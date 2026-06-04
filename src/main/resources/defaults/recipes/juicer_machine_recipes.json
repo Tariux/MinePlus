@@ -1,0 +1,40 @@
+{
+  "recipes": [
+    {
+      "id": "juicer_carrot_juice",
+      "machine": "juicer_machine",
+      "level": 1,
+      "craftTimeTicks": 20,
+      "input": {
+        "minecraft:carrot": 1
+      },
+      "output": {
+        "juicer_carrot_juice": 1
+      }
+    },
+    {
+      "id": "juicer_melon_juice",
+      "machine": "juicer_machine",
+      "level": 1,
+      "craftTimeTicks": 20,
+      "input": {
+        "minecraft:melon_slice": 1
+      },
+      "output": {
+        "juicer_melon_juice": 1
+      }
+    },
+    {
+      "id": "juicer_melon_block_juice",
+      "machine": "juicer_machine",
+      "level": 1,
+      "craftTimeTicks": 20,
+      "input": {
+        "minecraft:melon": 1
+      },
+      "output": {
+        "juicer_melon_juice": 1
+      }
+    }
+  ]
+}

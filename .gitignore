@@ -1,0 +1,10 @@
+.gradle
+gradle
+build
+node_modules
+scripts
+libs
+package.json
+.notes
+models
+textures

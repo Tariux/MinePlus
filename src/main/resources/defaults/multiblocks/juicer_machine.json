@@ -1,0 +1,29 @@
+{
+  "id": "juicer_machine",
+  "name": "Juicer",
+  "gui": "juicer_gui",
+  "levels": {
+    "1": {
+      "model": "models/juicer-machine-level-1.bbmodel",
+      "speed": 1.0,
+      "durability": 80.0,
+      "upgradeCost": {
+        "minecraft:iron_ingot": 8,
+        "minecraft:redstone": 4,
+        "minecraft:glass_bottle": 4
+      },
+      "guiOptions": {
+        "title": "Juicer I"
+      }
+    },
+    "2": {
+      "model": "models/juicer-machine-level-2.bbmodel",
+      "speed": 1.5,
+      "durability": 130.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Juicer II"
+      }
+    }
+  }
+}

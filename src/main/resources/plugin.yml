@@ -1,0 +1,24 @@
+name: Mineplus
+version: ${version}
+main: com.mineplus.MineplusPlugin
+api-version: '1.21'
+author: Tariush
+
+commands:
+  mineplus:
+    description: Mineplus runtime administration command
+    usage: /mineplus <status|reload|model|juicer>
+
+permissions:
+  mineplus.admin.status:
+    description: Allows reading Mineplus runtime status
+    default: op
+  mineplus.admin.reload:
+    description: Allows reloading Mineplus configs and models
+    default: op
+  mineplus.admin.model:
+    description: Allows administrating active Mineplus model instances
+    default: op
+  mineplus.admin.juicer:
+    description: Allows using Juicer test controls
+    default: op

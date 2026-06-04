@@ -1,0 +1,17 @@
+{
+  "id": "charcoal_mini_furnace",
+  "name": "Charcoal Mini Furnace",
+  "levels": {
+    "1": {
+      "model": "models/mini_furnace.bbmodel",
+      "speed": 1.2,
+      "durability": 60.0,
+      "upgradeCost": {
+        "minecraft:coal": 16
+      },
+      "guiOptions": {
+        "title": "Mini Furnace"
+      }
+    }
+  }
+}

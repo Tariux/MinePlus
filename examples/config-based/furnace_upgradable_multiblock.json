@@ -1,0 +1,43 @@
+{
+  "id": "upgradable_furnace",
+  "name": "Upgradable Furnace",
+  "gui": "furnace_gui",
+  "levels": {
+    "1": {
+      "model": "models/furnace_lv1.bbmodel",
+      "speed": 1.0,
+      "durability": 100.0,
+      "upgradeCost": {
+        "minecraft:coal_block": 4
+      },
+      "guiOptions": {
+        "title": "Furnace I",
+        "theme": "ember"
+      }
+    },
+    "2": {
+      "model": "models/furnace_lv2.bbmodel",
+      "speed": 1.8,
+      "durability": 180.0,
+      "upgradeCost": {
+        "minecraft:coal_block": 16
+      },
+      "guiOptions": {
+        "title": "Furnace II",
+        "theme": "blaze"
+      }
+    },
+    "3": {
+      "model": "models/furnace_lv3.bbmodel",
+      "speed": 3.0,
+      "durability": 300.0,
+      "upgradeCost": {
+        "minecraft:coal_block": 64
+      },
+      "guiOptions": {
+        "title": "Furnace III",
+        "theme": "inferno"
+      }
+    }
+  }
+}

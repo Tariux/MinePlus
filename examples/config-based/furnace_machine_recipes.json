@@ -1,0 +1,28 @@
+{
+  "recipes": [
+    {
+      "id": "furnace_iron_fast",
+      "machine": "upgradable_furnace",
+      "level": 1,
+      "craftTimeTicks": 80,
+      "input": {
+        "minecraft:raw_iron": 1
+      },
+      "output": {
+        "minecraft:iron_ingot": 1
+      }
+    },
+    {
+      "id": "furnace_gold_fast",
+      "machine": "upgradable_furnace",
+      "level": 1,
+      "craftTimeTicks": 80,
+      "input": {
+        "minecraft:raw_gold": 1
+      },
+      "output": {
+        "minecraft:gold_ingot": 1
+      }
+    }
+  ]
+}
