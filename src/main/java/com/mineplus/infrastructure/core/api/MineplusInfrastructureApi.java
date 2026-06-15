@@ -131,4 +131,9 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     public MultiBlockSignal createSignal(UUID sourceId, UUID targetId, String channel, Map<String, String> data, int hops) {
         return new MultiBlockSignal(sourceId, targetId, channel, data, hops);
     }
+
+    @Override
+    public void setTextureOverride(String textureName, org.bukkit.Material material) {
+        com.mineplus.infrastructure.virtual.TextureMaterialResolver.setOverride(textureName, material);
+    }
 }

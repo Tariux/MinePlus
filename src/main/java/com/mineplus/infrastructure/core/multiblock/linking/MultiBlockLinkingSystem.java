@@ -60,6 +60,24 @@ public final class MultiBlockLinkingSystem {
         propagateSignal(initial);
     }
 
+    private void spawnSignalParticle(MultiBlockInstance from, MultiBlockInstance to) {
+        org.bukkit.World world = org.bukkit.Bukkit.getWorld(from.coordinate().worldName());
+        if (world == null) return;
+
+        org.bukkit.Location start = new org.bukkit.Location(world, from.coordinate().x() + 0.5, from.coordinate().y() + 0.5, from.coordinate().z() + 0.5);
+        org.bukkit.Location end = new org.bukkit.Location(world, to.coordinate().x() + 0.5, to.coordinate().y() + 0.5, to.coordinate().z() + 0.5);
+
+        org.bukkit.util.Vector direction = end.toVector().subtract(start.toVector());
+        double distance = direction.length();
+        direction.normalize();
+
+        org.bukkit.Location current = start.clone();
+        for (double i = 0; i < distance; i += 0.5) {
+            current.add(direction.clone().multiply(0.5));
+            world.spawnParticle(org.bukkit.Particle.END_ROD, current, 1, 0, 0, 0, 0);
+        }
+    }
+
     private void propagateSignal(MultiBlockSignal initial) {
         Deque<MultiBlockSignal> queue = new ArrayDeque<>();
         Set<UUID> visited = new HashSet<>();
@@ -83,6 +101,11 @@ public final class MultiBlockLinkingSystem {
             }
 
             for (UUID nextTarget : target.linkedBlocks()) {
+                MultiBlockInstance nextInstance = registry.getInstance(nextTarget);
+                if (nextInstance != null) {
+                    spawnSignalParticle(target, nextInstance);
+                }
+
                 queue.add(new MultiBlockSignal(
                         signal.sourceId(),
                         nextTarget,

@@ -425,12 +425,33 @@ public final class TextureMaterialResolver {
         TEXTURE_MAP = Collections.unmodifiableMap(m);
     }
 
+    private static final Map<String, Material> OVERRIDES = new LinkedHashMap<>();
+
+    public static void setOverride(String key, Material material) {
+        if (key == null || material == null || !material.isBlock()) {
+            return;
+        }
+        String normalizedKey = key.toLowerCase(Locale.ROOT).trim();
+        if (normalizedKey.endsWith(".png")) {
+            normalizedKey = normalizedKey.substring(0, normalizedKey.length() - 4);
+        }
+        OVERRIDES.put(normalizedKey, material);
+    }
+
     public static Material resolve(String textureName) {
         if (textureName == null || textureName.isBlank()) {
             return FALLBACK;
         }
 
         String key = textureName.toLowerCase(Locale.ROOT).trim();
+
+        if (key.endsWith(".png")) {
+            key = key.substring(0, key.length() - 4);
+        }
+
+        if (OVERRIDES.containsKey(key)) {
+            return OVERRIDES.get(key);
+        }
 
         if (key.endsWith(".png")) {
             key = key.substring(0, key.length() - 4);

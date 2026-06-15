@@ -50,4 +50,6 @@ public interface InfrastructureApi {
     MultiBlockInstance getBlockAt(Location location);
 
     MultiBlockSignal createSignal(UUID sourceId, UUID targetId, String channel, Map<String, String> data, int hops);
+
+    void setTextureOverride(String textureName, org.bukkit.Material material);
 }
