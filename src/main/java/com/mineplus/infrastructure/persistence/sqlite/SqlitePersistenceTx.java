@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.persistence.sqlite;
 import com.mineplus.infrastructure.persistence.PersistenceTx;
 import com.mineplus.infrastructure.persistence.repository.MetaRepository;
 import com.mineplus.infrastructure.persistence.repository.MultiBlockRepository;
+import com.mineplus.infrastructure.persistence.repository.VirtualBlockRepository;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.logging.Logger;
@@ -12,13 +13,21 @@ public final class SqlitePersistenceTx implements PersistenceTx {
     private final Connection connection;
     private final Logger logger;
     private final MultiBlockRepository multiBlocks;
+    private final VirtualBlockRepository virtualBlocks;
     private final MetaRepository meta;
     private boolean active;
 
-    public SqlitePersistenceTx(Connection connection, Logger logger, MultiBlockRepository multiBlocks, MetaRepository meta) {
+    public SqlitePersistenceTx(
+            Connection connection,
+            Logger logger,
+            MultiBlockRepository multiBlocks,
+            VirtualBlockRepository virtualBlocks,
+            MetaRepository meta
+    ) {
         this.connection = connection;
         this.logger = logger;
         this.multiBlocks = multiBlocks;
+        this.virtualBlocks = virtualBlocks;
         this.meta = meta;
         this.active = true;
     }
@@ -26,6 +35,11 @@ public final class SqlitePersistenceTx implements PersistenceTx {
     @Override
     public MultiBlockRepository multiBlocks() {
         return multiBlocks;
+    }
+
+    @Override
+    public VirtualBlockRepository virtualBlocks() {
+        return virtualBlocks;
     }
 
     @Override

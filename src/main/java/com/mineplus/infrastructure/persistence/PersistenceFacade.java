@@ -4,12 +4,15 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.mineplus.infrastructure.persistence.repository.MetaRepository;
 import com.mineplus.infrastructure.persistence.repository.MultiBlockRepository;
+import com.mineplus.infrastructure.persistence.repository.VirtualBlockRepository;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
+import com.mineplus.infrastructure.persistence.snapshot.VirtualBlockSnapshot;
 import com.mineplus.infrastructure.persistence.sqlite.SqliteConnectionFactory;
 import com.mineplus.infrastructure.persistence.sqlite.SqliteMetaRepository;
 import com.mineplus.infrastructure.persistence.sqlite.SqliteMigrationRunner;
 import com.mineplus.infrastructure.persistence.sqlite.SqliteMultiBlockRepository;
 import com.mineplus.infrastructure.persistence.sqlite.SqlitePersistenceTx;
+import com.mineplus.infrastructure.persistence.sqlite.SqliteVirtualBlockRepository;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -32,7 +35,8 @@ public final class PersistenceFacade {
     private volatile long lastFlushDurationMs;
     private volatile long lastErrorAt;
     private volatile String lastError;
-    private volatile List<MultiBlockSnapshot> queuedFullReplace;
+    private volatile List<MultiBlockSnapshot> queuedMultiBlockReplace;
+    private volatile List<VirtualBlockSnapshot> queuedVirtualBlockReplace;
     private SqliteConnectionFactory connectionFactory;
 
     public PersistenceFacade(PersistenceConfig config, Logger logger) {
@@ -48,7 +52,8 @@ public final class PersistenceFacade {
         this.lastFlushDurationMs = 0L;
         this.lastErrorAt = 0L;
         this.lastError = "";
-        this.queuedFullReplace = null;
+        this.queuedMultiBlockReplace = null;
+        this.queuedVirtualBlockReplace = null;
     }
 
     public void initialize() {
@@ -98,24 +103,59 @@ public final class PersistenceFacade {
         }
     }
 
-    public void enqueueFullReplace(Collection<MultiBlockSnapshot> snapshots) {
+    public List<VirtualBlockSnapshot> loadAllVirtualBlocks() {
+        if (!enabled) {
+            return List.of();
+        }
+
+        try (SqlitePersistenceTx tx = beginTx()) {
+            if (tx == null) {
+                return List.of();
+            }
+            List<VirtualBlockSnapshot> snapshots = tx.virtualBlocks().loadAll();
+            tx.commit();
+            loadedRows.addAndGet(snapshots.size());
+            return snapshots;
+        } catch (SQLException | RuntimeException exception) {
+            rememberError("load-vblocks-failed: " + exception.getMessage());
+            logger.warning("Failed to load virtualblocks from sqlite: " + exception.getMessage());
+            return List.of();
+        }
+    }
+
+    public void enqueueMultiBlockReplace(Collection<MultiBlockSnapshot> snapshots) {
         List<MultiBlockSnapshot> copy = snapshots == null ? List.of() : List.copyOf(snapshots);
         synchronized (lock) {
-            queuedFullReplace = copy;
+            queuedMultiBlockReplace = copy;
         }
+    }
+
+    public void enqueueVirtualBlockReplace(Collection<VirtualBlockSnapshot> snapshots) {
+        List<VirtualBlockSnapshot> copy = snapshots == null ? List.of() : List.copyOf(snapshots);
+        synchronized (lock) {
+            queuedVirtualBlockReplace = copy;
+        }
+    }
+
+    @Deprecated
+    public void enqueueFullReplace(Collection<MultiBlockSnapshot> snapshots) {
+        enqueueMultiBlockReplace(snapshots);
     }
 
     public void flushNow() {
         if (!enabled) {
             return;
         }
-        List<MultiBlockSnapshot> payload;
+        List<MultiBlockSnapshot> mbPayload;
+        List<VirtualBlockSnapshot> vbPayload;
         synchronized (lock) {
-            payload = queuedFullReplace;
-            queuedFullReplace = null;
+            mbPayload = queuedMultiBlockReplace;
+            vbPayload = queuedVirtualBlockReplace;
+            queuedMultiBlockReplace = null;
+            queuedVirtualBlockReplace = null;
         }
 
-        if (payload == null) {
+        if (mbPayload == null && vbPayload == null) {
             return;
         }
 
@@ -124,11 +164,17 @@ public final class PersistenceFacade {
             if (tx == null) {
                 return;
             }
-            tx.multiBlocks().replaceAll(payload);
-            tx.meta().put("last_full_replace_at", Long.toString(System.currentTimeMillis()));
+            if (mbPayload != null) {
+                tx.multiBlocks().replaceAll(mbPayload);
+                writtenRows.addAndGet(mbPayload.size());
+            }
+            if (vbPayload != null) {
+                tx.virtualBlocks().replaceAll(vbPayload);
+                writtenRows.addAndGet(vbPayload.size());
+            }
+            tx.meta().put("last_flush_at", Long.toString(System.currentTimeMillis()));
             tx.commit();
             flushCount.incrementAndGet();
-            writtenRows.addAndGet(payload.size());
             lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
         } catch (SQLException | RuntimeException exception) {
             rememberError("flush-failed: " + exception.getMessage());
@@ -164,8 +210,9 @@ public final class PersistenceFacade {
             connection.setAutoCommit(false);
             String prefix = config.tablePrefix();
             MultiBlockRepository multiBlocks = new SqliteMultiBlockRepository(connection, prefix + "multiblocks", gson);
+            VirtualBlockRepository virtualBlocks = new SqliteVirtualBlockRepository(connection, prefix + "virtualblocks", gson);
             MetaRepository meta = new SqliteMetaRepository(connection, prefix + "meta");
-            return new SqlitePersistenceTx(connection, logger, multiBlocks, meta);
+            return new SqlitePersistenceTx(connection, logger, multiBlocks, virtualBlocks, meta);
         } catch (SQLException exception) {
             rememberError("tx-init-failed: " + exception.getMessage());
             logger.warning("Failed to initialize sqlite transaction: " + exception.getMessage());

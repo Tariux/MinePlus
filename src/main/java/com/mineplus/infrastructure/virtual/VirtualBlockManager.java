@@ -3,12 +3,9 @@ package com.mineplus.infrastructure.virtual;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
+import com.mineplus.infrastructure.persistence.PersistenceFacade;
+import com.mineplus.infrastructure.persistence.snapshot.VirtualBlockSnapshot;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -45,8 +43,7 @@ public class VirtualBlockManager implements Listener {
     private final Map<String, VirtualModel> loadedModels = new HashMap<>();
     private final Map<Location, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
-    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-    private File storageFile;
+    private PersistenceFacade persistence;
     private JavaPlugin plugin;
     private boolean debugLoggingEnabled;
 
@@ -54,6 +51,7 @@ public class VirtualBlockManager implements Listener {
             String modelName,
             Location origin,
             Quaternionf rotation,
+            Map<String, UUID> cubeEntities,
             List<UUID> displayEntities,
             Set<Location> barrierBlocks
     ) {
@@ -62,8 +60,11 @@ public class VirtualBlockManager implements Listener {
     public void loadModels(JavaPlugin plugin) {
         this.plugin = plugin;
         this.debugLoggingEnabled = Boolean.getBoolean("mineplus.debug.models");
-        this.storageFile = new File(plugin.getDataFolder(), "virtual-blocks.json");
         loadModelDefinitions();
+    }
+
+    public void loadWithPersistence(PersistenceFacade persistence) {
+        this.persistence = persistence;
         restoreSpawnedModels();
     }
 
@@ -103,8 +104,136 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
+    public void transform(UUID instanceId, Location newOrigin, Quaternionf newRotation, int interpolationTicks) {
+        ActiveVirtualBlock active = activeBlocks.get(instanceId);
+        if (active == null || newOrigin.getWorld() == null) {
+            return;
+        }
+
+        VirtualModel model = getModel(active.modelName());
+        if (model == null) {
+            return;
+        }
+
+        // Update barriers if moved to a different block
+        if (newOrigin.getBlockX() != active.origin().getBlockX() ||
+            newOrigin.getBlockY() != active.origin().getBlockY() ||
+            newOrigin.getBlockZ() != active.origin().getBlockZ()) {
+
+            for (Location loc : active.barrierBlocks()) {
+                if (loc.getBlock().getType() == Material.BARRIER) {
+                    loc.getBlock().setType(Material.AIR);
+                }
+                blockToModelMap.remove(loc);
+            }
+            active.barrierBlocks().clear();
+
+            Set<Location> newBarriers = computeBarrierLocations(model, newOrigin, newRotation);
+            for (Location loc : newBarriers) {
+                if (loc.getBlock().getType().isAir()) {
+                    loc.getBlock().setType(Material.BARRIER);
+                    active.barrierBlocks().add(loc);
+                    blockToModelMap.put(loc, instanceId);
+                }
+            }
+        }
+
+        Location displayOrigin = newOrigin.clone().add(0.5, 0.0, 0.5);
+        for (BakedCube cube : model.cubes()) {
+            UUID entityId = active.cubeEntities().get(cube.name());
+            if (entityId == null) continue;
+
+            Entity entity = Bukkit.getEntity(entityId);
+            if (!(entity instanceof BlockDisplay display)) continue;
+
+            Vector3f translated = new Vector3f(cube.translation());
+            newRotation.transform(translated);
+            Quaternionf combinedRotation = new Quaternionf(newRotation).mul(cube.leftRotation());
+
+            Transformation transformation = new Transformation(
+                    translated,
+                    combinedRotation,
+                    cube.scale(),
+                    cube.rightRotation()
+            );
+
+            display.setInterpolationDuration(interpolationTicks);
+            display.setInterpolationDelay(0);
+            display.setTransformation(transformation);
+            display.teleport(displayOrigin);
+        }
+
+        activeBlocks.put(instanceId, new ActiveVirtualBlock(
+                active.modelName(),
+                newOrigin,
+                newRotation,
+                active.cubeEntities(),
+                active.displayEntities(),
+                active.barrierBlocks()
+        ));
+        saveAsync();
+    }
+
+    public void transformCube(UUID instanceId, String cubeName, Vector3f localTranslation, Quaternionf localRotation, int interpolationTicks) {
+        ActiveVirtualBlock active = activeBlocks.get(instanceId);
+        if (active == null) return;
+
+        UUID entityId = active.cubeEntities().get(cubeName);
+        if (entityId == null) return;
+
+        Entity entity = Bukkit.getEntity(entityId);
+        if (!(entity instanceof BlockDisplay display)) return;
+
+        VirtualModel model = getModel(active.modelName());
+        if (model == null) return;
+
+        BakedCube cube = null;
+        for (BakedCube c : model.cubes()) {
+            if (cubeName.equals(c.name())) {
+                cube = c;
+                break;
+            }
+        }
+        if (cube == null) return;
+
+        Vector3f finalTranslation = new Vector3f(cube.translation()).add(localTranslation);
+        active.rotation().transform(finalTranslation);
+
+        Quaternionf finalRotation = new Quaternionf(active.rotation()).mul(cube.leftRotation()).mul(localRotation);
+
+        Transformation transformation = new Transformation(
+                finalTranslation,
+                finalRotation,
+                cube.scale(),
+                cube.rightRotation()
+        );
+
+        display.setInterpolationDuration(interpolationTicks);
+        display.setInterpolationDelay(0);
+        display.setTransformation(transformation);
+    }
+
     public void shutdown() {
         saveNow();
+    }
+
+    private void saveAsync() {
+        if (persistence != null) {
+            persistence.enqueueVirtualBlockReplace(activeBlocks.entrySet().stream()
+                    .map(e -> new VirtualBlockSnapshot(
+                            e.getKey(),
+                            e.getValue().modelName(),
+                            e.getValue().origin().getWorld().getName(),
+                            e.getValue().origin().getBlockX(),
+                            e.getValue().origin().getBlockY(),
+                            e.getValue().origin().getBlockZ(),
+                            e.getValue().rotation().x,
+                            e.getValue().rotation().y,
+                            e.getValue().rotation().z,
+                            e.getValue().rotation().w,
+                            e.getValue().cubeEntities()
+                    )).toList());
+        }
     }
 
     public ActiveVirtualBlock getVirtualBlockAt(Location location) {
@@ -211,6 +340,7 @@ public class VirtualBlockManager implements Listener {
             UUID instanceId
     ) {
         List<UUID> spawnedEntities = new ArrayList<>();
+        Map<String, UUID> cubeEntities = new HashMap<>();
         Set<Location> barrierBlocks = new HashSet<>();
 
         Location origin = new Location(
@@ -222,16 +352,9 @@ public class VirtualBlockManager implements Listener {
         Location displayOrigin = origin.clone().add(0.5, 0.0, 0.5);
         Quaternionf globalRotation = new Quaternionf(placement.globalRotation());
 
-        VirtualBoundingBox box = VirtualBoundingBox.calculate(model);
-        for (Vector offset : box.getOccupiedOffsets()) {
-            Vector3f rotatedOffset = new Vector3f((float) offset.getX(), (float) offset.getY(), (float) offset.getZ());
-            globalRotation.transform(rotatedOffset);
-
-            Location location = origin.clone().add(
-                    Math.round(rotatedOffset.x),
-                    Math.round(rotatedOffset.y),
-                    Math.round(rotatedOffset.z)
-            );
+        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, globalRotation);
+        for (Vector offset : occupiedOffsets) {
+            Location location = origin.clone().add(offset);
             Block block = location.getBlock();
             if (block.getType().isAir()) {
                 block.setType(Material.BARRIER);
@@ -257,7 +380,11 @@ public class VirtualBlockManager implements Listener {
                     cube.rightRotation()
             );
             display.setTransformation(transformation);
-            spawnedEntities.add(display.getUniqueId());
+            UUID entityId = display.getUniqueId();
+            spawnedEntities.add(entityId);
+            if (cube.name() != null && !cube.name().isBlank()) {
+                cubeEntities.put(cube.name(), entityId);
+            }
 
             if (debugLoggingEnabled) {
                 plugin.getLogger().info("Rendered cube '" + cube.name()
@@ -282,11 +409,12 @@ public class VirtualBlockManager implements Listener {
                 model.name(),
                 origin,
                 globalRotation,
+                cubeEntities,
                 spawnedEntities,
                 barrierBlocks
         ));
         if (persist) {
-            saveNow();
+            saveAsync();
         }
         return instanceId;
     }
@@ -305,14 +433,14 @@ public class VirtualBlockManager implements Listener {
         }
 
         for (UUID displayId : activeBlock.displayEntities()) {
-            Entity display = org.bukkit.Bukkit.getEntity(displayId);
+            Entity display = Bukkit.getEntity(displayId);
             if (display != null) {
                 display.remove();
             }
         }
 
         if (persist) {
-            saveNow();
+            saveAsync();
         }
     }
 
@@ -334,117 +462,67 @@ public class VirtualBlockManager implements Listener {
     }
 
     private void restoreSpawnedModels() {
-        if (storageFile == null || !storageFile.exists()) {
+        if (persistence == null) {
             return;
         }
 
-        Type listType = new TypeToken<List<StoredVirtualBlock>>() {
-        }.getType();
-        try (FileReader reader = new FileReader(storageFile)) {
-            List<StoredVirtualBlock> records = gson.fromJson(reader, listType);
-            if (records == null) {
-                return;
+        for (VirtualBlockSnapshot record : persistence.loadAllVirtualBlocks()) {
+            World world = Bukkit.getWorld(record.world());
+            if (world == null) {
+                continue;
             }
 
-            for (StoredVirtualBlock record : records) {
-                World world = org.bukkit.Bukkit.getWorld(record.world());
-                if (world == null) {
-                    continue;
-                }
-
-                VirtualModel model = getModel(record.modelName());
-                if (model == null) {
-                    continue;
-                }
-
-                Location origin = new Location(world, record.x(), record.y(), record.z());
-                Quaternionf rotation = new Quaternionf(record.rotationX(), record.rotationY(), record.rotationZ(), record.rotationW());
-                UUID instanceId = parseUuid(record.id());
-                if (instanceId == null) {
-                    instanceId = UUID.randomUUID();
-                }
-
-                Set<Location> expectedBarriers = computeBarrierLocations(model, origin, rotation);
-                List<UUID> existingDisplays = findDisplayEntities(world, instanceId);
-                Set<Location> existingBarriers = new HashSet<>();
-                for (Location barrier : expectedBarriers) {
-                    if (barrier.getBlock().getType() == Material.BARRIER) {
-                        existingBarriers.add(barrier);
-                    }
-                }
-
-                if (!existingDisplays.isEmpty() || !existingBarriers.isEmpty()) {
-                    for (Location barrier : existingBarriers) {
-                        blockToModelMap.put(barrier, instanceId);
-                    }
-                    activeBlocks.put(instanceId, new ActiveVirtualBlock(
-                            model.name(),
-                            origin,
-                            rotation,
-                            existingDisplays,
-                            existingBarriers
-                    ));
-                    continue;
-                }
-
-                VirtualBlockPlacementHelper.PlacementData placement =
-                        new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
-                spawnModel(model, placement, false, instanceId);
+            VirtualModel model = getModel(record.modelName());
+            if (model == null) {
+                continue;
             }
-        } catch (Exception exception) {
-            exception.printStackTrace();
+
+            Location origin = new Location(world, record.x(), record.y(), record.z());
+            Quaternionf rotation = new Quaternionf(record.rotationX(), record.rotationY(), record.rotationZ(), record.rotationW());
+            UUID instanceId = record.id();
+
+            Set<Location> expectedBarriers = computeBarrierLocations(model, origin, rotation);
+            List<UUID> existingDisplays = findDisplayEntities(world, instanceId);
+            Set<Location> existingBarriers = new HashSet<>();
+            for (Location barrier : expectedBarriers) {
+                if (barrier.getBlock().getType() == Material.BARRIER) {
+                    existingBarriers.add(barrier);
+                }
+            }
+
+            if (!existingDisplays.isEmpty() || !existingBarriers.isEmpty()) {
+                for (Location barrier : existingBarriers) {
+                    blockToModelMap.put(barrier, instanceId);
+                }
+                activeBlocks.put(instanceId, new ActiveVirtualBlock(
+                        model.name(),
+                        origin,
+                        rotation,
+                        record.cubeEntities() == null ? new HashMap<>() : new HashMap<>(record.cubeEntities()),
+                        existingDisplays,
+                        existingBarriers
+                ));
+                continue;
+            }
+
+            VirtualBlockPlacementHelper.PlacementData placement =
+                    new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
+            spawnModel(model, placement, false, instanceId);
         }
     }
 
-    private void saveNow() {
-        if (storageFile == null) {
-            return;
-        }
-
-        File parent = storageFile.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return;
-        }
-
-        List<StoredVirtualBlock> records = new ArrayList<>();
-        for (Map.Entry<UUID, ActiveVirtualBlock> entry : activeBlocks.entrySet()) {
-            ActiveVirtualBlock active = entry.getValue();
-            Location location = active.origin();
-            if (location.getWorld() == null) {
-                continue;
-            }
-            records.add(new StoredVirtualBlock(
-                    entry.getKey().toString(),
-                    active.modelName(),
-                    location.getWorld().getName(),
-                    location.getBlockX(),
-                    location.getBlockY(),
-                    location.getBlockZ(),
-                    active.rotation().x,
-                    active.rotation().y,
-                    active.rotation().z,
-                    active.rotation().w
-            ));
-        }
-
-        try (FileWriter writer = new FileWriter(storageFile)) {
-            gson.toJson(records, writer);
-        } catch (IOException exception) {
-            exception.printStackTrace();
+    public void saveNow() {
+        if (persistence != null) {
+            saveAsync();
+            persistence.flushNow();
         }
     }
 
     private Set<Location> computeBarrierLocations(VirtualModel model, Location origin, Quaternionf rotation) {
         Set<Location> locations = new HashSet<>();
-        VirtualBoundingBox box = VirtualBoundingBox.calculate(model);
-        for (Vector offset : box.getOccupiedOffsets()) {
-            Vector3f rotatedOffset = new Vector3f((float) offset.getX(), (float) offset.getY(), (float) offset.getZ());
-            rotation.transform(rotatedOffset);
-            locations.add(origin.clone().add(
-                    Math.round(rotatedOffset.x),
-                    Math.round(rotatedOffset.y),
-                    Math.round(rotatedOffset.z)
-            ));
+        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, rotation);
+        for (Vector offset : occupiedOffsets) {
+            locations.add(origin.clone().add(offset));
         }
         return locations;
     }
@@ -487,17 +565,4 @@ public class VirtualBlockManager implements Listener {
         return "(" + value.x + ", " + value.y + ", " + value.z + ", " + value.w + ")";
     }
 
-    private record StoredVirtualBlock(
-            String id,
-            String modelName,
-            String world,
-            int x,
-            int y,
-            int z,
-            float rotationX,
-            float rotationY,
-            float rotationZ,
-            float rotationW
-    ) {
-    }
 }

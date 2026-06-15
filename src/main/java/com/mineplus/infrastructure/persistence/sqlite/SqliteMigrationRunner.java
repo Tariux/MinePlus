@@ -15,6 +15,7 @@ public final class SqliteMigrationRunner {
 
     public void migrate(Connection connection) throws SQLException {
         String multiBlocks = config.tablePrefix() + "multiblocks";
+        String virtualBlocks = config.tablePrefix() + "virtualblocks";
         String meta = config.tablePrefix() + "meta";
         try (Statement statement = connection.createStatement()) {
             statement.execute("""
@@ -23,6 +24,12 @@ public final class SqliteMigrationRunner {
                         payload TEXT NOT NULL
                     )
                     """.formatted(multiBlocks));
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS %s (
+                        id TEXT PRIMARY KEY,
+                        payload TEXT NOT NULL
+                    )
+                    """.formatted(virtualBlocks));
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS %s (
                         key TEXT PRIMARY KEY,

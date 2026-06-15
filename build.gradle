@@ -12,21 +12,21 @@ java {
 }
 
 repositories {
+    mavenCentral()
+    maven {
+        name = "papermc-repo"
+        url = "https://repo.papermc.io/repository/maven-public/"
+    }
+    maven {
+        name = "sonatype"
+        url = "https://oss.sonatype.org/content/groups/public/"
+    }
 }
 
 dependencies {
-    compileOnly files(
-            "libs/paper-api-1.21.jar",
-            "libs/spigot-api-1.21.1.jar",
-            "libs/adventure-api-4.17.0.jar",
-            "libs/adventure-text-minimessage-4.17.0.jar",
-            "libs/adventure-key-4.17.0.jar",
-            "libs/adventure-platform-api-4.3.0.jar",
-            "libs/bungeecord-chat-1.20.jar",
-            "libs/joml-1.10.8.jar",
-            "libs/gson-2.13.2.jar",
-            "libs/item-nbt-api-plugin-2.15.6.jar",
-    )
+    compileOnly "io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT"
+    implementation "org.joml:joml:1.10.8"
+    implementation "com.google.code.gson:gson:2.11.0"
 }
 
 tasks.withType(JavaCompile).configureEach {

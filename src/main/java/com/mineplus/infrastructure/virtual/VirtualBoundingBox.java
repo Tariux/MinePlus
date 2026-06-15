@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.virtual;
 import java.util.HashSet;
 import java.util.Set;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
@@ -66,6 +67,43 @@ public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int max
             offsets.add(new org.bukkit.util.Vector(0, 0, 0));
         }
 
+        return offsets;
+    }
+
+    public static Set<org.bukkit.util.Vector> calculateVoxelOffsets(VirtualModel model, Quaternionf rotation) {
+        Set<org.bukkit.util.Vector> offsets = new HashSet<>();
+        for (BakedCube cube : model.cubes()) {
+            Matrix4f matrix = new Matrix4f()
+                    .rotate(rotation)
+                    .translate(cube.translation())
+                    .rotate(cube.leftRotation())
+                    .scale(cube.scale())
+                    .rotate(cube.rightRotation());
+
+            float cMinX = Float.MAX_VALUE, cMinY = Float.MAX_VALUE, cMinZ = Float.MAX_VALUE;
+            float cMaxX = -Float.MAX_VALUE, cMaxY = -Float.MAX_VALUE, cMaxZ = -Float.MAX_VALUE;
+
+            for (Vector3f vertex : cubeVertices()) {
+                Vector3f transformed = matrix.transformPosition(new Vector3f(vertex));
+                cMinX = Math.min(cMinX, transformed.x);
+                cMinY = Math.min(cMinY, transformed.y);
+                cMinZ = Math.min(cMinZ, transformed.z);
+                cMaxX = Math.max(cMaxX, transformed.x);
+                cMaxY = Math.max(cMaxY, transformed.y);
+                cMaxZ = Math.max(cMaxZ, transformed.z);
+            }
+
+            for (int x = (int) Math.floor(cMinX); x < (int) Math.ceil(cMaxX); x++) {
+                for (int y = (int) Math.floor(cMinY); y < (int) Math.ceil(cMaxY); y++) {
+                    for (int z = (int) Math.floor(cMinZ); z < (int) Math.ceil(cMaxZ); z++) {
+                        offsets.add(new org.bukkit.util.Vector(x, y, z));
+                    }
+                }
+            }
+        }
+        if (offsets.isEmpty()) {
+            offsets.add(new org.bukkit.util.Vector(0, 0, 0));
+        }
         return offsets;
     }
 

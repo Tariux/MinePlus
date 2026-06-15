@@ -18,7 +18,8 @@ import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
 import com.mineplus.infrastructure.core.recipes.RecipeManager;
-import com.mineplus.infrastructure.core.storage.MultiBlockStorageEngine;
+import com.mineplus.infrastructure.persistence.PersistenceConfig;
+import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import java.util.Set;
@@ -30,7 +31,7 @@ public final class InfrastructureEngine {
     private final InfrastructureGuiManager guiManager;
     private final InfrastructureItemManager itemManager;
     private final RecipeManager recipeManager;
-    private final MultiBlockStorageEngine storageEngine;
+    private final PersistenceFacade persistenceFacade;
     private final ModelRenderingManager renderingManager;
     private final UpgradeManager upgradeManager;
     private final MultiBlockLifecycleManager lifecycleManager;
@@ -50,14 +51,14 @@ public final class InfrastructureEngine {
         this.guiManager = new InfrastructureGuiManager();
         this.itemManager = new InfrastructureItemManager(itemRegistry);
         this.recipeManager = new RecipeManager();
-        this.storageEngine = new MultiBlockStorageEngine(plugin);
+        this.persistenceFacade = new PersistenceFacade(PersistenceConfig.defaults(plugin.getDataFolder()), plugin.getLogger());
         this.renderingManager = new ModelRenderingManager(virtualBlockManager);
         this.upgradeManager = new UpgradeManager(itemManager);
         this.lifecycleManager = new MultiBlockLifecycleManager(
                 plugin,
                 registry,
                 renderingManager,
-                storageEngine,
+                persistenceFacade,
                 guiManager,
                 upgradeManager,
                 hookBus
@@ -79,6 +80,8 @@ public final class InfrastructureEngine {
     }
 
     public void initialize() {
+        persistenceFacade.initialize();
+        renderingManager.virtualBlockManager().loadWithPersistence(persistenceFacade);
         reloadMultiBlocks();
         reloadRecipes();
         lifecycleManager.restorePersistedInstances();
@@ -98,6 +101,7 @@ public final class InfrastructureEngine {
             tickTaskId = -1;
         }
         lifecycleManager.saveNow();
+        persistenceFacade.shutdown(5000);
     }
 
     public InfrastructureApi api() {

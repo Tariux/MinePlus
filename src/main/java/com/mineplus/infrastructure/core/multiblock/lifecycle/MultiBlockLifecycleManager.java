@@ -9,7 +9,8 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
-import com.mineplus.infrastructure.core.storage.MultiBlockStorageEngine;
+import com.mineplus.infrastructure.persistence.PersistenceFacade;
+import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import java.util.Map;
 import java.util.Objects;
@@ -28,7 +29,7 @@ public final class MultiBlockLifecycleManager {
     private final MineplusPlugin plugin;
     private final MultiBlockRegistry registry;
     private final ModelRenderingManager renderingManager;
-    private final MultiBlockStorageEngine storage;
+    private final PersistenceFacade persistence;
     private final InfrastructureGuiManager guiManager;
     private final UpgradeManager upgradeManager;
     private final HookBus hookBus;
@@ -37,7 +38,7 @@ public final class MultiBlockLifecycleManager {
             MineplusPlugin plugin,
             MultiBlockRegistry registry,
             ModelRenderingManager renderingManager,
-            MultiBlockStorageEngine storage,
+            PersistenceFacade persistence,
             InfrastructureGuiManager guiManager,
             UpgradeManager upgradeManager,
             HookBus hookBus
@@ -45,7 +46,7 @@ public final class MultiBlockLifecycleManager {
         this.plugin = plugin;
         this.registry = registry;
         this.renderingManager = renderingManager;
-        this.storage = storage;
+        this.persistence = persistence;
         this.guiManager = guiManager;
         this.upgradeManager = upgradeManager;
         this.hookBus = hookBus;
@@ -53,7 +54,8 @@ public final class MultiBlockLifecycleManager {
 
     public void restorePersistedInstances() {
         registry.clearInstances();
-        for (MultiBlockInstance instance : storage.load()) {
+        for (MultiBlockSnapshot snapshot : persistence.loadAllMultiBlocks()) {
+            MultiBlockInstance instance = snapshot.toInstance();
             MultiBlockType type = registry.getType(instance.typeId());
             if (type == null) {
                 continue;
@@ -95,7 +97,7 @@ public final class MultiBlockLifecycleManager {
 
         registry.addInstance(instance);
         fire(MultiBlockLifecycleEventType.CREATE, type, instance, null, null);
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return instance;
     }
 
@@ -116,7 +118,7 @@ public final class MultiBlockLifecycleManager {
 
         fire(MultiBlockLifecycleEventType.PLACE, type, instance, actor, null);
         fire(MultiBlockLifecycleEventType.ACTIVATE, type, instance, actor, null);
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -150,7 +152,7 @@ public final class MultiBlockLifecycleManager {
             guiManager.open(type.guiKey(), player, instance);
         }
 
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -176,7 +178,7 @@ public final class MultiBlockLifecycleManager {
 
         fire(MultiBlockLifecycleEventType.UPGRADE, type, instance, player, null);
         type.hook().onUpgrade(instance, oldLevel, instance.level(), player);
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -201,7 +203,7 @@ public final class MultiBlockLifecycleManager {
             fire(MultiBlockLifecycleEventType.REMOVE, type, instance, actor, null);
             type.hook().onRemove(instance, actor);
         }
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -259,7 +261,12 @@ public final class MultiBlockLifecycleManager {
     }
 
     public void saveNow() {
-        storage.saveNow(registry.getInstances());
+        persistence.enqueueMultiBlockReplace(registry.getInstances().stream().map(MultiBlockSnapshot::from).toList());
+        persistence.flushNow();
+    }
+
+    private void saveAsync() {
+        persistence.enqueueMultiBlockReplace(registry.getInstances().stream().map(MultiBlockSnapshot::from).toList());
     }
 
     public void reloadModels() {
@@ -273,7 +280,7 @@ public final class MultiBlockLifecycleManager {
             fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
             type.hook().onModelReload(instance);
         }
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
     }
 
     public boolean reloadModel(UUID instanceId) {
@@ -291,7 +298,7 @@ public final class MultiBlockLifecycleManager {
         instance.setRenderedModelId(modelId);
         fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
         type.hook().onModelReload(instance);
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -314,7 +321,7 @@ public final class MultiBlockLifecycleManager {
         if (previousLevel != level) {
             fire(MultiBlockLifecycleEventType.UPGRADE, type, instance, null, null);
         }
-        storage.saveAsync(registry.getInstances());
+        saveAsync();
         return true;
     }
 
@@ -332,7 +339,7 @@ public final class MultiBlockLifecycleManager {
         }
 
         if (!idsToRemove.isEmpty()) {
-            storage.saveAsync(registry.getInstances());
+            saveAsync();
         }
         return idsToRemove.size();
     }
