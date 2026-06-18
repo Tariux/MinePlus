@@ -70,10 +70,11 @@ public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int max
         return offsets;
     }
 
-    public static Set<org.bukkit.util.Vector> calculateVoxelOffsets(VirtualModel model, Quaternionf rotation) {
+    public static Set<org.bukkit.util.Vector> calculateVoxelOffsets(VirtualModel model, Quaternionf rotation, Vector3f offset) {
         Set<org.bukkit.util.Vector> offsets = new HashSet<>();
         for (BakedCube cube : model.cubes()) {
             Matrix4f matrix = new Matrix4f()
+                    .translate(offset)
                     .rotate(rotation)
                     .translate(cube.translation())
                     .rotate(cube.leftRotation())
@@ -93,9 +94,18 @@ public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int max
                 cMaxZ = Math.max(cMaxZ, transformed.z);
             }
 
-            for (int x = (int) Math.floor(cMinX); x < (int) Math.ceil(cMaxX); x++) {
-                for (int y = (int) Math.floor(cMinY); y < (int) Math.ceil(cMaxY); y++) {
-                    for (int z = (int) Math.floor(cMinZ); z < (int) Math.ceil(cMaxZ); z++) {
+            // Use a small epsilon to avoid creating extra barriers on the edges
+            float epsilon = 0.001f;
+            int startX = (int) Math.floor(cMinX + epsilon);
+            int endX = (int) Math.ceil(cMaxX - epsilon);
+            int startY = (int) Math.floor(cMinY + epsilon);
+            int endY = (int) Math.ceil(cMaxY - epsilon);
+            int startZ = (int) Math.floor(cMinZ + epsilon);
+            int endZ = (int) Math.ceil(cMaxZ - epsilon);
+
+            for (int x = startX; x < endX; x++) {
+                for (int y = startY; y < endY; y++) {
+                    for (int z = startZ; z < endZ; z++) {
                         offsets.add(new org.bukkit.util.Vector(x, y, z));
                     }
                 }

@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.persistence.snapshot;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -14,6 +15,7 @@ public record VirtualBlockSnapshot(
         float rotationY,
         float rotationZ,
         float rotationW,
-        Map<String, UUID> cubeEntities
+        Map<String, UUID> cubeEntities,
+        List<UUID> displayEntities
 ) {
 }

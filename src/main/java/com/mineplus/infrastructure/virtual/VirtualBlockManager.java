@@ -36,6 +36,7 @@ import org.joml.Vector3f;
 public class VirtualBlockManager implements Listener {
 
     private static final String DISPLAY_TAG_PREFIX = "mineplus_vblock:";
+    private static final Vector3f DISPLAY_OFFSET = new Vector3f(0.5f, 0.0f, 0.5f);
     private static final Material FALLBACK_MATERIAL = Material.WHITE_CONCRETE;
     private static final String MODELS_FOLDER = "models";
     private static final String DEBUG_MODELS_FOLDER = "debug";
@@ -231,7 +232,8 @@ public class VirtualBlockManager implements Listener {
                             e.getValue().rotation().y,
                             e.getValue().rotation().z,
                             e.getValue().rotation().w,
-                            e.getValue().cubeEntities()
+                            e.getValue().cubeEntities(),
+                            e.getValue().displayEntities()
                     )).toList());
         }
     }
@@ -352,7 +354,7 @@ public class VirtualBlockManager implements Listener {
         Location displayOrigin = origin.clone().add(0.5, 0.0, 0.5);
         Quaternionf globalRotation = new Quaternionf(placement.globalRotation());
 
-        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, globalRotation);
+        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, globalRotation, DISPLAY_OFFSET);
         for (Vector offset : occupiedOffsets) {
             Location location = origin.clone().add(offset);
             Block block = location.getBlock();
@@ -433,7 +435,7 @@ public class VirtualBlockManager implements Listener {
         }
 
         for (UUID displayId : activeBlock.displayEntities()) {
-            Entity display = Bukkit.getEntity(displayId);
+            Entity display = findEntityForcefully(activeBlock.origin().getWorld(), displayId);
             if (display != null) {
                 display.remove();
             }
@@ -442,6 +444,16 @@ public class VirtualBlockManager implements Listener {
         if (persist) {
             saveAsync();
         }
+    }
+
+    private Entity findEntityForcefully(World world, UUID id) {
+        Entity entity = Bukkit.getEntity(id);
+        if (entity != null) return entity;
+
+        for (Entity e : world.getEntities()) {
+            if (e.getUniqueId().equals(id)) return e;
+        }
+        return null;
     }
 
     private Material resolveCubeMaterial(BakedCube cube) {
@@ -482,7 +494,11 @@ public class VirtualBlockManager implements Listener {
             UUID instanceId = record.id();
 
             Set<Location> expectedBarriers = computeBarrierLocations(model, origin, rotation);
-            List<UUID> existingDisplays = findDisplayEntities(world, instanceId);
+            List<UUID> existingDisplays = record.displayEntities();
+            if (existingDisplays == null || existingDisplays.isEmpty()) {
+                existingDisplays = findDisplayEntities(world, instanceId);
+            }
+
             Set<Location> existingBarriers = new HashSet<>();
             for (Location barrier : expectedBarriers) {
                 if (barrier.getBlock().getType() == Material.BARRIER) {
@@ -520,7 +536,7 @@ public class VirtualBlockManager implements Listener {
 
     private Set<Location> computeBarrierLocations(VirtualModel model, Location origin, Quaternionf rotation) {
         Set<Location> locations = new HashSet<>();
-        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, rotation);
+        Set<Vector> occupiedOffsets = VirtualBoundingBox.calculateVoxelOffsets(model, rotation, DISPLAY_OFFSET);
         for (Vector offset : occupiedOffsets) {
             locations.add(origin.clone().add(offset));
         }
