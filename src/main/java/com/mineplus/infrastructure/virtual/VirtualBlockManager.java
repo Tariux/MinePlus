@@ -92,10 +92,15 @@ public class VirtualBlockManager implements Listener {
     }
 
     public UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
-        return spawnModel(model, placement, true, UUID.randomUUID());
+        return spawnModel(model, placement, UUID.randomUUID());
+    }
+
+    public UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement, UUID instanceId) {
+        return spawnModel(model, placement, true, instanceId);
     }
 
     public void removeModel(UUID instanceId) {
+        if (instanceId == null) return;
         removeModel(instanceId, true);
     }
 
@@ -423,26 +428,52 @@ public class VirtualBlockManager implements Listener {
 
     private void removeModel(UUID instanceId, boolean persist) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
-        if (activeBlock == null) {
-            return;
-        }
 
-        for (Location loc : activeBlock.barrierBlocks()) {
-            if (loc.getBlock().getType() == Material.BARRIER) {
-                loc.getBlock().setType(Material.AIR);
+        // Even if activeBlock is null, we should try a tag-based cleanup to be safe
+        // especially after server reload where internal state might be out of sync
+        if (activeBlock != null) {
+            for (Location loc : activeBlock.barrierBlocks()) {
+                if (loc.getBlock().getType() == Material.BARRIER) {
+                    loc.getBlock().setType(Material.AIR);
+                }
+                blockToModelMap.remove(loc);
             }
-            blockToModelMap.remove(loc);
+
+        World world = activeBlock.origin().getWorld();
+        Location origin = activeBlock.origin();
+        boolean chunkLoaded = origin.getChunk().isLoaded();
+
+        if (!chunkLoaded) {
+            origin.getChunk().load();
         }
 
-        for (UUID displayId : activeBlock.displayEntities()) {
-            Entity display = findEntityForcefully(activeBlock.origin().getWorld(), displayId);
-            if (display != null) {
-                display.remove();
+        try {
+            for (UUID displayId : activeBlock.displayEntities()) {
+                Entity display = findEntityForcefully(world, displayId);
+                if (display != null) {
+                    display.remove();
+                }
+            }
+            // Tag-based emergency cleanup (Ensures no 'zombie' models in this world)
+            cleanupZombieEntities(world, instanceId);
+        } finally {
+            if (!chunkLoaded) {
+                origin.getChunk().unload();
+                }
             }
         }
 
         if (persist) {
             saveAsync();
+        }
+    }
+
+    private void cleanupZombieEntities(World world, UUID instanceId) {
+        String tag = DISPLAY_TAG_PREFIX + instanceId;
+        for (Entity entity : world.getEntities()) {
+            if (entity instanceof BlockDisplay && entity.getScoreboardTags().contains(tag)) {
+                entity.remove();
+            }
         }
     }
 

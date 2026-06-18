@@ -55,6 +55,12 @@ public final class ModelRenderingManager {
         );
         VirtualBlockPlacementHelper.PlacementData placementData =
                 new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
+
+        // If instance already has a rendered ID, reuse it or cleanup first
+        if (instance.renderedModelId() != null) {
+            virtualBlockManager.removeModel(instance.renderedModelId());
+        }
+
         return virtualBlockManager.spawnModel(model, placementData);
     }
 
