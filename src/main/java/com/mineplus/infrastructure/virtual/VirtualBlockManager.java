@@ -1,14 +1,10 @@
 // Path: src/main/java/com/mineplus/infrastructure/virtual/VirtualBlockManager.java
 package com.mineplus.infrastructure.virtual;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
+import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
+import com.mineplus.infrastructure.model.BlockCoordinate;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -43,12 +40,11 @@ public class VirtualBlockManager implements Listener {
     private static final String DEBUG_MODELS_FOLDER = "debug";
 
     private final Map<String, VirtualModel> loadedModels = new HashMap<>();
-    private final Map<Location, UUID> blockToModelMap = new HashMap<>();
+    private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
-    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-    private File storageFile;
     private JavaPlugin plugin;
     private boolean debugLoggingEnabled;
+    private MultiBlockLifecycleManager lifecycleManager;
 
     public record ActiveVirtualBlock(
             String modelName,
@@ -62,9 +58,11 @@ public class VirtualBlockManager implements Listener {
     public void loadModels(JavaPlugin plugin) {
         this.plugin = plugin;
         this.debugLoggingEnabled = Boolean.getBoolean("mineplus.debug.models");
-        this.storageFile = new File(plugin.getDataFolder(), "virtual-blocks.json");
         loadModelDefinitions();
-        restoreSpawnedModels();
+    }
+
+    public void setLifecycleManager(MultiBlockLifecycleManager manager) {
+        this.lifecycleManager = manager;
     }
 
     public void reloadModelDefinitions() {
@@ -90,25 +88,40 @@ public class VirtualBlockManager implements Listener {
     }
 
     public UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
-        return spawnModel(model, placement, true, UUID.randomUUID());
+        return spawnModel(model, placement, UUID.randomUUID());
     }
 
     public void removeModel(UUID instanceId) {
-        removeModel(instanceId, true);
+        removeModelInternal(instanceId);
     }
 
     public void removeAllModels() {
         for (UUID id : new ArrayList<>(activeBlocks.keySet())) {
-            removeModel(id, false);
+            removeModelInternal(id);
         }
     }
 
     public void shutdown() {
-        saveNow();
+        removeAllModels();
+    }
+
+    public boolean exists(UUID instanceId) {
+        return activeBlocks.containsKey(instanceId);
+    }
+
+    public Set<Location> getBarrierLocations(UUID instanceId) {
+        ActiveVirtualBlock activeBlock = activeBlocks.get(instanceId);
+        if (activeBlock == null) {
+            return Set.of();
+        }
+        return activeBlock.barrierBlocks();
     }
 
     public ActiveVirtualBlock getVirtualBlockAt(Location location) {
-        UUID instanceId = blockToModelMap.get(location);
+        if (location == null) {
+            return null;
+        }
+        UUID instanceId = blockToModelMap.get(BlockCoordinate.from(location));
         if (instanceId != null) {
             return activeBlocks.get(instanceId);
         }
@@ -119,7 +132,7 @@ public class VirtualBlockManager implements Listener {
         if (location == null) {
             return null;
         }
-        return blockToModelMap.get(location);
+        return blockToModelMap.get(BlockCoordinate.from(location));
     }
 
     @EventHandler
@@ -129,10 +142,16 @@ public class VirtualBlockManager implements Listener {
             return;
         }
 
-        UUID instanceId = blockToModelMap.get(block.getLocation());
+        UUID instanceId = blockToModelMap.get(BlockCoordinate.from(block.getLocation()));
         if (instanceId != null) {
             event.setDropItems(false);
-            removeModel(instanceId);
+            removeModelInternal(instanceId);
+            if (lifecycleManager != null) {
+                MultiBlockInstance instance = lifecycleManager.findByRenderedModelId(instanceId);
+                if (instance != null) {
+                    lifecycleManager.remove(instance.id(), event.getPlayer(), true);
+                }
+            }
         }
     }
 
@@ -207,7 +226,6 @@ public class VirtualBlockManager implements Listener {
     private UUID spawnModel(
             VirtualModel model,
             VirtualBlockPlacementHelper.PlacementData placement,
-            boolean persist,
             UUID instanceId
     ) {
         List<UUID> spawnedEntities = new ArrayList<>();
@@ -236,7 +254,7 @@ public class VirtualBlockManager implements Listener {
             if (block.getType().isAir()) {
                 block.setType(Material.BARRIER);
                 barrierBlocks.add(location);
-                blockToModelMap.put(location, instanceId);
+                blockToModelMap.put(BlockCoordinate.from(location), instanceId);
             }
         }
 
@@ -285,13 +303,10 @@ public class VirtualBlockManager implements Listener {
                 spawnedEntities,
                 barrierBlocks
         ));
-        if (persist) {
-            saveNow();
-        }
         return instanceId;
     }
 
-    private void removeModel(UUID instanceId, boolean persist) {
+    private void removeModelInternal(UUID instanceId) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
         if (activeBlock == null) {
             return;
@@ -301,7 +316,7 @@ public class VirtualBlockManager implements Listener {
             if (loc.getBlock().getType() == Material.BARRIER) {
                 loc.getBlock().setType(Material.AIR);
             }
-            blockToModelMap.remove(loc);
+            blockToModelMap.remove(BlockCoordinate.from(loc));
         }
 
         for (UUID displayId : activeBlock.displayEntities()) {
@@ -309,10 +324,6 @@ public class VirtualBlockManager implements Listener {
             if (display != null) {
                 display.remove();
             }
-        }
-
-        if (persist) {
-            saveNow();
         }
     }
 
@@ -333,145 +344,32 @@ public class VirtualBlockManager implements Listener {
         return matched;
     }
 
-    private void restoreSpawnedModels() {
-        if (storageFile == null || !storageFile.exists()) {
-            return;
+    public UUID restoreForState(BlockCoordinate anchor, String modelKey, Quaternionf rotation) {
+        if (blockToModelMap.containsKey(anchor)) {
+            return blockToModelMap.get(anchor);
         }
-
-        Type listType = new TypeToken<List<StoredVirtualBlock>>() {
-        }.getType();
-        try (FileReader reader = new FileReader(storageFile)) {
-            List<StoredVirtualBlock> records = gson.fromJson(reader, listType);
-            if (records == null) {
-                return;
+        VirtualModel model = getModel(modelKey);
+        if (model == null) {
+            if (plugin != null) {
+                plugin.getLogger().warning("Cannot restore virtual block: unknown model key '" + modelKey + "' at " + anchor + ".");
             }
-
-            for (StoredVirtualBlock record : records) {
-                World world = org.bukkit.Bukkit.getWorld(record.world());
-                if (world == null) {
-                    continue;
-                }
-
-                VirtualModel model = getModel(record.modelName());
-                if (model == null) {
-                    continue;
-                }
-
-                Location origin = new Location(world, record.x(), record.y(), record.z());
-                Quaternionf rotation = new Quaternionf(record.rotationX(), record.rotationY(), record.rotationZ(), record.rotationW());
-                UUID instanceId = parseUuid(record.id());
-                if (instanceId == null) {
-                    instanceId = UUID.randomUUID();
-                }
-
-                Set<Location> expectedBarriers = computeBarrierLocations(model, origin, rotation);
-                List<UUID> existingDisplays = findDisplayEntities(world, instanceId);
-                Set<Location> existingBarriers = new HashSet<>();
-                for (Location barrier : expectedBarriers) {
-                    if (barrier.getBlock().getType() == Material.BARRIER) {
-                        existingBarriers.add(barrier);
-                    }
-                }
-
-                if (!existingDisplays.isEmpty() || !existingBarriers.isEmpty()) {
-                    for (Location barrier : existingBarriers) {
-                        blockToModelMap.put(barrier, instanceId);
-                    }
-                    activeBlocks.put(instanceId, new ActiveVirtualBlock(
-                            model.name(),
-                            origin,
-                            rotation,
-                            existingDisplays,
-                            existingBarriers
-                    ));
-                    continue;
-                }
-
-                VirtualBlockPlacementHelper.PlacementData placement =
-                        new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
-                spawnModel(model, placement, false, instanceId);
-            }
-        } catch (Exception exception) {
-            exception.printStackTrace();
-        }
-    }
-
-    private void saveNow() {
-        if (storageFile == null) {
-            return;
-        }
-
-        File parent = storageFile.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return;
-        }
-
-        List<StoredVirtualBlock> records = new ArrayList<>();
-        for (Map.Entry<UUID, ActiveVirtualBlock> entry : activeBlocks.entrySet()) {
-            ActiveVirtualBlock active = entry.getValue();
-            Location location = active.origin();
-            if (location.getWorld() == null) {
-                continue;
-            }
-            records.add(new StoredVirtualBlock(
-                    entry.getKey().toString(),
-                    active.modelName(),
-                    location.getWorld().getName(),
-                    location.getBlockX(),
-                    location.getBlockY(),
-                    location.getBlockZ(),
-                    active.rotation().x,
-                    active.rotation().y,
-                    active.rotation().z,
-                    active.rotation().w
-            ));
-        }
-
-        try (FileWriter writer = new FileWriter(storageFile)) {
-            gson.toJson(records, writer);
-        } catch (IOException exception) {
-            exception.printStackTrace();
-        }
-    }
-
-    private Set<Location> computeBarrierLocations(VirtualModel model, Location origin, Quaternionf rotation) {
-        Set<Location> locations = new HashSet<>();
-        VirtualBoundingBox box = VirtualBoundingBox.calculate(model);
-        for (Vector offset : box.getOccupiedOffsets()) {
-            Vector3f rotatedOffset = new Vector3f((float) offset.getX(), (float) offset.getY(), (float) offset.getZ());
-            rotation.transform(rotatedOffset);
-            locations.add(origin.clone().add(
-                    Math.round(rotatedOffset.x),
-                    Math.round(rotatedOffset.y),
-                    Math.round(rotatedOffset.z)
-            ));
-        }
-        return locations;
-    }
-
-    private List<UUID> findDisplayEntities(World world, UUID instanceId) {
-        String tag = DISPLAY_TAG_PREFIX + instanceId;
-        List<UUID> ids = new ArrayList<>();
-        for (Entity entity : world.getEntities()) {
-            if (!(entity instanceof BlockDisplay)) {
-                continue;
-            }
-            if (entity.getScoreboardTags().contains(tag)) {
-                ids.add(entity.getUniqueId());
-            }
-        }
-        return ids;
-    }
-
-    private UUID parseUuid(String value) {
-        if (value == null || value.isBlank()) {
             return null;
         }
-        try {
-            return UUID.fromString(value);
-        } catch (IllegalArgumentException ignored) {
+        World world = Bukkit.getWorld(anchor.worldName());
+        if (world == null) {
+            if (plugin != null) {
+                plugin.getLogger().info("restoreForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
+            }
             return null;
         }
+        Location origin = new Location(world, anchor.x(), anchor.y(), anchor.z());
+        VirtualBlockPlacementHelper.PlacementData placement =
+                new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
+        UUID instanceId = spawnModel(model, placement, UUID.randomUUID());
+        if (plugin != null) {
+            plugin.getLogger().info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
+        }
+        return instanceId;
     }
 
     private String stripExtension(String fileName) {
@@ -485,19 +383,5 @@ public class VirtualBlockManager implements Listener {
 
     private String quaternionString(Quaternionf value) {
         return "(" + value.x + ", " + value.y + ", " + value.z + ", " + value.w + ")";
-    }
-
-    private record StoredVirtualBlock(
-            String id,
-            String modelName,
-            String world,
-            int x,
-            int y,
-            int z,
-            float rotationX,
-            float rotationY,
-            float rotationZ,
-            float rotationW
-    ) {
     }
 }

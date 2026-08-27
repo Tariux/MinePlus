@@ -21,6 +21,10 @@ public final class MultiBlockInstance {
     private int level;
     private Quaternionf rotation;
     private UUID renderedModelId;
+    private EntityStatus status;
+    private long lastHeartbeat;
+    private long lastValidatedAt;
+    private String modelKey;
     private final Map<String, String> metadata;
     private final Map<String, String> stateData;
     private final Set<UUID> linkedBlocks;
@@ -36,6 +40,10 @@ public final class MultiBlockInstance {
             int level,
             Quaternionf rotation,
             UUID renderedModelId,
+            EntityStatus status,
+            long lastHeartbeat,
+            long lastValidatedAt,
+            String modelKey,
             Map<String, String> metadata,
             Map<String, String> stateData,
             Set<UUID> linkedBlocks
@@ -50,6 +58,10 @@ public final class MultiBlockInstance {
         this.level = level;
         this.rotation = new Quaternionf(rotation);
         this.renderedModelId = renderedModelId;
+        this.status = status;
+        this.lastHeartbeat = lastHeartbeat;
+        this.lastValidatedAt = lastValidatedAt;
+        this.modelKey = modelKey;
         this.metadata = new LinkedHashMap<>(metadata);
         this.stateData = new LinkedHashMap<>(stateData);
         this.linkedBlocks = new LinkedHashSet<>(linkedBlocks);
@@ -109,6 +121,38 @@ public final class MultiBlockInstance {
 
     public void setRenderedModelId(UUID renderedModelId) {
         this.renderedModelId = renderedModelId;
+    }
+
+    public EntityStatus status() {
+        return status;
+    }
+
+    public void setStatus(EntityStatus status) {
+        this.status = status;
+    }
+
+    public long lastHeartbeat() {
+        return lastHeartbeat;
+    }
+
+    public void setLastHeartbeat(long lastHeartbeat) {
+        this.lastHeartbeat = lastHeartbeat;
+    }
+
+    public long lastValidatedAt() {
+        return lastValidatedAt;
+    }
+
+    public void setLastValidatedAt(long lastValidatedAt) {
+        this.lastValidatedAt = lastValidatedAt;
+    }
+
+    public String modelKey() {
+        return modelKey;
+    }
+
+    public void setModelKey(String modelKey) {
+        this.modelKey = modelKey;
     }
 
     public Map<String, String> metadata() {

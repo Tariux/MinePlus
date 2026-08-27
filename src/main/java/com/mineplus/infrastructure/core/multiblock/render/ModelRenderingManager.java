@@ -27,20 +27,25 @@ public final class ModelRenderingManager {
     public UUID render(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
         World world = Bukkit.getWorld(instance.coordinate().worldName());
         if (world == null) {
+            Bukkit.getLogger().warning("render: World not loaded for instance " + instance.id() + " at " + instance.coordinate().worldName());
             return null;
         }
 
         MultiBlockLevel level = type.level(instance.level());
         if (level == null || level.modelPath().isBlank()) {
+            Bukkit.getLogger().warning("render: No level " + instance.level() + " for type '" + type.id() + "'.");
             return null;
         }
 
         String modelKey = buildModelKey(type.id(), instance.level());
+        instance.setModelKey(modelKey);
         File modelFile = resolveModelFile(pluginDataFolder, level.modelPath());
         VirtualModel model = virtualBlockManager.getModel(modelKey);
         if (model == null) {
+            Bukkit.getLogger().info("render: Model key '" + modelKey + "' not preloaded — parsing from file " + modelFile.getAbsolutePath());
             model = BbModelImporter.parse(modelKey, modelFile, Bukkit.getLogger());
             if (model == null || model.cubes().isEmpty()) {
+                Bukkit.getLogger().severe("render: Failed to load or parse model file " + modelFile.getAbsolutePath() + " for key '" + modelKey + "'.");
                 return null;
             }
             virtualBlockManager.registerModel(modelKey, model);
@@ -61,13 +66,13 @@ public final class ModelRenderingManager {
     public void remove(MultiBlockInstance instance) {
         if (instance.renderedModelId() != null) {
             virtualBlockManager.removeModel(instance.renderedModelId());
-            instance.setRenderedModelId(null);
         }
     }
 
     public UUID swapModel(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
         remove(instance);
-        return render(type, instance, pluginDataFolder);
+        UUID newModelId = render(type, instance, pluginDataFolder);
+        return newModelId;
     }
 
     public VirtualBlockManager virtualBlockManager() {

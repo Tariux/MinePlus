@@ -1,8 +1,8 @@
 package com.mineplus.infrastructure.core.gui;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.util.StringNormalizer;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.bukkit.entity.Player;
@@ -88,7 +88,7 @@ public final class InfrastructureGuiManager {
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.toLowerCase(Locale.ROOT).trim();
+        return StringNormalizer.normalize(value);
     }
 
     private OpenGuiSession sessionFor(UUID playerId) {

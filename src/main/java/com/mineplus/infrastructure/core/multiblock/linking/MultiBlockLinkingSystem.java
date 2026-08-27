@@ -60,6 +60,12 @@ public final class MultiBlockLinkingSystem {
         propagateSignal(initial);
     }
 
+    public void cleanupLinksFor(UUID removedId) {
+        for (MultiBlockInstance instance : registry.getInstances()) {
+            instance.mutableLinkedBlocks().remove(removedId);
+        }
+    }
+
     private void propagateSignal(MultiBlockSignal initial) {
         Deque<MultiBlockSignal> queue = new ArrayDeque<>();
         Set<UUID> visited = new HashSet<>();

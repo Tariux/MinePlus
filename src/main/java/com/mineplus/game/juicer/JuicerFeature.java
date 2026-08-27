@@ -55,10 +55,6 @@ public final class JuicerFeature {
                 actor.sendMessage(ChatColor.GRAY + "Juicer level " + instance.level() + " ready.");
             }
         });
-
-        context.jsonInfrastructureApi().reloadModelDefinitions();
-        context.jsonInfrastructureApi().reloadMultiBlocks();
-        context.jsonInfrastructureApi().reloadRecipes();
     }
 
     private void installDefaultResource(String classpathResource, String dataRelativePath, boolean overwrite) {

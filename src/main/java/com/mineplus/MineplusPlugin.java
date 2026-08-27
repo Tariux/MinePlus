@@ -32,9 +32,9 @@ public final class MineplusPlugin extends JavaPlugin {
         virtualBlockManager.loadModels(this);
 
         context = PluginContext.bootstrap(this, virtualBlockManager);
-        context.finalizeSetup();
         juicerFeature = new JuicerFeature(this, context);
         juicerFeature.enable();
+        context.finalizeSetup();
 
         registerCommand();
         registerListeners();

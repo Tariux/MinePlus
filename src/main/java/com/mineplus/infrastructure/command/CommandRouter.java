@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.command;
 
+import com.mineplus.infrastructure.core.util.StringNormalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -7,7 +8,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -116,6 +116,6 @@ public final class CommandRouter implements CommandExecutor, TabCompleter {
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.toLowerCase(Locale.ROOT).trim();
+        return StringNormalizer.normalize(value);
     }
 }

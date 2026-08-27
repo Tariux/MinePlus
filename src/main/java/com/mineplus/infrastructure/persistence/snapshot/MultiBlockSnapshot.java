@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.persistence.snapshot;
 
+import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import java.util.LinkedHashMap;
@@ -25,7 +26,10 @@ public record MultiBlockSnapshot(
         float rotationY,
         float rotationZ,
         float rotationW,
-        UUID renderedModelId,
+        String status,
+        long lastHeartbeat,
+        long lastValidatedAt,
+        String modelKey,
         Map<String, String> metadata,
         Map<String, String> stateData,
         Set<UUID> linkedBlocks
@@ -56,7 +60,10 @@ public record MultiBlockSnapshot(
                 rotation.y,
                 rotation.z,
                 rotation.w,
-                instance.renderedModelId(),
+                instance.status() == null ? null : instance.status().name(),
+                instance.lastHeartbeat(),
+                instance.lastValidatedAt(),
+                instance.modelKey(),
                 instance.metadata(),
                 instance.stateData(),
                 instance.linkedBlocks()
@@ -64,6 +71,9 @@ public record MultiBlockSnapshot(
     }
 
     public MultiBlockInstance toInstance() {
+        EntityStatus resolvedStatus = status == null || status.isBlank()
+                ? EntityStatus.CREATED
+                : parseStatus(status);
         return new MultiBlockInstance(
                 id,
                 typeId,
@@ -74,10 +84,22 @@ public record MultiBlockSnapshot(
                 placedAt,
                 level,
                 new Quaternionf(rotationX, rotationY, rotationZ, rotationW),
-                renderedModelId,
+                null,
+                resolvedStatus,
+                lastHeartbeat,
+                lastValidatedAt,
+                modelKey,
                 new LinkedHashMap<>(metadata),
                 new LinkedHashMap<>(stateData),
                 new LinkedHashSet<>(linkedBlocks)
         );
+    }
+
+    private static EntityStatus parseStatus(String value) {
+        try {
+            return EntityStatus.valueOf(value);
+        } catch (IllegalArgumentException | NullPointerException ignored) {
+            return EntityStatus.CREATED;
+        }
     }
 }

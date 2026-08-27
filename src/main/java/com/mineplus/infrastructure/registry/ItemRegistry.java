@@ -2,11 +2,11 @@ package com.mineplus.infrastructure.registry;
 
 import com.mineplus.MineplusPlugin;
 import com.mineplus.infrastructure.definition.ItemDefinition;
+import com.mineplus.infrastructure.core.util.StringNormalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
@@ -102,6 +102,6 @@ public final class ItemRegistry {
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.toLowerCase(Locale.ROOT).trim();
+        return StringNormalizer.normalize(value);
     }
 }

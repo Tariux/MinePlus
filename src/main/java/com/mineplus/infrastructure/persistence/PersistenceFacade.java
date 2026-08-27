@@ -33,6 +33,7 @@ public final class PersistenceFacade {
     private volatile long lastErrorAt;
     private volatile String lastError;
     private volatile List<MultiBlockSnapshot> queuedFullReplace;
+    private SqlitePersistenceTx currentTx;
     private SqliteConnectionFactory connectionFactory;
 
     public PersistenceFacade(PersistenceConfig config, Logger logger) {
@@ -61,39 +62,47 @@ public final class PersistenceFacade {
         enabled = connectionFactory.driverAvailable();
         if (!enabled) {
             lastError = "driver-unavailable";
+            logger.warning("PersistenceFacade initialized but SQLite driver is unavailable. Persistence is DISABLED.");
             return;
         }
+
+        logger.info("PersistenceFacade: SQLite driver detected. Database file: " + config.databaseFile());
 
         try (Connection connection = connectionFactory.open()) {
             if (connection == null) {
                 enabled = false;
                 rememberError("connection-unavailable");
+                logger.severe("PersistenceFacade: Failed to open SQLite connection. Persistence is DISABLED.");
                 return;
             }
             new SqliteMigrationRunner(config).migrate(connection);
+            logger.info("PersistenceFacade: SQLite database migrated successfully.");
         } catch (SQLException exception) {
             enabled = false;
             rememberError("migration-failed: " + exception.getMessage());
-            logger.warning("Failed to initialize sqlite persistence: " + exception.getMessage());
+            logger.severe("Failed to initialize sqlite persistence: " + exception.getMessage());
         }
     }
 
     public List<MultiBlockSnapshot> loadAllMultiBlocks() {
         if (!enabled) {
+            logger.warning("PersistenceFacade.loadAllMultiBlocks: persistence is DISABLED, returning empty list.");
             return List.of();
         }
 
         try (SqlitePersistenceTx tx = beginTx()) {
             if (tx == null) {
+                logger.warning("PersistenceFacade.loadAllMultiBlocks: transaction init failed, returning empty list.");
                 return List.of();
             }
             List<MultiBlockSnapshot> snapshots = tx.multiBlocks().loadAll();
             tx.commit();
             loadedRows.addAndGet(snapshots.size());
+            logger.info("PersistenceFacade: Loaded " + snapshots.size() + " multiblock snapshots from SQLite.");
             return snapshots;
         } catch (SQLException | RuntimeException exception) {
             rememberError("load-failed: " + exception.getMessage());
-            logger.warning("Failed to load multiblocks from sqlite: " + exception.getMessage());
+            logger.log(java.util.logging.Level.SEVERE, "Failed to load multiblocks from sqlite: " + exception.getMessage(), exception);
             return List.of();
         }
     }
@@ -103,10 +112,12 @@ public final class PersistenceFacade {
         synchronized (lock) {
             queuedFullReplace = copy;
         }
+        logger.info("PersistenceFacade: Enqueued " + copy.size() + " multiblock snapshots for persistence.");
     }
 
     public void flushNow() {
         if (!enabled) {
+            logger.warning("PersistenceFacade.flushNow: persistence is DISABLED, skipping flush.");
             return;
         }
         List<MultiBlockSnapshot> payload;
@@ -116,12 +127,15 @@ public final class PersistenceFacade {
         }
 
         if (payload == null) {
+            logger.info("PersistenceFacade.flushNow: no payload queued, skipping flush.");
             return;
         }
 
         long started = System.currentTimeMillis();
+        logger.info("PersistenceFacade.flushNow: Flushing " + payload.size() + " snapshots to SQLite...");
         try (SqlitePersistenceTx tx = beginTx()) {
             if (tx == null) {
+                logger.severe("PersistenceFacade.flushNow: transaction init failed, could not flush.");
                 return;
             }
             tx.multiBlocks().replaceAll(payload);
@@ -130,14 +144,48 @@ public final class PersistenceFacade {
             flushCount.incrementAndGet();
             writtenRows.addAndGet(payload.size());
             lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
+            logger.info("PersistenceFacade.flushNow: Flushed " + payload.size() + " snapshots in " + lastFlushDurationMs + "ms.");
         } catch (SQLException | RuntimeException exception) {
             rememberError("flush-failed: " + exception.getMessage());
-            logger.warning("Failed to flush persistence snapshot: " + exception.getMessage());
+            logger.log(java.util.logging.Level.SEVERE, "Failed to flush persistence snapshot: " + exception.getMessage(), exception);
         }
     }
 
     public void shutdown(long timeoutMs) {
         flushNow();
+    }
+
+    public PersistenceTx beginTransaction() {
+        if (currentTx != null) {
+            return currentTx;
+        }
+        SqlitePersistenceTx tx = beginTx();
+        currentTx = tx;
+        return tx;
+    }
+
+    public void commitTransaction() {
+        if (currentTx == null) {
+            return;
+        }
+        try {
+            currentTx.commit();
+        } finally {
+            currentTx.close();
+            currentTx = null;
+        }
+    }
+
+    public void rollbackTransaction() {
+        if (currentTx == null) {
+            return;
+        }
+        try {
+            currentTx.rollback();
+        } finally {
+            currentTx.close();
+            currentTx = null;
+        }
     }
 
     public PersistenceStats stats() {

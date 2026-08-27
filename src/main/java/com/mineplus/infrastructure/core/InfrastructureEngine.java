@@ -19,8 +19,13 @@ import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
 import com.mineplus.infrastructure.core.recipes.RecipeManager;
 import com.mineplus.infrastructure.core.storage.MultiBlockStorageEngine;
+import com.mineplus.infrastructure.persistence.PersistenceConfig;
+import com.mineplus.infrastructure.persistence.PersistenceFacade;
+import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import java.io.File;
+import java.util.List;
 import java.util.Set;
 
 public final class InfrastructureEngine {
@@ -30,7 +35,7 @@ public final class InfrastructureEngine {
     private final InfrastructureGuiManager guiManager;
     private final InfrastructureItemManager itemManager;
     private final RecipeManager recipeManager;
-    private final MultiBlockStorageEngine storageEngine;
+    private final PersistenceFacade persistenceFacade;
     private final ModelRenderingManager renderingManager;
     private final UpgradeManager upgradeManager;
     private final MultiBlockLifecycleManager lifecycleManager;
@@ -41,28 +46,33 @@ public final class InfrastructureEngine {
     private final MultiBlockConfigLoader configLoader;
     private final RecipeConfigLoader recipeLoader;
     private final MineplusPlugin plugin;
+    private final java.util.logging.Logger logger;
     private int tickTaskId;
 
     public InfrastructureEngine(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager, ItemRegistry itemRegistry) {
         this.plugin = plugin;
+        this.logger = plugin.getLogger();
         this.registry = new MultiBlockRegistry();
-        this.hookBus = new HookBus();
+        this.hookBus = new HookBus(plugin.getLogger());
         this.guiManager = new InfrastructureGuiManager();
         this.itemManager = new InfrastructureItemManager(itemRegistry);
         this.recipeManager = new RecipeManager();
-        this.storageEngine = new MultiBlockStorageEngine(plugin);
+        this.persistenceFacade = new PersistenceFacade(PersistenceConfig.defaults(plugin.getDataFolder()), plugin.getLogger());
+        this.persistenceFacade.initialize();
         this.renderingManager = new ModelRenderingManager(virtualBlockManager);
         this.upgradeManager = new UpgradeManager(itemManager);
+        this.linkingSystem = new MultiBlockLinkingSystem(registry);
         this.lifecycleManager = new MultiBlockLifecycleManager(
                 plugin,
                 registry,
                 renderingManager,
-                storageEngine,
+                persistenceFacade,
                 guiManager,
                 upgradeManager,
-                hookBus
+                hookBus,
+                linkingSystem
         );
-        this.linkingSystem = new MultiBlockLinkingSystem(registry);
+        virtualBlockManager.setLifecycleManager(lifecycleManager);
         this.api = new MineplusInfrastructureApi(
                 registry,
                 lifecycleManager,
@@ -79,9 +89,16 @@ public final class InfrastructureEngine {
     }
 
     public void initialize() {
+        logger.info("InfrastructureEngine: Initializing infrastructure...");
+        logger.info("InfrastructureEngine: Loading types from configs.");
         reloadMultiBlocks();
+        logger.info("InfrastructureEngine: Types and multiblocks loaded.");
         reloadRecipes();
-        lifecycleManager.restorePersistedInstances();
+        logger.info("InfrastructureEngine: Recipes loaded.");
+        migrateFromJsonIfPresent();
+        logger.info("InfrastructureEngine: Migration check complete.");
+        int restored = lifecycleManager.restorePersistedInstances();
+        logger.info("InfrastructureEngine: Restored " + restored + " instances from persistence.");
         if (tickTaskId == -1) {
             tickTaskId = plugin.getServer().getScheduler().scheduleSyncRepeatingTask(
                     plugin,
@@ -89,15 +106,25 @@ public final class InfrastructureEngine {
                     20L,
                     20L
             );
+            logger.info("InfrastructureEngine: Scheduled lifecycle tick task (ID: " + tickTaskId + ").");
         }
+        lifecycleManager.startHeartbeat();
+        logger.info("InfrastructureEngine: Heartbeat started.");
     }
 
     public void shutdown() {
+        plugin.getLogger().info("InfrastructureEngine: Shutting down. Saving persistent data...");
         if (tickTaskId != -1) {
             plugin.getServer().getScheduler().cancelTask(tickTaskId);
             tickTaskId = -1;
+            plugin.getLogger().info("InfrastructureEngine: Tick task cancelled.");
         }
+        lifecycleManager.stopHeartbeat();
+        plugin.getLogger().info("InfrastructureEngine: Heartbeat stopped.");
         lifecycleManager.saveNow();
+        plugin.getLogger().info("InfrastructureEngine: Persistent data saved.");
+        persistenceFacade.shutdown(5000);
+        plugin.getLogger().info("InfrastructureEngine: Persistence facade shutdown complete.");
     }
 
     public InfrastructureApi api() {
@@ -132,10 +159,42 @@ public final class InfrastructureEngine {
         return guiManager;
     }
 
+    private void migrateFromJsonIfPresent() {
+        File jsonFile = new File(plugin.getDataFolder(), "multiblocks.json");
+        if (!jsonFile.exists()) {
+            return;
+        }
+
+        List<MultiBlockSnapshot> existing = persistenceFacade.loadAllMultiBlocks();
+        if (!existing.isEmpty()) {
+            jsonFile.renameTo(new File(plugin.getDataFolder(), "multiblocks.json.migrated"));
+            return;
+        }
+
+        MultiBlockStorageEngine legacy = new MultiBlockStorageEngine(plugin);
+        List<MultiBlockSnapshot> snapshots = legacy.load().stream()
+                .map(MultiBlockSnapshot::from)
+                .toList();
+        persistenceFacade.enqueueFullReplace(snapshots);
+        persistenceFacade.flushNow();
+
+        if (jsonFile.delete()) {
+            plugin.getLogger().info("Migrated legacy multiblocks.json to SQLite persistence.");
+        } else {
+            plugin.getLogger().warning("Failed to delete legacy multiblocks.json after migration.");
+        }
+    }
+
     public void reloadAll() {
         reloadModelDefinitions();
         reloadMultiBlocks();
         reloadRecipes();
+        lifecycleManager.reconcile();
+        List<MultiBlockSnapshot> snapshots = registry.getInstances().stream()
+                .map(MultiBlockSnapshot::from)
+                .toList();
+        persistenceFacade.enqueueFullReplace(snapshots);
+        persistenceFacade.flushNow();
     }
 
     public void reloadModelDefinitions() {

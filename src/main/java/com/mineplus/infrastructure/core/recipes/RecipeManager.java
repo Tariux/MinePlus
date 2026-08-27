@@ -1,11 +1,11 @@
 package com.mineplus.infrastructure.core.recipes;
 
+import com.mineplus.infrastructure.core.util.StringNormalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 public final class RecipeManager {
@@ -98,6 +98,6 @@ public final class RecipeManager {
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.toLowerCase(Locale.ROOT).trim();
+        return StringNormalizer.normalize(value);
     }
 }

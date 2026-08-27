@@ -15,7 +15,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bukkit.Bukkit;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -38,7 +40,7 @@ public class BbModelImporter {
                 logger.warning("Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath()
                         + ": " + exception.getMessage());
             } else {
-                exception.printStackTrace();
+                Bukkit.getLogger().log(Level.WARNING, "Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath(), exception);
             }
             return null;
         }
@@ -159,7 +161,7 @@ public class BbModelImporter {
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
             } else {
-                exception.printStackTrace();
+                Bukkit.getLogger().log(Level.WARNING, "Failed to parse bbmodel '" + name + "': " + exception.getMessage(), exception);
             }
             return null;
         }

@@ -1,9 +1,11 @@
+// DEPRECATED: Replaced by PersistenceFacade (SQLite). Retained only for JSON migration in Phase 4.
 package com.mineplus.infrastructure.core.storage;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.mineplus.MineplusPlugin;
+import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import java.io.File;
@@ -19,6 +21,11 @@ import java.util.Map;
 import java.util.UUID;
 import org.joml.Quaternionf;
 
+/**
+ * @deprecated Replaced by PersistenceFacade (SQLite). Retained only for JSON migration.
+ * See PersistenceFacade and SqliteMultiBlockRepository for the active persistence path.
+ */
+@Deprecated
 public final class MultiBlockStorageEngine {
 
     private final MineplusPlugin plugin;
@@ -101,6 +108,10 @@ public final class MultiBlockStorageEngine {
             float rotationZ,
             float rotationW,
             String renderedModelId,
+            String status,
+            long lastHeartbeat,
+            long lastValidatedAt,
+            String modelKey,
             Map<String, String> metadata,
             Map<String, String> stateData,
             List<String> linked
@@ -125,6 +136,10 @@ public final class MultiBlockStorageEngine {
                     rotation.z,
                     rotation.w,
                     toStringValue(instance.renderedModelId()),
+                    instance.status() == null ? "" : instance.status().name(),
+                    instance.lastHeartbeat(),
+                    instance.lastValidatedAt(),
+                    instance.modelKey(),
                     new LinkedHashMap<>(instance.metadata()),
                     new LinkedHashMap<>(instance.stateData()),
                     instance.linkedBlocks().stream().map(UUID::toString).toList()
@@ -136,6 +151,7 @@ public final class MultiBlockStorageEngine {
             Map<String, String> safeStateData = stateData == null ? Map.of() : stateData;
             List<String> safeLinked = linked == null ? List.of() : linked;
 
+            EntityStatus resolvedStatus = parseStatus(status);
             return new MultiBlockInstance(
                     parseUuid(id),
                     typeId,
@@ -147,6 +163,10 @@ public final class MultiBlockStorageEngine {
                     level,
                     new Quaternionf(rotationX, rotationY, rotationZ, rotationW),
                     parseUuid(renderedModelId),
+                    resolvedStatus,
+                    lastHeartbeat,
+                    lastValidatedAt,
+                    modelKey,
                     safeMetadata,
                     safeStateData,
                     safeLinked.stream()
@@ -154,6 +174,17 @@ public final class MultiBlockStorageEngine {
                             .filter(value -> value != null)
                             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
             );
+        }
+
+        private static EntityStatus parseStatus(String value) {
+            if (value == null || value.isBlank()) {
+                return EntityStatus.CREATED;
+            }
+            try {
+                return EntityStatus.valueOf(value);
+            } catch (IllegalArgumentException ignored) {
+                return EntityStatus.CREATED;
+            }
         }
 
         private static String toStringValue(UUID uuid) {

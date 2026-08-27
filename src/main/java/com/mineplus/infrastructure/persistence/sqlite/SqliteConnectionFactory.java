@@ -18,6 +18,11 @@ public final class SqliteConnectionFactory {
         this.config = config;
         this.logger = logger;
         this.driverAvailable = detectDriver(logger);
+        if (driverAvailable) {
+            logger.info("SqliteConnectionFactory: SQLite JDBC driver found.");
+        } else {
+            logger.severe("SqliteConnectionFactory: SQLite JDBC driver NOT found. Persistence will be DISABLED.");
+        }
     }
 
     public boolean driverAvailable() {
@@ -26,6 +31,7 @@ public final class SqliteConnectionFactory {
 
     public Connection open() {
         if (!driverAvailable) {
+            logger.warning("open(): Driver not available.");
             return null;
         }
         try {
@@ -36,14 +42,18 @@ public final class SqliteConnectionFactory {
                 return null;
             }
 
+            logger.info("open(): Opening SQLite connection to " + file.getAbsolutePath());
             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
             try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA journal_mode=WAL");
+                statement.execute("PRAGMA synchronous=NORMAL");
                 statement.execute("PRAGMA foreign_keys = ON");
                 statement.execute("PRAGMA busy_timeout = " + config.busyTimeoutMs());
             }
+            logger.info("open(): SQLite connection established.");
             return connection;
         } catch (SQLException exception) {
-            logger.warning("Failed to open sqlite connection: " + exception.getMessage());
+            logger.log(java.util.logging.Level.SEVERE, "Failed to open sqlite connection: " + exception.getMessage(), exception);
             return null;
         }
     }

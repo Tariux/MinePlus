@@ -4,15 +4,18 @@ import com.mineplus.MineplusPlugin;
 import com.mineplus.infrastructure.core.events.HookBus;
 import com.mineplus.infrastructure.core.events.MultiBlockSignal;
 import com.mineplus.infrastructure.core.gui.InfrastructureGuiManager;
+import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
+import com.mineplus.infrastructure.core.multiblock.linking.MultiBlockLinkingSystem;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
-import com.mineplus.infrastructure.core.storage.MultiBlockStorageEngine;
 import com.mineplus.infrastructure.model.BlockCoordinate;
+import com.mineplus.infrastructure.persistence.PersistenceFacade;
+import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
+import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import org.bukkit.Bukkit;
@@ -28,52 +31,123 @@ public final class MultiBlockLifecycleManager {
     private final MineplusPlugin plugin;
     private final MultiBlockRegistry registry;
     private final ModelRenderingManager renderingManager;
-    private final MultiBlockStorageEngine storage;
+    private final PersistenceFacade persistenceFacade;
     private final InfrastructureGuiManager guiManager;
     private final UpgradeManager upgradeManager;
     private final HookBus hookBus;
+    private final MultiBlockLinkingSystem linkingSystem;
+    private int heartbeatTaskId;
 
     public MultiBlockLifecycleManager(
             MineplusPlugin plugin,
             MultiBlockRegistry registry,
             ModelRenderingManager renderingManager,
-            MultiBlockStorageEngine storage,
+            PersistenceFacade persistenceFacade,
             InfrastructureGuiManager guiManager,
             UpgradeManager upgradeManager,
-            HookBus hookBus
+            HookBus hookBus,
+            MultiBlockLinkingSystem linkingSystem
     ) {
         this.plugin = plugin;
         this.registry = registry;
         this.renderingManager = renderingManager;
-        this.storage = storage;
+        this.persistenceFacade = persistenceFacade;
         this.guiManager = guiManager;
         this.upgradeManager = upgradeManager;
         this.hookBus = hookBus;
+        this.linkingSystem = linkingSystem;
+        this.heartbeatTaskId = -1;
     }
 
-    public void restorePersistedInstances() {
+    public int restorePersistedInstances() {
+        plugin.getLogger().info("MultiBlockLifecycleManager: Loading instances from persistence...");
         registry.clearInstances();
-        for (MultiBlockInstance instance : storage.load()) {
+        int loaded = 0;
+        int corrupted = 0;
+        for (MultiBlockSnapshot snapshot : persistenceFacade.loadAllMultiBlocks()) {
+            MultiBlockInstance instance = snapshot.toInstance();
             MultiBlockType type = registry.getType(instance.typeId());
             if (type == null) {
+                plugin.getLogger().warning("MultiBlockLifecycleManager: Instance " + instance.id() + " has unknown type '" + instance.typeId() + "' — marking CORRUPTED.");
+                instance.setStatus(EntityStatus.CORRUPTED);
+                corrupted++;
+            }
+            registry.addInstance(instance);
+            loaded++;
+        }
+        plugin.getLogger().info("MultiBlockLifecycleManager: Loaded " + loaded + " instances (" + corrupted + " corrupted, type missing).");
+        reconcile();
+        return loaded;
+    }
+
+    public void reconcile() {
+        int checked = 0;
+        int corrupted = 0;
+        int deferred = 0;
+        int rendered = 0;
+        for (MultiBlockInstance instance : new java.util.ArrayList<>(registry.getInstances())) {
+            checked++;
+            MultiBlockType type = registry.getType(instance.typeId());
+
+            if (type == null) {
+                plugin.getLogger().warning("reconcile: Instance " + instance.id() + " has no type '" + instance.typeId() + "' — mark CORRUPTED.");
+                EntityStateMachine.transition(instance, EntityStatus.CORRUPTED);
+            }
+
+            EntityStatus status = instance.status() == null ? EntityStatus.CREATED : instance.status();
+            if (status == EntityStatus.CORRUPTED) {
+                cleanupCorrupted(instance);
+                corrupted++;
                 continue;
             }
 
-            UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
-            instance.setRenderedModelId(modelId);
-            registry.addInstance(instance);
-            fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
+            if (!EntityStateMachine.validateWorldLoaded(instance)) {
+                deferred++;
+                continue;
+            }
+
+            if (status == EntityStatus.ACTIVE) {
+                UUID modelId = renderingManager.virtualBlockManager().restoreForState(
+                        instance.coordinate(), instance.modelKey(), instance.rotation());
+                if (modelId == null && type != null) {
+                    plugin.getLogger().warning("reconcile: restoreForState returned null for instance " + instance.id() + ", attempting render().");
+                    modelId = renderingManager.render(type, instance, plugin.getDataFolder());
+                }
+                if (modelId != null) {
+                    rendered++;
+                } else {
+                    plugin.getLogger().warning("reconcile: Failed to render model for instance " + instance.id() + " — modelId is null.");
+                }
+                registry.bindRenderedModelId(instance.id(), modelId);
+                instance.setLastValidatedAt(System.currentTimeMillis());
+                fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
+            }
         }
+        persistInstances();
+        plugin.getLogger().info("reconcile: checked=" + checked + " corrupted=" + corrupted + " deferred=" + deferred + " rendered=" + rendered);
+    }
+
+    private void cleanupCorrupted(MultiBlockInstance instance) {
+        renderingManager.remove(instance);
+        instance.mutableLinkedBlocks().clear();
+        registry.removeInstance(instance.id());
+        EntityStateMachine.transition(instance, EntityStatus.REMOVED);
     }
 
     public MultiBlockInstance create(String typeId, Location location, UUID owner, UUID creator, Quaternionf rotation) {
         MultiBlockType type = registry.getType(typeId);
-        if (type == null || location.getWorld() == null) {
+        if (type == null) {
+            plugin.getLogger().warning("create: Unknown multiblock type '" + typeId + "' at " + location + ".");
+            return null;
+        }
+        if (location.getWorld() == null) {
+            plugin.getLogger().warning("create: World not loaded for location " + location + ".");
             return null;
         }
 
         BlockCoordinate coordinate = BlockCoordinate.from(location);
         if (registry.hasAt(coordinate)) {
+            plugin.getLogger().warning("create: Position already occupied at " + coordinate + ".");
             return null;
         }
 
@@ -88,6 +162,10 @@ public final class MultiBlockLifecycleManager {
                 type.minLevel(),
                 rotation == null ? new Quaternionf() : rotation,
                 null,
+                EntityStatus.CREATED,
+                0L,
+                0L,
+                null,
                 Map.of(),
                 Map.of(),
                 java.util.Set.of()
@@ -95,28 +173,50 @@ public final class MultiBlockLifecycleManager {
 
         registry.addInstance(instance);
         fire(MultiBlockLifecycleEventType.CREATE, type, instance, null, null);
-        storage.saveAsync(registry.getInstances());
+        persistInstances();
+        plugin.getLogger().info("create: Created multiblock instance " + instance.id() + " of type '" + typeId + "' at " + coordinate + ".");
         return instance;
     }
 
     public boolean place(UUID id, Player actor) {
         MultiBlockInstance instance = registry.getInstance(id);
         if (instance == null) {
+            plugin.getLogger().warning("place: Instance not found for id " + id + ".");
             return false;
         }
 
         MultiBlockType type = registry.getType(instance.typeId());
         if (type == null) {
+            plugin.getLogger().warning("place: Type not found for instance " + id + " (typeId='" + instance.typeId() + "').");
+            return false;
+        }
+
+        EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
+        if (current != EntityStatus.CREATED) {
+            plugin.getLogger().warning("place: Instance " + id + " is not in CREATED state (current=" + current + ").");
+            return false;
+        }
+        if (!EntityStateMachine.transition(instance, EntityStatus.PLACED)) {
+            plugin.getLogger().warning("place: Failed to transition instance " + id + " to PLACED.");
             return false;
         }
 
         UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
-        instance.setRenderedModelId(modelId);
+        if (modelId == null) {
+            plugin.getLogger().severe("place: render() returned null for instance " + id + ". Rolling back to CREATED.");
+            EntityStateMachine.transition(instance, EntityStatus.CREATED);
+            persistInstances();
+            return false;
+        }
+        registry.bindRenderedModelId(instance.id(), modelId);
         instance.setPlacedAt(System.currentTimeMillis());
+        instance.setLastValidatedAt(System.currentTimeMillis());
 
         fire(MultiBlockLifecycleEventType.PLACE, type, instance, actor, null);
+        instance.setStatus(EntityStatus.ACTIVE);
         fire(MultiBlockLifecycleEventType.ACTIVATE, type, instance, actor, null);
-        storage.saveAsync(registry.getInstances());
+        persistInstances();
+        plugin.getLogger().info("place: Placed and activated instance " + id + " (modelKey='" + instance.modelKey() + "').");
         return true;
     }
 
@@ -150,7 +250,7 @@ public final class MultiBlockLifecycleManager {
             guiManager.open(type.guiKey(), player, instance);
         }
 
-        storage.saveAsync(registry.getInstances());
+        persistInstances();
         return true;
     }
 
@@ -165,6 +265,11 @@ public final class MultiBlockLifecycleManager {
             return false;
         }
 
+        EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
+        if (current != EntityStatus.ACTIVE) {
+            return false;
+        }
+
         int oldLevel = instance.level();
         if (!upgradeManager.consumeUpgradeCost(type, instance, player)) {
             return false;
@@ -172,11 +277,15 @@ public final class MultiBlockLifecycleManager {
 
         instance.setLevel(oldLevel + 1);
         UUID swappedModel = renderingManager.swapModel(type, instance, plugin.getDataFolder());
-        instance.setRenderedModelId(swappedModel);
+        if (swappedModel == null) {
+            instance.setLevel(oldLevel);
+            return false;
+        }
+        registry.bindRenderedModelId(instance.id(), swappedModel);
 
         fire(MultiBlockLifecycleEventType.UPGRADE, type, instance, player, null);
         type.hook().onUpgrade(instance, oldLevel, instance.level(), player);
-        storage.saveAsync(registry.getInstances());
+        persistInstances();
         return true;
     }
 
@@ -186,30 +295,65 @@ public final class MultiBlockLifecycleManager {
             return false;
         }
 
-        MultiBlockType type = registry.getType(instance.typeId());
-        if (type == null) {
-            return false;
+        if (destroy) {
+            if (!EntityStateMachine.transition(instance, EntityStatus.BROKEN)) {
+                if (!EntityStateMachine.transition(instance, EntityStatus.REMOVED)) {
+                    return false;
+                }
+            }
+        } else {
+            if (!EntityStateMachine.transition(instance, EntityStatus.REMOVED)) {
+                return false;
+            }
+        }
+        if (instance.status() != EntityStatus.REMOVED) {
+            EntityStateMachine.transition(instance, EntityStatus.REMOVED);
         }
 
+        MultiBlockType type = registry.getType(instance.typeId());
         renderingManager.remove(instance);
         registry.removeInstance(instanceId);
-
-        if (destroy) {
-            fire(MultiBlockLifecycleEventType.DESTRUCTION, type, instance, actor, null);
-            type.hook().onBreak(instance, actor);
-        } else {
-            fire(MultiBlockLifecycleEventType.REMOVE, type, instance, actor, null);
-            type.hook().onRemove(instance, actor);
+        if (linkingSystem != null) {
+            linkingSystem.cleanupLinksFor(instanceId);
         }
-        storage.saveAsync(registry.getInstances());
+
+        if (type != null) {
+            if (destroy) {
+                fire(MultiBlockLifecycleEventType.DESTRUCTION, type, instance, actor, null);
+                type.hook().onBreak(instance, actor);
+            } else {
+                fire(MultiBlockLifecycleEventType.REMOVE, type, instance, actor, null);
+                type.hook().onRemove(instance, actor);
+            }
+        }
+        persistInstances();
+        plugin.getLogger().info("remove: Removed instance " + instanceId + " (destroy=" + destroy + ").");
         return true;
     }
 
     public void tick() {
+        long now = System.currentTimeMillis();
         for (MultiBlockInstance instance : registry.getInstances()) {
             MultiBlockType type = registry.getType(instance.typeId());
             if (type == null) {
                 continue;
+            }
+            EntityStatus status = instance.status() == null ? EntityStatus.CREATED : instance.status();
+            if (status == EntityStatus.ACTIVE) {
+                instance.setLastHeartbeat(now);
+
+                if (instance.renderedModelId() == null && instance.modelKey() != null && !instance.modelKey().isBlank()) {
+                    if (EntityStateMachine.validateWorldLoaded(instance)) {
+                        UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
+                        if (modelId != null) {
+                            registry.bindRenderedModelId(instance.id(), modelId);
+                            plugin.getLogger().info("tick: Deferred render succeeded for instance " + instance.id() + ".");
+                            fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
+                        } else {
+                            plugin.getLogger().warning("tick: Deferred render FAILED for instance " + instance.id() + " (render returned null).");
+                        }
+                    }
+                }
             }
             fire(MultiBlockLifecycleEventType.TICK, type, instance, null, null);
             type.hook().onTick(instance);
@@ -259,7 +403,48 @@ public final class MultiBlockLifecycleManager {
     }
 
     public void saveNow() {
-        storage.saveNow(registry.getInstances());
+        persistInstances();
+    }
+
+    public void startHeartbeat() {
+        if (heartbeatTaskId == -1) {
+            heartbeatTaskId = plugin.getServer().getScheduler().scheduleSyncRepeatingTask(
+                    plugin,
+                    this::flushHeartbeats,
+                    100L,
+                    100L
+            );
+        }
+    }
+
+    public void stopHeartbeat() {
+        if (heartbeatTaskId != -1) {
+            plugin.getServer().getScheduler().cancelTask(heartbeatTaskId);
+            heartbeatTaskId = -1;
+        }
+    }
+
+    public void flushHeartbeats() {
+        long now = System.currentTimeMillis();
+        boolean needsFlush = false;
+        for (MultiBlockInstance instance : registry.getInstances()) {
+            if (instance.status() == EntityStatus.ACTIVE) {
+                instance.setLastHeartbeat(now);
+                needsFlush = true;
+            }
+        }
+        if (needsFlush) {
+            persistInstances();
+        }
+    }
+
+    private void persistInstances() {
+        List<MultiBlockSnapshot> snapshots = registry.getInstances().stream()
+                .map(MultiBlockSnapshot::from)
+                .toList();
+        persistenceFacade.enqueueFullReplace(snapshots);
+        persistenceFacade.flushNow();
+        plugin.getLogger().info("persistInstances: Persisted " + snapshots.size() + " instances to SQLite.");
     }
 
     public void reloadModels() {
@@ -268,12 +453,16 @@ public final class MultiBlockLifecycleManager {
             if (type == null) {
                 continue;
             }
+            EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
+            if (current != EntityStatus.ACTIVE && current != EntityStatus.PLACED) {
+                continue;
+            }
             UUID modelId = renderingManager.swapModel(type, instance, plugin.getDataFolder());
-            instance.setRenderedModelId(modelId);
+            registry.bindRenderedModelId(instance.id(), modelId);
             fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
             type.hook().onModelReload(instance);
         }
-        storage.saveAsync(registry.getInstances());
+        persistInstances();
     }
 
     public boolean reloadModel(UUID instanceId) {
@@ -287,12 +476,17 @@ public final class MultiBlockLifecycleManager {
             return false;
         }
 
+        EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
+        if (current != EntityStatus.ACTIVE && current != EntityStatus.PLACED) {
+            return false;
+        }
+
         UUID modelId = renderingManager.swapModel(type, instance, plugin.getDataFolder());
-        instance.setRenderedModelId(modelId);
+        registry.bindRenderedModelId(instance.id(), modelId);
         fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
         type.hook().onModelReload(instance);
-        storage.saveAsync(registry.getInstances());
-        return true;
+        persistInstances();
+        return modelId != null;
     }
 
     public boolean setLevel(UUID instanceId, int level) {
@@ -306,16 +500,21 @@ public final class MultiBlockLifecycleManager {
             return false;
         }
 
+        EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
+        if (current != EntityStatus.ACTIVE && current != EntityStatus.PLACED) {
+            return false;
+        }
+
         int previousLevel = instance.level();
         instance.setLevel(level);
         UUID modelId = renderingManager.swapModel(type, instance, plugin.getDataFolder());
-        instance.setRenderedModelId(modelId);
+        registry.bindRenderedModelId(instance.id(), modelId);
         fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
         if (previousLevel != level) {
             fire(MultiBlockLifecycleEventType.UPGRADE, type, instance, null, null);
         }
-        storage.saveAsync(registry.getInstances());
-        return true;
+        persistInstances();
+        return modelId != null;
     }
 
     public int pruneUnknownTypes() {
@@ -326,13 +525,20 @@ public final class MultiBlockLifecycleManager {
 
         for (UUID id : idsToRemove) {
             MultiBlockInstance removed = registry.removeInstance(id);
-            if (removed != null && removed.renderedModelId() != null) {
-                renderingManager.remove(removed);
+            if (removed != null) {
+                EntityStateMachine.transition(removed, EntityStatus.REMOVED);
+                removed.mutableLinkedBlocks().clear();
+                if (linkingSystem != null) {
+                    linkingSystem.cleanupLinksFor(id);
+                }
+                if (removed.renderedModelId() != null) {
+                    renderingManager.remove(removed);
+                }
             }
         }
 
         if (!idsToRemove.isEmpty()) {
-            storage.saveAsync(registry.getInstances());
+            persistInstances();
         }
         return idsToRemove.size();
     }
@@ -341,10 +547,7 @@ public final class MultiBlockLifecycleManager {
         if (renderedModelId == null) {
             return null;
         }
-        return registry.getInstances().stream()
-                .filter(instance -> Objects.equals(renderedModelId, instance.renderedModelId()))
-                .findFirst()
-                .orElse(null);
+        return registry.getInstanceByRenderedModelId(renderedModelId);
     }
 
     public Location toLocation(MultiBlockInstance instance) {
