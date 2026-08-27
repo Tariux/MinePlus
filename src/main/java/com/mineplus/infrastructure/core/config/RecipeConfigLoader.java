@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import com.mineplus.MineplusPlugin;
 import com.mineplus.infrastructure.core.recipes.MachineRecipe;
 import com.mineplus.infrastructure.core.recipes.RecipeManager;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.FileReader;
 import java.util.LinkedHashMap;
@@ -27,7 +28,7 @@ public final class RecipeConfigLoader {
 
         File folder = new File(plugin.getDataFolder(), "recipes");
         if (!folder.exists() && !folder.mkdirs()) {
-            plugin.getLogger().warning("Failed to create recipes config folder");
+            DebugLogger.warning("Failed to create recipes config folder");
             return;
         }
 
@@ -54,7 +55,7 @@ public final class RecipeConfigLoader {
             }
             registerRecipe(root);
         } catch (Exception exception) {
-            plugin.getLogger().warning("Failed to load recipe config " + file.getName() + ": " + exception.getMessage());
+            DebugLogger.warning("Failed to load recipe config " + file.getName() + ": " + exception.getMessage());
         }
     }
 

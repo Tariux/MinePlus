@@ -26,7 +26,7 @@ dependencies {
             "libs/joml-1.10.8.jar",
             "libs/gson-2.13.2.jar",
             "libs/item-nbt-api-plugin-2.15.6.jar",
-            "libs/sqlite-jdbc-3.45.1.0.jar",
+            "libs/sqlite-jdbc-3.45.1.0.jar"
     )
 }
 

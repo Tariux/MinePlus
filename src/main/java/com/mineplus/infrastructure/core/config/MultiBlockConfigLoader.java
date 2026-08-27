@@ -8,6 +8,7 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.FileReader;
 import java.util.LinkedHashMap;
@@ -31,7 +32,7 @@ public final class MultiBlockConfigLoader {
 
         File folder = new File(plugin.getDataFolder(), "multiblocks");
         if (!folder.exists() && !folder.mkdirs()) {
-            plugin.getLogger().warning("Failed to create multiblocks config folder");
+            DebugLogger.warning("Failed to create multiblocks config folder");
             return;
         }
 
@@ -53,7 +54,7 @@ public final class MultiBlockConfigLoader {
             String gui = root.has("gui") ? root.get("gui").getAsString() : "";
             JsonObject levelsObject = root.getAsJsonObject("levels");
             if (levelsObject == null || levelsObject.isEmpty()) {
-                plugin.getLogger().warning("Skipping multiblock without levels: " + file.getName());
+                DebugLogger.warning("Skipping multiblock without levels: " + file.getName());
                 return;
             }
 
@@ -72,7 +73,7 @@ public final class MultiBlockConfigLoader {
             registry.registerType(new MultiBlockType(id, name, levels, new MultiBlockHook() {
             }, gui));
         } catch (Exception exception) {
-            plugin.getLogger().warning("Failed to load multiblock config " + file.getName() + ": " + exception.getMessage());
+            DebugLogger.warning("Failed to load multiblock config " + file.getName() + ": " + exception.getMessage());
         }
     }
 

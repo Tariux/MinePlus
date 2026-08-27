@@ -8,6 +8,7 @@ import com.mineplus.MineplusPlugin;
 import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.model.BlockCoordinate;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -59,7 +60,7 @@ public final class MultiBlockStorageEngine {
             }
             return loaded;
         } catch (IOException exception) {
-            plugin.getLogger().warning("Failed to load multiblocks storage: " + exception.getMessage());
+            DebugLogger.warning("Failed to load multiblocks storage: " + exception.getMessage());
             return List.of();
         }
     }
@@ -75,7 +76,7 @@ public final class MultiBlockStorageEngine {
     public void saveNow(Iterable<MultiBlockInstance> instances) {
         saveQueued = false;
         if (!plugin.getDataFolder().exists() && !plugin.getDataFolder().mkdirs()) {
-            plugin.getLogger().warning("Failed to create plugin folder for multiblock storage");
+            DebugLogger.warning("Failed to create plugin folder for multiblock storage");
             return;
         }
 
@@ -87,7 +88,7 @@ public final class MultiBlockStorageEngine {
         try (FileWriter writer = new FileWriter(file)) {
             gson.toJson(records, writer);
         } catch (IOException exception) {
-            plugin.getLogger().warning("Failed to save multiblocks storage: " + exception.getMessage());
+            DebugLogger.warning("Failed to save multiblocks storage: " + exception.getMessage());
         }
     }
 

@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.virtual.BbModelImporter;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.Locale;
 import java.util.UUID;
@@ -27,13 +28,13 @@ public final class ModelRenderingManager {
     public UUID render(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
         World world = Bukkit.getWorld(instance.coordinate().worldName());
         if (world == null) {
-            Bukkit.getLogger().warning("render: World not loaded for instance " + instance.id() + " at " + instance.coordinate().worldName());
+            DebugLogger.warning("render: World not loaded for instance " + instance.id() + " at " + instance.coordinate().worldName());
             return null;
         }
 
         MultiBlockLevel level = type.level(instance.level());
         if (level == null || level.modelPath().isBlank()) {
-            Bukkit.getLogger().warning("render: No level " + instance.level() + " for type '" + type.id() + "'.");
+            DebugLogger.warning("render: No level " + instance.level() + " for type '" + type.id() + "'.");
             return null;
         }
 
@@ -42,10 +43,10 @@ public final class ModelRenderingManager {
         File modelFile = resolveModelFile(pluginDataFolder, level.modelPath());
         VirtualModel model = virtualBlockManager.getModel(modelKey);
         if (model == null) {
-            Bukkit.getLogger().info("render: Model key '" + modelKey + "' not preloaded — parsing from file " + modelFile.getAbsolutePath());
-            model = BbModelImporter.parse(modelKey, modelFile, Bukkit.getLogger());
+            DebugLogger.info("render: Model key '" + modelKey + "' not preloaded — parsing from file " + modelFile.getAbsolutePath());
+            model = BbModelImporter.parse(modelKey, modelFile);
             if (model == null || model.cubes().isEmpty()) {
-                Bukkit.getLogger().severe("render: Failed to load or parse model file " + modelFile.getAbsolutePath() + " for key '" + modelKey + "'.");
+                DebugLogger.severe("render: Failed to load or parse model file " + modelFile.getAbsolutePath() + " for key '" + modelKey + "'.");
                 return null;
             }
             virtualBlockManager.registerModel(modelKey, model);

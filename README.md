@@ -35,6 +35,11 @@ Core internals:
 - `/mineplus reload [all|models|multiblocks|recipes]`
 - `/mineplus model <list|inspect|remove|respawn|setlevel> ...`
 
+## Configuration
+
+- `plugins/Mineplus/settings.mp.yml` is auto-generated on first start.
+- Set `ADDITIONAL_DEBUG_LOGS: true` to enable verbose debug output across multiblock lifecycle, rendering, persistence, and linking systems. Default: `false`.
+
 ## Docs
 
 - `docs/config-reference.md`

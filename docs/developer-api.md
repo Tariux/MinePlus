@@ -61,6 +61,7 @@ Use this tier for full machine frameworks and advanced add-ons.
 
 - `MultiBlockLifecycleManager` drives create/place/interact/tick/upgrade/remove.
 - `ModelRenderingManager` maps machine level to `.bbmodel` rendering through `VirtualBlockManager`.
+- `VirtualBlockManager` maintains session-local mapping and performs automatic cleanup of orphaned `BlockDisplay` "ghost" entities during chunk loading to ensure persistence synchronization.
 - `MultiBlockStorageEngine` persists and restores active instances.
 - `HookBus` publishes lifecycle events to registered listeners.
 - `MultiBlockLinkingSystem` handles directed links and signal propagation.

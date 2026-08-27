@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.FileReader;
 import java.io.Reader;
@@ -40,7 +41,7 @@ public class BbModelImporter {
                 logger.warning("Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath()
                         + ": " + exception.getMessage());
             } else {
-                Bukkit.getLogger().log(Level.WARNING, "Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath(), exception);
+                DebugLogger.severe("Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath(), exception);
             }
             return null;
         }
@@ -161,7 +162,7 @@ public class BbModelImporter {
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
             } else {
-                Bukkit.getLogger().log(Level.WARNING, "Failed to parse bbmodel '" + name + "': " + exception.getMessage(), exception);
+                DebugLogger.severe("Failed to parse bbmodel '" + name + "': " + exception.getMessage(), exception);
             }
             return null;
         }

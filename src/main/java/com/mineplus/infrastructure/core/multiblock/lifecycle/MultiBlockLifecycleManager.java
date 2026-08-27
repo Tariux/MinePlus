@@ -14,6 +14,7 @@ import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
+import com.mineplus.util.DebugLogger;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,7 +61,7 @@ public final class MultiBlockLifecycleManager {
     }
 
     public int restorePersistedInstances() {
-        plugin.getLogger().info("MultiBlockLifecycleManager: Loading instances from persistence...");
+        DebugLogger.info("MultiBlockLifecycleManager: Loading instances from persistence...");
         registry.clearInstances();
         int loaded = 0;
         int corrupted = 0;
@@ -68,14 +69,14 @@ public final class MultiBlockLifecycleManager {
             MultiBlockInstance instance = snapshot.toInstance();
             MultiBlockType type = registry.getType(instance.typeId());
             if (type == null) {
-                plugin.getLogger().warning("MultiBlockLifecycleManager: Instance " + instance.id() + " has unknown type '" + instance.typeId() + "' — marking CORRUPTED.");
+                DebugLogger.warning("MultiBlockLifecycleManager: Instance " + instance.id() + " has unknown type '" + instance.typeId() + "' — marking CORRUPTED.");
                 instance.setStatus(EntityStatus.CORRUPTED);
                 corrupted++;
             }
             registry.addInstance(instance);
             loaded++;
         }
-        plugin.getLogger().info("MultiBlockLifecycleManager: Loaded " + loaded + " instances (" + corrupted + " corrupted, type missing).");
+        DebugLogger.info("MultiBlockLifecycleManager: Loaded " + loaded + " instances (" + corrupted + " corrupted, type missing).");
         reconcile();
         return loaded;
     }
@@ -90,7 +91,7 @@ public final class MultiBlockLifecycleManager {
             MultiBlockType type = registry.getType(instance.typeId());
 
             if (type == null) {
-                plugin.getLogger().warning("reconcile: Instance " + instance.id() + " has no type '" + instance.typeId() + "' — mark CORRUPTED.");
+                DebugLogger.warning("reconcile: Instance " + instance.id() + " has no type '" + instance.typeId() + "' — mark CORRUPTED.");
                 EntityStateMachine.transition(instance, EntityStatus.CORRUPTED);
             }
 
@@ -110,13 +111,13 @@ public final class MultiBlockLifecycleManager {
                 UUID modelId = renderingManager.virtualBlockManager().restoreForState(
                         instance.coordinate(), instance.modelKey(), instance.rotation());
                 if (modelId == null && type != null) {
-                    plugin.getLogger().warning("reconcile: restoreForState returned null for instance " + instance.id() + ", attempting render().");
+                    DebugLogger.warning("reconcile: restoreForState returned null for instance " + instance.id() + ", attempting render().");
                     modelId = renderingManager.render(type, instance, plugin.getDataFolder());
                 }
                 if (modelId != null) {
                     rendered++;
                 } else {
-                    plugin.getLogger().warning("reconcile: Failed to render model for instance " + instance.id() + " — modelId is null.");
+                    DebugLogger.warning("reconcile: Failed to render model for instance " + instance.id() + " — modelId is null.");
                 }
                 registry.bindRenderedModelId(instance.id(), modelId);
                 instance.setLastValidatedAt(System.currentTimeMillis());
@@ -124,7 +125,7 @@ public final class MultiBlockLifecycleManager {
             }
         }
         persistInstances();
-        plugin.getLogger().info("reconcile: checked=" + checked + " corrupted=" + corrupted + " deferred=" + deferred + " rendered=" + rendered);
+        DebugLogger.info("reconcile: checked=" + checked + " corrupted=" + corrupted + " deferred=" + deferred + " rendered=" + rendered);
     }
 
     private void cleanupCorrupted(MultiBlockInstance instance) {
@@ -137,17 +138,17 @@ public final class MultiBlockLifecycleManager {
     public MultiBlockInstance create(String typeId, Location location, UUID owner, UUID creator, Quaternionf rotation) {
         MultiBlockType type = registry.getType(typeId);
         if (type == null) {
-            plugin.getLogger().warning("create: Unknown multiblock type '" + typeId + "' at " + location + ".");
+            DebugLogger.warning("create: Unknown multiblock type '" + typeId + "' at " + location + ".");
             return null;
         }
         if (location.getWorld() == null) {
-            plugin.getLogger().warning("create: World not loaded for location " + location + ".");
+            DebugLogger.warning("create: World not loaded for location " + location + ".");
             return null;
         }
 
         BlockCoordinate coordinate = BlockCoordinate.from(location);
         if (registry.hasAt(coordinate)) {
-            plugin.getLogger().warning("create: Position already occupied at " + coordinate + ".");
+            DebugLogger.warning("create: Position already occupied at " + coordinate + ".");
             return null;
         }
 
@@ -174,36 +175,36 @@ public final class MultiBlockLifecycleManager {
         registry.addInstance(instance);
         fire(MultiBlockLifecycleEventType.CREATE, type, instance, null, null);
         persistInstances();
-        plugin.getLogger().info("create: Created multiblock instance " + instance.id() + " of type '" + typeId + "' at " + coordinate + ".");
+        DebugLogger.info("create: Created multiblock instance " + instance.id() + " of type '" + typeId + "' at " + coordinate + ".");
         return instance;
     }
 
     public boolean place(UUID id, Player actor) {
         MultiBlockInstance instance = registry.getInstance(id);
         if (instance == null) {
-            plugin.getLogger().warning("place: Instance not found for id " + id + ".");
+            DebugLogger.warning("place: Instance not found for id " + id + ".");
             return false;
         }
 
         MultiBlockType type = registry.getType(instance.typeId());
         if (type == null) {
-            plugin.getLogger().warning("place: Type not found for instance " + id + " (typeId='" + instance.typeId() + "').");
+            DebugLogger.warning("place: Type not found for instance " + id + " (typeId='" + instance.typeId() + "').");
             return false;
         }
 
         EntityStatus current = instance.status() == null ? EntityStatus.CREATED : instance.status();
         if (current != EntityStatus.CREATED) {
-            plugin.getLogger().warning("place: Instance " + id + " is not in CREATED state (current=" + current + ").");
+            DebugLogger.warning("place: Instance " + id + " is not in CREATED state (current=" + current + ").");
             return false;
         }
         if (!EntityStateMachine.transition(instance, EntityStatus.PLACED)) {
-            plugin.getLogger().warning("place: Failed to transition instance " + id + " to PLACED.");
+            DebugLogger.warning("place: Failed to transition instance " + id + " to PLACED.");
             return false;
         }
 
         UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
         if (modelId == null) {
-            plugin.getLogger().severe("place: render() returned null for instance " + id + ". Rolling back to CREATED.");
+            DebugLogger.severe("place: render() returned null for instance " + id + ". Rolling back to CREATED.");
             EntityStateMachine.transition(instance, EntityStatus.CREATED);
             persistInstances();
             return false;
@@ -216,7 +217,7 @@ public final class MultiBlockLifecycleManager {
         instance.setStatus(EntityStatus.ACTIVE);
         fire(MultiBlockLifecycleEventType.ACTIVATE, type, instance, actor, null);
         persistInstances();
-        plugin.getLogger().info("place: Placed and activated instance " + id + " (modelKey='" + instance.modelKey() + "').");
+        DebugLogger.info("place: Placed and activated instance " + id + " (modelKey='" + instance.modelKey() + "').");
         return true;
     }
 
@@ -327,7 +328,7 @@ public final class MultiBlockLifecycleManager {
             }
         }
         persistInstances();
-        plugin.getLogger().info("remove: Removed instance " + instanceId + " (destroy=" + destroy + ").");
+        DebugLogger.info("remove: Removed instance " + instanceId + " (destroy=" + destroy + ").");
         return true;
     }
 
@@ -347,10 +348,10 @@ public final class MultiBlockLifecycleManager {
                         UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
                         if (modelId != null) {
                             registry.bindRenderedModelId(instance.id(), modelId);
-                            plugin.getLogger().info("tick: Deferred render succeeded for instance " + instance.id() + ".");
+                            DebugLogger.info("tick: Deferred render succeeded for instance " + instance.id() + ".");
                             fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
                         } else {
-                            plugin.getLogger().warning("tick: Deferred render FAILED for instance " + instance.id() + " (render returned null).");
+                            DebugLogger.warning("tick: Deferred render FAILED for instance " + instance.id() + " (render returned null).");
                         }
                     }
                 }
@@ -402,6 +403,10 @@ public final class MultiBlockLifecycleManager {
         return registry.getByLocation(BlockCoordinate.from(block));
     }
 
+    public MultiBlockRegistry registry() {
+        return registry;
+    }
+
     public void saveNow() {
         persistInstances();
     }
@@ -444,7 +449,7 @@ public final class MultiBlockLifecycleManager {
                 .toList();
         persistenceFacade.enqueueFullReplace(snapshots);
         persistenceFacade.flushNow();
-        plugin.getLogger().info("persistInstances: Persisted " + snapshots.size() + " instances to SQLite.");
+        DebugLogger.info("persistInstances: Persisted " + snapshots.size() + " instances to SQLite.");
     }
 
     public void reloadModels() {

@@ -4,6 +4,7 @@ package com.mineplus.infrastructure.virtual;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -162,7 +163,7 @@ public class VirtualBlockManager implements Listener {
         }
 
         loadExternalModelDefinitions(plugin.getDataFolder());
-        plugin.getLogger().info("Virtual models ready: " + loadedModels.size());
+        DebugLogger.info("Virtual models ready: " + loadedModels.size());
     }
 
     private void loadExternalModelDefinitions(File pluginFolder) {
@@ -190,7 +191,7 @@ public class VirtualBlockManager implements Listener {
         }
 
         if (loaded > 0) {
-            plugin.getLogger().info("Loaded " + loaded + " external model(s) from " + modelsFolder.getPath());
+            DebugLogger.info("Loaded " + loaded + " external model(s) from " + modelsFolder.getPath());
         }
     }
 
@@ -277,8 +278,8 @@ public class VirtualBlockManager implements Listener {
             display.setTransformation(transformation);
             spawnedEntities.add(display.getUniqueId());
 
-            if (debugLoggingEnabled) {
-                plugin.getLogger().info("Rendered cube '" + cube.name()
+            if (DebugLogger.isEnabled()) {
+                DebugLogger.info("Rendered cube '" + cube.name()
                         + "' tex=" + (cube.primaryTexture() == null ? "none" : cube.primaryTexture())
                         + " mat=" + cubeMaterial.name()
                         + " translation=" + vectorString(translated)
@@ -287,7 +288,7 @@ public class VirtualBlockManager implements Listener {
                         + " globalRotation=" + quaternionString(globalRotation));
                 for (Map.Entry<CubeFace, BakedFace> face : cube.faces().entrySet()) {
                     BakedFace data = face.getValue();
-                    plugin.getLogger().info(" - face " + face.getKey().name().toLowerCase(Locale.ROOT)
+                    DebugLogger.info(" - face " + face.getKey().name().toLowerCase(Locale.ROOT)
                             + " uv=[" + data.u1() + "," + data.v1() + "," + data.u2() + "," + data.v2() + "]"
                             + " rotation=" + data.rotation()
                             + " textureRef=" + data.textureReference()
@@ -304,6 +305,44 @@ public class VirtualBlockManager implements Listener {
                 barrierBlocks
         ));
         return instanceId;
+    }
+
+    public void cleanupGhostEntities(UUID instanceId) {
+        String tag = DISPLAY_TAG_PREFIX + instanceId;
+        for (org.bukkit.World world : org.bukkit.Bukkit.getWorlds()) {
+            for (org.bukkit.entity.Entity entity : world.getEntitiesByClass(org.bukkit.entity.BlockDisplay.class)) {
+                if (entity.getScoreboardTags().contains(tag)) {
+                    entity.remove();
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
+        for (org.bukkit.entity.Entity entity : event.getChunk().getEntities()) {
+            if (!(entity instanceof org.bukkit.entity.BlockDisplay)) {
+                continue;
+            }
+
+            for (String tag : entity.getScoreboardTags()) {
+                if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
+                    String instanceIdStr = tag.substring(DISPLAY_TAG_PREFIX.length());
+                    try {
+                        UUID instanceId = UUID.fromString(instanceIdStr);
+                        if (!activeBlocks.containsKey(instanceId)) {
+                            if (lifecycleManager != null && lifecycleManager.registry().getInstance(instanceId) != null) {
+                                continue;
+                            }
+                            entity.remove();
+                            DebugLogger.info("Removed ghost entity " + entity.getUniqueId() + " in loaded chunk.");
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // Ignore
+                    }
+                }
+            }
+        }
     }
 
     private void removeModelInternal(UUID instanceId) {
@@ -351,14 +390,14 @@ public class VirtualBlockManager implements Listener {
         VirtualModel model = getModel(modelKey);
         if (model == null) {
             if (plugin != null) {
-                plugin.getLogger().warning("Cannot restore virtual block: unknown model key '" + modelKey + "' at " + anchor + ".");
+                DebugLogger.warning("Cannot restore virtual block: unknown model key '" + modelKey + "' at " + anchor + ".");
             }
             return null;
         }
         World world = Bukkit.getWorld(anchor.worldName());
         if (world == null) {
             if (plugin != null) {
-                plugin.getLogger().info("restoreForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
+                DebugLogger.info("restoreForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
             }
             return null;
         }
@@ -367,7 +406,7 @@ public class VirtualBlockManager implements Listener {
                 new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
         UUID instanceId = spawnModel(model, placement, UUID.randomUUID());
         if (plugin != null) {
-            plugin.getLogger().info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
+            DebugLogger.info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
         }
         return instanceId;
     }

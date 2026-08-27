@@ -24,6 +24,7 @@ import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.List;
 import java.util.Set;
@@ -89,16 +90,16 @@ public final class InfrastructureEngine {
     }
 
     public void initialize() {
-        logger.info("InfrastructureEngine: Initializing infrastructure...");
-        logger.info("InfrastructureEngine: Loading types from configs.");
+        DebugLogger.info("InfrastructureEngine: Initializing infrastructure...");
+        DebugLogger.info("InfrastructureEngine: Loading types from configs.");
         reloadMultiBlocks();
-        logger.info("InfrastructureEngine: Types and multiblocks loaded.");
+        DebugLogger.info("InfrastructureEngine: Types and multiblocks loaded.");
         reloadRecipes();
-        logger.info("InfrastructureEngine: Recipes loaded.");
+        DebugLogger.info("InfrastructureEngine: Recipes loaded.");
         migrateFromJsonIfPresent();
-        logger.info("InfrastructureEngine: Migration check complete.");
+        DebugLogger.info("InfrastructureEngine: Migration check complete.");
         int restored = lifecycleManager.restorePersistedInstances();
-        logger.info("InfrastructureEngine: Restored " + restored + " instances from persistence.");
+        DebugLogger.info("InfrastructureEngine: Restored " + restored + " instances from persistence.");
         if (tickTaskId == -1) {
             tickTaskId = plugin.getServer().getScheduler().scheduleSyncRepeatingTask(
                     plugin,
@@ -106,25 +107,25 @@ public final class InfrastructureEngine {
                     20L,
                     20L
             );
-            logger.info("InfrastructureEngine: Scheduled lifecycle tick task (ID: " + tickTaskId + ").");
+            DebugLogger.info("InfrastructureEngine: Scheduled lifecycle tick task (ID: " + tickTaskId + ").");
         }
         lifecycleManager.startHeartbeat();
-        logger.info("InfrastructureEngine: Heartbeat started.");
+        DebugLogger.info("InfrastructureEngine: Heartbeat started.");
     }
 
     public void shutdown() {
-        plugin.getLogger().info("InfrastructureEngine: Shutting down. Saving persistent data...");
+        DebugLogger.info("InfrastructureEngine: Shutting down. Saving persistent data...");
         if (tickTaskId != -1) {
             plugin.getServer().getScheduler().cancelTask(tickTaskId);
             tickTaskId = -1;
-            plugin.getLogger().info("InfrastructureEngine: Tick task cancelled.");
+            DebugLogger.info("InfrastructureEngine: Tick task cancelled.");
         }
         lifecycleManager.stopHeartbeat();
-        plugin.getLogger().info("InfrastructureEngine: Heartbeat stopped.");
+        DebugLogger.info("InfrastructureEngine: Heartbeat stopped.");
         lifecycleManager.saveNow();
-        plugin.getLogger().info("InfrastructureEngine: Persistent data saved.");
+        DebugLogger.info("InfrastructureEngine: Persistent data saved.");
         persistenceFacade.shutdown(5000);
-        plugin.getLogger().info("InfrastructureEngine: Persistence facade shutdown complete.");
+        DebugLogger.info("InfrastructureEngine: Persistence facade shutdown complete.");
     }
 
     public InfrastructureApi api() {
@@ -179,9 +180,9 @@ public final class InfrastructureEngine {
         persistenceFacade.flushNow();
 
         if (jsonFile.delete()) {
-            plugin.getLogger().info("Migrated legacy multiblocks.json to SQLite persistence.");
+            DebugLogger.info("Migrated legacy multiblocks.json to SQLite persistence.");
         } else {
-            plugin.getLogger().warning("Failed to delete legacy multiblocks.json after migration.");
+            DebugLogger.warning("Failed to delete legacy multiblocks.json after migration.");
         }
     }
 

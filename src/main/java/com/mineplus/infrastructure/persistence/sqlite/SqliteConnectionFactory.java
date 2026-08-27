@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.persistence.sqlite;
 
 import com.mineplus.infrastructure.persistence.PersistenceConfig;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -17,11 +18,11 @@ public final class SqliteConnectionFactory {
     public SqliteConnectionFactory(PersistenceConfig config, Logger logger) {
         this.config = config;
         this.logger = logger;
-        this.driverAvailable = detectDriver(logger);
+        this.driverAvailable = detectDriver();
         if (driverAvailable) {
-            logger.info("SqliteConnectionFactory: SQLite JDBC driver found.");
+            DebugLogger.info("SqliteConnectionFactory: SQLite JDBC driver found.");
         } else {
-            logger.severe("SqliteConnectionFactory: SQLite JDBC driver NOT found. Persistence will be DISABLED.");
+            DebugLogger.severe("SqliteConnectionFactory: SQLite JDBC driver NOT found. Persistence will be DISABLED.");
         }
     }
 
@@ -31,18 +32,18 @@ public final class SqliteConnectionFactory {
 
     public Connection open() {
         if (!driverAvailable) {
-            logger.warning("open(): Driver not available.");
+            DebugLogger.warning("open(): Driver not available.");
             return null;
         }
         try {
             File file = config.databaseFile();
             File parent = file.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                logger.warning("Failed to create persistence folder: " + parent.getAbsolutePath());
+                DebugLogger.warning("Failed to create persistence folder: " + parent.getAbsolutePath());
                 return null;
             }
 
-            logger.info("open(): Opening SQLite connection to " + file.getAbsolutePath());
+            DebugLogger.info("open(): Opening SQLite connection to " + file.getAbsolutePath());
             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
             try (Statement statement = connection.createStatement()) {
                 statement.execute("PRAGMA journal_mode=WAL");
@@ -50,20 +51,20 @@ public final class SqliteConnectionFactory {
                 statement.execute("PRAGMA foreign_keys = ON");
                 statement.execute("PRAGMA busy_timeout = " + config.busyTimeoutMs());
             }
-            logger.info("open(): SQLite connection established.");
+            DebugLogger.info("open(): SQLite connection established.");
             return connection;
         } catch (SQLException exception) {
-            logger.log(java.util.logging.Level.SEVERE, "Failed to open sqlite connection: " + exception.getMessage(), exception);
+            DebugLogger.severe("Failed to open sqlite connection: " + exception.getMessage(), exception);
             return null;
         }
     }
 
-    private static boolean detectDriver(Logger logger) {
+    private static boolean detectDriver() {
         try {
             Class.forName("org.sqlite.JDBC");
             return true;
         } catch (ClassNotFoundException exception) {
-            logger.warning("SQLite JDBC driver not found. Persistence is disabled.");
+            DebugLogger.warning("SQLite JDBC driver not found. Persistence is disabled.");
             return false;
         }
     }

@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.persistence.sqlite;
 import com.google.gson.Gson;
 import com.mineplus.infrastructure.persistence.repository.MultiBlockRepository;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
+import com.mineplus.util.DebugLogger;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -10,20 +11,17 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.logging.Logger;
 
 public final class SqliteMultiBlockRepository implements MultiBlockRepository {
 
     private final Connection connection;
     private final String table;
     private final Gson gson;
-    private final Logger logger;
 
     public SqliteMultiBlockRepository(Connection connection, String table, Gson gson) {
         this.connection = connection;
         this.table = table;
         this.gson = gson;
-        this.logger = Logger.getLogger(SqliteMultiBlockRepository.class.getName());
     }
 
     @Override
@@ -39,7 +37,7 @@ public final class SqliteMultiBlockRepository implements MultiBlockRepository {
                 }
             }
         }
-        logger.info("SqliteMultiBlockRepository: Loaded " + snapshots.size() + " rows from '" + table + "'.");
+        DebugLogger.info("SqliteMultiBlockRepository: Loaded " + snapshots.size() + " rows from '" + table + "'.");
         return snapshots;
     }
 
@@ -80,13 +78,13 @@ public final class SqliteMultiBlockRepository implements MultiBlockRepository {
                     delete.setString(i + 1, idsToDelete.get(i));
                 }
                 delete.executeUpdate();
-                logger.info("SqliteMultiBlockRepository: Deleted " + idsToDelete.size() + " rows from '" + table + "'.");
+                DebugLogger.info("SqliteMultiBlockRepository: Deleted " + idsToDelete.size() + " rows from '" + table + "'.");
             }
         }
 
         // Perform upserts
         if (snapshots == null || snapshots.isEmpty()) {
-            logger.info("SqliteMultiBlockRepository: No snapshots to upsert, skipping upsert operation for '" + table + "'.");
+            DebugLogger.info("SqliteMultiBlockRepository: No snapshots to upsert, skipping upsert operation for '" + table + "'.");
             return;
         }
 
@@ -102,6 +100,6 @@ public final class SqliteMultiBlockRepository implements MultiBlockRepository {
             }
             insert.executeBatch();
         }
-        logger.info("SqliteMultiBlockRepository: Upserted " + snapshots.size() + " rows in '" + table + "'.");
+        DebugLogger.info("SqliteMultiBlockRepository: Upserted " + snapshots.size() + " rows in '" + table + "'.");
     }
 }

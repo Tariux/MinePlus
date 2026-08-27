@@ -6,6 +6,7 @@ import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
 import com.mineplus.game.juicer.gui.JuicerGui;
 import com.mineplus.game.juicer.items.CarrotJuiceItemDefinition;
 import com.mineplus.game.juicer.items.MelonJuiceItemDefinition;
+import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -65,18 +66,18 @@ public final class JuicerFeature {
 
         File parent = target.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            plugin.getLogger().warning("Failed to create folder for " + dataRelativePath);
+            DebugLogger.warning("Failed to create folder for " + dataRelativePath);
             return;
         }
 
         try (InputStream stream = plugin.getResource(classpathResource)) {
             if (stream == null) {
-                plugin.getLogger().warning("Missing embedded resource: " + classpathResource);
+                DebugLogger.warning("Missing embedded resource: " + classpathResource);
                 return;
             }
             Files.copy(stream, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException exception) {
-            plugin.getLogger().warning("Failed to install resource " + dataRelativePath + ": " + exception.getMessage());
+            DebugLogger.warning("Failed to install resource " + dataRelativePath + ": " + exception.getMessage());
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.mineplus;
 
+import com.mineplus.config.ConfigManager;
+import com.mineplus.util.DebugLogger;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.CommandRouter;
 import com.mineplus.infrastructure.command.sub.ModelSubCommand;
@@ -23,10 +25,15 @@ public final class MineplusPlugin extends JavaPlugin {
     private CommandRouter commandRouter;
     private VirtualBlockManager virtualBlockManager;
     private JuicerFeature juicerFeature;
+    private ConfigManager configManager;
 
     @Override
     public void onEnable() {
         instance = this;
+
+        configManager = new ConfigManager(this);
+        configManager.loadConfig();
+        DebugLogger.init(configManager.getConfig(), getLogger());
 
         virtualBlockManager = new VirtualBlockManager();
         virtualBlockManager.loadModels(this);

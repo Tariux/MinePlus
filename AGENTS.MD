@@ -14,6 +14,10 @@ Feature definitions can come from code or JSON:
 - JSON multiblocks: `plugins/Mineplus/multiblocks/*.json` parsed by `MultiBlockConfigLoader` into `MultiBlockType` + `MultiBlockLevel` (`model`, `speed`, `durability`, `upgradeCost`, `guiOptions`, optional `gui` key).
 - JSON machine recipes: `plugins/Mineplus/recipes/*.json` parsed by `RecipeConfigLoader` into `MachineRecipe`.
 
-Virtual rendering pipeline: Blockbench-like JSON -> `BbModelImporter` -> `VirtualModel` (`BakedCube` list) -> `VirtualBlockManager` spawn/remove and barrier/display tracking. `ModelRenderingManager` resolves per-level model paths and binds rendered model IDs back to instances.
+Virtual rendering pipeline: Blockbench-like JSON -> `BbModelImporter` -> `VirtualModel` (`BakedCube` list) -> `VirtualBlockManager` spawn/remove and barrier/display tracking. `ModelRenderingManager` resolves per-level model paths and binds rendered model IDs back to instances. `VirtualBlockManager` also monitors chunk loads to remove orphaned `BlockDisplay` entities (ghosts) that persist across server reloads.
+
+Configuration and logging:
+- `ConfigManager` auto-generates `plugins/Mineplus/settings.mp.yml` on first start.
+- `DebugLogger` gates all additional lifecycle, rendering, persistence, and linking logs behind `ADDITIONAL_DEBUG_LOGS` (default `false`). When disabled, only essential plugin lifecycle logs are emitted.
 
 Current architecture direction (recent commits up to `e3e3ee5`) is stabilization/alignment of the infrastructure layer; prefer extending via `InfrastructureApi` + engine managers instead of ad-hoc listeners.

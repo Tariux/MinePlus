@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import org.bukkit.Material;
 import org.bukkit.Bukkit;
+import com.mineplus.util.DebugLogger;
 
 public final class TextureMaterialResolver {
 
@@ -478,7 +479,7 @@ public final class TextureMaterialResolver {
             }
         }
 
-        Bukkit.getLogger().warning("[BbModelImporter] Could not resolve texture: '" + textureName + "'. Falling back to " + FALLBACK.name());
+        DebugLogger.warning("[BbModelImporter] Could not resolve texture: '" + textureName + "'. Falling back to " + FALLBACK.name());
         return FALLBACK;
     }
 
