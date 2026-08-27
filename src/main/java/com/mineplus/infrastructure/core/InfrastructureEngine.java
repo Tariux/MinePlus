@@ -14,6 +14,7 @@ import com.mineplus.infrastructure.core.gui.InfrastructureGuiManager;
 import com.mineplus.infrastructure.core.items.InfrastructureItemManager;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.core.multiblock.linking.MultiBlockLinkingSystem;
+import com.mineplus.infrastructure.core.multiblock.progress.MachineProcessManager;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
@@ -41,6 +42,7 @@ public final class InfrastructureEngine {
     private final UpgradeManager upgradeManager;
     private final MultiBlockLifecycleManager lifecycleManager;
     private final MultiBlockLinkingSystem linkingSystem;
+    private final MachineProcessManager processManager;
     private final InfrastructureApi api;
     private final BasicInfrastructureApi basicApi;
     private final JsonInfrastructureApi jsonApi;
@@ -63,6 +65,7 @@ public final class InfrastructureEngine {
         this.renderingManager = new ModelRenderingManager(virtualBlockManager);
         this.upgradeManager = new UpgradeManager(itemManager);
         this.linkingSystem = new MultiBlockLinkingSystem(registry);
+        this.processManager = new MachineProcessManager(registry, recipeManager, hookBus);
         this.lifecycleManager = new MultiBlockLifecycleManager(
                 plugin,
                 registry,
@@ -71,7 +74,8 @@ public final class InfrastructureEngine {
                 guiManager,
                 upgradeManager,
                 hookBus,
-                linkingSystem
+                linkingSystem,
+                processManager
         );
         virtualBlockManager.setLifecycleManager(lifecycleManager);
         this.api = new MineplusInfrastructureApi(
@@ -80,7 +84,8 @@ public final class InfrastructureEngine {
                 linkingSystem,
                 guiManager,
                 recipeManager,
-                hookBus
+                hookBus,
+                processManager
         );
         this.basicApi = new MineplusBasicInfrastructureApi(registry, lifecycleManager);
         this.jsonApi = new MineplusJsonInfrastructureApi(this);
@@ -111,6 +116,8 @@ public final class InfrastructureEngine {
         }
         lifecycleManager.startHeartbeat();
         DebugLogger.info("InfrastructureEngine: Heartbeat started.");
+        persistenceFacade.startAutoFlush(plugin);
+        DebugLogger.info("InfrastructureEngine: Async persistence flush cycle started.");
     }
 
     public void shutdown() {
@@ -122,6 +129,8 @@ public final class InfrastructureEngine {
         }
         lifecycleManager.stopHeartbeat();
         DebugLogger.info("InfrastructureEngine: Heartbeat stopped.");
+        persistenceFacade.stopAutoFlush();
+        DebugLogger.info("InfrastructureEngine: Async persistence flush cycle stopped.");
         lifecycleManager.saveNow();
         DebugLogger.info("InfrastructureEngine: Persistent data saved.");
         persistenceFacade.shutdown(5000);
@@ -150,6 +159,14 @@ public final class InfrastructureEngine {
 
     public MultiBlockLinkingSystem linkingSystem() {
         return linkingSystem;
+    }
+
+    /**
+     * @return the timed-process engine ({@link MachineProcessManager}) used for
+     *         recipe-based crafting progress on machine instances
+     */
+    public MachineProcessManager processManager() {
+        return processManager;
     }
 
     public RecipeManager recipeManager() {

@@ -21,8 +21,8 @@ Top-level fields:
 
 Per-level fields:
 - `model` (optional): relative or absolute path to `.bbmodel`.
-- `speed` (optional, default `1.0`).
-- `durability` (optional, default `1.0`).
+- `speed` (optional, default `1.0`): crafting speed multiplier applied to running processes. `2.0` halves the time a recipe takes; a mid-process upgrade speeds up the running process immediately.
+- `durability` (optional, default `1.0`): not yet consumed by the engine; reserved for future use.
 - `upgradeCost` (optional): object of `itemKey -> amount`.
 - `guiOptions` (optional): string map for custom GUI data.
 
@@ -68,7 +68,7 @@ Recipe fields:
 - `id` (required): unique recipe id.
 - `machine` (required): multiblock type id.
 - `level` (optional, default `1`): minimum machine level.
-- `craftTimeTicks` (optional, default `20`).
+- `craftTimeTicks` (optional, default `20`): base duration in ticks when the recipe is run as a timed process (see `startProcess` in the developer API). The level's `speed` multiplier scales it. Processes pause in unloaded chunks and survive restarts.
 - `input` (optional): object `key -> amount`.
 - `output` (optional): object `key -> amount`.
 

@@ -18,10 +18,11 @@ Boot flow:
 Core internals:
 - `MultiBlockRegistry`
 - `MultiBlockLifecycleManager`
+- `MachineProcessManager` (timed crafting, restart-safe, chunk-aware)
 - `ModelRenderingManager`
 - `MultiBlockLinkingSystem`
 - `RecipeManager`
-- `MultiBlockStorageEngine`
+- `PersistenceFacade` (SQLite persistence, asynchronous write-behind)
 
 ## 3 Usage Tiers
 
@@ -39,6 +40,13 @@ Core internals:
 
 - `plugins/Mineplus/settings.mp.yml` is auto-generated on first start.
 - Set `ADDITIONAL_DEBUG_LOGS: true` to enable verbose debug output across multiblock lifecycle, rendering, persistence, and linking systems. Default: `false`.
+
+## Persistence
+
+- Multiblock state is stored in `plugins/Mineplus/infrastructure.db` (SQLite).
+- Writes are asynchronous (write-behind): gameplay actions only stage data in memory; the database is flushed by a background task roughly once per second, and synchronously on server shutdown or `/mineplus reload`.
+- Crash semantics: after a server crash or forced kill, up to the last flush interval (~1 second) of multiblock changes may roll back to the last persisted state. This matches the previous shutdown-save behavior in practice.
+- Persistence errors are always written to the server log, even with `ADDITIONAL_DEBUG_LOGS: false`.
 
 ## Docs
 

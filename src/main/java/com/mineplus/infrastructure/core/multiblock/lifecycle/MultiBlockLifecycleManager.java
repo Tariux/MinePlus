@@ -8,6 +8,7 @@ import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.linking.MultiBlockLinkingSystem;
+import com.mineplus.infrastructure.core.multiblock.progress.MachineProcessManager;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
@@ -29,6 +30,9 @@ import org.joml.Quaternionf;
 
 public final class MultiBlockLifecycleManager {
 
+    /** Interval of the repeating lifecycle tick task, in ticks. */
+    private static final int TICK_INTERVAL_TICKS = 20;
+
     private final MineplusPlugin plugin;
     private final MultiBlockRegistry registry;
     private final ModelRenderingManager renderingManager;
@@ -37,6 +41,7 @@ public final class MultiBlockLifecycleManager {
     private final UpgradeManager upgradeManager;
     private final HookBus hookBus;
     private final MultiBlockLinkingSystem linkingSystem;
+    private MachineProcessManager processManager;
     private int heartbeatTaskId;
 
     public MultiBlockLifecycleManager(
@@ -57,7 +62,52 @@ public final class MultiBlockLifecycleManager {
         this.upgradeManager = upgradeManager;
         this.hookBus = hookBus;
         this.linkingSystem = linkingSystem;
+        this.processManager = null;
         this.heartbeatTaskId = -1;
+    }
+
+    /**
+     * Constructor with an explicit process manager, enabling timed crafting
+     * processes ({@link MachineProcessManager}). The process manager requires
+     * the recipe registry, which the base constructor does not have access to.
+     *
+     * @param processManager the timed-process engine, or {@code null} to disable processes
+     */
+    public MultiBlockLifecycleManager(
+            MineplusPlugin plugin,
+            MultiBlockRegistry registry,
+            ModelRenderingManager renderingManager,
+            PersistenceFacade persistenceFacade,
+            InfrastructureGuiManager guiManager,
+            UpgradeManager upgradeManager,
+            HookBus hookBus,
+            MultiBlockLinkingSystem linkingSystem,
+            MachineProcessManager processManager
+    ) {
+        this(plugin, registry, renderingManager, persistenceFacade, guiManager, upgradeManager, hookBus, linkingSystem);
+        if (processManager != null) {
+            this.processManager = processManager;
+        }
+    }
+
+    /**
+     * Binds (or replaces) the timed-process engine. Processes already encoded in
+     * restored instances' stateData resume automatically on the next tick.
+     * When no process manager is bound, timed processes are disabled and
+     * {@link #tick()} skips process advancement entirely.
+     *
+     * @param processManager the engine to bind; must not be null
+     */
+    public void setProcessManager(MachineProcessManager processManager) {
+        java.util.Objects.requireNonNull(processManager, "processManager");
+        this.processManager = processManager;
+    }
+
+    /**
+     * @return the bound timed-process engine, or {@code null} if timed processes are disabled
+     */
+    public MachineProcessManager processManager() {
+        return processManager;
     }
 
     public int restorePersistedInstances() {
@@ -332,8 +382,21 @@ public final class MultiBlockLifecycleManager {
         return true;
     }
 
+    /**
+     * Repeating lifecycle tick (runs every {@link #TICK_INTERVAL_TICKS} ticks).
+     *
+     * <p>Chunk-awareness (vanilla parity): instances whose containing chunk is
+     * currently unloaded are fully skipped — no heartbeat update, no deferred
+     * render, no hook dispatch, no process advancement. Their state (including
+     * running processes encoded in stateData) is retained and resumes when the
+     * chunk loads again, mirroring how vanilla tile entities behave in unloaded
+     * chunks.
+     */
     public void tick() {
         long now = System.currentTimeMillis();
+        if (processManager != null) {
+            processManager.advanceAll(TICK_INTERVAL_TICKS);
+        }
         for (MultiBlockInstance instance : registry.getInstances()) {
             MultiBlockType type = registry.getType(instance.typeId());
             if (type == null) {
@@ -341,6 +404,9 @@ public final class MultiBlockLifecycleManager {
             }
             EntityStatus status = instance.status() == null ? EntityStatus.CREATED : instance.status();
             if (status == EntityStatus.ACTIVE) {
+                if (!EntityStateMachine.validateChunkLoaded(instance)) {
+                    continue;
+                }
                 instance.setLastHeartbeat(now);
 
                 if (instance.renderedModelId() == null && instance.modelKey() != null && !instance.modelKey().isBlank()) {
@@ -407,8 +473,14 @@ public final class MultiBlockLifecycleManager {
         return registry;
     }
 
+    /**
+     * Saves all live instances durably, blocking until the SQLite write completes.
+     * Intended for shutdown and admin-triggered operations; regular gameplay paths
+     * use {@link #persistInstances()} (write-behind) instead.
+     */
     public void saveNow() {
         persistInstances();
+        persistenceFacade.flushNow();
     }
 
     public void startHeartbeat() {
@@ -429,11 +501,21 @@ public final class MultiBlockLifecycleManager {
         }
     }
 
+    /**
+     * Periodic heartbeat flush. Chunk-aware, matching {@link #tick()}: instances in
+     * unloaded chunks are skipped, so a server whose machines all sit in unloaded
+     * chunks stages nothing and the persistence layer stays idle. The heartbeat
+     * timestamp is only ever written and persisted (never used for decisions), so
+     * pausing it for unloaded machines has no behavioral side effects.
+     */
     public void flushHeartbeats() {
         long now = System.currentTimeMillis();
         boolean needsFlush = false;
         for (MultiBlockInstance instance : registry.getInstances()) {
             if (instance.status() == EntityStatus.ACTIVE) {
+                if (!EntityStateMachine.validateChunkLoaded(instance)) {
+                    continue;
+                }
                 instance.setLastHeartbeat(now);
                 needsFlush = true;
             }
@@ -443,13 +525,19 @@ public final class MultiBlockLifecycleManager {
         }
     }
 
+    /**
+     * Stages the current state of all instances for asynchronous persistence.
+     * Snapshots are captured on the main thread (instances are main-thread state)
+     * but no SQLite I/O happens here; the {@link PersistenceFacade} write-behind
+     * cycle performs the actual flush off-thread. All lifecycle hot paths
+     * (create/place/interact/upgrade/remove/tick/heartbeat) call this.
+     */
     private void persistInstances() {
         List<MultiBlockSnapshot> snapshots = registry.getInstances().stream()
                 .map(MultiBlockSnapshot::from)
                 .toList();
         persistenceFacade.enqueueFullReplace(snapshots);
-        persistenceFacade.flushNow();
-        DebugLogger.info("persistInstances: Persisted " + snapshots.size() + " instances to SQLite.");
+        DebugLogger.info("persistInstances: Staged " + snapshots.size() + " instances for async persistence.");
     }
 
     public void reloadModels() {

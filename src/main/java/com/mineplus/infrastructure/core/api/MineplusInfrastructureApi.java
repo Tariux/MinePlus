@@ -10,6 +10,8 @@ import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleEvent;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.core.multiblock.linking.MultiBlockLinkingSystem;
+import com.mineplus.infrastructure.core.multiblock.progress.MachineProcess;
+import com.mineplus.infrastructure.core.multiblock.progress.MachineProcessManager;
 import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import com.mineplus.infrastructure.core.recipes.MachineRecipe;
 import com.mineplus.infrastructure.core.recipes.RecipeManager;
@@ -30,6 +32,7 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     private final InfrastructureGuiManager guiManager;
     private final RecipeManager recipeManager;
     private final HookBus hookBus;
+    private final MachineProcessManager processManager;
 
     public MineplusInfrastructureApi(
             MultiBlockRegistry registry,
@@ -37,7 +40,8 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
             MultiBlockLinkingSystem linkingSystem,
             InfrastructureGuiManager guiManager,
             RecipeManager recipeManager,
-            HookBus hookBus
+            HookBus hookBus,
+            MachineProcessManager processManager
     ) {
         this.registry = registry;
         this.lifecycleManager = lifecycleManager;
@@ -45,6 +49,7 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
         this.guiManager = guiManager;
         this.recipeManager = recipeManager;
         this.hookBus = hookBus;
+        this.processManager = processManager;
     }
 
     @Override
@@ -130,5 +135,25 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     @Override
     public MultiBlockSignal createSignal(UUID sourceId, UUID targetId, String channel, Map<String, String> data, int hops) {
         return new MultiBlockSignal(sourceId, targetId, channel, data, hops);
+    }
+
+    @Override
+    public int autoLinkNeighbors(UUID sourceId, int radius) {
+        return linkingSystem.autoLinkNeighbors(sourceId, radius);
+    }
+
+    @Override
+    public boolean startProcess(UUID instanceId, String recipeId) {
+        return processManager != null && processManager.start(instanceId, recipeId);
+    }
+
+    @Override
+    public boolean cancelProcess(UUID instanceId) {
+        return processManager != null && processManager.cancel(instanceId);
+    }
+
+    @Override
+    public MachineProcess getProcess(UUID instanceId) {
+        return processManager == null ? null : processManager.get(instanceId);
     }
 }

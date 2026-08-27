@@ -70,4 +70,25 @@ public final class EntityStateMachine {
         World world = Bukkit.getWorld(instance.coordinate().worldName());
         return world != null;
     }
+
+    /**
+     * Checks whether the block containing the instance's coordinate is in a
+     * currently loaded chunk. Mirrors vanilla behavior for tile entities
+     * (furnaces etc. do not run in unloaded chunks): machines in unloaded
+     * chunks must not tick, advance processes, or update heartbeats.
+     *
+     * <p>Instances whose world is not loaded at all also count as unloaded.
+     *
+     * @param instance the instance to check
+     * @return {@code true} if the containing chunk is loaded and loaded for entities
+     */
+    public static boolean validateChunkLoaded(MultiBlockInstance instance) {
+        if (!validateWorldLoaded(instance)) {
+            return false;
+        }
+        World world = Bukkit.getWorld(instance.coordinate().worldName());
+        int blockX = instance.coordinate().x();
+        int blockZ = instance.coordinate().z();
+        return world.isChunkLoaded(blockX >> 4, blockZ >> 4);
+    }
 }

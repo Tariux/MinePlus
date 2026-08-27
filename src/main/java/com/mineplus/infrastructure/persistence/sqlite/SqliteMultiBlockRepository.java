@@ -14,6 +14,13 @@ import java.util.List;
 
 public final class SqliteMultiBlockRepository implements MultiBlockRepository {
 
+    /**
+     * Maximum host parameters per DELETE statement. SQLite's default
+     * SQLITE_MAX_VARIABLE_NUMBER is 999; exceeding it makes the statement fail,
+     * so large removal sets must be deleted in batches.
+     */
+    private static final int DELETE_BATCH_SIZE = 500;
+
     private final Connection connection;
     private final String table;
     private final Gson gson;
@@ -70,16 +77,23 @@ public final class SqliteMultiBlockRepository implements MultiBlockRepository {
             }
         }
 
-        // Perform deletions
+        // Perform deletions in batches to stay under SQLite's host-parameter limit
         if (!idsToDelete.isEmpty()) {
-            String deleteSql = "DELETE FROM " + table + " WHERE id IN (" + String.join(",", java.util.Collections.nCopies(idsToDelete.size(), "?")) + ")";
-            try (PreparedStatement delete = connection.prepareStatement(deleteSql)) {
-                for (int i = 0; i < idsToDelete.size(); i++) {
-                    delete.setString(i + 1, idsToDelete.get(i));
+            int totalDeleted = 0;
+            for (int from = 0; from < idsToDelete.size(); from += DELETE_BATCH_SIZE) {
+                int to = Math.min(from + DELETE_BATCH_SIZE, idsToDelete.size());
+                List<String> batch = idsToDelete.subList(from, to);
+                String deleteSql = "DELETE FROM " + table
+                        + " WHERE id IN (" + String.join(",", java.util.Collections.nCopies(batch.size(), "?")) + ")";
+                try (PreparedStatement delete = connection.prepareStatement(deleteSql)) {
+                    for (int i = 0; i < batch.size(); i++) {
+                        delete.setString(i + 1, batch.get(i));
+                    }
+                    totalDeleted += delete.executeUpdate();
                 }
-                delete.executeUpdate();
-                DebugLogger.info("SqliteMultiBlockRepository: Deleted " + idsToDelete.size() + " rows from '" + table + "'.");
             }
+            DebugLogger.info("SqliteMultiBlockRepository: Deleted " + totalDeleted
+                    + " rows from '" + table + "' in " + ((idsToDelete.size() + DELETE_BATCH_SIZE - 1) / DELETE_BATCH_SIZE) + " batch(es).");
         }
 
         // Perform upserts

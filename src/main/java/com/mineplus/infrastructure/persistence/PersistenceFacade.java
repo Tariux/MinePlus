@@ -17,14 +17,34 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
 
+/**
+ * Write-behind persistence facade over SQLite.
+ *
+ * <p>Producers on the main thread call {@link #enqueueFullReplace(Collection)} which only
+ * stages an immutable snapshot list in memory (cheap). The actual SQLite transaction is
+ * performed by a repeating asynchronous flush task (see {@link #startAutoFlush(Plugin)}),
+ * so database I/O never blocks the main server thread. A synchronous write is still
+ * available through {@link #flushNow()} for shutdown and migration paths.
+ *
+ * <p>Concurrency: the staged payload is guarded by {@code lock}, and the flush body is
+ * serialized by {@code flushLock} so an in-flight asynchronous flush and a shutdown
+ * flush on the main thread cannot interleave transactions. Errors are always reported
+ * to the plugin logger (independent of the debug-logging toggle) because a failed
+ * write silently risks data loss.
+ */
 public final class PersistenceFacade {
 
     private final PersistenceConfig config;
     private final Logger logger;
     private final Gson gson;
     private final Object lock;
+    /** Serializes flush transactions across the async flusher and the main thread. */
+    private final Object flushLock;
     private final AtomicLong flushCount;
     private final AtomicLong loadedRows;
     private final AtomicLong writtenRows;
@@ -34,6 +54,7 @@ public final class PersistenceFacade {
     private volatile long lastErrorAt;
     private volatile String lastError;
     private volatile List<MultiBlockSnapshot> queuedFullReplace;
+    private volatile BukkitTask autoFlushTask;
     private SqlitePersistenceTx currentTx;
     private SqliteConnectionFactory connectionFactory;
 
@@ -42,6 +63,7 @@ public final class PersistenceFacade {
         this.logger = logger;
         this.gson = new GsonBuilder().create();
         this.lock = new Object();
+        this.flushLock = new Object();
         this.flushCount = new AtomicLong();
         this.loadedRows = new AtomicLong();
         this.writtenRows = new AtomicLong();
@@ -63,7 +85,7 @@ public final class PersistenceFacade {
         enabled = connectionFactory.driverAvailable();
         if (!enabled) {
             lastError = "driver-unavailable";
-            DebugLogger.warning("PersistenceFacade initialized but SQLite driver is unavailable. Persistence is DISABLED.");
+            logger.warning("PersistenceFacade initialized but SQLite driver is unavailable. Persistence is DISABLED.");
             return;
         }
 
@@ -81,7 +103,7 @@ public final class PersistenceFacade {
         } catch (SQLException exception) {
             enabled = false;
             rememberError("migration-failed: " + exception.getMessage());
-            DebugLogger.severe("Failed to initialize sqlite persistence: " + exception.getMessage());
+            logger.log(Level.SEVERE, "Failed to initialize sqlite persistence: " + exception.getMessage(), exception);
         }
     }
 
@@ -103,11 +125,21 @@ public final class PersistenceFacade {
             return snapshots;
         } catch (SQLException | RuntimeException exception) {
             rememberError("load-failed: " + exception.getMessage());
-            DebugLogger.severe("Failed to load multiblocks from sqlite: " + exception.getMessage(), exception);
+            logger.log(Level.SEVERE, "Failed to load multiblocks from sqlite: " + exception.getMessage(), exception);
             return List.of();
         }
     }
 
+    /**
+     * Stages a full-replace payload for the next flush. This method performs no I/O;
+     * it only copies the snapshot list and marks the queue dirty, so it is safe to
+     * call from hot main-thread paths (interact/place/remove/upgrade/tick).
+     *
+     * <p>Repeated calls overwrite any previously staged payload; the latest staged
+     * state always wins, which is correct for a full-replace strategy.
+     *
+     * @param snapshots the complete set of live multiblock snapshots to persist
+     */
     public void enqueueFullReplace(Collection<MultiBlockSnapshot> snapshots) {
         List<MultiBlockSnapshot> copy = snapshots == null ? List.of() : List.copyOf(snapshots);
         synchronized (lock) {
@@ -116,43 +148,119 @@ public final class PersistenceFacade {
         DebugLogger.info("PersistenceFacade: Enqueued " + copy.size() + " multiblock snapshots for persistence.");
     }
 
+    /**
+     * Starts the asynchronous write-behind flush cycle. The repeating task runs off
+     * the main thread every {@code flushIntervalTicks} (from {@link PersistenceConfig})
+     * and writes the staged payload, if any, in a single SQLite transaction. Does
+     * nothing if persistence is disabled or the cycle is already running.
+     *
+     * <p>Must be called after {@link #initialize()} and after any synchronous
+     * startup/migration flush, so that no async write overlaps the initial load.
+     *
+     * @param plugin the plugin instance owning the scheduler task
+     */
+    public void startAutoFlush(Plugin plugin) {
+        if (autoFlushTask != null || !enabled) {
+            return;
+        }
+        long intervalTicks = config.flushIntervalTicks();
+        autoFlushTask = plugin.getServer().getScheduler().runTaskTimerAsynchronously(
+                plugin,
+                this::flushNow,
+                intervalTicks,
+                intervalTicks
+        );
+        DebugLogger.info("PersistenceFacade: Async write-behind flush scheduled every " + intervalTicks + " ticks.");
+    }
+
+    /**
+     * Stops the asynchronous flush cycle if running. A flush that is already executing
+     * is allowed to finish; subsequent writes require an explicit {@link #flushNow()}.
+     */
+    public void stopAutoFlush() {
+        BukkitTask task = autoFlushTask;
+        autoFlushTask = null;
+        if (task != null) {
+            task.cancel();
+            DebugLogger.info("PersistenceFacade: Async write-behind flush stopped.");
+        }
+    }
+
+    /**
+     * Writes the staged payload to SQLite synchronously on the calling thread.
+     * Used by the async flush task, and directly by shutdown/migration paths that
+     * require the write to be durable before proceeding. A no-op when nothing
+     * is staged or persistence is disabled.
+     */
     public void flushNow() {
         if (!enabled) {
             DebugLogger.warning("PersistenceFacade.flushNow: persistence is DISABLED, skipping flush.");
             return;
         }
-        List<MultiBlockSnapshot> payload;
-        synchronized (lock) {
-            payload = queuedFullReplace;
-            queuedFullReplace = null;
-        }
+        synchronized (flushLock) {
+            List<MultiBlockSnapshot> payload;
+            synchronized (lock) {
+                payload = queuedFullReplace;
+                queuedFullReplace = null;
+            }
 
-        if (payload == null) {
-            DebugLogger.info("PersistenceFacade.flushNow: no payload queued, skipping flush.");
-            return;
-        }
-
-        long started = System.currentTimeMillis();
-        DebugLogger.info("PersistenceFacade.flushNow: Flushing " + payload.size() + " snapshots to SQLite...");
-        try (SqlitePersistenceTx tx = beginTx()) {
-            if (tx == null) {
-                DebugLogger.severe("PersistenceFacade.flushNow: transaction init failed, could not flush.");
+            if (payload == null) {
+                DebugLogger.info("PersistenceFacade.flushNow: no payload queued, skipping flush.");
                 return;
             }
-            tx.multiBlocks().replaceAll(payload);
-            tx.meta().put("last_full_replace_at", Long.toString(System.currentTimeMillis()));
-            tx.commit();
-            flushCount.incrementAndGet();
-            writtenRows.addAndGet(payload.size());
-            lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
-            DebugLogger.info("PersistenceFacade.flushNow: Flushed " + payload.size() + " snapshots in " + lastFlushDurationMs + "ms.");
-        } catch (SQLException | RuntimeException exception) {
-            rememberError("flush-failed: " + exception.getMessage());
-            DebugLogger.severe("Failed to flush persistence snapshot: " + exception.getMessage(), exception);
+
+            long started = System.currentTimeMillis();
+            DebugLogger.info("PersistenceFacade.flushNow: Flushing " + payload.size() + " snapshots to SQLite...");
+            try (SqlitePersistenceTx tx = beginTx()) {
+                if (tx == null) {
+                    logger.log(Level.SEVERE, "PersistenceFacade.flushNow: transaction init failed, could not flush "
+                            + payload.size() + " snapshots; data remains in memory until the next flush.");
+                    requeuePayload(payload);
+                    return;
+                }
+                tx.multiBlocks().replaceAll(payload);
+                tx.meta().put("last_full_replace_at", Long.toString(System.currentTimeMillis()));
+                tx.commit();
+                flushCount.incrementAndGet();
+                writtenRows.addAndGet(payload.size());
+                lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
+                DebugLogger.info("PersistenceFacade.flushNow: Flushed " + payload.size() + " snapshots in "
+                        + lastFlushDurationMs + "ms.");
+            } catch (SQLException | RuntimeException exception) {
+                rememberError("flush-failed: " + exception.getMessage());
+                logger.log(Level.SEVERE, "Failed to flush persistence snapshot (" + payload.size()
+                        + " snapshots); the data stays staged in memory and the next flush will retry as a full replace.",
+                        exception);
+                requeuePayload(payload);
+            }
         }
     }
 
+    /**
+     * Re-stages a payload whose flush failed so that the next flush cycle (or the
+     * shutdown flush) retries it. Only stages the payload if no newer payload has
+     * been enqueued in the meantime — full-replace semantics dictate that the
+     * newest staged state always wins, so an older failed payload is discarded
+     * rather than overwriting fresher data.
+     *
+     * @param payload the payload whose write attempt failed
+     */
+    private void requeuePayload(List<MultiBlockSnapshot> payload) {
+        synchronized (lock) {
+            if (queuedFullReplace == null) {
+                queuedFullReplace = payload;
+            }
+        }
+    }
+
+    /**
+     * Stops the async flush cycle and performs a final synchronous flush.
+     *
+     * @param timeoutMs accepted for API compatibility; the flush itself is bounded
+     *                  by SQLite's busy timeout rather than this value
+     */
     public void shutdown(long timeoutMs) {
+        stopAutoFlush();
         flushNow();
     }
 

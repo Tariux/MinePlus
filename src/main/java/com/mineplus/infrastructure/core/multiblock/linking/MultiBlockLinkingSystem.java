@@ -66,6 +66,34 @@ public final class MultiBlockLinkingSystem {
         }
     }
 
+    /**
+     * Automatically links an instance to every other instance within a cube around
+     * it (Chebyshev distance {@code <= radius}). Enables pipe-network style
+     * scenarios: a newly placed pump auto-connects to adjacent filters without
+     * any plugin knowing individual instance UUIDs.
+     *
+     * <p>Links are directed from the anchor to each discovered neighbor (the
+     * same semantics as {@link #linkTo(UUID, UUID)}). Existing links are
+     * preserved; this method only adds.
+     *
+     * @param sourceId the instance to link from (the network joiner)
+     * @param radius   the Chebyshev radius to search (typically 1 for adjacency)
+     * @return the number of new links created
+     */
+    public int autoLinkNeighbors(UUID sourceId, int radius) {
+        MultiBlockInstance source = registry.getInstance(sourceId);
+        if (source == null) {
+            return 0;
+        }
+        int created = 0;
+        for (MultiBlockInstance neighbor : registry.getNearby(source.coordinate(), radius)) {
+            if (source.mutableLinkedBlocks().add(neighbor.id())) {
+                created++;
+            }
+        }
+        return created;
+    }
+
     private void propagateSignal(MultiBlockSignal initial) {
         Deque<MultiBlockSignal> queue = new ArrayDeque<>();
         Set<UUID> visited = new HashSet<>();

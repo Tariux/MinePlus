@@ -143,6 +143,52 @@ public final class MultiBlockRegistry {
         return instancesByLocation.containsKey(coordinate);
     }
 
+    /**
+     * Finds all instances within a cube of the given half-extent around a
+     * coordinate (Chebyshev distance {@code <= radius}). Enables spatial
+     * gameplay scenarios such as auto-connecting pipe networks: a placed pump
+     * can discover adjacent filters without knowing their UUIDs.
+     *
+     * <p>Implementation is O((2r+1)^3) map lookups over the location index —
+     * cheap for the small radii such scenarios use (typically 1–3). The
+     * anchor coordinate itself is excluded unless an instance sits exactly
+     * on it, in which case it is included.
+     *
+     * @param coordinate the anchor coordinate
+     * @param radius     the Chebyshev radius (0 = the anchor block only, 1 = 3x3x3)
+     * @return an unmodifiable set of nearby instances, excluding the anchor instance
+     *         if one exists exactly at the anchor coordinate
+     */
+    public synchronized Set<MultiBlockInstance> getNearby(BlockCoordinate coordinate, int radius) {
+        if (coordinate == null || radius < 0) {
+            return Set.of();
+        }
+        Set<MultiBlockInstance> nearby = new LinkedHashSet<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockCoordinate probe = new BlockCoordinate(
+                            coordinate.worldName(),
+                            coordinate.x() + dx,
+                            coordinate.y() + dy,
+                            coordinate.z() + dz);
+                    UUID id = instancesByLocation.get(probe);
+                    if (id != null) {
+                        MultiBlockInstance instance = instancesById.get(id);
+                        if (instance != null) {
+                            nearby.add(instance);
+                        }
+                    }
+                }
+            }
+        }
+        MultiBlockInstance anchor = getByLocation(coordinate);
+        if (anchor != null) {
+            nearby.remove(anchor);
+        }
+        return Collections.unmodifiableSet(nearby);
+    }
+
     public synchronized void clearInstances() {
         instancesById.clear();
         instancesByLocation.clear();

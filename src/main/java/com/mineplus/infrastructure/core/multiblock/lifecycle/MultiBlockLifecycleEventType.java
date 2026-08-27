@@ -11,5 +11,9 @@ public enum MultiBlockLifecycleEventType {
     REMOVE,
     DESTRUCTION,
     MODEL_RELOAD,
-    TICK
+    TICK,
+    /** A timed crafting process was started on an instance (see MachineProcessManager). */
+    PROCESS_START,
+    /** A timed crafting process finished on an instance (see MachineProcessManager). */
+    PROCESS_COMPLETE
 }
