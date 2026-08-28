@@ -2,7 +2,7 @@ name: Mineplus
 version: ${version}
 main: com.mineplus.MineplusPlugin
 api-version: '1.21'
-author: Tariush
+author: Tariux
 
 commands:
   mineplus:
