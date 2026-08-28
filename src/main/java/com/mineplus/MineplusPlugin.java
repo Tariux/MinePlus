@@ -36,6 +36,7 @@ public final class MineplusPlugin extends JavaPlugin {
         DebugLogger.init(configManager.getConfig(), getLogger());
 
         virtualBlockManager = new VirtualBlockManager();
+        virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
         virtualBlockManager.loadModels(this);
 
         context = PluginContext.bootstrap(this, virtualBlockManager);
@@ -96,6 +97,17 @@ public final class MineplusPlugin extends JavaPlugin {
 
     public static MineplusPlugin getInstance() {
         return instance;
+    }
+
+    /** Re-reads settings.mp.yml and applies virtual-rendering settings before a model reload. */
+    public void refreshVirtualRenderingSettings() {
+        if (configManager != null) {
+            configManager.loadConfig();
+            DebugLogger.init(configManager.getConfig(), getLogger());
+        }
+        if (virtualBlockManager != null && configManager != null) {
+            virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
+        }
     }
 
     public InfrastructureApi infrastructureApi() {

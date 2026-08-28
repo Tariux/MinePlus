@@ -22,28 +22,31 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.util.Transformation;
-import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public class VirtualBlockManager implements Listener {
 
     private static final String DISPLAY_TAG_PREFIX = "mineplus_vblock:";
-    private static final Material FALLBACK_MATERIAL = Material.WHITE_CONCRETE;
     private static final String MODELS_FOLDER = "models";
     private static final String DEBUG_MODELS_FOLDER = "debug";
 
     private final Map<String, VirtualModel> loadedModels = new HashMap<>();
+    private final Map<String, ModelMeta> modelMeta = new HashMap<>();
+    private final Map<String, List<String>> unresolvedTexturesByModel = new HashMap<>();
     private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
+    private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
+
     private JavaPlugin plugin;
+    private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
     private boolean debugLoggingEnabled;
     private MultiBlockLifecycleManager lifecycleManager;
 
@@ -66,6 +69,15 @@ public class VirtualBlockManager implements Listener {
         this.lifecycleManager = manager;
     }
 
+    public void updateSettings(VirtualRenderingSettings settings) {
+        this.settings = settings == null ? VirtualRenderingSettings.defaults() : settings;
+        occupancyCalculator.clearCache();
+    }
+
+    public VirtualRenderingSettings settings() {
+        return settings;
+    }
+
     public void reloadModelDefinitions() {
         loadModelDefinitions();
     }
@@ -81,11 +93,37 @@ public class VirtualBlockManager implements Listener {
         return loadedModels.get(name.toLowerCase(Locale.ROOT));
     }
 
+    public ModelMeta getModelMeta(String name) {
+        if (name == null || name.isBlank()) {
+            return ModelMeta.empty();
+        }
+        return modelMeta.getOrDefault(name.toLowerCase(Locale.ROOT), ModelMeta.empty());
+    }
+
     public void registerModel(String name, VirtualModel model) {
+        registerModel(name, model, ModelMeta.empty());
+    }
+
+    public void registerModel(String name, VirtualModel model, ModelMeta meta) {
         if (name == null || model == null) {
             return;
         }
-        loadedModels.put(name.toLowerCase(Locale.ROOT), model);
+        String key = name.toLowerCase(Locale.ROOT);
+        loadedModels.put(key, model);
+        modelMeta.put(key, meta == null ? ModelMeta.empty() : meta);
+    }
+
+    /** Texture names of a model that fell through to the fallback material (empty when all resolved). */
+    public List<String> getUnresolvedTextures(String modelName) {
+        if (modelName == null) {
+            return List.of();
+        }
+        List<String> unresolved = unresolvedTexturesByModel.get(modelName.toLowerCase(Locale.ROOT));
+        return unresolved == null ? List.of() : List.copyOf(unresolved);
+    }
+
+    public VoxelOccupancyCalculator occupancyCalculator() {
+        return occupancyCalculator;
     }
 
     public UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
@@ -158,6 +196,9 @@ public class VirtualBlockManager implements Listener {
 
     private void loadModelDefinitions() {
         loadedModels.clear();
+        modelMeta.clear();
+        unresolvedTexturesByModel.clear();
+        occupancyCalculator.clearCache();
         if (plugin == null) {
             return;
         }
@@ -185,7 +226,7 @@ public class VirtualBlockManager implements Listener {
             String name = modelKeyFromFile(modelsFolder, file);
             VirtualModel model = BbModelImporter.parse(name, file, plugin.getLogger());
             if (model != null && !model.cubes().isEmpty()) {
-                loadedModels.put(name.toLowerCase(Locale.ROOT), model);
+                registerModel(name, model, ModelMeta.load(file));
                 loaded++;
             }
         }
@@ -229,8 +270,13 @@ public class VirtualBlockManager implements Listener {
             VirtualBlockPlacementHelper.PlacementData placement,
             UUID instanceId
     ) {
-        List<UUID> spawnedEntities = new ArrayList<>();
-        Set<Location> barrierBlocks = new HashSet<>();
+        ModelMeta meta = getModelMeta(model.name());
+        ModelMeta.CollisionMode collisionMode = meta.collisionMode() != null
+                ? meta.collisionMode() : settings.collisionMode();
+        ModelMeta.OriginMode originMode = meta.originMode() != null
+                ? meta.originMode() : settings.originMode();
+        VirtualModel.TextureMode textureMode = meta.textureMode() != null
+                ? meta.textureMode() : settings.textureMode();
 
         Location origin = new Location(
                 placement.location().getWorld(),
@@ -238,54 +284,82 @@ public class VirtualBlockManager implements Listener {
                 placement.location().getBlockY(),
                 placement.location().getBlockZ()
         );
-        Location displayOrigin = origin.clone().add(0.5, 0.0, 0.5);
-        Quaternionf globalRotation = new Quaternionf(placement.globalRotation());
+        // CENTER (vanilla convention): pixel (0,0,0) = anchor block center at its base;
+        // displays spawn at the block center so centered models rotate about it and
+        // single-block models stay within one block. GRID: spawn at the block corner.
+        Location displayOrigin = originMode == ModelMeta.OriginMode.GRID
+                ? origin.clone()
+                : origin.clone().add(0.5, 0.0, 0.5);
 
-        VirtualBoundingBox box = VirtualBoundingBox.calculate(model);
-        for (Vector offset : box.getOccupiedOffsets()) {
-            Vector3f rotatedOffset = new Vector3f((float) offset.getX(), (float) offset.getY(), (float) offset.getZ());
-            globalRotation.transform(rotatedOffset);
+        RotationSnapper.SnappedRotation snapped = settings.rotationSnap()
+                ? RotationSnapper.snap(placement.globalRotation(), settings.rotationSnapThresholdDegrees())
+                : null;
+        Quaternionf globalRotation = snapped != null
+                ? snapped.quaternion()
+                : new Quaternionf(placement.globalRotation());
 
-            Location location = origin.clone().add(
-                    Math.round(rotatedOffset.x),
-                    Math.round(rotatedOffset.y),
-                    Math.round(rotatedOffset.z)
-            );
+        List<UUID> spawnedEntities = new ArrayList<>();
+        Set<Location> barrierBlocks = new HashSet<>();
+
+        // Collision lattice: geometry-aware voxelization under the exact same
+        // T(anchorOffset)·R·M transform the displays use; cells are already final.
+        int[] cells = occupancyCalculator.compute(
+                model, snapped, placement.globalRotation(), collisionMode,
+                settings.collisionEpsilon(), originMode);
+        for (int i = 0; i + 2 < cells.length; i += 3) {
+            Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
             Block block = location.getBlock();
             if (block.getType().isAir()) {
                 block.setType(Material.BARRIER);
                 barrierBlocks.add(location);
                 blockToModelMap.put(BlockCoordinate.from(location), instanceId);
+            } else if (settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
+                rollbackSpawn(barrierBlocks, spawnedEntities, instanceId);
+                DebugLogger.warning("spawnModel: collision cell " + location + " is not air; "
+                        + "STRICT policy aborted the spawn of model '" + model.name() + "'.");
+                return null;
             }
         }
 
+        recordUnresolvedTextures(model);
+
+        // Visual emission: fast path single display per uniform cube, plates for mixed faces.
         for (BakedCube cube : model.cubes()) {
-            BlockDisplay display = (BlockDisplay) origin.getWorld().spawnEntity(displayOrigin, EntityType.BLOCK_DISPLAY);
-            Material cubeMaterial = resolveCubeMaterial(cube);
-            display.setBlock(cubeMaterial.createBlockData());
-            display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
+            List<DisplayEmitter.EmittedDisplay> emitted =
+                    DisplayEmitter.emitCube(model, cube, textureMode, settings.perFaceRendering());
+            for (DisplayEmitter.EmittedDisplay item : emitted) {
+                BlockDisplay display = (BlockDisplay) origin.getWorld().spawnEntity(
+                        displayOrigin, EntityType.BLOCK_DISPLAY);
+                display.setBlock(DisplayEmitter.blockDataFor(item.material()));
+                display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
+                if (item.lightEmission() > 0) {
+                    display.setBrightness(new Display.Brightness(item.lightEmission(), 15));
+                }
 
-            Vector3f translated = new Vector3f(cube.translation());
-            globalRotation.transform(translated);
-            Quaternionf combinedRotation = new Quaternionf(globalRotation).mul(cube.leftRotation());
+                Vector3f translation = new Vector3f(item.translation());
+                globalRotation.transform(translation);
+                Quaternionf combinedRotation = new Quaternionf(globalRotation).mul(item.leftRotation());
 
-            Transformation transformation = new Transformation(
-                    translated,
-                    combinedRotation,
-                    cube.scale(),
-                    cube.rightRotation()
-            );
-            display.setTransformation(transformation);
-            spawnedEntities.add(display.getUniqueId());
+                display.setTransformation(new org.bukkit.util.Transformation(
+                        translation,
+                        combinedRotation,
+                        item.scale(),
+                        item.rightRotation()
+                ));
+                spawnedEntities.add(display.getUniqueId());
+
+                if (DebugLogger.isEnabled()) {
+                    DebugLogger.info("Rendered '" + item.source()
+                            + "' mat=" + item.material().name()
+                            + " light=" + item.lightEmission()
+                            + " translation=" + vectorString(translation)
+                            + " scale=" + vectorString(item.scale())
+                            + " localRotation=" + quaternionString(item.leftRotation())
+                            + " globalRotation=" + quaternionString(globalRotation));
+                }
+            }
 
             if (DebugLogger.isEnabled()) {
-                DebugLogger.info("Rendered cube '" + cube.name()
-                        + "' tex=" + (cube.primaryTexture() == null ? "none" : cube.primaryTexture())
-                        + " mat=" + cubeMaterial.name()
-                        + " translation=" + vectorString(translated)
-                        + " scale=" + vectorString(cube.scale())
-                        + " localRotation=" + quaternionString(cube.leftRotation())
-                        + " globalRotation=" + quaternionString(globalRotation));
                 for (Map.Entry<CubeFace, BakedFace> face : cube.faces().entrySet()) {
                     BakedFace data = face.getValue();
                     DebugLogger.info(" - face " + face.getKey().name().toLowerCase(Locale.ROOT)
@@ -305,6 +379,53 @@ public class VirtualBlockManager implements Listener {
                 barrierBlocks
         ));
         return instanceId;
+    }
+
+    private void rollbackSpawn(Set<Location> barrierBlocks, List<UUID> spawnedEntities, UUID instanceId) {
+        for (Location loc : barrierBlocks) {
+            if (loc.getBlock().getType() == Material.BARRIER) {
+                loc.getBlock().setType(Material.AIR);
+            }
+            blockToModelMap.remove(BlockCoordinate.from(loc));
+        }
+        for (UUID displayId : spawnedEntities) {
+            Entity display = Bukkit.getEntity(displayId);
+            if (display != null) {
+                display.remove();
+            }
+        }
+    }
+
+    private void recordUnresolvedTextures(VirtualModel model) {
+        String key = model.name().toLowerCase(Locale.ROOT);
+        if (unresolvedTexturesByModel.containsKey(key)) {
+            return;
+        }
+        Set<String> textureNames = new java.util.LinkedHashSet<>();
+        for (BakedCube cube : model.cubes()) {
+            if (cube.primaryTexture() != null) {
+                textureNames.add(cube.primaryTexture());
+            }
+            for (BakedFace face : cube.faces().values()) {
+                if (face.textureName() != null) {
+                    textureNames.add(face.textureName());
+                }
+            }
+        }
+        List<String> sortedNames = new ArrayList<>(textureNames);
+        Collections.sort(sortedNames);
+        List<String> unresolved = new ArrayList<>();
+        for (String textureName : sortedNames) {
+            TextureMaterialResolver.Resolution resolution = TextureMaterialResolver.resolveDetailed(textureName);
+            if (resolution.isFallback()) {
+                unresolved.add(textureName);
+            }
+        }
+        unresolvedTexturesByModel.put(key, Collections.unmodifiableList(unresolved));
+        if (!unresolved.isEmpty()) {
+            DebugLogger.warning("Model '" + model.name() + "' has "
+                    + unresolved.size() + " unresolved texture(s): " + String.join(", ", unresolved));
+        }
     }
 
     public void cleanupGhostEntities(UUID instanceId) {
@@ -364,23 +485,6 @@ public class VirtualBlockManager implements Listener {
                 display.remove();
             }
         }
-    }
-
-    private Material resolveCubeMaterial(BakedCube cube) {
-        String textureId = cube.primaryTexture();
-        if (textureId == null || textureId.isBlank()) {
-            return FALLBACK_MATERIAL;
-        }
-
-        String normalized = textureId.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_]", "_");
-        Material matched = Material.matchMaterial(normalized);
-        if (matched == null) {
-            matched = Material.matchMaterial(textureId);
-        }
-        if (matched == null || !matched.isBlock() || matched.isAir()) {
-            return FALLBACK_MATERIAL;
-        }
-        return matched;
     }
 
     public UUID restoreForState(BlockCoordinate anchor, String modelKey, Quaternionf rotation) {

@@ -5,15 +5,35 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Material;
-import org.bukkit.Bukkit;
 import com.mineplus.util.DebugLogger;
 
+/**
+ * Filename-to-vanilla-material resolution pipeline (tiered):
+ * <ol>
+ *   <li>exact texture map (370 curated entries)</li>
+ *   <li>direct {@link Material#matchMaterial(String)} (block, non-air)</li>
+ *   <li>suffix-strip ({@code _top}, {@code _side}, ... ) retrying tiers 1–2</li>
+ *   <li>legacy/Blockbench alias table</li>
+ *   <li>token fuzzy: underscore-insensitive contains-match against map keys</li>
+ *   <li>fallback ({@code WHITE_CONCRETE}) + recorded in the per-model report</li>
+ * </ol>
+ * Results are cached per texture name for the JVM lifetime.
+ */
 public final class TextureMaterialResolver {
 
     private static final Material FALLBACK = Material.WHITE_CONCRETE;
 
     private static final Map<String, Material> TEXTURE_MAP;
+    private static final Map<String, Material> ALIASES;
+    private static final ConcurrentHashMap<String, Resolution> RESOLVE_CACHE = new ConcurrentHashMap<>();
+
+    /** Suffixes stripped in tier 3, longest first so {@code _side_overlay} style names behave. */
+    private static final String[] STRIP_SUFFIXES = {
+            "_top", "_side", "_bottom", "_front", "_back", "_left", "_right",
+            "_inner", "_outer", "_base", "_0", "_1", "_2", "_3"
+    };
 
     static {
         Map<String, Material> m = new LinkedHashMap<>();
@@ -424,63 +444,225 @@ public final class TextureMaterialResolver {
         m.put("wool_colored_yellow", Material.YELLOW_WOOL);
 
         TEXTURE_MAP = Collections.unmodifiableMap(m);
+
+        Map<String, Material> a = new LinkedHashMap<>();
+        a.put("wool_colored_white", Material.WHITE_WOOL);
+        a.put("wool_colored_orange", Material.ORANGE_WOOL);
+        a.put("wool_colored_magenta", Material.MAGENTA_WOOL);
+        a.put("wool_colored_light_blue", Material.LIGHT_BLUE_WOOL);
+        a.put("wool_colored_yellow", Material.YELLOW_WOOL);
+        a.put("wool_colored_lime", Material.LIME_WOOL);
+        a.put("wool_colored_pink", Material.PINK_WOOL);
+        a.put("wool_colored_gray", Material.GRAY_WOOL);
+        a.put("wool_colored_light_gray", Material.LIGHT_GRAY_WOOL);
+        a.put("wool_colored_cyan", Material.CYAN_WOOL);
+        a.put("wool_colored_purple", Material.PURPLE_WOOL);
+        a.put("wool_colored_blue", Material.BLUE_WOOL);
+        a.put("wool_colored_brown", Material.BROWN_WOOL);
+        a.put("wool_colored_green", Material.GREEN_WOOL);
+        a.put("wool_colored_red", Material.RED_WOOL);
+        a.put("wool_colored_black", Material.BLACK_WOOL);
+        a.put("planks", Material.OAK_PLANKS);
+        a.put("log", Material.OAK_LOG);
+        a.put("sapling", Material.OAK_SAPLING);
+        a.put("leaves", Material.OAK_LEAVES);
+        a.put("door", Material.OAK_DOOR);
+        a.put("door_upper", Material.OAK_DOOR);
+        a.put("door_lower", Material.OAK_DOOR);
+        a.put("trapdoor", Material.OAK_TRAPDOOR);
+        a.put("fence", Material.OAK_FENCE);
+        a.put("fence_gate", Material.OAK_FENCE_GATE);
+        a.put("stairs", Material.OAK_STAIRS);
+        a.put("slab", Material.OAK_SLAB);
+        a.put("button", Material.OAK_BUTTON);
+        a.put("pressure_plate", Material.OAK_PRESSURE_PLATE);
+        a.put("sign", Material.OAK_SIGN);
+        a.put("boat", Material.OAK_BOAT);
+        a.put("hardened_clay_stained_white", Material.WHITE_TERRACOTTA);
+        a.put("hardened_clay_stained_orange", Material.ORANGE_TERRACOTTA);
+        a.put("hardened_clay_stained_magenta", Material.MAGENTA_TERRACOTTA);
+        a.put("hardened_clay_stained_light_blue", Material.LIGHT_BLUE_TERRACOTTA);
+        a.put("hardened_clay_stained_yellow", Material.YELLOW_TERRACOTTA);
+        a.put("hardened_clay_stained_lime", Material.LIME_TERRACOTTA);
+        a.put("hardened_clay_stained_pink", Material.PINK_TERRACOTTA);
+        a.put("hardened_clay_stained_gray", Material.GRAY_TERRACOTTA);
+        a.put("hardened_clay_stained_light_gray", Material.LIGHT_GRAY_TERRACOTTA);
+        a.put("hardened_clay_stained_cyan", Material.CYAN_TERRACOTTA);
+        a.put("hardened_clay_stained_purple", Material.PURPLE_TERRACOTTA);
+        a.put("hardened_clay_stained_blue", Material.BLUE_TERRACOTTA);
+        a.put("hardened_clay_stained_brown", Material.BROWN_TERRACOTTA);
+        a.put("hardened_clay_stained_green", Material.GREEN_TERRACOTTA);
+        a.put("hardened_clay_stained_red", Material.RED_TERRACOTTA);
+        a.put("hardened_clay_stained_black", Material.BLACK_TERRACOTTA);
+        a.put("stained_glass_white", Material.WHITE_STAINED_GLASS);
+        a.put("stained_glass_pane_white", Material.WHITE_STAINED_GLASS_PANE);
+        a.put("carpet_white", Material.WHITE_CARPET);
+        a.put("dye_white", Material.WHITE_DYE);
+        a.put("brick_block", Material.BRICKS);
+        a.put("stonebrick", Material.STONE_BRICKS);
+        a.put("stone_brick", Material.STONE_BRICKS);
+        a.put("wood", Material.OAK_PLANKS);
+        a.put("wooden", Material.OAK_PLANKS);
+        a.put("double_plant", Material.SUNFLOWER);
+        a.put("tall_grass", Material.TALL_GRASS);
+        a.put("dead_bush", Material.DEAD_BUSH);
+        a.put("mushroom_red", Material.RED_MUSHROOM);
+        a.put("mushroom_brown", Material.BROWN_MUSHROOM);
+        a.put("torch_on", Material.TORCH);
+        a.put("redstone_dust_dot", Material.REDSTONE);
+        a.put("redstone_dust_line0", Material.REDSTONE);
+        a.put("redstone_dust_line1", Material.REDSTONE);
+        a.put("water_still", Material.WATER);
+        a.put("water_flow", Material.WATER);
+        a.put("lava_still", Material.LAVA);
+        a.put("lava_flow", Material.LAVA);
+        a.put("fire_layer_0", Material.FIRE);
+        a.put("fire_layer_1", Material.FIRE);
+        a.put("destroy_stage_0", Material.AIR);
+        a.put("destroy_stage_1", Material.AIR);
+        a.put("destroy_stage_2", Material.AIR);
+        a.put("destroy_stage_3", Material.AIR);
+        a.put("destroy_stage_4", Material.AIR);
+        a.put("destroy_stage_5", Material.AIR);
+        a.put("destroy_stage_6", Material.AIR);
+        a.put("destroy_stage_7", Material.AIR);
+        a.put("destroy_stage_8", Material.AIR);
+        a.put("destroy_stage_9", Material.AIR);
+        a.put("particle_generic", Material.AIR);
+        a.put("missingno", Material.AIR);
+        a.put("missing_model", Material.AIR);
+        ALIASES = Collections.unmodifiableMap(a);
+    }
+
+    /** Resolution outcome for diagnostics. */
+    public record Resolution(String textureName, Material material, int tier) {
+
+        public boolean isFallback() {
+            return material == FALLBACK;
+        }
+
+        public String tierName() {
+            return switch (tier) {
+                case 1 -> "map";
+                case 2 -> "direct";
+                case 3 -> "suffix-strip";
+                case 4 -> "alias";
+                case 5 -> "fuzzy";
+                default -> "fallback";
+            };
+        }
     }
 
     public static Material resolve(String textureName) {
+        return resolveDetailed(textureName).material();
+    }
+
+    public static Resolution resolveDetailed(String textureName) {
         if (textureName == null || textureName.isBlank()) {
-            return FALLBACK;
+            return new Resolution(textureName, FALLBACK, 0);
         }
+        return RESOLVE_CACHE.computeIfAbsent(textureName, TextureMaterialResolver::resolveUncached);
+    }
 
-        String key = textureName.toLowerCase(Locale.ROOT).trim();
-
-        if (key.endsWith(".png")) {
-            key = key.substring(0, key.length() - 4);
-        }
-
-        if (key.contains(":")) {
-            key = key.substring(key.lastIndexOf(':') + 1);
-        }
-        
-        if (key.contains("/")) {
-            key = key.substring(key.lastIndexOf('/') + 1);
+    private static Resolution resolveUncached(String textureName) {
+        String key = normalize(textureName);
+        if (key.isEmpty()) {
+            return new Resolution(textureName, FALLBACK, 0);
         }
 
         Material mapped = TEXTURE_MAP.get(key);
         if (mapped != null) {
-            return mapped;
+            return new Resolution(textureName, mapped, 1);
         }
 
-        Material direct = Material.matchMaterial(key.toUpperCase(Locale.ROOT));
-        if (direct != null && direct.isBlock() && !direct.isAir()) {
-            return direct;
+        Material direct = matchBlock(key);
+        if (direct != null) {
+            return new Resolution(textureName, direct, 2);
         }
 
-        if (key.contains("_")) {
-            String[] parts = key.split("_");
-            if (parts.length == 2) {
-                String swappedKey = parts[1] + "_" + parts[0];
-                
-                Material swappedMapped = TEXTURE_MAP.get(swappedKey);
-                if (swappedMapped != null) {
-                    return swappedMapped;
+        for (String suffix : STRIP_SUFFIXES) {
+            if (key.endsWith(suffix) && key.length() > suffix.length()) {
+                String stripped = key.substring(0, key.length() - suffix.length());
+                Material strippedMapped = TEXTURE_MAP.get(stripped);
+                if (strippedMapped != null) {
+                    return new Resolution(textureName, strippedMapped, 3);
                 }
-                
-                Material swappedDirect = Material.matchMaterial(swappedKey.toUpperCase(Locale.ROOT));
-                if (swappedDirect != null && swappedDirect.isBlock() && !swappedDirect.isAir()) {
-                    return swappedDirect;
+                Material strippedDirect = matchBlock(stripped);
+                if (strippedDirect != null) {
+                    return new Resolution(textureName, strippedDirect, 3);
                 }
             }
         }
 
+        Material aliased = ALIASES.get(key);
+        if (aliased != null && aliased != Material.AIR) {
+            return new Resolution(textureName, aliased, 4);
+        }
+
+        Resolution fuzzy = fuzzyResolve(textureName, key);
+        if (fuzzy != null) {
+            return fuzzy;
+        }
+
+        DebugLogger.warning("[TextureMaterialResolver] Could not resolve texture: '" + textureName
+                + "'. Falling back to " + FALLBACK.name());
+        return new Resolution(textureName, FALLBACK, 0);
+    }
+
+    private static Resolution fuzzyResolve(String originalName, String key) {
+        String flatKey = key.replace("_", "");
+        if (flatKey.isEmpty()) {
+            return null;
+        }
+
+        Material best = null;
+        String bestKeyName = null;
+        int bestRank = Integer.MAX_VALUE;
         for (Map.Entry<String, Material> entry : TEXTURE_MAP.entrySet()) {
             String mapKey = entry.getKey();
-            if (mapKey.contains(key) || key.contains(mapKey)) {
-                return entry.getValue();
+            String flatMapKey = mapKey.replace("_", "");
+            boolean candidate = false;
+            int rank = Integer.MAX_VALUE;
+            if (flatMapKey.contains(flatKey) || flatKey.contains(flatMapKey)) {
+                candidate = true;
+                rank = Math.abs(flatKey.length() - flatMapKey.length());
+            }
+            if (candidate && rank < bestRank) {
+                bestRank = rank;
+                best = entry.getValue();
+                bestKeyName = mapKey;
             }
         }
+        if (best == null) {
+            return null;
+        }
+        DebugLogger.info("[TextureMaterialResolver] fuzzy-resolved '" + originalName + "' via '" + bestKeyName + "'.");
+        return new Resolution(originalName, best, 5);
+    }
 
-        DebugLogger.warning("[BbModelImporter] Could not resolve texture: '" + textureName + "'. Falling back to " + FALLBACK.name());
-        return FALLBACK;
+    private static Material matchBlock(String key) {
+        Material matched = Material.matchMaterial(key.toUpperCase(Locale.ROOT));
+        if (matched == null || !matched.isBlock() || matched.isAir()) {
+            return null;
+        }
+        return matched;
+    }
+
+    private static String normalize(String textureName) {
+        String key = textureName.toLowerCase(Locale.ROOT).trim();
+        if (key.endsWith(".png")) {
+            key = key.substring(0, key.length() - 4);
+        }
+        if (key.endsWith(".mcmeta")) {
+            key = key.substring(0, key.length() - 7);
+        }
+        if (key.contains(":")) {
+            key = key.substring(key.lastIndexOf(':') + 1);
+        }
+        if (key.contains("/")) {
+            key = key.substring(key.lastIndexOf('/') + 1);
+        }
+        return key;
     }
 
     public static Material fallback() {

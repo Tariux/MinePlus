@@ -4,6 +4,7 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.virtual.BbModelImporter;
+import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
@@ -49,7 +50,7 @@ public final class ModelRenderingManager {
                 DebugLogger.severe("render: Failed to load or parse model file " + modelFile.getAbsolutePath() + " for key '" + modelKey + "'.");
                 return null;
             }
-            virtualBlockManager.registerModel(modelKey, model);
+            virtualBlockManager.registerModel(modelKey, model, ModelMeta.load(modelFile));
         }
 
         Quaternionf rotation = instance.rotation();

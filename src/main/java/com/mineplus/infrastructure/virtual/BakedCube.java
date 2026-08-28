@@ -12,8 +12,22 @@ public record BakedCube(
         Vector3f scale,
         Quaternionf rightRotation,
         Map<CubeFace, BakedFace> faces,
-        String primaryTexture
+        String primaryTexture,
+        int lightEmission
 ) {
+
+    public BakedCube(
+            String name,
+            Vector3f translation,
+            Quaternionf leftRotation,
+            Vector3f scale,
+            Quaternionf rightRotation,
+            Map<CubeFace, BakedFace> faces,
+            String primaryTexture
+    ) {
+        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, 0);
+    }
+
     public BakedCube {
         name = name == null ? "cube" : name;
         translation = new Vector3f(translation);
@@ -25,5 +39,12 @@ public record BakedCube(
             faceCopy.putAll(faces);
         }
         faces = Map.copyOf(faceCopy);
+        lightEmission = Math.max(0, Math.min(15, lightEmission));
+    }
+
+    /** True when this cube carries no rotation, so its OBB equals its AABB (voxelization fast path). */
+    public boolean isAxisAligned() {
+        Quaternionf r = leftRotation;
+        return (r.x * r.x + r.y * r.y + r.z * r.z) <= 1.0e-4f;
     }
 }

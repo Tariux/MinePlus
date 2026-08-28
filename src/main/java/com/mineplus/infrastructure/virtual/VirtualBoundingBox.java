@@ -5,6 +5,14 @@ import java.util.Set;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
+/**
+ * Whole-model AABB fill (legacy collision proxy).
+ *
+ * @deprecated for collision use — {@link VoxelOccupancyCalculator} replaces it with
+ *     per-cube geometry-aware voxelization. Retained as a diagnostic utility and as the
+ *     AABB compat escape hatch ({@code collisionMode: AABB}).
+ */
+@Deprecated
 public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
 
     public static VirtualBoundingBox calculate(VirtualModel model) {
@@ -34,10 +42,12 @@ public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int max
             }
         }
 
-        int roundedMinX = Math.max(0, (int) Math.floor(minX));
-        int roundedMinY = Math.max(0, (int) Math.floor(minY));
-        int roundedMinZ = Math.max(0, (int) Math.floor(minZ));
-        
+        // No clamp to zero: negative model-space extents are legal geometry
+        // (a cube at from=[-7,0,-7] simply extends west/north of the anchor).
+        int roundedMinX = (int) Math.floor(minX);
+        int roundedMinY = (int) Math.floor(minY);
+        int roundedMinZ = (int) Math.floor(minZ);
+
         int roundedMaxX = Math.max(roundedMinX + 1, (int) Math.ceil(maxX));
         int roundedMaxY = Math.max(roundedMinY + 1, (int) Math.ceil(maxY));
         int roundedMaxZ = Math.max(roundedMinZ + 1, (int) Math.ceil(maxZ));

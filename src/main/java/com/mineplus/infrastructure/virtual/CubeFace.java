@@ -10,6 +10,23 @@ public enum CubeFace {
     UP,
     DOWN;
 
+    /** Normal axis index: X=0, Y=1, Z=2. */
+    public int normalAxis() {
+        return switch (this) {
+            case EAST, WEST -> 0;
+            case UP, DOWN -> 1;
+            default -> 2;
+        };
+    }
+
+    /** True when the outward normal points along the positive axis direction. */
+    public boolean positiveNormal() {
+        return switch (this) {
+            case SOUTH, EAST, UP -> true;
+            default -> false;
+        };
+    }
+
     public static CubeFace fromKey(String key) {
         if (key == null || key.isBlank()) {
             return null;

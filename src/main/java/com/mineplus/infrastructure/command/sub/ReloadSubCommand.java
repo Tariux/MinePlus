@@ -44,11 +44,13 @@ public final class ReloadSubCommand implements SubCommand {
 
         switch (scope) {
             case "all" -> {
+                context.plugin().refreshVirtualRenderingSettings();
                 context.jsonInfrastructureApi().reloadAll();
                 sender.sendMessage(ChatColor.GREEN + "Reloaded models, multiblocks, and recipes.");
                 return true;
             }
             case "models" -> {
+                context.plugin().refreshVirtualRenderingSettings();
                 context.jsonInfrastructureApi().reloadModelDefinitions();
                 sender.sendMessage(ChatColor.GREEN + "Reloaded model definitions and refreshed active renders.");
                 return true;

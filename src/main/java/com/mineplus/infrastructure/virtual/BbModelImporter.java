@@ -1,10 +1,9 @@
 package com.mineplus.infrastructure.virtual;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.mineplus.util.DebugLogger;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.Reader;
@@ -16,13 +15,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.bukkit.Bukkit;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+/**
+ * Streaming importer for Blockbench {@code .bbmodel} files.
+ *
+ * <p>Uses a single-pass {@link JsonReader} state machine instead of a Gson DOM so that
+ * dead branches — most importantly every texture's Base64 {@code source} PNG (KB–MB each) —
+ * are skipped with {@link JsonReader#skipValue()} and never materialized as strings.
+ *
+ * <p>The outliner matrix accumulation (pivot conjugation {@code T(origin/16)·R·T(-origin/16)}
+ * chained through parents, cycle-safe) is preserved verbatim from the DOM importer; only the
+ * input construction changed.
+ */
 public class BbModelImporter {
 
     public static VirtualModel parse(String name, File file) {
@@ -34,8 +42,8 @@ public class BbModelImporter {
             return null;
         }
 
-        try (FileReader reader = new FileReader(file)) {
-            return parse(name, reader, logger);
+        try (Reader fileReader = new BufferedReader(new FileReader(file))) {
+            return parse(name, fileReader, logger);
         } catch (Exception exception) {
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath()
@@ -48,116 +56,8 @@ public class BbModelImporter {
     }
 
     public static VirtualModel parse(String name, Reader reader, Logger logger) {
-        List<BakedCube> bakedCubes = new ArrayList<>();
-        TextureLookup textureLookup = new TextureLookup();
-
         try {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            JsonArray textures = root.has("textures") && root.get("textures").isJsonArray()
-                    ? root.getAsJsonArray("textures")
-                    : new JsonArray();
-            textureLookup.parse(textures);
-
-            JsonArray elements = root.has("elements") && root.get("elements").isJsonArray()
-                    ? root.getAsJsonArray("elements")
-                    : new JsonArray();
-            Map<String, JsonObject> elementsByUuid = new HashMap<>();
-            for (JsonElement elem : elements) {
-                if (!elem.isJsonObject()) {
-                    continue;
-                }
-                JsonObject cube = elem.getAsJsonObject();
-                if (cube.has("type") && !"cube".equalsIgnoreCase(cube.get("type").getAsString())) {
-                    continue;
-                }
-                String uuid = getString(cube, "uuid");
-                if (uuid != null && !uuid.isBlank()) {
-                    elementsByUuid.put(uuid, cube);
-                }
-            }
-
-            Map<String, JsonObject> groupObjectsByUuid = new HashMap<>();
-            JsonArray outliner = root.has("outliner") && root.get("outliner").isJsonArray()
-                    ? root.getAsJsonArray("outliner")
-                    : new JsonArray();
-            collectGroupObjects(outliner, groupObjectsByUuid);
-
-            Map<String, Matrix4f> elementTransforms = new HashMap<>();
-            Map<String, Boolean> elementEnabled = new HashMap<>();
-            for (JsonElement entry : outliner) {
-                applyOutlinerEntry(
-                        entry,
-                        new Matrix4f(),
-                        true,
-                        elementsByUuid,
-                        groupObjectsByUuid,
-                        elementTransforms,
-                        elementEnabled,
-                        new HashSet<>()
-                );
-            }
-
-            for (JsonElement elem : elements) {
-                if (!elem.isJsonObject()) {
-                    continue;
-                }
-                JsonObject cube = elem.getAsJsonObject();
-                if (cube.has("type") && !"cube".equalsIgnoreCase(cube.get("type").getAsString())) {
-                    continue;
-                }
-
-                JsonArray fromArr = cube.getAsJsonArray("from");
-                JsonArray toArr = cube.getAsJsonArray("to");
-                if (fromArr == null || toArr == null || fromArr.size() < 3 || toArr.size() < 3) {
-                    continue;
-                }
-
-                String cubeUuid = getString(cube, "uuid");
-                if (cubeUuid != null && Boolean.FALSE.equals(elementEnabled.get(cubeUuid))) {
-                    continue;
-                }
-                if (cube.has("export") && !cube.get("export").getAsBoolean()) {
-                    continue;
-                }
-
-                float inflate = cube.has("inflate") ? cube.get("inflate").getAsFloat() : 0f;
-                Vector3f from = parseVector(fromArr).sub(inflate, inflate, inflate);
-                Vector3f to = parseVector(toArr).add(inflate, inflate, inflate);
-                Vector3f rawScale = new Vector3f(
-                        (to.x - from.x) / 16.0f,
-                        (to.y - from.y) / 16.0f,
-                        (to.z - from.z) / 16.0f
-                );
-
-                Matrix4f cubeMatrix = new Matrix4f()
-                        .translate(from.x / 16.0f, from.y / 16.0f, from.z / 16.0f)
-                        .scale(rawScale);
-                cubeMatrix = parsePivotRotation(cube).mul(cubeMatrix, new Matrix4f());
-
-                Matrix4f parentMatrix = cubeUuid == null
-                        ? new Matrix4f()
-                        : new Matrix4f(elementTransforms.getOrDefault(cubeUuid, new Matrix4f()));
-                Matrix4f finalMatrix = parentMatrix.mul(cubeMatrix, new Matrix4f());
-
-                Vector3f translation = finalMatrix.getTranslation(new Vector3f());
-                Vector3f bakedScale = finalMatrix.getScale(new Vector3f());
-                Quaternionf bakedRotation = finalMatrix.getUnnormalizedRotation(new Quaternionf());
-
-                JsonObject facesNode = cube.has("faces") ? cube.getAsJsonObject("faces") : null;
-                EnumMap<CubeFace, BakedFace> faces = parseFaces(facesNode, textureLookup);
-                String cubeName = getString(cube, "name");
-                String primaryTexture = choosePrimaryTexture(faces);
-
-                bakedCubes.add(new BakedCube(
-                        cubeName,
-                        translation,
-                        bakedRotation,
-                        bakedScale,
-                        new Quaternionf(),
-                        faces,
-                        primaryTexture
-                ));
-            }
+            return parseStreamed(name, reader);
         } catch (Exception exception) {
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
@@ -166,70 +66,316 @@ public class BbModelImporter {
             }
             return null;
         }
-
-        return new VirtualModel(name, bakedCubes, textureLookup.toIdMap());
     }
 
-    private static void collectGroupObjects(JsonArray outliner, Map<String, JsonObject> groups) {
-        if (outliner == null) {
-            return;
-        }
-        for (JsonElement entry : outliner) {
-            if (entry.isJsonObject()) {
-                JsonObject group = entry.getAsJsonObject();
-                String uuid = getString(group, "uuid");
-                if (uuid != null && !uuid.isBlank()) {
-                    groups.put(uuid, group);
-                }
-                if (group.has("children") && group.get("children").isJsonArray()) {
-                    collectGroupObjects(group.getAsJsonArray("children"), groups);
-                }
+    private static VirtualModel parseStreamed(String name, Reader reader) throws Exception {
+        List<BakedCube> bakedCubes = new ArrayList<>();
+        TextureLookup textureLookup = new TextureLookup();
+        VirtualModel.Resolution resolution = null;
+
+        // Raw element capture (kept as lightweight value holders, not Gson DOM).
+        List<RawElement> rawElements = new ArrayList<>();
+        List<RawGroup> rootOutliner = new ArrayList<>();
+        List<String> rootElementUuids = new ArrayList<>();
+
+        JsonReader json = new JsonReader(reader);
+        json.setLenient(false);
+        json.beginObject();
+        while (json.hasNext()) {
+            String fieldName = json.nextName();
+            switch (fieldName) {
+                case "textures" -> parseTextures(json, textureLookup);
+                case "elements" -> parseElements(json, rawElements);
+                case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
+                case "resolution" -> resolution = parseResolution(json);
+                case "meta" -> json.skipValue(); // box_uv etc. read from elements themselves
+                default -> json.skipValue();
             }
         }
+        json.endObject();
+
+        // Bake outliner transforms exactly like the DOM importer did.
+        Map<String, Matrix4f> elementTransforms = new HashMap<>();
+        Map<String, Boolean> elementEnabled = new HashMap<>();
+        Set<String> knownElementUuids = new HashSet<>();
+        for (RawElement element : rawElements) {
+            if (element.uuid != null && !element.uuid.isBlank()) {
+                knownElementUuids.add(element.uuid);
+            }
+        }
+        // Root-level element UUIDs (cubes not inside any group): identity transform, visible.
+        for (String rootUuid : rootElementUuids) {
+            if (rootUuid != null && knownElementUuids.contains(rootUuid)) {
+                elementTransforms.put(rootUuid, new Matrix4f());
+                elementEnabled.put(rootUuid, true);
+            }
+        }
+        for (RawGroup group : rootOutliner) {
+            applyOutlinerEntry(
+                    group,
+                    new Matrix4f(),
+                    true,
+                    knownElementUuids,
+                    elementTransforms,
+                    elementEnabled,
+                    new HashSet<>()
+            );
+        }
+
+        for (RawElement element : rawElements) {
+            if (!"cube".equalsIgnoreCase(element.type)) {
+                continue;
+            }
+            if (element.from == null || element.to == null) {
+                continue;
+            }
+            if (element.uuid != null && Boolean.FALSE.equals(elementEnabled.get(element.uuid))) {
+                continue;
+            }
+            if (!element.export) {
+                continue;
+            }
+
+            Vector3f from = new Vector3f(element.from).sub(element.inflate, element.inflate, element.inflate);
+            Vector3f to = new Vector3f(element.to).add(element.inflate, element.inflate, element.inflate);
+            Vector3f rawScale = new Vector3f(
+                    (to.x - from.x) / 16.0f,
+                    (to.y - from.y) / 16.0f,
+                    (to.z - from.z) / 16.0f
+            );
+
+            Matrix4f cubeMatrix = new Matrix4f()
+                    .translate(from.x / 16.0f, from.y / 16.0f, from.z / 16.0f)
+                    .scale(rawScale);
+            Matrix4f pivotMatrix = pivotRotation(element.origin, element.rotation);
+            cubeMatrix = pivotMatrix.mul(cubeMatrix, new Matrix4f());
+
+            Matrix4f parentMatrix = element.uuid == null
+                    ? new Matrix4f()
+                    : new Matrix4f(elementTransforms.getOrDefault(element.uuid, new Matrix4f()));
+            Matrix4f finalMatrix = parentMatrix.mul(cubeMatrix, new Matrix4f());
+
+            Vector3f translation = finalMatrix.getTranslation(new Vector3f());
+            Vector3f bakedScale = finalMatrix.getScale(new Vector3f());
+            Quaternionf bakedRotation = finalMatrix.getUnnormalizedRotation(new Quaternionf());
+
+            EnumMap<CubeFace, BakedFace> faces = new EnumMap<>(CubeFace.class);
+            for (Map.Entry<CubeFace, RawFace> entry : element.faces.entrySet()) {
+                RawFace raw = entry.getValue();
+                faces.put(entry.getKey(), new BakedFace(
+                        raw.uv[0], raw.uv[1], raw.uv[2], raw.uv[3],
+                        raw.rotation, raw.textureReference,
+                        textureLookup.resolveByReference(raw.textureReference)
+                ));
+            }
+            String primaryTexture = choosePrimaryTexture(faces);
+
+            bakedCubes.add(new BakedCube(
+                    element.name,
+                    translation,
+                    bakedRotation,
+                    bakedScale,
+                    new Quaternionf(),
+                    faces,
+                    primaryTexture,
+                    element.lightEmission
+            ));
+        }
+
+        return new VirtualModel(
+                name, bakedCubes, textureLookup.toIdMap(), resolution, null,
+                textureLookup.resolveByIndex(textureLookup.defaultIndex())
+        );
+    }
+
+    private static void parseTextures(JsonReader json, TextureLookup lookup) throws Exception {
+        lookup.beginParse();
+        json.beginArray();
+        int arrayIndex = 0;
+        while (json.hasNext()) {
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                arrayIndex++;
+                continue;
+            }
+            json.beginObject();
+            String id = null;
+            String path = null;
+            String relativePath = null;
+            String name = null;
+            boolean useAsDefault = false;
+            boolean particle = false;
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "id" -> id = nextStringOrNull(json);
+                    case "path" -> path = nextStringOrNull(json);
+                    case "relative_path" -> relativePath = nextStringOrNull(json);
+                    case "name" -> name = nextStringOrNull(json);
+                    case "use_as_default" -> useAsDefault = nextBoolean(json, false);
+                    case "particle" -> particle = nextBoolean(json, false);
+                    default -> json.skipValue(); // "source" (Base64 PNG), "uuid", "relative_height", ...
+                }
+            }
+            json.endObject();
+
+            // Priority order matches the DOM importer: path, then relative_path, then name.
+            String extracted = extractTextureIdentifier(path);
+            if (extracted == null) {
+                extracted = extractTextureIdentifier(relativePath);
+            }
+            if (extracted == null) {
+                extracted = extractTextureIdentifier(name);
+            }
+            lookup.addTexture(arrayIndex, id, extracted, useAsDefault, particle);
+            arrayIndex++;
+        }
+        json.endArray();
+    }
+
+    private static void parseElements(JsonReader json, List<RawElement> output) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            RawElement element = new RawElement();
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "uuid" -> element.uuid = nextStringOrNull(json);
+                    case "name" -> element.name = nextStringOrNull(json);
+                    case "type" -> element.type = nextStringOrNull(json);
+                    case "from" -> element.from = nextVector3(json);
+                    case "to" -> element.to = nextVector3(json);
+                    case "origin" -> element.origin = nextVector3(json);
+                    case "rotation" -> element.rotation = nextVector3(json);
+                    case "inflate" -> element.inflate = (float) nextDouble(json, 0.0);
+                    case "export" -> element.export = nextBoolean(json, true);
+                    case "light_emission" -> element.lightEmission = (int) nextDouble(json, 0.0);
+                    case "faces" -> parseFaces(json, element.faces);
+                    default -> json.skipValue(); // rescale, locked, color, autouv, render_order, ...
+                }
+            }
+            json.endObject();
+            output.add(element);
+        }
+        json.endArray();
+    }
+
+    private static void parseFaces(JsonReader json, Map<CubeFace, RawFace> faces) throws Exception {
+        json.beginObject();
+        while (json.hasNext()) {
+            String faceKey = json.nextName();
+            CubeFace face = CubeFace.fromKey(faceKey);
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            RawFace raw = new RawFace();
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "uv" -> raw.uv = nextUv(json);
+                    case "rotation" -> raw.rotation = (int) nextDouble(json, 0.0);
+                    case "texture" -> raw.textureReference = nextTextureReference(json);
+                    default -> json.skipValue();
+                }
+            }
+            json.endObject();
+            if (face != null) {
+                faces.put(face, raw);
+            }
+        }
+        json.endObject();
+    }
+
+    private static void parseOutliner(JsonReader json, RawGroup parent, List<RawGroup> siblings, List<String> rootElementUuids) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            JsonToken peek = json.peek();
+            if (peek == JsonToken.STRING) {
+                String uuid = json.nextString();
+                if (parent != null) {
+                    parent.childElementUuids.add(uuid);
+                } else if (rootElementUuids != null) {
+                    rootElementUuids.add(uuid);
+                }
+            } else if (peek == JsonToken.BEGIN_OBJECT) {
+                RawGroup group = new RawGroup();
+                json.beginObject();
+                while (json.hasNext()) {
+                    String fieldName = json.nextName();
+                    switch (fieldName) {
+                        case "uuid" -> group.uuid = nextStringOrNull(json);
+                        case "origin" -> group.origin = nextVector3(json);
+                        case "rotation" -> group.rotation = nextVector3(json);
+                        case "visibility" -> group.visibility = nextBoolean(json, true);
+                        case "children" -> parseOutliner(json, group, group.children, null);
+                        default -> json.skipValue();
+                    }
+                }
+                json.endObject();
+                siblings.add(group);
+            } else {
+                json.skipValue();
+            }
+        }
+        json.endArray();
+    }
+
+    private static VirtualModel.Resolution parseResolution(JsonReader json) throws Exception {
+        int width = 16;
+        int height = 16;
+        json.beginObject();
+        while (json.hasNext()) {
+            String fieldName = json.nextName();
+            switch (fieldName) {
+                case "width" -> width = (int) nextDouble(json, 16.0);
+                case "height" -> height = (int) nextDouble(json, 16.0);
+                default -> json.skipValue();
+            }
+        }
+        json.endObject();
+        return new VirtualModel.Resolution(width, height);
     }
 
     private static void applyOutlinerEntry(
-            JsonElement entry,
+            RawGroup group,
             Matrix4f parentTransform,
             boolean parentVisible,
-            Map<String, JsonObject> elementsByUuid,
-            Map<String, JsonObject> groupObjectsByUuid,
+            Set<String> knownElementUuids,
             Map<String, Matrix4f> elementTransforms,
             Map<String, Boolean> elementEnabled,
             Set<String> visited
     ) {
-        if (entry.isJsonPrimitive()) {
-            String uuid = entry.getAsString();
-            if (uuid != null && !uuid.isBlank() && elementsByUuid.containsKey(uuid)) {
-                elementTransforms.put(uuid, new Matrix4f(parentTransform));
-                elementEnabled.put(uuid, parentVisible);
+        if (group.uuid != null && !visited.add(group.uuid)) {
+            return;
+        }
+
+        boolean visible = parentVisible && group.visibility;
+        Matrix4f groupTransform = parentTransform.mul(
+                pivotRotation(group.origin, group.rotation), new Matrix4f());
+
+        for (String childUuid : group.childElementUuids) {
+            if (childUuid == null || childUuid.isBlank()) {
+                continue;
             }
-            return;
+            if (knownElementUuids.contains(childUuid)) {
+                elementTransforms.put(childUuid, new Matrix4f(groupTransform));
+                elementEnabled.put(childUuid, visible);
+            }
         }
 
-        if (!entry.isJsonObject()) {
-            return;
-        }
-
-        JsonObject group = entry.getAsJsonObject();
-        String groupUuid = getString(group, "uuid");
-        if (groupUuid != null && !visited.add(groupUuid)) {
-            return;
-        }
-
-        boolean visible = parentVisible && (!group.has("visibility") || group.get("visibility").getAsBoolean());
-        Matrix4f groupTransform = parentTransform.mul(parsePivotRotation(group), new Matrix4f());
-
-        JsonArray children = group.has("children") && group.get("children").isJsonArray()
-                ? group.getAsJsonArray("children")
-                : new JsonArray();
-        for (JsonElement child : children) {
+        for (RawGroup child : group.children) {
             applyOutlinerEntry(
                     child,
                     groupTransform,
                     visible,
-                    elementsByUuid,
-                    groupObjectsByUuid,
+                    knownElementUuids,
                     elementTransforms,
                     elementEnabled,
                     visited
@@ -237,15 +383,10 @@ public class BbModelImporter {
         }
     }
 
-    private static Matrix4f parsePivotRotation(JsonObject node) {
-        JsonArray originArr = node.has("origin") ? node.getAsJsonArray("origin") : null;
-        JsonArray rotationArr = node.has("rotation") ? node.getAsJsonArray("rotation") : null;
-        if (rotationArr == null || originArr == null) {
+    private static Matrix4f pivotRotation(Vector3f origin, Vector3f rotation) {
+        if (rotation == null || origin == null) {
             return new Matrix4f();
         }
-
-        Vector3f origin = parseVector(originArr);
-        Vector3f rotation = parseVector(rotationArr);
         if (rotation.x == 0 && rotation.y == 0 && rotation.z == 0) {
             return new Matrix4f();
         }
@@ -260,66 +401,6 @@ public class BbModelImporter {
                 .translate(origin.x / 16.0f, origin.y / 16.0f, origin.z / 16.0f)
                 .rotate(quaternion)
                 .translate(-origin.x / 16.0f, -origin.y / 16.0f, -origin.z / 16.0f);
-    }
-
-    private static Vector3f parseVector(JsonArray array) {
-        if (array == null || array.size() < 3) {
-            return new Vector3f();
-        }
-        return new Vector3f(
-                array.get(0).getAsFloat(),
-                array.get(1).getAsFloat(),
-                array.get(2).getAsFloat()
-        );
-    }
-
-    private static EnumMap<CubeFace, BakedFace> parseFaces(JsonObject facesNode, TextureLookup lookup) {
-        EnumMap<CubeFace, BakedFace> faces = new EnumMap<>(CubeFace.class);
-        if (facesNode == null) {
-            return faces;
-        }
-
-        for (Map.Entry<String, JsonElement> entry : facesNode.entrySet()) {
-            CubeFace face = CubeFace.fromKey(entry.getKey());
-            if (face == null || !entry.getValue().isJsonObject()) {
-                continue;
-            }
-
-            JsonObject faceNode = entry.getValue().getAsJsonObject();
-            float[] uv = parseUv(faceNode.getAsJsonArray("uv"));
-            int rotation = faceNode.has("rotation") ? faceNode.get("rotation").getAsInt() : 0;
-            String textureReference = null;
-            String textureName = null;
-
-            if (faceNode.has("texture") && !faceNode.get("texture").isJsonNull()) {
-                JsonElement texElement = faceNode.get("texture");
-                if (texElement.isJsonPrimitive() && texElement.getAsJsonPrimitive().isNumber()) {
-                    int arrayIndex = texElement.getAsInt();
-                    textureReference = String.valueOf(arrayIndex);
-                    textureName = lookup.resolveByIndex(arrayIndex);
-                } else if (texElement.isJsonPrimitive() && texElement.getAsJsonPrimitive().isString()) {
-                    textureReference = texElement.getAsString();
-                    textureName = lookup.resolveByReference(textureReference);
-                }
-            }
-
-            faces.put(face, new BakedFace(
-                    uv[0], uv[1], uv[2], uv[3], rotation, textureReference, textureName
-            ));
-        }
-        return faces;
-    }
-
-    private static float[] parseUv(JsonArray uvArray) {
-        if (uvArray == null || uvArray.size() < 4) {
-            return new float[]{0f, 0f, 16f, 16f};
-        }
-        return new float[]{
-                uvArray.get(0).getAsFloat(),
-                uvArray.get(1).getAsFloat(),
-                uvArray.get(2).getAsFloat(),
-                uvArray.get(3).getAsFloat()
-        };
     }
 
     private static String choosePrimaryTexture(Map<CubeFace, BakedFace> faces) {
@@ -340,37 +421,182 @@ public class BbModelImporter {
         return null;
     }
 
-    private static String getString(JsonObject object, String key) {
-        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+    private static String extractTextureIdentifier(String rawValue) {
+        String normalized = rawValue.replace('\\', '/').trim();
+        if (normalized.isEmpty()) {
             return null;
         }
-        return object.get(key).getAsString();
+
+        int slashIndex = normalized.lastIndexOf('/');
+        String fileName = slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
+        if (fileName.endsWith(".png")) {
+            fileName = fileName.substring(0, fileName.length() - 4);
+        }
+        if (fileName.endsWith(".mcmeta")) {
+            fileName = fileName.substring(0, fileName.length() - 7);
+        }
+
+        if (fileName.isBlank()) {
+            return null;
+        }
+        return fileName.toLowerCase(Locale.ROOT);
     }
 
+    private static String nextStringOrNull(JsonReader json) throws Exception {
+        if (json.peek() == JsonToken.NULL) {
+            json.nextNull();
+            return null;
+        }
+        return json.nextString();
+    }
+
+    private static boolean nextBoolean(JsonReader json, boolean fallback) throws Exception {
+        JsonToken peek = json.peek();
+        if (peek == JsonToken.BOOLEAN) {
+            return json.nextBoolean();
+        }
+        if (peek == JsonToken.NULL) {
+            json.nextNull();
+            return fallback;
+        }
+        json.skipValue();
+        return fallback;
+    }
+
+    private static double nextDouble(JsonReader json, double fallback) throws Exception {
+        JsonToken peek = json.peek();
+        if (peek == JsonToken.NUMBER) {
+            return json.nextDouble();
+        }
+        if (peek == JsonToken.STRING) {
+            try {
+                return Double.parseDouble(json.nextString());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        if (peek == JsonToken.NULL) {
+            json.nextNull();
+            return fallback;
+        }
+        json.skipValue();
+        return fallback;
+    }
+
+    private static Vector3f nextVector3(JsonReader json) throws Exception {
+        if (json.peek() != JsonToken.BEGIN_ARRAY) {
+            json.skipValue();
+            return null;
+        }
+        float[] values = new float[3];
+        json.beginArray();
+        int index = 0;
+        while (json.hasNext() && index < 3) {
+            values[index++] = (float) json.nextDouble();
+        }
+        while (json.hasNext()) {
+            json.skipValue();
+        }
+        json.endArray();
+        return new Vector3f(values[0], values[1], values[2]);
+    }
+
+    private static float[] nextUv(JsonReader json) throws Exception {
+        if (json.peek() != JsonToken.BEGIN_ARRAY) {
+            json.skipValue();
+            return new float[]{0f, 0f, 16f, 16f};
+        }
+        float[] uv = new float[]{0f, 0f, 16f, 16f};
+        json.beginArray();
+        int index = 0;
+        while (json.hasNext() && index < 4) {
+            uv[index++] = (float) json.nextDouble();
+        }
+        while (json.hasNext()) {
+            json.skipValue();
+        }
+        json.endArray();
+        return uv;
+    }
+
+    private static String nextTextureReference(JsonReader json) throws Exception {
+        JsonToken peek = json.peek();
+        if (peek == JsonToken.NULL) {
+            json.nextNull();
+            return null;
+        }
+        if (peek == JsonToken.NUMBER) {
+            return String.valueOf((int) json.nextDouble());
+        }
+        if (peek == JsonToken.STRING) {
+            return json.nextString();
+        }
+        json.skipValue();
+        return null;
+    }
+
+    /** Streaming holder for one outliner group. */
+    private static final class RawGroup {
+        String uuid;
+        Vector3f origin;
+        Vector3f rotation;
+        boolean visibility = true;
+        final List<String> childElementUuids = new ArrayList<>();
+        final List<RawGroup> children = new ArrayList<>();
+    }
+
+    /** Streaming holder for one element. */
+    private static final class RawElement {
+        String uuid;
+        String name;
+        String type = "cube";
+        Vector3f from;
+        Vector3f to;
+        Vector3f origin;
+        Vector3f rotation;
+        float inflate = 0f;
+        boolean export = true;
+        int lightEmission = 0;
+        final Map<CubeFace, RawFace> faces = new EnumMap<>(CubeFace.class);
+    }
+
+    /** Streaming holder for one element face. */
+    private static final class RawFace {
+        float[] uv = {0f, 0f, 16f, 16f};
+        int rotation = 0;
+        String textureReference;
+    }
+
+    /**
+     * Texture index/reference table built during streaming. Identifiers are deduplicated
+     * so the same texture name repeating across faces/cubes shares one {@code String}.
+     */
     static final class TextureLookup {
 
         private final Map<String, String> byId = new HashMap<>();
         private final Map<Integer, String> byIndex = new HashMap<>();
+        private final Map<String, String> dedup = new HashMap<>();
+        private final List<int[]> defaults = new ArrayList<>();
 
-        void parse(JsonArray textures) {
-            int arrayIndex = 0;
-            for (JsonElement textureEntry : textures) {
-                if (!textureEntry.isJsonObject()) {
-                    arrayIndex++;
-                    continue;
-                }
-                JsonObject texture = textureEntry.getAsJsonObject();
-                String id = getString(texture, "id");
-                String extracted = extractTextureIdentifier(texture);
+        void beginParse() {
+            byId.clear();
+            byIndex.clear();
+            dedup.clear();
+            defaults.clear();
+        }
 
-                if (extracted != null && !extracted.isBlank()) {
-                    byIndex.put(arrayIndex, extracted);
-                    if (id != null && !id.isBlank()) {
-                        byId.put(id, extracted);
-                        byId.put("#" + id, extracted);
-                    }
-                }
-                arrayIndex++;
+        void addTexture(int arrayIndex, String id, String extracted, boolean useAsDefault, boolean particle) {
+            if (extracted == null || extracted.isBlank()) {
+                return;
+            }
+            String canonical = dedup.computeIfAbsent(extracted, key -> key.intern());
+            byIndex.put(arrayIndex, canonical);
+            if (id != null && !id.isBlank()) {
+                byId.put(id, canonical);
+                byId.put("#" + id, canonical);
+            }
+            if (useAsDefault || particle) {
+                defaults.add(new int[]{arrayIndex, useAsDefault ? 1 : 0, particle ? 1 : 0});
             }
         }
 
@@ -387,9 +613,49 @@ public class BbModelImporter {
                 return direct;
             }
             if (reference.startsWith("#")) {
-                return byId.get(reference.substring(1));
+                String stripped = reference.substring(1);
+                direct = byId.get(stripped);
+                if (direct != null) {
+                    return direct;
+                }
+                reference = stripped;
+            }
+            // Numeric references are indices into the textures array.
+            if (!reference.isEmpty()) {
+                boolean digits = true;
+                for (int i = 0; i < reference.length(); i++) {
+                    char c = reference.charAt(i);
+                    if (c < '0' || c > '9') {
+                        digits = false;
+                        break;
+                    }
+                }
+                if (digits) {
+                    try {
+                        String byIdx = byIndex.get(Integer.parseInt(reference));
+                        if (byIdx != null) {
+                            return byIdx;
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // out of range int — fall through
+                    }
+                }
             }
             return byId.get("#" + reference);
+        }
+
+        /** Index of the default texture (use_as_default/particle), or -1. */
+        int defaultIndex() {
+            int best = -1;
+            int bestRank = -1;
+            for (int[] entry : defaults) {
+                int rank = entry[1] > 0 ? 2 : 1; // prefer use_as_default over particle
+                if (rank > bestRank) {
+                    bestRank = rank;
+                    best = entry[0];
+                }
+            }
+            return best;
         }
 
         Map<String, String> toIdMap() {
@@ -400,34 +666,6 @@ public class BbModelImporter {
                 }
             }
             return result;
-        }
-
-        private static String extractTextureIdentifier(JsonObject texture) {
-            String[] keys = {"path", "relative_path", "name"};
-            for (String key : keys) {
-                String value = getString(texture, key);
-                if (value == null || value.isBlank()) {
-                    continue;
-                }
-                String normalized = value.replace('\\', '/').trim();
-                if (normalized.isEmpty()) {
-                    continue;
-                }
-
-                int slashIndex = normalized.lastIndexOf('/');
-                String fileName = slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
-                if (fileName.endsWith(".png")) {
-                    fileName = fileName.substring(0, fileName.length() - 4);
-                }
-                if (fileName.endsWith(".mcmeta")) {
-                    fileName = fileName.substring(0, fileName.length() - 7);
-                }
-
-                if (!fileName.isBlank()) {
-                    return fileName.toLowerCase(Locale.ROOT);
-                }
-            }
-            return null;
         }
     }
 }
