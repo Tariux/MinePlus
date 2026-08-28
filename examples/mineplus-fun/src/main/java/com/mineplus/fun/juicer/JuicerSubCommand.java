@@ -1,4 +1,4 @@
-package com.mineplus.game.juicer;
+package com.mineplus.fun.juicer;
 
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
@@ -37,12 +37,12 @@ public final class JuicerSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/mineplus juicer <place|remove|upgrade|give>";
+        return "/juicer <place|remove|upgrade|give>";
     }
 
     @Override
     public String permission() {
-        return "mineplus.admin.juicer";
+        return "mineplusfun.admin.juicer";
     }
 
     @Override

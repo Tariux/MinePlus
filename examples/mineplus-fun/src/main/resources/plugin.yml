@@ -1,0 +1,18 @@
+name: MineplusFun
+version: ${version}
+main: com.mineplus.fun.MineplusFunPlugin
+api-version: '1.21'
+author: Tariush
+
+# Hard dependency: the Core engine must be present and enabled first.
+depend: [Mineplus]
+
+commands:
+  juicer:
+    description: Juicer machine controls (MineplusFun module)
+    usage: /juicer <place|remove|upgrade|give>
+
+permissions:
+  mineplusfun.admin.juicer:
+    description: Allows using Juicer controls
+    default: op

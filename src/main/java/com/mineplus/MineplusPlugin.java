@@ -13,8 +13,6 @@ import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
 import com.mineplus.infrastructure.core.gui.InfrastructureGuiListener;
 import com.mineplus.infrastructure.listener.InfrastructureListener;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
-import com.mineplus.game.juicer.JuicerFeature;
-import com.mineplus.game.juicer.JuicerSubCommand;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -24,7 +22,6 @@ public final class MineplusPlugin extends JavaPlugin {
     private PluginContext context;
     private CommandRouter commandRouter;
     private VirtualBlockManager virtualBlockManager;
-    private JuicerFeature juicerFeature;
     private ConfigManager configManager;
 
     @Override
@@ -40,8 +37,6 @@ public final class MineplusPlugin extends JavaPlugin {
         virtualBlockManager.loadModels(this);
 
         context = PluginContext.bootstrap(this, virtualBlockManager);
-        juicerFeature = new JuicerFeature(this, context);
-        juicerFeature.enable();
         context.finalizeSetup();
 
         registerCommand();
@@ -59,7 +54,6 @@ public final class MineplusPlugin extends JavaPlugin {
         }
 
         commandRouter = null;
-        juicerFeature = null;
         context = null;
         instance = null;
         virtualBlockManager = null;
@@ -77,7 +71,6 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new StatusSubCommand(context));
         commandRouter.register(new ReloadSubCommand(context));
         commandRouter.register(new ModelSubCommand(context));
-        commandRouter.register(new JuicerSubCommand(context));
 
         command.setExecutor(commandRouter);
         command.setTabCompleter(commandRouter);
@@ -97,6 +90,15 @@ public final class MineplusPlugin extends JavaPlugin {
 
     public static MineplusPlugin getInstance() {
         return instance;
+    }
+
+    /**
+     * Public entry point for external modules. Returns the live {@link PluginContext}
+     * so dependent plugins can register multiblocks, recipes, GUIs, hooks, and items
+     * through the Core API without being part of the Core build.
+     */
+    public PluginContext getPluginContext() {
+        return context;
     }
 
     /** Re-reads settings.mp.yml and applies virtual-rendering settings before a model reload. */

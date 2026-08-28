@@ -1,12 +1,11 @@
-package com.mineplus.game.juicer;
+package com.mineplus.fun.juicer;
 
-import com.mineplus.MineplusPlugin;
+import com.mineplus.fun.juicer.gui.JuicerGui;
+import com.mineplus.fun.juicer.items.CarrotJuiceItemDefinition;
+import com.mineplus.fun.juicer.items.MelonJuiceItemDefinition;
 import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
-import com.mineplus.game.juicer.gui.JuicerGui;
-import com.mineplus.game.juicer.items.CarrotJuiceItemDefinition;
-import com.mineplus.game.juicer.items.MelonJuiceItemDefinition;
-import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,13 +13,21 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.java.JavaPlugin;
 
+/**
+ * Wires the Juicer game feature into the Mineplus Core engine.
+ *
+ * <p>Resources (bbmodels, multiblock + recipe JSON) are shipped inside this module's jar and
+ * copied into the <em>Core's</em> data folder so the Core's existing loaders pick them up.
+ * A {@code reloadAll()} then loads them without restarting the server.
+ */
 public final class JuicerFeature {
 
-    private final MineplusPlugin plugin;
+    private final JavaPlugin plugin;
     private final PluginContext context;
 
-    public JuicerFeature(MineplusPlugin plugin, PluginContext context) {
+    public JuicerFeature(JavaPlugin plugin, PluginContext context) {
         this.plugin = plugin;
         this.context = context;
     }
@@ -52,32 +59,35 @@ public final class JuicerFeature {
 
         context.infrastructureApi().registerHook(JuicerKeys.MACHINE_ID, new MultiBlockHook() {
             @Override
-            public void onInteract(com.mineplus.infrastructure.core.multiblock.MultiBlockInstance instance, Player actor) {
+            public void onInteract(MultiBlockInstance instance, Player actor) {
                 actor.sendMessage(ChatColor.GRAY + "Juicer level " + instance.level() + " ready.");
             }
         });
+
+        // Load the freshly installed definitions into the Core engine.
+        context.jsonInfrastructureApi().reloadAll();
     }
 
     private void installDefaultResource(String classpathResource, String dataRelativePath, boolean overwrite) {
-        File target = new File(plugin.getDataFolder(), dataRelativePath);
+        File target = new File(context.plugin().getDataFolder(), dataRelativePath);
         if (target.exists() && !overwrite) {
             return;
         }
 
         File parent = target.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            DebugLogger.warning("Failed to create folder for " + dataRelativePath);
+            plugin.getLogger().warning("Failed to create folder for " + dataRelativePath);
             return;
         }
 
         try (InputStream stream = plugin.getResource(classpathResource)) {
             if (stream == null) {
-                DebugLogger.warning("Missing embedded resource: " + classpathResource);
+                plugin.getLogger().warning("Missing embedded resource: " + classpathResource);
                 return;
             }
             Files.copy(stream, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException exception) {
-            DebugLogger.warning("Failed to install resource " + dataRelativePath + ": " + exception.getMessage());
+            plugin.getLogger().warning("Failed to install resource " + dataRelativePath + ": " + exception.getMessage());
         }
     }
 }

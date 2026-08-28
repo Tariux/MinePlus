@@ -1,7 +1,6 @@
-package com.mineplus.game.juicer.gui;
+package com.mineplus.fun.juicer.gui;
 
-import com.mineplus.MineplusPlugin;
-import com.mineplus.game.juicer.JuicerKeys;
+import com.mineplus.fun.juicer.JuicerKeys;
 import com.mineplus.infrastructure.core.gui.InfrastructureGui;
 import com.mineplus.infrastructure.core.gui.InteractiveInfrastructureGui;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
@@ -25,6 +24,7 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.java.JavaPlugin;
 
 public final class JuicerGui implements InfrastructureGui, InteractiveInfrastructureGui {
 
@@ -34,7 +34,7 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
     private static final int UPGRADE_SLOT = 22;
     private static final int SIZE = 27;
 
-    private final MineplusPlugin plugin;
+    private final JavaPlugin plugin;
     private final MultiBlockRegistry registry;
     private final MultiBlockLifecycleManager lifecycleManager;
     private final RecipeManager recipeManager;
@@ -42,7 +42,7 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
     private final Map<UUID, StoredContents> machineContents;
 
     public JuicerGui(
-            MineplusPlugin plugin,
+            JavaPlugin plugin,
             MultiBlockRegistry registry,
             MultiBlockLifecycleManager lifecycleManager,
             RecipeManager recipeManager,

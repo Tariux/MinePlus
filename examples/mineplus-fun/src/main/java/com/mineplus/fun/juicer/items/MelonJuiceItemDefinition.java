@@ -1,6 +1,6 @@
-package com.mineplus.game.juicer.items;
+package com.mineplus.fun.juicer.items;
 
-import com.mineplus.game.juicer.JuicerKeys;
+import com.mineplus.fun.juicer.JuicerKeys;
 import com.mineplus.infrastructure.definition.ItemCategory;
 import com.mineplus.infrastructure.definition.ItemDefinition;
 import java.util.List;

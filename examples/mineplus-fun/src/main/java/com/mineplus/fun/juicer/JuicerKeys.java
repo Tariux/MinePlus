@@ -1,4 +1,4 @@
-package com.mineplus.game.juicer;
+package com.mineplus.fun.juicer;
 
 public final class JuicerKeys {
 

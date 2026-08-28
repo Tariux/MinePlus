@@ -10,11 +10,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -37,13 +39,13 @@ public class VirtualBlockManager implements Listener {
     private static final String DISPLAY_TAG_PREFIX = "mineplus_vblock:";
     private static final Material BARRIER_MATERIAL = Material.BARRIER;
     private static final String MODELS_FOLDER = "models";
-    private static final String DEBUG_MODELS_FOLDER = "debug";
 
     private final Map<String, VirtualModel> loadedModels = new HashMap<>();
     private final Map<String, ModelMeta> modelMeta = new HashMap<>();
     private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
     private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
+    private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
@@ -96,6 +98,14 @@ public class VirtualBlockManager implements Listener {
             return ModelMeta.empty();
         }
         return modelMeta.getOrDefault(name.toLowerCase(Locale.ROOT), ModelMeta.empty());
+    }
+
+    /** Deterministic per-model texture-resolution report (keyed by texture name). */
+    public Map<String, TextureMaterialResolver.Resolution> getTextureReport(String name) {
+        if (name == null || name.isBlank()) {
+            return Map.of();
+        }
+        return textureReports.getOrDefault(name.toLowerCase(Locale.ROOT), Map.of());
     }
 
     public void registerModel(String name, VirtualModel model) {
@@ -225,6 +235,7 @@ public class VirtualBlockManager implements Listener {
     private void loadModelDefinitions() {
         loadedModels.clear();
         modelMeta.clear();
+        textureReports.clear();
         occupancyCalculator.clearCache();
         if (plugin == null) {
             return;
@@ -236,47 +247,30 @@ public class VirtualBlockManager implements Listener {
 
     private void loadExternalModelDefinitions(File pluginFolder) {
         File modelsFolder = new File(pluginFolder, MODELS_FOLDER);
-        if (!modelsFolder.exists() && !modelsFolder.mkdirs()) {
-            return;
-        }
-        File debugFolder = new File(modelsFolder, DEBUG_MODELS_FOLDER);
-        if (!debugFolder.exists()) {
-            debugFolder.mkdirs();
-        }
+        ModelImportCoordinator coordinator = new ModelImportCoordinator(
+                file -> modelKeyFromFile(modelsFolder, file), plugin.getLogger());
+        ModelImportCoordinator.LoadResult result = coordinator.importFolder(modelsFolder);
 
-        List<File> files = new ArrayList<>();
-        collectModelFiles(modelsFolder, files);
-        files.sort(java.util.Comparator.comparing(File::getPath));
-
-        int loaded = 0;
-        for (File file : files) {
-            String name = modelKeyFromFile(modelsFolder, file);
-            VirtualModel model = BbModelImporter.parse(name, file, plugin.getLogger());
-            if (model != null && !model.cubes().isEmpty()) {
-                registerModel(name, model, ModelMeta.load(file));
-                loaded++;
-            }
-        }
-
-        if (loaded > 0) {
-            DebugLogger.info("Loaded " + loaded + " external model(s) from " + modelsFolder.getPath());
+        for (ModelImportCoordinator.ModelEntry entry : result.entries()) {
+            VirtualModel model = entry.model();
+            registerModel(entry.key(), model, ModelMeta.load(entry.file()));
+            textureReports.put(entry.key(), resolveTextureReport(model));
         }
     }
 
-    private void collectModelFiles(File folder, List<File> output) {
-        File[] children = folder.listFiles();
-        if (children == null) {
-            return;
+    /**
+     * Deterministic per-model texture-resolution report. Builds the same tiered
+     * {@link TextureMaterialResolver} diagnostics already used elsewhere, but in a
+     * {@link LinkedHashMap} so ordering is stable across reloads (mirrors the
+     * FMM determinism fix where non-deterministic key order rewrote the resource
+     * pack hash every restart).
+     */
+    private Map<String, TextureMaterialResolver.Resolution> resolveTextureReport(VirtualModel model) {
+        Map<String, TextureMaterialResolver.Resolution> report = new LinkedHashMap<>();
+        for (String texture : model.textureNames()) {
+            report.put(texture, TextureMaterialResolver.resolveDetailed(texture));
         }
-        for (File child : children) {
-            if (child.isDirectory()) {
-                collectModelFiles(child, output);
-                continue;
-            }
-            if (child.getName().toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
-                output.add(child);
-            }
-        }
+        return report;
     }
 
     private String modelKeyFromFile(File baseFolder, File file) {

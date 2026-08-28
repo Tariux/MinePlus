@@ -97,11 +97,19 @@ public final class MultiBlockLinkingSystem {
     private void propagateSignal(MultiBlockSignal initial) {
         Deque<MultiBlockSignal> queue = new ArrayDeque<>();
         Set<UUID> visited = new HashSet<>();
+        // Routed ledger (FMM ProjectileTarget pattern): prevents the same
+        // (source, target, channel) pair from being delivered twice within one
+        // propagation, even when graph cycles would otherwise re-visit a target
+        // through a different path after the targetId guard has released it.
+        Set<SignalRoute> routed = new HashSet<>();
         queue.add(initial);
 
         while (!queue.isEmpty()) {
             MultiBlockSignal signal = queue.poll();
             if (signal.hopCount() > MAX_SIGNAL_HOPS || !visited.add(signal.targetId())) {
+                continue;
+            }
+            if (!routed.add(new SignalRoute(signal.sourceId(), signal.targetId(), signal.channel()))) {
                 continue;
             }
 
@@ -126,5 +134,9 @@ public final class MultiBlockLinkingSystem {
                 ));
             }
         }
+    }
+
+    /** Identity of a single signal delivery, used by the routede-ledger dedupe. */
+    private record SignalRoute(UUID source, UUID target, String channel) {
     }
 }

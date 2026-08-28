@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.mineplus'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+}
+
+dependencies {
+    // The Core engine, built from the parent project (run `gradle build` there first).
+    compileOnly files("../../build/libs/mineplus-1.0.0.jar")
+
+    // Core's compile-time dependencies are also required here so the Core API
+    // signatures resolve. At runtime the server provides paper/spigot.
+    compileOnly files(
+            "../../libs/paper-api-1.21.jar",
+            "../../libs/spigot-api-1.21.1.jar",
+            "../../libs/adventure-api-4.17.0.jar",
+            "../../libs/adventure-text-minimessage-4.17.0.jar",
+            "../../libs/adventure-key-4.17.0.jar",
+            "../../libs/adventure-platform-api-4.3.0.jar",
+            "../../libs/bungeecord-chat-1.20.jar",
+            "../../libs/joml-1.10.8.jar",
+            "../../libs/gson-2.13.2.jar",
+            "../../libs/item-nbt-api-plugin-2.15.6.jar",
+            "../../libs/sqlite-jdbc-3.45.1.0.jar"
+    )
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(21)
+}
+
+processResources {
+    inputs.property("version", project.version)
+    filteringCharset = 'UTF-8'
+
+    filesMatching("plugin.yml") {
+        expand(version: project.version)
+    }
+}

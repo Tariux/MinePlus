@@ -76,6 +76,7 @@ public class BbModelImporter {
 
         // Raw element capture (kept as lightweight value holders, not Gson DOM).
         List<RawElement> rawElements = new ArrayList<>();
+        List<RawAnchor> rawAnchors = new ArrayList<>();
         List<RawGroup> rootOutliner = new ArrayList<>();
         List<String> rootElementUuids = new ArrayList<>();
 
@@ -86,7 +87,7 @@ public class BbModelImporter {
             String fieldName = json.nextName();
             switch (fieldName) {
                 case "textures" -> parseTextures(json, textureLookup);
-                case "elements" -> parseElements(json, rawElements);
+                case "elements" -> parseElements(json, rawElements, rawAnchors);
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
                 case "resolution" -> resolution = parseResolution(json);
                 case "meta" -> modelFormat = parseMeta(json);
@@ -183,7 +184,21 @@ public class BbModelImporter {
             ));
         }
 
-        return new VirtualModel(name, bakedCubes, textureLookup.toIdMap(), resolution, modelFormat);
+        List<VectorAnchor> anchors = new ArrayList<>();
+        for (RawAnchor anchor : rawAnchors) {
+            Matrix4f parent = anchor.uuid != null
+                    ? new Matrix4f(elementTransforms.getOrDefault(anchor.uuid, new Matrix4f()))
+                    : new Matrix4f();
+            Matrix4f local = pivotRotation(anchor.origin, anchor.rotation);
+            Matrix4f combined = parent.mul(local, new Matrix4f());
+            anchors.add(new VectorAnchor(
+                    anchor.name,
+                    combined.getTranslation(new Vector3f()),
+                    combined.getUnnormalizedRotation(new Quaternionf())
+            ));
+        }
+
+        return new VirtualModel(name, bakedCubes, textureLookup.toIdMap(), resolution, modelFormat, anchors);
     }
 
     private static void parseTextures(JsonReader json, TextureLookup lookup) throws Exception {
@@ -227,7 +242,7 @@ public class BbModelImporter {
         json.endArray();
     }
 
-    private static void parseElements(JsonReader json, List<RawElement> output) throws Exception {
+    private static void parseElements(JsonReader json, List<RawElement> output, List<RawAnchor> anchors) throws Exception {
         json.beginArray();
         while (json.hasNext()) {
             if (json.peek() != JsonToken.BEGIN_OBJECT) {
@@ -255,6 +270,14 @@ public class BbModelImporter {
             }
             json.endObject();
             output.add(element);
+            if ("locator".equalsIgnoreCase(element.type) || "null_object".equalsIgnoreCase(element.type)) {
+                RawAnchor anchor = new RawAnchor();
+                anchor.uuid = element.uuid;
+                anchor.name = element.name != null && !element.name.isBlank() ? element.name : element.uuid;
+                anchor.origin = element.origin;
+                anchor.rotation = element.rotation;
+                anchors.add(anchor);
+            }
         }
         json.endArray();
     }
@@ -579,6 +602,14 @@ public class BbModelImporter {
         float[] uv = {0f, 0f, 16f, 16f};
         int rotation = 0;
         String textureReference;
+    }
+
+    /** Streaming holder for a {@code locator}/{@code null_object} anchor element. */
+    private static final class RawAnchor {
+        String uuid;
+        String name;
+        Vector3f origin;
+        Vector3f rotation;
     }
 
     /**

@@ -1,4 +1,4 @@
-package com.mineplus.game.juicer;
+package com.mineplus.fun.juicer;
 
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import org.bukkit.attribute.Attribute;

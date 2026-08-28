@@ -6,19 +6,16 @@ author: Tariush
 
 commands:
   mineplus:
-    description: Mineplus runtime administration command
-    usage: /mineplus <status|reload|model|juicer>
+    description: Mineplus Core runtime administration command
+    usage: /mineplus <status|reload|model>
 
 permissions:
   mineplus.admin.status:
-    description: Allows reading Mineplus runtime status
+    description: Allows reading Mineplus Core runtime status
     default: op
   mineplus.admin.reload:
-    description: Allows reloading Mineplus configs and models
+    description: Allows reloading Mineplus Core configs and models
     default: op
   mineplus.admin.model:
-    description: Allows administrating active Mineplus model instances
-    default: op
-  mineplus.admin.juicer:
-    description: Allows using Juicer test controls
+    description: Allows administrating active Mineplus Core model instances
     default: op
