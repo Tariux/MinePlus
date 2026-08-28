@@ -1,32 +1,54 @@
-# Mineplus Config Reference
+# ⚙️ Configuration Reference
 
-Mineplus is a **zero-content core**. Nothing is added to gameplay unless you provide JSON files or call the API.
+> **Navigate:** [Docs Home](README.md) • [Developer API](developer-api.md) • [Extension Workflows](extension-workflows.md) • [Examples](../examples/README.md)
 
-Runtime folders (inside `plugins/Mineplus/`):
-- `models/*.bbmodel`
-- `multiblocks/*.json`
-- `recipes/*.json`
+Mineplus is a **zero-content core**: nothing is added to gameplay unless you provide JSON files or call the API. This reference documents every file format and setting you can use to fill that canvas.
 
-Reload from game with `/mineplus reload`.
+**Runtime folders** (inside `plugins/Mineplus/`):
+
+```
+plugins/Mineplus/
+├── settings.mp.yml        ← engine settings (auto-generated)
+├── models/*.bbmodel       ← Blockbench models (nested folders supported)
+├── multiblocks/*.json     ← machine type definitions
+├── recipes/*.json         ← machine recipe definitions
+└── infrastructure.db      ← SQLite persistence (auto-managed)
+```
+
+Reload everything from game with `/mineplus reload all`.
+
+**Contents:** [Multiblock JSON](#1-multiblock-type-json) · [Recipe JSON](#2-machine-recipe-json) · [Models](#3-model-files-bbmodel) · [settings.mp.yml](#settingsmpyml-rendering-engine) · [Commands](#admin-command-reference)
+
+---
 
 ## 1) Multiblock Type JSON
 
-Path: `plugins/Mineplus/multiblocks/<file>.json`
+**Path:** `plugins/Mineplus/multiblocks/<file>.json`
+**Live example:** [`examples/config-based/furnace_upgradable_multiblock.json`](../examples/config-based/furnace_upgradable_multiblock.json) • the [Cannon definition](../examples/mineplus-fun/src/main/resources/defaults/multiblocks/cannon.json)
 
-Top-level fields:
-- `id` (required): unique machine type id.
-- `name` (optional): display name, defaults to `id`.
-- `gui` (optional): key used by `InfrastructureGuiManager`.
-- `levels` (required): object where each key is an integer level.
+### Top-level fields
 
-Per-level fields:
-- `model` (optional): relative or absolute path to `.bbmodel`.
-- `speed` (optional, default `1.0`): crafting speed multiplier applied to running processes. `2.0` halves the time a recipe takes; a mid-process upgrade speeds up the running process immediately.
-- `durability` (optional, default `1.0`): not yet consumed by the engine; reserved for future use.
-- `upgradeCost` (optional): object of `itemKey -> amount`.
-- `guiOptions` (optional): string map for custom GUI data.
+| Field | Required | Description |
+|---|---|---|
+| `id` | ✅ | Unique machine type id (snake_case convention, e.g. `cannon`, `juicer_machine`) |
+| `name` | optional | Display name; defaults to `id` |
+| `gui` | optional | GUI key opened automatically on right-click (see note below) |
+| `levels` | ✅ | Object where each key is an integer level |
 
-Example:
+> **When to set `gui`:** if present, the core opens that GUI on *every* right-click. For conditional interactions (e.g. the Cannon: torch fires, empty hand opens the menu) omit `gui` and let a registered hook decide — see the [Developer API](developer-api.md) and the [Cannon hook](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonFireHook.java).
+
+### Per-level fields
+
+| Field | Default | Description |
+|---|---|---|
+| `model` | — | Relative (from `plugins/Mineplus/`) or absolute path to a `.bbmodel` |
+| `speed` | `1.0` | Crafting speed multiplier. `2.0` halves recipe time; a mid-process upgrade speeds the running process immediately |
+| `durability` | `1.0` | Reserved for future use — not yet consumed by the engine |
+| `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
+| `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
+
+### Example
+
 ```json
 {
   "id": "crusher",
@@ -37,42 +59,41 @@ Example:
       "model": "models/crusher_lv1.bbmodel",
       "speed": 1.0,
       "durability": 100.0,
-      "upgradeCost": {
-        "core_plate": 8
-      },
-      "guiOptions": {
-        "title": "Crusher I"
-      }
+      "upgradeCost": { "core_plate": 8 },
+      "guiOptions": { "title": "Crusher I" }
     },
     "2": {
       "model": "models/crusher_lv2.bbmodel",
       "speed": 1.35,
       "durability": 160.0,
-      "upgradeCost": {
-        "core_plate": 16
-      }
+      "upgradeCost": { "core_plate": 16 }
     }
   }
 }
 ```
 
+---
+
 ## 2) Machine Recipe JSON
 
-Path: `plugins/Mineplus/recipes/<file>.json`
+**Path:** `plugins/Mineplus/recipes/<file>.json`
+**Live example:** [`examples/config-based/furnace_machine_recipes.json`](../examples/config-based/furnace_machine_recipes.json)
 
-Loader supports either:
-- a single recipe object, or
-- `{ "recipes": [ ... ] }`
+The loader accepts either a single recipe object or a `{ "recipes": [ ... ] }` wrapper.
 
-Recipe fields:
-- `id` (required): unique recipe id.
-- `machine` (required): multiblock type id.
-- `level` (optional, default `1`): minimum machine level.
-- `craftTimeTicks` (optional, default `20`): base duration in ticks when the recipe is run as a timed process (see `startProcess` in the developer API). The level's `speed` multiplier scales it. Processes pause in unloaded chunks and survive restarts.
-- `input` (optional): object `key -> amount`.
-- `output` (optional): object `key -> amount`.
+### Recipe fields
 
-Example:
+| Field | Default | Description |
+|---|---|---|
+| `id` | ✅ required | Unique recipe id |
+| `machine` | ✅ required | Target multiblock type id |
+| `level` | `1` | Minimum machine level |
+| `craftTimeTicks` | `20` | Base duration in ticks when run as a timed process (scaled by the level's `speed`; processes pause in unloaded chunks and survive restarts — see [`startProcess`](developer-api.md#timed-crafting-processes)) |
+| `input` | `{}` | Object `key -> amount` |
+| `output` | `{}` | Object `key -> amount` |
+
+### Example
+
 ```json
 {
   "recipes": [
@@ -81,43 +102,54 @@ Example:
       "machine": "crusher",
       "level": 1,
       "craftTimeTicks": 100,
-      "input": {
-        "raw_iron": 1
-      },
-      "output": {
-        "iron_dust": 2
-      }
+      "input": { "raw_iron": 1 },
+      "output": { "iron_dust": 2 }
     }
   ]
 }
 ```
 
+---
+
 ## 3) Model Files (`.bbmodel`)
 
-Path: `plugins/Mineplus/models/*.bbmodel`
+**Path:** `plugins/Mineplus/models/*.bbmodel` (scanned recursively — nested folders supported)
 
-Notes:
-- Relative `model` paths are resolved from `plugins/Mineplus/`.
+- Relative `model` paths in multiblock JSON are resolved from `plugins/Mineplus/`.
 - Keep model file names stable; active instances rely on type/level model resolution.
 - Use `/mineplus reload models` after edits.
-- The importer applies cube rotation around each cube `origin` (pivot) and supports outliner group hierarchy transforms.
-- `inflate` is supported and included in final cube dimensions.
-- Face `uv` and face `rotation` are parsed for all six directions (`north`, `south`, `east`, `west`, `up`, `down`).
-- Barrier occupancy is computed from transformed cube volumes (union per cube), not from one full model bounding box, so empty internal spaces stay free.
+
+### What the importer supports
+
+| Feature | Status |
+|---|---|
+| Cube rotation around each cube's `origin` (pivot) | ✅ |
+| Outliner group hierarchy transforms | ✅ |
+| `inflate` | ✅ included in final cube dimensions |
+| Per-face `uv` + `rotation` (all six directions) | ✅ parsed & used for material orientation |
+| Negative-coordinate geometry | ✅ preserved |
+| `light_emission` | ✅ per-cube display brightness |
+| Animations / timeline / embedded texture bitmaps | ❌ skipped (dead branches are never even allocated) |
+
+**Barrier occupancy is computed from transformed cube volumes** (union per cube), not from one full model bounding box — empty internal spaces stay free, so hollow structures are genuinely walkable.
+
+---
 
 ### Texture Engine Architecture
 
-Mineplus renders models using Minecraft `BlockDisplay` entities. Each cube in the model becomes one `BlockDisplay` entity, which can only show a single Minecraft block material. This is the fundamental constraint of the system.
+Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes one `BlockDisplay`, which can only show a single Minecraft block material — this is the fundamental constraint of the "completely vanilla, no resource pack" approach, and everything below follows from it.
 
-**How it works:**
+**How a cube gets its material:**
 
 1. The importer reads the `.bbmodel` `textures` array, extracting each texture's filename (from `path`, `relative_path`, or `name` fields, in that priority order).
-2. For each cube, the importer reads the face `texture` reference — which is the **integer array index** into the `textures` array (standard Blockbench format).
-3. The **primary texture** of a cube is chosen from the first resolved face texture, checked in order: north → south → east → west → up → down.
-4. That primary texture name is mapped to a Minecraft `Material` via `TextureMaterialResolver`.
-5. If the texture name doesn't match any known block, the fallback is `WHITE_CONCRETE`.
+2. For each cube, it reads the face `texture` reference — the **integer array index** into the `textures` array (standard Blockbench format).
+3. The **primary texture** is chosen from the first resolved face texture, checked in order: north → south → east → west → up → down.
+4. The primary texture name is mapped to a Minecraft `Material` via `TextureMaterialResolver` (curated map → direct match → suffix-strip → aliases → fuzzy → fallback).
+5. Unmatched names fall back to `WHITE_CONCRETE` and are reported per model via `/mineplus model info`.
 
-**Key limitation:** Each cube renders as exactly one Minecraft block material. Per-face texture mixing, UV crops/subsections, and UV rotation are parsed and stored but cannot be reproduced by the block-display renderer.
+**Key limitation:** each cube renders as exactly one Minecraft block material. Per-face texture mixing, UV crops, and UV rotation are analyzed and used for *material orientation* (directional blocks like furnaces or logs get their `facing`/`axis` block states set correctly), but arbitrary per-face pixel art requires a client resource pack and is out of scope.
+
+---
 
 ### Blockbench Designer Guidelines
 
@@ -127,24 +159,25 @@ Follow these rules when creating `.bbmodel` files for Mineplus:
 
 2. **Texture assignment is per-cube.** Assign the same Minecraft block texture to **all six faces** of each cube. The engine picks the first face with a valid texture and uses that one material for the entire cube.
 
-3. **Name your texture files after the Minecraft block texture.** The engine extracts the filename from the texture entry and maps it to a `Material`.
-   - Example: use `bookshelf.png`, `purpur_pillar.png`, `concrete_brown.png`.
-   - The `.png` extension is stripped automatically.
-   - Paths like `C:\...\blocks\bookshelf.png` or `minecraft-textures/blocks/bookshelf.png` work — only the final filename matters.
+3. **Name your texture files after the Minecraft block texture.** Only the final filename matters — `C:\...\blocks\bookshelf.png` and `minecraft-textures/blocks/bookshelf.png` both resolve as `bookshelf`. The `.png` extension is stripped automatically.
+   - ✅ `bookshelf.png`, `purpur_pillar.png`, `concrete_brown.png`
 
-4. **Use actual Minecraft block textures** extracted from the game's resource pack. Place them anywhere on disk and import them into Blockbench. The path/filename metadata is what Mineplus reads.
+4. **Use actual Minecraft block textures** extracted from the game's resource pack. Import them into Blockbench from anywhere on disk — Mineplus reads the path/filename metadata.
 
-5. **If you need different textures on different parts** of your model, split them into separate cubes. Each cube = one material.
+5. **Different texture on a different part? Split it into a separate cube.** One cube = one material.
 
-6. **Avoid the generic "texture" name.** A texture file named just `texture` or `texture.png` won't resolve to any block material and will fall back to `WHITE_CONCRETE`.
+6. **Avoid the generic "texture" name.** A file named just `texture` or `texture.png` won't resolve to any block material and falls back to `WHITE_CONCRETE`.
 
-7. **Model geometry** (position, scale, rotation, pivot, inflate, outliner groups) is all fully supported. Only the texture → material mapping has restrictions.
+7. **Model geometry is fully free.** Position, scale, rotation, pivots, inflate, outliner groups — all supported. Only the texture → material mapping has restrictions.
+
+---
 
 ### Allowed Texture Names
 
-The following texture filenames are recognized and mapped to Minecraft block materials. Use these exact names (without `.png`) for your texture files in Blockbench.
+The following texture filenames are recognized and mapped to Minecraft block materials (extension optional). Any valid Minecraft block material name also works directly (`oak_planks`, `white_concrete`, `diamond_block`) — matched case-insensitively against the Bukkit `Material` enum.
 
-Any Minecraft block material name also works directly (e.g., `oak_planks`, `diamond_block`). The list below covers **aliases and multi-face textures** that need special handling.
+<details>
+<summary><strong>📋 Click to expand the full texture catalog</strong></summary>
 
 #### Stone & Variants
 `stone`, `granite`, `polished_granite`, `diorite`, `polished_diorite`, `andesite`, `polished_andesite`, `deepslate`, `cobbled_deepslate`, `polished_deepslate`, `calcite`, `tuff`, `dripstone_block`, `cobblestone`, `mossy_cobblestone`, `smooth_stone`
@@ -158,7 +191,7 @@ Any Minecraft block material name also works directly (e.g., `oak_planks`, `diam
 #### Sandstone
 `sandstone`, `sandstone_top`, `sandstone_bottom`, `chiseled_sandstone`, `cut_sandstone`, `red_sandstone`, `red_sandstone_top`, `red_sandstone_bottom`, `chiseled_red_sandstone`, `cut_red_sandstone`
 
-#### Wood (all wood types: oak, spruce, birch, jungle, acacia, dark_oak, mangrove, cherry, bamboo, crimson, warped)
+#### Wood (all types: oak, spruce, birch, jungle, acacia, dark_oak, mangrove, cherry, bamboo, crimson, warped)
 `{wood}_planks`, `{wood}_log`, `{wood}_log_top`, `stripped_{wood}_log`, `stripped_{wood}_log_top`, `{wood}_stem`, `{wood}_stem_top`
 
 #### Ores
@@ -212,22 +245,100 @@ Any Minecraft block material name also works directly (e.g., `oak_planks`, `diam
 #### Misc
 `lodestone_top`, `lodestone_side`, `respawn_anchor_top`, `respawn_anchor_side0`
 
-#### Direct Material Names
-Any valid Minecraft block material name also works directly (e.g., `oak_planks`, `white_concrete`, `diamond_block`). The name is matched case-insensitively against the Bukkit `Material` enum. If it is a valid block material, it will be used.
+</details>
+
+---
+
+### Per-Model Overrides (`.meta.json`)
+
+Any global rendering setting can be overridden per model. Place a `models/<key>.meta.json` next to the model file:
+
+```json
+{
+  "originMode": "GRID",
+  "collisionMode": "SURFACE"
+}
+```
+
+Omitted fields fall back to the global `settings.mp.yml` values.
+
+---
+
+### Anchor Conventions (Origin Modes)
+
+| Mode | Meaning |
+|---|---|
+| `AUTO` | Detect from the model's `meta.model_format` and geometry extent — the default |
+| `CENTER` | Blockbench free-format: pixel (0,0,0) is the **center** of the anchor block at its base; a full block spans [-8..8] horizontally, [0..16] vertically |
+| `GRID` | Vanilla `java_block` convention: pixel (0,0,0) is the **north-west-bottom corner**; a full block spans [0..16] on every axis |
+
+`AUTO` resolves `java_block`/`java_item`/`modded_block` formats to `GRID` (unless the geometry is center-authored) and everything else to `CENTER`.
+
+---
 
 ### Internal Debug Models
 
-- Use `plugins/Mineplus/models/debug/` for raw importer/transform debug models.
-- The loader scans `plugins/Mineplus/models/` recursively, so nested folders are supported.
-- Model keys include folder path (example: `models/debug/test_rotation.bbmodel` -> key `debug/test_rotation`).
-- Use `/mineplus model models` to list loaded keys and `/mineplus model debugspawn <modelKey>` to spawn one quickly.
+- Use `plugins/Mineplus/models/debug/` for throwaway importer/transform experiments — keeps production model keys clean.
+- The loader scans `plugins/Mineplus/models/` recursively; model keys include the folder path (e.g. `models/debug/test_rotation.bbmodel` → key `debug/test_rotation`).
+- `/mineplus model models` lists loaded keys; `/mineplus model debugspawn <modelKey>` spawns one on the looked-at face.
 
-## 4) Admin Command Reference
+---
 
-- `/mineplus status`
-- `/mineplus reload [all|models|multiblocks|recipes]`
-- `/mineplus model list [limit]`
-- `/mineplus model inspect [look|uuid]`
-- `/mineplus model remove [look|uuid]`
-- `/mineplus model respawn [look|uuid]`
-- `/mineplus model setlevel <look|uuid> <level>`
+## `settings.mp.yml` (Rendering Engine)
+
+Auto-generated on first start at `plugins/Mineplus/settings.mp.yml`. Controls the global bbmodel → BlockDisplay pipeline; per-model `.meta.json` overrides take precedence.
+
+```yaml
+# Toggle additional detailed debug logs across multiblock lifecycle,
+# rendering pipeline, persistence transactions, and linking events.
+ADDITIONAL_DEBUG_LOGS: false
+
+VIRTUAL_RENDERING:
+  # Collision proxy voxelization: AABB | GEOMETRY | SURFACE
+  COLLISION_MODE: GEOMETRY
+  # Cell shrink epsilon for geometry contact tests.
+  COLLISION_EPSILON: 0.001
+  # Behavior when a collision cell is not air: SKIP | STRICT
+  COLLISION_NON_AIR_POLICY: SKIP
+  # Snap placement rotations to the 24 grid orientations.
+  ROTATION_SNAP: true
+  # Max deviation from the nearest grid orientation before a warning is logged (degrees).
+  ROTATION_SNAP_THRESHOLD_DEGREES: 5
+  # Emit per-face material plates for mixed-material cubes.
+  PER_FACE_RENDERING: true
+  # Anchor convention: AUTO (detect) | CENTER | GRID
+  ORIGIN_MODE: AUTO
+```
+
+| Key | Values | Effect |
+|---|---|---|
+| `ADDITIONAL_DEBUG_LOGS` | `true` / `false` | Verbose lifecycle, rendering, persistence, and linking logs. Off by default; persistence errors are always logged regardless |
+| `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier voxelization: per-cube SAT (default), interior hollowing for walk-in structures, or legacy full-AABB fill |
+| `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
+| `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |
+| `ROTATION_SNAP` | `true` / `false` | Snap placement rotations to the 24 orientation-preserving axis permutations |
+| `ROTATION_SNAP_THRESHOLD_DEGREES` | degrees | Deviation beyond this logs a `DebugLogger` warning |
+| `PER_FACE_RENDERING` | `true` / `false` | Emit per-face material plates for mixed-material cubes (better texture fidelity, more display entities) |
+| `ORIGIN_MODE` | `AUTO` / `CENTER` / `GRID` | Default anchor convention — see [Origin Modes](#anchor-conventions-origin-modes) |
+
+---
+
+## Admin Command Reference
+
+| Command | Description |
+|---|---|
+| `/mineplus status` | Runtime overview: types, instances, processes |
+| `/mineplus reload [all\|models\|multiblocks\|recipes]` | Hot-reload content without a restart |
+| `/mineplus model list [limit]` | List active instances |
+| `/mineplus model inspect [look\|uuid]` | Full diagnostics: cubes, textures, occupancy layers, cache status |
+| `/mineplus model remove [look\|uuid]` | Remove an instance |
+| `/mineplus model respawn [look\|uuid]` | Respawn an instance's rendering |
+| `/mineplus model setlevel <look\|uuid> <level>` | Force an instance's level |
+| `/mineplus model models` | List all loaded model keys |
+| `/mineplus model debugspawn <modelKey>` | Spawn a raw model on the looked-at face |
+
+**Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model` — all default to op.
+
+---
+
+> ➡️ **Next:** wiring behavior to these definitions — the [Developer API](developer-api.md), or pick a ready-made path in [Extension Workflows](extension-workflows.md).
