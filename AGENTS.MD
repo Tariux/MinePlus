@@ -31,3 +31,7 @@ Configuration and logging:
 - `/mineplus model info <key>` reports cube count, display estimate, resolved texture table, occupancy cells with ASCII layer dumps, and cache status.
 
 Current architecture direction is stabilization/alignment of the infrastructure layer; prefer extending via `InfrastructureApi` + engine managers instead of ad-hoc listeners.
+
+Module layer (features live outside the Core): `examples/mineplus-fun` is the canonical reference module — a separate plugin (`depend: [Mineplus]`) containing the Juicer (recipes/GUI/custom items) and the Cannon (conditional interaction: torch fires, else opens menu; persistent TNT ammo in `stateData`; rotation-aware placement via `createMultiBlock`/`placeMultiBlock`). Its `DEVELOPMENT_PROMPT.md` is the authoritative module-building recipe (verified Core behavior, GUI patterns, API traps). Keep the Core pristine: no feature code, no feature resources, no feature commands.
+
+User documentation lives in `docs/` (`README.md` hub, `config-reference.md`, `developer-api.md`, `extension-workflows.md`) with assets in `docs/assets/`; the root `README.md` is the GitHub presentation. Keep these in sync when behavior changes.
