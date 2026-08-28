@@ -2,6 +2,7 @@ package com.mineplus;
 
 import com.mineplus.config.ConfigManager;
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.UpdateChecker;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.CommandRouter;
 import com.mineplus.infrastructure.command.sub.ModelSubCommand;
@@ -15,6 +16,7 @@ import com.mineplus.infrastructure.listener.InfrastructureListener;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bstats.bukkit.Metrics;
 
 public final class MineplusPlugin extends JavaPlugin {
 
@@ -31,6 +33,8 @@ public final class MineplusPlugin extends JavaPlugin {
         configManager = new ConfigManager(this);
         configManager.loadConfig();
         DebugLogger.init(configManager.getConfig(), getLogger());
+        UpdateChecker.check(this, configManager.getConfig().getUpdateCheckResourceId());
+        new Metrics(this, 33702);
 
         virtualBlockManager = new VirtualBlockManager();
         virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());

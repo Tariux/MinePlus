@@ -1,13 +1,32 @@
-.gradle
-gradle
-build
-node_modules
-scripts
-libs
-package.json
-.notes
-models
-textures
-.kilo
-tmp
-temp
+# Gradle caches and build output
+.gradle/
+build/
+
+# IDE folders
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local AI/tooling session state
+.kilo/
+.notes/
+
+# Local scratch folders (incoming models, throwaway assets)
+tmp/
+temp/
+
+# Demo media kept out of git (18 MB GIF lives in docs/assets/ on disk;
+# upload to platform galleries instead) — re-enable if you host them elsewhere
+docs/assets/
+
+# Local dev scripts and node tooling (reference a server outside this repo)
+/scripts/
+/package.json
+/node_modules/

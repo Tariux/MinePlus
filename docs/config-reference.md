@@ -293,6 +293,11 @@ Auto-generated on first start at `plugins/Mineplus/settings.mp.yml`. Controls th
 # rendering pipeline, persistence transactions, and linking events.
 ADDITIONAL_DEBUG_LOGS: false
 
+# Update checker: compares the installed version against the SpigotMC
+# resource page. 0 disables the check entirely.
+UPDATE_CHECKER:
+  RESOURCE_ID: 0
+
 VIRTUAL_RENDERING:
   # Collision proxy voxelization: AABB | GEOMETRY | SURFACE
   COLLISION_MODE: GEOMETRY
@@ -313,6 +318,7 @@ VIRTUAL_RENDERING:
 | Key | Values | Effect |
 |---|---|---|
 | `ADDITIONAL_DEBUG_LOGS` | `true` / `false` | Verbose lifecycle, rendering, persistence, and linking logs. Off by default; persistence errors are always logged regardless |
+| `UPDATE_CHECKER.RESOURCE_ID` | numeric | SpigotMC resource id for the optional version check on startup; `0` (default) disables it |
 | `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier voxelization: per-cube SAT (default), interior hollowing for walk-in structures, or legacy full-AABB fill |
 | `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
 | `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |

@@ -1,8 +1,0 @@
-[Mineplus] [INFO] Virtual model definitions loaded from plugins/Mineplus/models
-[Mineplus] [INFO] MultiBlock definitions loaded from plugins/Mineplus/multiblocks
-[Mineplus] [INFO] Machine recipes loaded from plugins/Mineplus/recipes
-[Mineplus] [INFO] Infrastructure runtime initialized
-[Mineplus] [INFO] Admin command: /mineplus status
-[Mineplus] [INFO] Admin command: /mineplus reload all
-[Mineplus] [INFO] Active instance created type=upgradable_furnace id=9af0...
-[Mineplus] [INFO] Active instance model respawned id=9af0...

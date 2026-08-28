@@ -3,6 +3,8 @@ version: ${version}
 main: com.mineplus.fun.MineplusFunPlugin
 api-version: '1.21'
 author: Tariux
+description: Reference module for Mineplus - the Juicer and the Cannon machines.
+website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.
 depend: [Mineplus]
