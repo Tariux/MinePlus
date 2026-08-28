@@ -2,7 +2,7 @@ name: MineplusFun
 version: ${version}
 main: com.mineplus.fun.MineplusFunPlugin
 api-version: '1.21'
-author: Tariush
+author: Tariux
 
 # Hard dependency: the Core engine must be present and enabled first.
 depend: [Mineplus]

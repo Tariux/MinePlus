@@ -184,7 +184,7 @@ MineplusPlugin
 
 <div align="center">
 
-**Made with ⚙️ and vanilla redstone by [Tariush](https://github.com/Tariush)**
+**Made with ⚙️ and vanilla redstone by [Tariux](https://github.com/Tariux)**
 
 *Star the repo if your server gained a cannon today.*
 
