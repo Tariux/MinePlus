@@ -19,6 +19,25 @@ public enum CubeFace {
         };
     }
 
+    /**
+     * Axis index of the face's U coordinate in the vanilla box-unwrap convention
+     * (U is horizontal in the texture for side faces).
+     */
+    public int uAxis() {
+        return switch (this) {
+            case EAST, WEST, UP, DOWN -> 0;
+            default -> 2;
+        };
+    }
+
+    /** Axis index of the face's V coordinate (vertical in the texture, except on UP/DOWN). */
+    public int vAxis() {
+        return switch (this) {
+            case UP, DOWN -> 2;
+            default -> 1;
+        };
+    }
+
     /** True when the outward normal points along the positive axis direction. */
     public boolean positiveNormal() {
         return switch (this) {

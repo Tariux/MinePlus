@@ -11,7 +11,6 @@ public record VirtualRenderingSettings(
         boolean rotationSnap,
         float rotationSnapThresholdDegrees,
         boolean perFaceRendering,
-        VirtualModel.TextureMode textureMode,
         ModelMeta.OriginMode originMode
 ) {
 
@@ -41,8 +40,7 @@ public record VirtualRenderingSettings(
                 true,
                 RotationSnapper.DEFAULT_SNAP_THRESHOLD_DEGREES,
                 true,
-                VirtualModel.TextureMode.BOX,
-                ModelMeta.OriginMode.CENTER
+                ModelMeta.OriginMode.AUTO
         );
     }
 }

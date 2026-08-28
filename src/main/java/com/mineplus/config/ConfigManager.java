@@ -74,10 +74,8 @@ public class ConfigManager {
                       ROTATION_SNAP_THRESHOLD_DEGREES: 5
                       # Emit per-face material plates for mixed-material cubes.
                       PER_FACE_RENDERING: true
-                      # Texture application: BOX (per-face) | UV (single texture)
-                      TEXTURE_MODE: BOX
-                      # Anchor convention: CENTER (vanilla: pixel 0,0,0 = block center; full block spans -8..8) | GRID (corner anchor)
-                      ORIGIN_MODE: CENTER
+                      # Anchor convention: AUTO (detect from model format and extent) | CENTER | GRID
+                      ORIGIN_MODE: AUTO
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

@@ -65,7 +65,9 @@ public final class VoxelOccupancyCalculator {
             ModelMeta.OriginMode originMode
     ) {
         ModelMeta.CollisionMode effectiveMode = mode == null ? ModelMeta.CollisionMode.GEOMETRY : mode;
-        ModelMeta.OriginMode effectiveOrigin = originMode == null ? ModelMeta.OriginMode.CENTER : originMode;
+        ModelMeta.OriginMode effectiveOrigin = originMode == null || originMode == ModelMeta.OriginMode.AUTO
+                ? ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes())
+                : originMode;
         float offsetX = effectiveOrigin == ModelMeta.OriginMode.GRID ? 0.0f : 0.5f;
         float offsetZ = offsetX;
 
@@ -87,8 +89,14 @@ public final class VoxelOccupancyCalculator {
             return cached;
         }
 
-        // World (anchor-relative) transform: T(offset) · R · M_cube.
-        Matrix4f placement = new Matrix4f().translate(offsetX, 0.0f, offsetZ).rotate(rotation);
+        // World (anchor-relative) transform, identical to the display composition:
+        // world = C + R·(DO + M·q − C), where C = anchor block center (0.5, 0.5, 0.5)
+        // and DO = display spawn offset. Rotations therefore pivot about the block
+        // center (vanilla block behavior), keeping single-block models in-block.
+        Matrix4f placement = new Matrix4f()
+                .translate(0.5f, 0.5f, 0.5f)
+                .rotate(rotation)
+                .translate(offsetX - 0.5f, -0.5f, offsetZ - 0.5f);
         boolean permutationPlacement = isPermutation(placement);
 
         Set<Long> cells = new HashSet<>();
@@ -278,9 +286,9 @@ public final class VoxelOccupancyCalculator {
     }
 
     /**
-     * Legacy whole-model-AABB fill (compat escape hatch). Uses float bounds (not the
-     * integer {@link VirtualBoundingBox}) so the origin offset and rotation are applied
-     * before flooring, keeping boundary cells exact.
+     * Legacy whole-model-AABB fill (compat escape hatch). The model box's corners are
+     * rotated about the anchor block center — the same pivot the displays use — and the
+     * resulting world AABB is filled cell-by-cell.
      */
     private static int[] legacyAabbCells(VirtualModel model, Quaternionf rotation, float offsetX, float offsetZ) {
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
@@ -312,37 +320,30 @@ public final class VoxelOccupancyCalculator {
             return new int[]{0, 0, 0};
         }
 
-        // Rotate the box's corners, then apply the anchor offset, then floor/ceil.
-        if (rotation != null && !(rotation.x == 0.0f && rotation.y == 0.0f && rotation.z == 0.0f && rotation.w == 1.0f)) {
-            float rMinX = Float.MAX_VALUE, rMinY = Float.MAX_VALUE, rMinZ = Float.MAX_VALUE;
-            float rMaxX = -Float.MAX_VALUE, rMaxY = -Float.MAX_VALUE, rMaxZ = -Float.MAX_VALUE;
-            Vector3f c = new Vector3f((minX + maxX) / 2.0f, (minY + maxY) / 2.0f, (minZ + maxZ) / 2.0f);
-            for (int corner = 0; corner < 8; corner++) {
-                Vector3f p = new Vector3f(
-                        (corner & 1) == 0 ? minX : maxX,
-                        (corner & 2) == 0 ? minY : maxY,
-                        (corner & 4) == 0 ? minZ : maxZ);
-                p.sub(c);
-                rotation.transform(p);
-                p.add(c);
-                rMinX = Math.min(rMinX, p.x);
-                rMinY = Math.min(rMinY, p.y);
-                rMinZ = Math.min(rMinZ, p.z);
-                rMaxX = Math.max(rMaxX, p.x);
-                rMaxY = Math.max(rMaxY, p.y);
-                rMaxZ = Math.max(rMaxZ, p.z);
-            }
-            minX = rMinX;
-            minY = rMinY;
-            minZ = rMinZ;
-            maxX = rMaxX;
-            maxY = rMaxY;
-            maxZ = rMaxZ;
+        // Rotate the 8 box corners about the anchor block center: w = C + R·(DO + p − C).
+        float rMinX = Float.MAX_VALUE, rMinY = Float.MAX_VALUE, rMinZ = Float.MAX_VALUE;
+        float rMaxX = -Float.MAX_VALUE, rMaxY = -Float.MAX_VALUE, rMaxZ = -Float.MAX_VALUE;
+        for (int corner = 0; corner < 8; corner++) {
+            Vector3f p = new Vector3f(
+                    (corner & 1) == 0 ? minX : maxX,
+                    (corner & 2) == 0 ? minY : maxY,
+                    (corner & 4) == 0 ? minZ : maxZ);
+            p.add(offsetX - 0.5f, -0.5f, offsetZ - 0.5f);
+            rotation.transform(p);
+            p.add(0.5f, 0.5f, 0.5f);
+            rMinX = Math.min(rMinX, p.x);
+            rMinY = Math.min(rMinY, p.y);
+            rMinZ = Math.min(rMinZ, p.z);
+            rMaxX = Math.max(rMaxX, p.x);
+            rMaxY = Math.max(rMaxY, p.y);
+            rMaxZ = Math.max(rMaxZ, p.z);
         }
-        minX += offsetX;
-        maxX += offsetX;
-        minZ += offsetZ;
-        maxZ += offsetZ;
+        minX = rMinX;
+        minY = rMinY;
+        minZ = rMinZ;
+        maxX = rMaxX;
+        maxY = rMaxY;
+        maxZ = rMaxZ;
 
         int x0 = (int) Math.floor(minX);
         int y0 = (int) Math.floor(minY);
@@ -398,48 +399,5 @@ public final class VoxelOccupancyCalculator {
     private static int unpackZ(long value) {
         int v = ((int) value) & 0x1F_FFFF;
         return (v << 11) >> 11;
-    }
-
-    /** Unpacks an int-triple array produced by {@link #compute}. */
-    public static List<RotationSnapper.Vector3i> unpack(int[] triples) {
-        List<RotationSnapper.Vector3i> cells = new ArrayList<>(triples.length / 3);
-        for (int i = 0; i + 2 < triples.length; i += 3) {
-            cells.add(new RotationSnapper.Vector3i(triples[i], triples[i + 1], triples[i + 2]));
-        }
-        return cells;
-    }
-
-    /** Formats one horizontal layer of a cell set as an ASCII dump for diagnostics. */
-    public static String asciiLayer(int[] triples, int y) {
-        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
-        int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
-        for (int i = 0; i + 2 < triples.length; i += 3) {
-            if (triples[i + 1] != y) {
-                continue;
-            }
-            minX = Math.min(minX, triples[i]);
-            maxX = Math.max(maxX, triples[i]);
-            minZ = Math.min(minZ, triples[i + 2]);
-            maxZ = Math.max(maxZ, triples[i + 2]);
-        }
-        if (minX > maxX) {
-            return "(empty layer)";
-        }
-        Set<Long> layer = new HashSet<>();
-        for (int i = 0; i + 2 < triples.length; i += 3) {
-            if (triples[i + 1] == y) {
-                layer.add(((long) triples[i] << 32) | (triples[i + 2] & 0xFFFFFFFFL));
-            }
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("y=").append(y).append(" x[").append(minX).append("..").append(maxX)
-                .append("] z[").append(minZ).append("..").append(maxZ).append("]\n");
-        for (int z = minZ; z <= maxZ; z++) {
-            for (int x = minX; x <= maxX; x++) {
-                sb.append(layer.contains(((long) x << 32) | (z & 0xFFFFFFFFL)) ? '#' : '.');
-            }
-            sb.append('\n');
-        }
-        return sb.toString();
     }
 }

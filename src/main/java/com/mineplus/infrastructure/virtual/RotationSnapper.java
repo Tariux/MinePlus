@@ -62,11 +62,6 @@ public final class RotationSnapper {
                     signs[2] * v[axisMap[2]]
             );
         }
-
-        /** Vector transform (display translations): rotates by the exact snapped quaternion. */
-        public Vector3f transform(Vector3f v) {
-            return quaternion.transform(new Vector3f(v));
-        }
     }
 
     /** Immutable integer 3-tuple used for exact voxel-offset math. */

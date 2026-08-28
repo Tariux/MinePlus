@@ -158,6 +158,8 @@ public final class ModelSubCommand implements SubCommand {
                     sender.sendMessage(ChatColor.RED + "Look at a nearby block face to place the debug model.");
                     return true;
                 }
+                // Admin debug command: clear the target area so the model always places.
+                context.virtualBlockManager().prepareSpawnArea(model, placement, true);
                 UUID spawnedId = context.virtualBlockManager().spawnModel(model, placement);
                 sender.sendMessage(ChatColor.GREEN + "Spawned debug model '" + modelKey + "' with id " + spawnedId);
                 return true;
@@ -231,15 +233,19 @@ public final class ModelSubCommand implements SubCommand {
 
         var meta = manager.getModelMeta(modelKey);
         var settings = manager.settings();
-        var textureMode = meta.textureMode() != null ? meta.textureMode() : settings.textureMode();
         var collisionMode = meta.collisionMode() != null ? meta.collisionMode() : settings.collisionMode();
         var originMode = meta.originMode() != null ? meta.originMode() : settings.originMode();
+        if (originMode == null || originMode == com.mineplus.infrastructure.virtual.ModelMeta.OriginMode.AUTO) {
+            originMode = com.mineplus.infrastructure.virtual.ModelMeta.OriginMode.forModel(
+                    model.modelFormat(), model.cubes());
+        }
 
         sender.sendMessage(ChatColor.GOLD + "Model " + ChatColor.WHITE + modelKey);
         sender.sendMessage(ChatColor.YELLOW + "Cubes: " + ChatColor.WHITE + model.cubes().size()
-                + ChatColor.GRAY + " | resolution " + model.resolution().width() + "x" + model.resolution().height());
+                + ChatColor.GRAY + " | resolution " + model.resolution().width() + "x" + model.resolution().height()
+                + " | format " + (model.modelFormat() == null ? "unknown" : model.modelFormat()));
         sender.sendMessage(ChatColor.YELLOW + "Modes: " + ChatColor.WHITE
-                + "texture=" + textureMode + ", collision=" + collisionMode + ", origin=" + originMode);
+                + "collision=" + collisionMode + ", origin=" + originMode);
 
         int uniformCubes = 0;
         int mixedCubes = 0;
@@ -261,9 +267,7 @@ public final class ModelSubCommand implements SubCommand {
                 uniformCubes++;
             }
         }
-        int displayEstimate = textureMode == com.mineplus.infrastructure.virtual.VirtualModel.TextureMode.UV
-                ? model.cubes().size()
-                : uniformCubes + mixedCubes * (settings.perFaceRendering() ? 6 : 1);
+        int displayEstimate = uniformCubes + mixedCubes * (settings.perFaceRendering() ? 6 : 1);
         sender.sendMessage(ChatColor.YELLOW + "Display estimate: " + ChatColor.WHITE + displayEstimate
                 + ChatColor.GRAY + " (uniform " + uniformCubes + ", mixed " + mixedCubes
                 + (settings.perFaceRendering() ? "" : ", plates off") + ")");
@@ -291,30 +295,6 @@ public final class ModelSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.YELLOW + "Occupancy cells: " + ChatColor.WHITE + cells.length / 3
                 + ChatColor.GRAY + " (identity orientation, " + collisionMode + " mode)"
                 + " | cache entries: " + manager.occupancyCalculator().cacheSize());
-
-        var unresolved = manager.getUnresolvedTextures(modelKey);
-        if (!unresolved.isEmpty()) {
-            sender.sendMessage(ChatColor.RED + "Unresolved textures: " + String.join(", ", unresolved));
-        }
-
-        int minY = Integer.MAX_VALUE;
-        int maxY = Integer.MIN_VALUE;
-        for (int i = 1; i + 1 < cells.length; i += 3) {
-            minY = Math.min(minY, cells[i]);
-            maxY = Math.max(maxY, cells[i]);
-        }
-        if (minY <= maxY && cells.length > 0) {
-            int shown = 0;
-            for (int y = maxY; y >= minY && shown < 4; y--, shown++) {
-                for (String line : com.mineplus.infrastructure.virtual.VoxelOccupancyCalculator
-                        .asciiLayer(cells, y).split("\n")) {
-                    sender.sendMessage(ChatColor.GRAY + line);
-                }
-            }
-            if (minY < maxY - 3) {
-                sender.sendMessage(ChatColor.GRAY + "... layers y=" + minY + ".." + (maxY - 4) + " hidden");
-            }
-        }
     }
 
     private void listInstances(CommandSender sender, int limit) {

@@ -72,6 +72,7 @@ public class BbModelImporter {
         List<BakedCube> bakedCubes = new ArrayList<>();
         TextureLookup textureLookup = new TextureLookup();
         VirtualModel.Resolution resolution = null;
+        String modelFormat = null;
 
         // Raw element capture (kept as lightweight value holders, not Gson DOM).
         List<RawElement> rawElements = new ArrayList<>();
@@ -88,7 +89,7 @@ public class BbModelImporter {
                 case "elements" -> parseElements(json, rawElements);
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
                 case "resolution" -> resolution = parseResolution(json);
-                case "meta" -> json.skipValue(); // box_uv etc. read from elements themselves
+                case "meta" -> modelFormat = parseMeta(json);
                 default -> json.skipValue();
             }
         }
@@ -182,10 +183,7 @@ public class BbModelImporter {
             ));
         }
 
-        return new VirtualModel(
-                name, bakedCubes, textureLookup.toIdMap(), resolution, null,
-                textureLookup.resolveByIndex(textureLookup.defaultIndex())
-        );
+        return new VirtualModel(name, bakedCubes, textureLookup.toIdMap(), resolution, modelFormat);
     }
 
     private static void parseTextures(JsonReader json, TextureLookup lookup) throws Exception {
@@ -203,8 +201,6 @@ public class BbModelImporter {
             String path = null;
             String relativePath = null;
             String name = null;
-            boolean useAsDefault = false;
-            boolean particle = false;
             while (json.hasNext()) {
                 String fieldName = json.nextName();
                 switch (fieldName) {
@@ -212,14 +208,12 @@ public class BbModelImporter {
                     case "path" -> path = nextStringOrNull(json);
                     case "relative_path" -> relativePath = nextStringOrNull(json);
                     case "name" -> name = nextStringOrNull(json);
-                    case "use_as_default" -> useAsDefault = nextBoolean(json, false);
-                    case "particle" -> particle = nextBoolean(json, false);
-                    default -> json.skipValue(); // "source" (Base64 PNG), "uuid", "relative_height", ...
+                    default -> json.skipValue(); // "source" (Base64 PNG), "uuid", "particle", ...
                 }
             }
             json.endObject();
 
-            // Priority order matches the DOM importer: path, then relative_path, then name.
+            // Priority order matches the original importer: path, then relative_path, then name.
             String extracted = extractTextureIdentifier(path);
             if (extracted == null) {
                 extracted = extractTextureIdentifier(relativePath);
@@ -227,7 +221,7 @@ public class BbModelImporter {
             if (extracted == null) {
                 extracted = extractTextureIdentifier(name);
             }
-            lookup.addTexture(arrayIndex, id, extracted, useAsDefault, particle);
+            lookup.addTexture(arrayIndex, id, extracted);
             arrayIndex++;
         }
         json.endArray();
@@ -343,6 +337,22 @@ public class BbModelImporter {
         return new VirtualModel.Resolution(width, height);
     }
 
+    /** Reads only {@code model_format}; skips the rest of the meta object. */
+    private static String parseMeta(JsonReader json) throws Exception {
+        String modelFormat = null;
+        json.beginObject();
+        while (json.hasNext()) {
+            String fieldName = json.nextName();
+            if ("model_format".equals(fieldName)) {
+                modelFormat = nextStringOrNull(json);
+            } else {
+                json.skipValue();
+            }
+        }
+        json.endObject();
+        return modelFormat;
+    }
+
     private static void applyOutlinerEntry(
             RawGroup group,
             Matrix4f parentTransform,
@@ -391,11 +401,15 @@ public class BbModelImporter {
             return new Matrix4f();
         }
 
-        Quaternionf quaternion = new Quaternionf().rotateXYZ(
-                (float) Math.toRadians(rotation.x),
-                (float) Math.toRadians(rotation.y),
-                (float) Math.toRadians(rotation.z)
-        );
+        // Blockbench/vanilla Euler order: X applied first, then Y, then Z (extrinsic),
+        // giving the compound Rz·Ry·Rx. Matches the reference Blockbench Import Library
+        // (createQuaternion: rotateZ(z).rotateY(y).rotateX(x)) and the vanilla model
+        // spec's X-then-Y-then-Z application order. JOML's rotateXYZ composes the
+        // opposite way (Z first), which inverts multi-axis compound rotations.
+        Quaternionf quaternion = new Quaternionf()
+                .rotateZ((float) Math.toRadians(rotation.z))
+                .rotateY((float) Math.toRadians(rotation.y))
+                .rotateX((float) Math.toRadians(rotation.x));
 
         return new Matrix4f()
                 .translate(origin.x / 16.0f, origin.y / 16.0f, origin.z / 16.0f)
@@ -576,16 +590,14 @@ public class BbModelImporter {
         private final Map<String, String> byId = new HashMap<>();
         private final Map<Integer, String> byIndex = new HashMap<>();
         private final Map<String, String> dedup = new HashMap<>();
-        private final List<int[]> defaults = new ArrayList<>();
 
         void beginParse() {
             byId.clear();
             byIndex.clear();
             dedup.clear();
-            defaults.clear();
         }
 
-        void addTexture(int arrayIndex, String id, String extracted, boolean useAsDefault, boolean particle) {
+        void addTexture(int arrayIndex, String id, String extracted) {
             if (extracted == null || extracted.isBlank()) {
                 return;
             }
@@ -595,13 +607,6 @@ public class BbModelImporter {
                 byId.put(id, canonical);
                 byId.put("#" + id, canonical);
             }
-            if (useAsDefault || particle) {
-                defaults.add(new int[]{arrayIndex, useAsDefault ? 1 : 0, particle ? 1 : 0});
-            }
-        }
-
-        String resolveByIndex(int index) {
-            return byIndex.get(index);
         }
 
         String resolveByReference(String reference) {
@@ -642,20 +647,6 @@ public class BbModelImporter {
                 }
             }
             return byId.get("#" + reference);
-        }
-
-        /** Index of the default texture (use_as_default/particle), or -1. */
-        int defaultIndex() {
-            int best = -1;
-            int bestRank = -1;
-            for (int[] entry : defaults) {
-                int rank = entry[1] > 0 ? 2 : 1; // prefer use_as_default over particle
-                if (rank > bestRank) {
-                    bestRank = rank;
-                    best = entry[0];
-                }
-            }
-            return best;
         }
 
         Map<String, String> toIdMap() {

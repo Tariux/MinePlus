@@ -35,19 +35,18 @@ import org.joml.Vector3f;
 public class VirtualBlockManager implements Listener {
 
     private static final String DISPLAY_TAG_PREFIX = "mineplus_vblock:";
+    private static final Material BARRIER_MATERIAL = Material.BARRIER;
     private static final String MODELS_FOLDER = "models";
     private static final String DEBUG_MODELS_FOLDER = "debug";
 
     private final Map<String, VirtualModel> loadedModels = new HashMap<>();
     private final Map<String, ModelMeta> modelMeta = new HashMap<>();
-    private final Map<String, List<String>> unresolvedTexturesByModel = new HashMap<>();
     private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
     private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
-    private boolean debugLoggingEnabled;
     private MultiBlockLifecycleManager lifecycleManager;
 
     public record ActiveVirtualBlock(
@@ -61,7 +60,6 @@ public class VirtualBlockManager implements Listener {
 
     public void loadModels(JavaPlugin plugin) {
         this.plugin = plugin;
-        this.debugLoggingEnabled = Boolean.getBoolean("mineplus.debug.models");
         loadModelDefinitions();
     }
 
@@ -113,21 +111,51 @@ public class VirtualBlockManager implements Listener {
         modelMeta.put(key, meta == null ? ModelMeta.empty() : meta);
     }
 
-    /** Texture names of a model that fell through to the fallback material (empty when all resolved). */
-    public List<String> getUnresolvedTextures(String modelName) {
-        if (modelName == null) {
-            return List.of();
-        }
-        List<String> unresolved = unresolvedTexturesByModel.get(modelName.toLowerCase(Locale.ROOT));
-        return unresolved == null ? List.of() : List.copyOf(unresolved);
-    }
-
     public VoxelOccupancyCalculator occupancyCalculator() {
         return occupancyCalculator;
     }
 
     public UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
         return spawnModel(model, placement, UUID.randomUUID());
+    }
+
+    /** Result of a spawn-area inspection/clearing pass. */
+    public enum SpawnAreaResult {
+        /** Every collision cell is air; nothing had to change. */
+        CLEAR,
+        /** Non-air blocks occupied cells and were removed. */
+        CLEARED,
+        /** Non-air blocks occupy cells and were left in place (standard-player policy). */
+        BLOCKED
+    }
+
+    /**
+     * Inspects (and optionally clears) the blocks occupying the prospective collision
+     * cells of a placement — the exact cells {@link #spawnModel} would fill with
+     * barriers. Used to guarantee a multi-block never spawns inside existing terrain.
+     *
+     * @param clear true to remove non-air occupants (creative/admin policy); false to
+     *              only report whether the area is free (standard-player policy)
+     */
+    public SpawnAreaResult prepareSpawnArea(VirtualModel model,
+                                            VirtualBlockPlacementHelper.PlacementData placement,
+                                            boolean clear) {
+        SpawnContext context = resolveSpawnContext(model, placement);
+        boolean cleared = false;
+        for (int i = 0; i + 2 < context.cells().length; i += 3) {
+            Location location = context.origin().clone().add(
+                    context.cells()[i], context.cells()[i + 1], context.cells()[i + 2]);
+            Block block = location.getBlock();
+            if (block.getType().isAir()) {
+                continue;
+            }
+            if (!clear) {
+                return SpawnAreaResult.BLOCKED;
+            }
+            block.setType(Material.AIR);
+            cleared = true;
+        }
+        return cleared ? SpawnAreaResult.CLEARED : SpawnAreaResult.CLEAR;
     }
 
     public void removeModel(UUID instanceId) {
@@ -177,7 +205,7 @@ public class VirtualBlockManager implements Listener {
     @EventHandler
     public void onBarrierBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (block.getType() != Material.BARRIER) {
+        if (block.getType() != BARRIER_MATERIAL) {
             return;
         }
 
@@ -197,7 +225,6 @@ public class VirtualBlockManager implements Listener {
     private void loadModelDefinitions() {
         loadedModels.clear();
         modelMeta.clear();
-        unresolvedTexturesByModel.clear();
         occupancyCalculator.clearCache();
         if (plugin == null) {
             return;
@@ -265,18 +292,29 @@ public class VirtualBlockManager implements Listener {
         return stripExtension(relative).toLowerCase(Locale.ROOT);
     }
 
-    private UUID spawnModel(
+    private record SpawnContext(
+            ModelMeta.CollisionMode collisionMode,
+            ModelMeta.OriginMode originMode,
+            Location origin,
+            RotationSnapper.SnappedRotation snapped,
+            Quaternionf globalRotation,
+            int[] cells
+    ) {
+    }
+
+    /** Resolves the effective modes, anchor, rotation, and collision cells for a spawn. */
+    private SpawnContext resolveSpawnContext(
             VirtualModel model,
-            VirtualBlockPlacementHelper.PlacementData placement,
-            UUID instanceId
+            VirtualBlockPlacementHelper.PlacementData placement
     ) {
         ModelMeta meta = getModelMeta(model.name());
         ModelMeta.CollisionMode collisionMode = meta.collisionMode() != null
                 ? meta.collisionMode() : settings.collisionMode();
         ModelMeta.OriginMode originMode = meta.originMode() != null
                 ? meta.originMode() : settings.originMode();
-        VirtualModel.TextureMode textureMode = meta.textureMode() != null
-                ? meta.textureMode() : settings.textureMode();
+        if (originMode == null || originMode == ModelMeta.OriginMode.AUTO) {
+            originMode = ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes());
+        }
 
         Location origin = new Location(
                 placement.location().getWorld(),
@@ -284,12 +322,6 @@ public class VirtualBlockManager implements Listener {
                 placement.location().getBlockY(),
                 placement.location().getBlockZ()
         );
-        // CENTER (vanilla convention): pixel (0,0,0) = anchor block center at its base;
-        // displays spawn at the block center so centered models rotate about it and
-        // single-block models stay within one block. GRID: spawn at the block corner.
-        Location displayOrigin = originMode == ModelMeta.OriginMode.GRID
-                ? origin.clone()
-                : origin.clone().add(0.5, 0.0, 0.5);
 
         RotationSnapper.SnappedRotation snapped = settings.rotationSnap()
                 ? RotationSnapper.snap(placement.globalRotation(), settings.rotationSnapThresholdDegrees())
@@ -298,39 +330,64 @@ public class VirtualBlockManager implements Listener {
                 ? snapped.quaternion()
                 : new Quaternionf(placement.globalRotation());
 
-        List<UUID> spawnedEntities = new ArrayList<>();
-        Set<Location> barrierBlocks = new HashSet<>();
-
-        // Collision lattice: geometry-aware voxelization under the exact same
-        // T(anchorOffset)·R·M transform the displays use; cells are already final.
         int[] cells = occupancyCalculator.compute(
                 model, snapped, placement.globalRotation(), collisionMode,
                 settings.collisionEpsilon(), originMode);
+
+        return new SpawnContext(collisionMode, originMode, origin, snapped, globalRotation, cells);
+    }
+
+    private UUID spawnModel(
+            VirtualModel model,
+            VirtualBlockPlacementHelper.PlacementData placement,
+            UUID instanceId
+    ) {
+        SpawnContext context = resolveSpawnContext(model, placement);
+        ModelMeta.OriginMode originMode = context.originMode();
+        Location origin = context.origin();
+        Quaternionf globalRotation = context.globalRotation();
+        int[] cells = context.cells();
+
+        // CENTER: pixel (0,0,0) = anchor block center at its base; centered models
+        // rotate about the block center. GRID: pixel (0,0,0) = block corner.
+        Location displayOrigin = originMode == ModelMeta.OriginMode.GRID
+                ? origin.clone()
+                : origin.clone().add(0.5, 0.0, 0.5);
+
+        List<UUID> spawnedEntities = new ArrayList<>();
+        Set<Location> barrierBlocks = new HashSet<>();
+
         for (int i = 0; i + 2 < cells.length; i += 3) {
             Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
             Block block = location.getBlock();
             if (block.getType().isAir()) {
-                block.setType(Material.BARRIER);
+                block.setType(BARRIER_MATERIAL);
                 barrierBlocks.add(location);
                 blockToModelMap.put(BlockCoordinate.from(location), instanceId);
             } else if (settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
-                rollbackSpawn(barrierBlocks, spawnedEntities, instanceId);
+                rollbackSpawn(barrierBlocks, spawnedEntities);
                 DebugLogger.warning("spawnModel: collision cell " + location + " is not air; "
                         + "STRICT policy aborted the spawn of model '" + model.name() + "'.");
                 return null;
             }
         }
 
-        recordUnresolvedTextures(model);
+        // Pivot: rotations rotate the model about the anchor block's center (vanilla
+        // block behavior): t' = R·t + (C−DO) − R·(C−DO), where C = (0.5, 0.5, 0.5)
+        // and DO = display spawn offset — identical to the voxelization's placement.
+        Vector3f pivotOffset = new Vector3f(
+                0.5f - (float) (displayOrigin.getX() - origin.getX()),
+                0.5f,
+                0.5f - (float) (displayOrigin.getZ() - origin.getZ()));
+        Vector3f rotatedPivotOffset = new Vector3f(pivotOffset);
+        globalRotation.transform(rotatedPivotOffset);
 
-        // Visual emission: fast path single display per uniform cube, plates for mixed faces.
         for (BakedCube cube : model.cubes()) {
-            List<DisplayEmitter.EmittedDisplay> emitted =
-                    DisplayEmitter.emitCube(model, cube, textureMode, settings.perFaceRendering());
-            for (DisplayEmitter.EmittedDisplay item : emitted) {
+            for (DisplayEmitter.EmittedDisplay item
+                    : DisplayEmitter.emitCube(cube, settings.perFaceRendering())) {
                 BlockDisplay display = (BlockDisplay) origin.getWorld().spawnEntity(
                         displayOrigin, EntityType.BLOCK_DISPLAY);
-                display.setBlock(DisplayEmitter.blockDataFor(item.material()));
+                display.setBlock(item.blockData());
                 display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
                 if (item.lightEmission() > 0) {
                     display.setBrightness(new Display.Brightness(item.lightEmission(), 15));
@@ -338,36 +395,15 @@ public class VirtualBlockManager implements Listener {
 
                 Vector3f translation = new Vector3f(item.translation());
                 globalRotation.transform(translation);
-                Quaternionf combinedRotation = new Quaternionf(globalRotation).mul(item.leftRotation());
+                translation.add(pivotOffset).sub(rotatedPivotOffset);
 
                 display.setTransformation(new org.bukkit.util.Transformation(
                         translation,
-                        combinedRotation,
+                        new Quaternionf(globalRotation).mul(item.leftRotation()),
                         item.scale(),
                         item.rightRotation()
                 ));
                 spawnedEntities.add(display.getUniqueId());
-
-                if (DebugLogger.isEnabled()) {
-                    DebugLogger.info("Rendered '" + item.source()
-                            + "' mat=" + item.material().name()
-                            + " light=" + item.lightEmission()
-                            + " translation=" + vectorString(translation)
-                            + " scale=" + vectorString(item.scale())
-                            + " localRotation=" + quaternionString(item.leftRotation())
-                            + " globalRotation=" + quaternionString(globalRotation));
-                }
-            }
-
-            if (DebugLogger.isEnabled()) {
-                for (Map.Entry<CubeFace, BakedFace> face : cube.faces().entrySet()) {
-                    BakedFace data = face.getValue();
-                    DebugLogger.info(" - face " + face.getKey().name().toLowerCase(Locale.ROOT)
-                            + " uv=[" + data.u1() + "," + data.v1() + "," + data.u2() + "," + data.v2() + "]"
-                            + " rotation=" + data.rotation()
-                            + " textureRef=" + data.textureReference()
-                            + " texture=" + data.textureName());
-                }
             }
         }
 
@@ -381,9 +417,9 @@ public class VirtualBlockManager implements Listener {
         return instanceId;
     }
 
-    private void rollbackSpawn(Set<Location> barrierBlocks, List<UUID> spawnedEntities, UUID instanceId) {
+    private void rollbackSpawn(Set<Location> barrierBlocks, List<UUID> spawnedEntities) {
         for (Location loc : barrierBlocks) {
-            if (loc.getBlock().getType() == Material.BARRIER) {
+            if (loc.getBlock().getType() == BARRIER_MATERIAL) {
                 loc.getBlock().setType(Material.AIR);
             }
             blockToModelMap.remove(BlockCoordinate.from(loc));
@@ -396,42 +432,10 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    private void recordUnresolvedTextures(VirtualModel model) {
-        String key = model.name().toLowerCase(Locale.ROOT);
-        if (unresolvedTexturesByModel.containsKey(key)) {
-            return;
-        }
-        Set<String> textureNames = new java.util.LinkedHashSet<>();
-        for (BakedCube cube : model.cubes()) {
-            if (cube.primaryTexture() != null) {
-                textureNames.add(cube.primaryTexture());
-            }
-            for (BakedFace face : cube.faces().values()) {
-                if (face.textureName() != null) {
-                    textureNames.add(face.textureName());
-                }
-            }
-        }
-        List<String> sortedNames = new ArrayList<>(textureNames);
-        Collections.sort(sortedNames);
-        List<String> unresolved = new ArrayList<>();
-        for (String textureName : sortedNames) {
-            TextureMaterialResolver.Resolution resolution = TextureMaterialResolver.resolveDetailed(textureName);
-            if (resolution.isFallback()) {
-                unresolved.add(textureName);
-            }
-        }
-        unresolvedTexturesByModel.put(key, Collections.unmodifiableList(unresolved));
-        if (!unresolved.isEmpty()) {
-            DebugLogger.warning("Model '" + model.name() + "' has "
-                    + unresolved.size() + " unresolved texture(s): " + String.join(", ", unresolved));
-        }
-    }
-
     public void cleanupGhostEntities(UUID instanceId) {
         String tag = DISPLAY_TAG_PREFIX + instanceId;
-        for (org.bukkit.World world : org.bukkit.Bukkit.getWorlds()) {
-            for (org.bukkit.entity.Entity entity : world.getEntitiesByClass(org.bukkit.entity.BlockDisplay.class)) {
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntitiesByClass(BlockDisplay.class)) {
                 if (entity.getScoreboardTags().contains(tag)) {
                     entity.remove();
                 }
@@ -441,25 +445,23 @@ public class VirtualBlockManager implements Listener {
 
     @EventHandler
     public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
-        for (org.bukkit.entity.Entity entity : event.getChunk().getEntities()) {
-            if (!(entity instanceof org.bukkit.entity.BlockDisplay)) {
+        for (Entity entity : event.getChunk().getEntities()) {
+            if (!(entity instanceof BlockDisplay)) {
                 continue;
             }
 
             for (String tag : entity.getScoreboardTags()) {
                 if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
-                    String instanceIdStr = tag.substring(DISPLAY_TAG_PREFIX.length());
                     try {
-                        UUID instanceId = UUID.fromString(instanceIdStr);
+                        UUID instanceId = UUID.fromString(tag.substring(DISPLAY_TAG_PREFIX.length()));
                         if (!activeBlocks.containsKey(instanceId)) {
                             if (lifecycleManager != null && lifecycleManager.registry().getInstance(instanceId) != null) {
                                 continue;
                             }
                             entity.remove();
-                            DebugLogger.info("Removed ghost entity " + entity.getUniqueId() + " in loaded chunk.");
                         }
-                    } catch (IllegalArgumentException e) {
-                        // Ignore
+                    } catch (IllegalArgumentException ignored) {
+                        // Malformed tag
                     }
                 }
             }
@@ -473,14 +475,14 @@ public class VirtualBlockManager implements Listener {
         }
 
         for (Location loc : activeBlock.barrierBlocks()) {
-            if (loc.getBlock().getType() == Material.BARRIER) {
+            if (loc.getBlock().getType() == BARRIER_MATERIAL) {
                 loc.getBlock().setType(Material.AIR);
             }
             blockToModelMap.remove(BlockCoordinate.from(loc));
         }
 
         for (UUID displayId : activeBlock.displayEntities()) {
-            Entity display = org.bukkit.Bukkit.getEntity(displayId);
+            Entity display = Bukkit.getEntity(displayId);
             if (display != null) {
                 display.remove();
             }
@@ -493,23 +495,19 @@ public class VirtualBlockManager implements Listener {
         }
         VirtualModel model = getModel(modelKey);
         if (model == null) {
-            if (plugin != null) {
-                DebugLogger.warning("Cannot restore virtual block: unknown model key '" + modelKey + "' at " + anchor + ".");
-            }
+            DebugLogger.warning("Cannot restore virtual block: unknown model key '" + modelKey + "' at " + anchor + ".");
             return null;
         }
         World world = Bukkit.getWorld(anchor.worldName());
         if (world == null) {
-            if (plugin != null) {
-                DebugLogger.info("restoreForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
-            }
+            DebugLogger.info("restoreForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
             return null;
         }
         Location origin = new Location(world, anchor.x(), anchor.y(), anchor.z());
         VirtualBlockPlacementHelper.PlacementData placement =
                 new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
         UUID instanceId = spawnModel(model, placement, UUID.randomUUID());
-        if (plugin != null) {
+        if (instanceId != null) {
             DebugLogger.info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
         }
         return instanceId;
@@ -518,13 +516,5 @@ public class VirtualBlockManager implements Listener {
     private String stripExtension(String fileName) {
         int dotIndex = fileName.lastIndexOf('.');
         return dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
-    }
-
-    private String vectorString(Vector3f value) {
-        return "(" + value.x + ", " + value.y + ", " + value.z + ")";
-    }
-
-    private String quaternionString(Quaternionf value) {
-        return "(" + value.x + ", " + value.y + ", " + value.z + ", " + value.w + ")";
     }
 }

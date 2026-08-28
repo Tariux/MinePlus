@@ -26,7 +26,51 @@ public final class ModelRenderingManager {
         this.virtualBlockManager = virtualBlockManager;
     }
 
+    /** Model + placement resolved the same way {@link #render} resolves them. */
+    private record Resolved(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
+    }
+
     public UUID render(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
+        Resolved resolved = resolve(type, instance, pluginDataFolder);
+        if (resolved == null) {
+            return null;
+        }
+        return virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
+    }
+
+    /**
+     * Inspects (and optionally clears) the blocks occupying the prospective spawn area
+     * of an instance's model — the exact cells {@link #render} would fill.
+     *
+     * @param clear true to remove non-air occupants (creative/admin policy); false to
+     *              only report whether the area is free (standard-player policy)
+     */
+    public VirtualBlockManager.SpawnAreaResult prepareArea(
+            MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder, boolean clear) {
+        Resolved resolved = resolve(type, instance, pluginDataFolder);
+        if (resolved == null) {
+            return VirtualBlockManager.SpawnAreaResult.BLOCKED;
+        }
+        return virtualBlockManager.prepareSpawnArea(resolved.model(), resolved.placement(), clear);
+    }
+
+    public void remove(MultiBlockInstance instance) {
+        if (instance.renderedModelId() != null) {
+            virtualBlockManager.removeModel(instance.renderedModelId());
+        }
+    }
+
+    public UUID swapModel(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
+        remove(instance);
+        UUID newModelId = render(type, instance, pluginDataFolder);
+        return newModelId;
+    }
+
+    public VirtualBlockManager virtualBlockManager() {
+        return virtualBlockManager;
+    }
+
+    private Resolved resolve(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
         World world = Bukkit.getWorld(instance.coordinate().worldName());
         if (world == null) {
             DebugLogger.warning("render: World not loaded for instance " + instance.id() + " at " + instance.coordinate().worldName());
@@ -62,23 +106,7 @@ public final class ModelRenderingManager {
         );
         VirtualBlockPlacementHelper.PlacementData placementData =
                 new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
-        return virtualBlockManager.spawnModel(model, placementData);
-    }
-
-    public void remove(MultiBlockInstance instance) {
-        if (instance.renderedModelId() != null) {
-            virtualBlockManager.removeModel(instance.renderedModelId());
-        }
-    }
-
-    public UUID swapModel(MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder) {
-        remove(instance);
-        UUID newModelId = render(type, instance, pluginDataFolder);
-        return newModelId;
-    }
-
-    public VirtualBlockManager virtualBlockManager() {
-        return virtualBlockManager;
+        return new Resolved(model, placementData);
     }
 
     private File resolveModelFile(File pluginDataFolder, String modelPath) {

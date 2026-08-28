@@ -15,6 +15,7 @@ import com.mineplus.infrastructure.core.multiblock.upgrade.UpgradeManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
+import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.util.DebugLogger;
 import java.util.List;
 import java.util.Map;
@@ -247,6 +248,27 @@ public final class MultiBlockLifecycleManager {
             DebugLogger.warning("place: Instance " + id + " is not in CREATED state (current=" + current + ").");
             return false;
         }
+
+        // Spawn-area policy: creative/admin placements clear the target area first;
+        // standard players require it to be empty (no spawning inside cactus, grass,
+        // or other existing blocks).
+        boolean fullAccess = actor == null
+                || actor.isOp()
+                || actor.getGameMode() == org.bukkit.GameMode.CREATIVE;
+        VirtualBlockManager.SpawnAreaResult area = renderingManager.prepareArea(
+                type, instance, plugin.getDataFolder(), fullAccess);
+        if (area == VirtualBlockManager.SpawnAreaResult.BLOCKED) {
+            if (actor != null) {
+                actor.sendMessage(org.bukkit.ChatColor.RED
+                        + "Insufficient space to place this structure — the target area is not clear.");
+            }
+            DebugLogger.info("place: Aborted placement of instance " + id + ": spawn area not clear.");
+            return false;
+        }
+        if (area == VirtualBlockManager.SpawnAreaResult.CLEARED) {
+            DebugLogger.info("place: Cleared spawn area for instance " + id + " (full-access placement).");
+        }
+
         if (!EntityStateMachine.transition(instance, EntityStatus.PLACED)) {
             DebugLogger.warning("place: Failed to transition instance " + id + " to PLACED.");
             return false;

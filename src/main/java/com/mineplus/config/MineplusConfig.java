@@ -1,9 +1,9 @@
 package com.mineplus.config;
 
 import com.mineplus.infrastructure.virtual.ModelMeta;
-import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.VoxelOccupancyCalculator;
+import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
 
@@ -30,17 +30,12 @@ public class MineplusConfig {
         return additionalDebugLogs;
     }
 
-    public boolean getAdditionalDebugLogs() {
-        return additionalDebugLogs;
-    }
-
     public VirtualRenderingSettings getVirtualRendering() {
         return virtualRendering;
     }
 
     public static VirtualRenderingSettings parseVirtualRendering(
-            org.bukkit.configuration.file.FileConfiguration yaml,
-            VirtualRenderingSettings fallback) {
+            FileConfiguration yaml, VirtualRenderingSettings fallback) {
         if (!yaml.isConfigurationSection("VIRTUAL_RENDERING")) {
             return fallback;
         }
@@ -48,15 +43,13 @@ public class MineplusConfig {
         VirtualRenderingSettings defaults = VirtualRenderingSettings.defaults();
         return new VirtualRenderingSettings(
                 ModelMeta.CollisionMode.fromKey(section.getString("COLLISION_MODE"), defaults.collisionMode()),
-                (float) section.getDouble("COLLISION_EPSILON", fallback.collisionEpsilon() > 0
-                        ? fallback.collisionEpsilon() : VoxelOccupancyCalculator.DEFAULT_EPSILON),
+                (float) section.getDouble("COLLISION_EPSILON", defaults.collisionEpsilon()),
                 VirtualRenderingSettings.NonAirPolicy.fromKey(
                         section.getString("COLLISION_NON_AIR_POLICY"), defaults.collisionNonAirPolicy()),
                 section.getBoolean("ROTATION_SNAP", defaults.rotationSnap()),
                 (float) section.getDouble("ROTATION_SNAP_THRESHOLD_DEGREES",
                         defaults.rotationSnapThresholdDegrees()),
                 section.getBoolean("PER_FACE_RENDERING", defaults.perFaceRendering()),
-                VirtualModel.TextureMode.fromKey(section.getString("TEXTURE_MODE"), defaults.textureMode()),
                 ModelMeta.OriginMode.fromKey(section.getString("ORIGIN_MODE"), defaults.originMode())
         );
     }

@@ -8,7 +8,6 @@ import java.util.Locale;
  * Per-model override file {@code models/<key>.meta.json}:
  * <pre>{@code
  * {
- *   "textureMode": "UV",
  *   "originMode": "GRID",
  *   "collisionMode": "SURFACE"
  * }
@@ -16,24 +15,90 @@ import java.util.Locale;
  * Any omitted field falls back to the global settings default.
  */
 public record ModelMeta(
-        VirtualModel.TextureMode textureMode,
         OriginMode originMode,
         CollisionMode collisionMode
 ) {
 
     public enum OriginMode {
         /**
-         * Vanilla/Blockbench convention: pixel (0,0,0) is the center of the anchor block at
-         * its base; a full block spans pixels [-8..8] horizontally and [0..16] vertically.
-         * Single-block models occupy exactly one block and rotate about the block center.
+         * Detect from the model's {@code meta.model_format} and geometry extent:
+         * vanilla {@code java_block}/{@code java_item} spaces ([0..16] pixels, corner
+         * origin) anchor at the block corner unless the geometry is center-authored;
+         * every other format anchors pixel (0,0,0) at the block center.
+         */
+        AUTO,
+        /**
+         * Blockbench free-format convention: pixel (0,0,0) is the center of the anchor
+         * block at its base; a full block spans pixels [-8..8] horizontally and [0..16]
+         * vertically. Single-block centered models occupy exactly one block.
          */
         CENTER,
-        /** Corner-anchored: pixel (0,0,0) is the north-west-bottom corner of the anchor block. */
+        /**
+         * Vanilla java_block convention: pixel (0,0,0) is the north-west-bottom corner
+         * of the anchor block; a full block spans pixels [0..16] on every axis.
+         */
         GRID;
 
-        /** @deprecated legacy alias for {@link #CENTER} (the old +0.5 spawn offset was correct). */
+        /** @deprecated legacy alias for {@link #CENTER}. */
         @Deprecated
         public static final OriginMode LEGACY = CENTER;
+
+        /** Resolves the anchor convention for a bbmodel {@code meta.model_format} value. */
+        public static OriginMode forFormat(String modelFormat) {
+            if (modelFormat == null || modelFormat.isBlank()) {
+                return CENTER;
+            }
+            String format = modelFormat.trim().toLowerCase(Locale.ROOT);
+            if (format.contains("java_block") || format.contains("java_item")
+                    || format.equals("modded_block")) {
+                return GRID;
+            }
+            return CENTER;
+        }
+
+        /**
+         * Resolves the anchor convention from the model format <i>and</i> the actual
+         * geometry extent. Authors frequently build centered models (pixel (0,0,0) =
+         * block center, extent like [-8..8]) even in {@code java_block} projects; the
+         * format label alone would corner-anchor those and swing them out of the block
+         * on rotated placements. Heuristic: when the geometry's xz bounding-box center
+         * sits within 2 pixels of the model origin, the model is center-authored.
+         */
+        public static OriginMode forModel(String modelFormat, java.util.List<BakedCube> cubes) {
+            OriginMode byFormat = forFormat(modelFormat);
+            if (byFormat != GRID) {
+                return byFormat;
+            }
+            if (cubes == null || cubes.isEmpty()) {
+                return GRID;
+            }
+
+            float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+            float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+            for (BakedCube cube : cubes) {
+                org.joml.Matrix4f m = new org.joml.Matrix4f()
+                        .translate(cube.translation())
+                        .rotate(cube.leftRotation())
+                        .scale(cube.scale())
+                        .rotate(cube.rightRotation());
+                for (int corner = 0; corner < 8; corner++) {
+                    org.joml.Vector3f p = new org.joml.Vector3f(
+                            (corner & 1) == 0 ? 0.0f : 1.0f,
+                            (corner & 2) == 0 ? 0.0f : 1.0f,
+                            (corner & 4) == 0 ? 0.0f : 1.0f);
+                    m.transformPosition(p);
+                    minX = Math.min(minX, p.x * 16.0f);
+                    maxX = Math.max(maxX, p.x * 16.0f);
+                    minZ = Math.min(minZ, p.z * 16.0f);
+                    maxZ = Math.max(maxZ, p.z * 16.0f);
+                }
+            }
+
+            float centerX = (minX + maxX) / 2.0f;
+            float centerZ = (minZ + maxZ) / 2.0f;
+            boolean centeredNearOrigin = Math.abs(centerX) <= 2.0f && Math.abs(centerZ) <= 2.0f;
+            return centeredNearOrigin ? CENTER : GRID;
+        }
 
         public static OriginMode fromKey(String key, OriginMode fallback) {
             if (key == null || key.isBlank()) {
@@ -72,11 +137,11 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null);
+        return new ModelMeta(null, null);
     }
 
     public boolean isEmpty() {
-        return textureMode == null && originMode == null && collisionMode == null;
+        return originMode == null && collisionMode == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -95,7 +160,6 @@ public record ModelMeta(
 
         try (com.google.gson.stream.JsonReader json =
                      new com.google.gson.stream.JsonReader(new java.io.BufferedReader(new java.io.FileReader(metaFile)))) {
-            VirtualModel.TextureMode textureMode = null;
             OriginMode originMode = null;
             CollisionMode collisionMode = null;
 
@@ -103,7 +167,6 @@ public record ModelMeta(
             while (json.hasNext()) {
                 String field = json.nextName();
                 switch (field) {
-                    case "textureMode" -> textureMode = VirtualModel.TextureMode.fromKey(readString(json), null);
                     case "originMode" -> originMode = OriginMode.fromKey(readString(json), null);
                     case "collisionMode" -> collisionMode = CollisionMode.fromKey(readString(json), null);
                     default -> json.skipValue();
@@ -111,7 +174,7 @@ public record ModelMeta(
             }
             json.endObject();
 
-            return new ModelMeta(textureMode, originMode, collisionMode);
+            return new ModelMeta(originMode, collisionMode);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
