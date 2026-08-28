@@ -3,6 +3,8 @@ version: ${version}
 main: com.mineplus.MineplusPlugin
 api-version: '1.21'
 author: Tariux
+description: Data-driven machines and custom structures for Minecraft, rendered on completely vanilla clients.
+website: https://github.com/Tariux/MinePlus
 
 commands:
   mineplus:

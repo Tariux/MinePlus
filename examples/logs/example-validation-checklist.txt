@@ -1,9 +1,0 @@
-[CHECK] Mineplus boots with zero gameplay additions when no JSON/API content is present
-[CHECK] .bbmodel files load from plugins/Mineplus/models
-[CHECK] Multiblock JSON files load from plugins/Mineplus/multiblocks
-[CHECK] Recipe JSON files load from plugins/Mineplus/recipes
-[CHECK] /mineplus status reports expected counts
-[CHECK] /mineplus reload all refreshes runtime state safely
-[CHECK] /mineplus model inspect works for origin blocks and collision barriers
-[CHECK] Removing a barrier block cleans the matching multiblock instance
-[CHECK] No orphan rendered models remain after remove/respawn operations

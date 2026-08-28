@@ -7,16 +7,14 @@
 [![](https://img.shields.io/badge/Minecraft-1.21%2B-green)](https://www.minecraft.net/)
 [![](https://img.shields.io/badge/Server-Paper%20%7C%20Spigot-orange)](https://papermc.io/)
 [![](https://img.shields.io/badge/Java-21-blue)](https://adoptium.net/)
-[![](https://img.shields.io/badge/Version-1.0.0-red)](../../releases)
-[![](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey)](../../)
+[![](https://img.shields.io/badge/version-1.0.0-red)](https://github.com/Tariux/MinePlus/releases)
+[![](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+[![](https://img.shields.io/badge/Modrinth-minepluscore-1bd96a)](https://modrinth.com/plugin/minepluscore)
+[![](https://img.shields.io/badge/Hangar-MinePlusCore-blue)](https://hangar.papermc.io/Tariux/MinePlusCore)
 
 **Design it in Blockbench → drop it in → it exists in-game. No client mods. No resource packs. No downloads for your players.**
 
-<br>
-
-<img src="docs/assets/cannon-preview.gif" alt="Mineplus Cannon — a multiblock machine firing a TNT shell built and rendered entirely server-side" width="720"/>
-
-<sub>▲ A fully functional **Cannon** multiblock — modeled in Blockbench, loaded from JSON, fired with a torch. Every player on a vanilla client sees it.</sub>
+**📥 Download:** [Modrinth](https://modrinth.com/plugin/minepluscore) · [Hangar](https://hangar.papermc.io/Tariux/MinePlusCore) · [GitHub Releases](https://github.com/Tariux/MinePlus/releases)
 
 </div>
 
@@ -78,15 +76,7 @@ What does that mean for your server?
 
 ## 🎬 Showcase — the Cannon
 
-Everything below is a **module feature**, built entirely outside the core with JSON + ~600 lines of Java:
-
-<div align="center">
-
-<a href="examples/mineplus-fun/README.md"><img src="docs/assets/cannon-preview.jpg" alt="The Mineplus Cannon multiblock rendered from a Blockbench model on a vanilla client" width="560"/></a>
-
-*The Cannon, mid-battle: modeled in Blockbench, rendered server-side, aimed by placement rotation, fired with a torch.*
-
-</div>
+Everything below is a **module feature**, built entirely outside the core with JSON + ~600 lines of Java. *Demo video and screenshots live on the [Modrinth](https://modrinth.com/plugin/minepluscore) and [Hangar](https://hangar.papermc.io/Tariux/MinePlusCore) pages.*
 
 | Interaction | Result |
 |---|---|
@@ -184,8 +174,10 @@ MineplusPlugin
 
 <div align="center">
 
-**Made with ⚙️ and vanilla redstone by [Tariux](https://github.com/Tariux)**
+**Made with ⚙️ and vanilla redstone by [Tariux](https://github.com/Tariux)** · [tariux@protonmail.com](mailto:tariux@protonmail.com)
 
 *Star the repo if your server gained a cannon today.*
+
+<sub>Anonymous usage statistics are collected via [bStats](https://bstats.org/plugin/bukkit/Mineplus/33702) — disable anytime in `plugins/bStats/config.yml`.</sub>
 
 </div>

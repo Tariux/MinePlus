@@ -26,7 +26,8 @@ Virtual rendering pipeline (`infrastructure.virtual`):
 - `VirtualBlockManager` spawn/remove, barrier placement, spawn-area policy (`prepareSpawnArea`: creative/op placements clear non-air occupants; standard players require an empty area and get an "insufficient space" message via `MultiBlockLifecycleManager.place`), ghost `BlockDisplay` cleanup on chunk loads. `ModelRenderingManager` resolves per-level model paths and binds rendered model IDs back to instances.
 
 Configuration and logging:
-- `ConfigManager` auto-generates `plugins/Mineplus/settings.mp.yml` on first start; the `VIRTUAL_RENDERING` section controls collision mode/epsilon/non-air policy, rotation snapping, per-face rendering, texture mode, and origin mode.
+- `ConfigManager` auto-generates `plugins/Mineplus/settings.mp.yml` on first start; the `VIRTUAL_RENDERING` section controls collision mode/epsilon/non-air policy, rotation snapping, per-face rendering, texture mode, and origin mode. `UPDATE_CHECKER.RESOURCE_ID` (default `0` = off) gates an optional SpigotMC version check (`util/UpdateChecker`) that runs once on enable, async.
+- bStats metrics are always enabled (plugin id 33702) via the vendored `org.bstats` sources in `src/main/java/org/bstats` (bstats-bukkit 3.2.1, MIT, vendored from Maven Central sources jars; opt-out lives in `plugins/bStats/config.yml`). `libs/` stub jars are committed so external builds and CI work.
 - `DebugLogger` gates all additional lifecycle, rendering, persistence, and linking logs behind `ADDITIONAL_DEBUG_LOGS` (default `false`). When disabled, only essential plugin lifecycle logs are emitted.
 - `/mineplus model info <key>` reports cube count, display estimate, resolved texture table, occupancy cells with ASCII layer dumps, and cache status.
 
@@ -35,3 +36,5 @@ Current architecture direction is stabilization/alignment of the infrastructure 
 Module layer (features live outside the Core): `examples/mineplus-fun` is the canonical reference module — a separate plugin (`depend: [Mineplus]`) containing the Juicer (recipes/GUI/custom items) and the Cannon (conditional interaction: torch fires, else opens menu; persistent TNT ammo in `stateData`; rotation-aware placement via `createMultiBlock`/`placeMultiBlock`). Its `DEVELOPMENT_PROMPT.md` is the authoritative module-building recipe (verified Core behavior, GUI patterns, API traps). Keep the Core pristine: no feature code, no feature resources, no feature commands.
 
 User documentation lives in `docs/` (`README.md` hub, `config-reference.md`, `developer-api.md`, `extension-workflows.md`) with assets in `docs/assets/`; the root `README.md` is the GitHub presentation. Keep these in sync when behavior changes.
+
+Publishing identity: author `Tariux` (tariux@protonmail.com), repo `github.com/Tariux/MinePlus`, Modrinth project `modrinth.com/plugin/minepluscore` (slug `minepluscore`), Hangar project `hangar.papermc.io/Tariux/MinePlusCore`, bStats plugin id 33702. The Core jar ships as the primary download; MineplusFun is the separate reference module.

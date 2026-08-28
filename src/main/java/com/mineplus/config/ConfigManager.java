@@ -35,7 +35,8 @@ public class ConfigManager {
 
             this.config = new MineplusConfig(
                     additionalDebugLogs,
-                    MineplusConfig.parseVirtualRendering(yamlConfig, VirtualRenderingSettings.defaults())
+                    MineplusConfig.parseVirtualRendering(yamlConfig, VirtualRenderingSettings.defaults()),
+                    yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Could not load configuration from settings.mp.yml, using defaults.", e);
@@ -58,6 +59,12 @@ public class ConfigManager {
                     # rendering pipeline, persistence transactions, and linking events.
                     # Default: false
                     ADDITIONAL_DEBUG_LOGS: false
+
+                    # Update checker: compares the installed version against the
+                    # SpigotMC resource page. Set to your resource id after publishing;
+                    # 0 disables the check entirely.
+                    UPDATE_CHECKER:
+                      RESOURCE_ID: 0
 
                     # Virtual rendering engine (bbmodel -> BlockDisplay pipeline).
                     # Per-model overrides live in models/<key>.meta.json.

@@ -9,21 +9,30 @@ public class MineplusConfig {
 
     private final boolean additionalDebugLogs;
     private final VirtualRenderingSettings virtualRendering;
+    private final int updateCheckResourceId;
 
     public MineplusConfig() {
         this(false);
     }
 
     public MineplusConfig(boolean additionalDebugLogs) {
-        this.additionalDebugLogs = additionalDebugLogs;
-        this.virtualRendering = VirtualRenderingSettings.defaults();
+        this(additionalDebugLogs, VirtualRenderingSettings.defaults());
     }
 
     public MineplusConfig(boolean additionalDebugLogs, VirtualRenderingSettings virtualRendering) {
+        this(additionalDebugLogs, virtualRendering, 0);
+    }
+
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
                 : virtualRendering;
+        this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
     public boolean isAdditionalDebugLogs() {
@@ -32,6 +41,10 @@ public class MineplusConfig {
 
     public VirtualRenderingSettings getVirtualRendering() {
         return virtualRendering;
+    }
+
+    public int getUpdateCheckResourceId() {
+        return updateCheckResourceId;
     }
 
     public static VirtualRenderingSettings parseVirtualRendering(
