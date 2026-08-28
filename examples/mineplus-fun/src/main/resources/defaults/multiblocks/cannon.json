@@ -1,0 +1,15 @@
+{
+  "id": "cannon",
+  "name": "Cannon",
+  "levels": {
+    "1": {
+      "model": "models/cannon-3-1-1.bbmodel",
+      "speed": 1.0,
+      "durability": 150.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Cannon"
+      }
+    }
+  }
+}

@@ -9,3 +9,5 @@ package.json
 models
 textures
 .kilo
+tmp
+temp

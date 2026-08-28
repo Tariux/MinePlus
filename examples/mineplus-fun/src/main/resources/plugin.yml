@@ -11,8 +11,14 @@ commands:
   juicer:
     description: Juicer machine controls (MineplusFun module)
     usage: /juicer <place|remove|upgrade|give>
+  cannon:
+    description: Cannon machine controls (MineplusFun module)
+    usage: /cannon <place|remove|upgrade>
 
 permissions:
   mineplusfun.admin.juicer:
     description: Allows using Juicer controls
+    default: op
+  mineplusfun.admin.cannon:
+    description: Allows using Cannon controls
     default: op

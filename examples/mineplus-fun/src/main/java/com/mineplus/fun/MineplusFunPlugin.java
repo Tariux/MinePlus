@@ -1,6 +1,8 @@
 package com.mineplus.fun;
 
 import com.mineplus.MineplusPlugin;
+import com.mineplus.fun.cannon.CannonFeature;
+import com.mineplus.fun.cannon.CannonSubCommand;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.juicer.JuicerSubCommand;
 import com.mineplus.infrastructure.PluginContext;
@@ -23,6 +25,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
 
     private PluginContext context;
     private JuicerFeature juicerFeature;
+    private CannonFeature cannonFeature;
 
     @Override
     public void onEnable() {
@@ -47,27 +50,43 @@ public final class MineplusFunPlugin extends JavaPlugin {
 
         this.juicerFeature = new JuicerFeature(this, context);
         this.juicerFeature.enable();
-        getLogger().info("[MineplusFun] Juicer module enabled on top of Mineplus Core.");
+
+        this.cannonFeature = new CannonFeature(this, context);
+        this.cannonFeature.enable();
+        getLogger().info("[MineplusFun] Juicer and Cannon modules enabled on top of Mineplus Core.");
     }
 
     @Override
     public void onDisable() {
+        this.cannonFeature = null;
         this.juicerFeature = null;
         this.context = null;
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("juicer") && context != null) {
+        if (context == null) {
+            return false;
+        }
+        if (command.getName().equalsIgnoreCase("juicer")) {
             return new JuicerSubCommand(context).execute(sender, label, args);
+        }
+        if (command.getName().equalsIgnoreCase("cannon")) {
+            return new CannonSubCommand(context).execute(sender, label, args);
         }
         return false;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (command.getName().equalsIgnoreCase("juicer") && context != null) {
+        if (context == null) {
+            return Collections.emptyList();
+        }
+        if (command.getName().equalsIgnoreCase("juicer")) {
             return new JuicerSubCommand(context).tabComplete(sender, args);
+        }
+        if (command.getName().equalsIgnoreCase("cannon")) {
+            return new CannonSubCommand(context).tabComplete(sender, args);
         }
         return Collections.emptyList();
     }
