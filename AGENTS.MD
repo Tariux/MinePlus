@@ -27,7 +27,7 @@ Virtual rendering pipeline (`infrastructure.virtual`):
 
 Configuration and logging:
 - `ConfigManager` auto-generates `plugins/Mineplus/settings.mp.yml` on first start; the `VIRTUAL_RENDERING` section controls collision mode/epsilon/non-air policy, rotation snapping, per-face rendering, texture mode, and origin mode. `UPDATE_CHECKER.RESOURCE_ID` (default `0` = off) gates an optional SpigotMC version check (`util/UpdateChecker`) that runs once on enable, async.
-- bStats metrics are always enabled (plugin id 33702) via the vendored `org.bstats` sources in `src/main/java/org/bstats` (bstats-bukkit 3.2.1, MIT, vendored from Maven Central sources jars; opt-out lives in `plugins/bStats/config.yml`). `libs/` stub jars are committed so external builds and CI work.
+- bStats metrics are always enabled (plugin id 33702) via the vendored bStats sources relocated to `com.mineplus.bstats` in `src/main/java/com/mineplus/bstats` (bstats-bukkit 3.2.1, MIT, vendored from Maven Central sources jars; relocation is required — `MetricsBase.checkRelocation` refuses to start under the original `org.bstats` package; opt-out lives in `plugins/bStats/config.yml`). `libs/` stub jars are committed so external builds and CI work.
 - `DebugLogger` gates all additional lifecycle, rendering, persistence, and linking logs behind `ADDITIONAL_DEBUG_LOGS` (default `false`). When disabled, only essential plugin lifecycle logs are emitted.
 - `/mineplus model info <key>` reports cube count, display estimate, resolved texture table, occupancy cells with ASCII layer dumps, and cache status.
 

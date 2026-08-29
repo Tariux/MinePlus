@@ -1,4 +1,4 @@
-package org.bstats.json;
+package com.mineplus.bstats.json;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;

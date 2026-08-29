@@ -1,13 +1,13 @@
-package org.bstats.charts;
+package com.mineplus.bstats.charts;
 
-import org.bstats.json.JsonObjectBuilder;
+import com.mineplus.bstats.json.JsonObjectBuilder;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-public class MultiLineChart extends CustomChart {
+public class AdvancedBarChart extends CustomChart {
 
-    private final Callable<Map<String, Integer>> callable;
+    private final Callable<Map<String, int[]>> callable;
 
     /**
      * Class constructor.
@@ -15,7 +15,7 @@ public class MultiLineChart extends CustomChart {
      * @param chartId The id of the chart.
      * @param callable The callable which is used to request the chart data.
      */
-    public MultiLineChart(String chartId, Callable<Map<String, Integer>> callable) {
+    public AdvancedBarChart(String chartId, Callable<Map<String, int[]>> callable) {
         super(chartId);
         this.callable = callable;
     }
@@ -23,15 +23,14 @@ public class MultiLineChart extends CustomChart {
     @Override
     protected JsonObjectBuilder.JsonObject getChartData() throws Exception {
         JsonObjectBuilder valuesBuilder = new JsonObjectBuilder();
-
-        Map<String, Integer> map = callable.call();
+        Map<String, int[]> map = callable.call();
         if (map == null || map.isEmpty()) {
             // Null = skip the chart
             return null;
         }
         boolean allSkipped = true;
-        for (Map.Entry<String, Integer> entry : map.entrySet()) {
-            if (entry.getValue() == 0) {
+        for (Map.Entry<String, int[]> entry : map.entrySet()) {
+            if (entry.getValue().length == 0) {
                 continue; // Skip this invalid
             }
             allSkipped = false;
@@ -46,5 +45,4 @@ public class MultiLineChart extends CustomChart {
                 .appendField("values", valuesBuilder.build())
                 .build();
     }
-
 }

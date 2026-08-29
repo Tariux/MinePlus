@@ -30,12 +30,11 @@ public final class InfrastructureItemManager {
 
     public boolean hasRequirements(Player player, Map<String, Integer> requirement) {
         for (Map.Entry<String, Integer> entry : requirement.entrySet()) {
-            ItemStack required = itemRegistry.createItem(entry.getKey());
-            if (required == null) {
-                return false;
+            int needed = Math.max(entry.getValue(), 0);
+            if (needed == 0) {
+                continue;
             }
 
-            int needed = Math.max(entry.getValue(), 0);
             int found = 0;
             for (ItemStack slot : player.getInventory().getContents()) {
                 if (slot == null) {

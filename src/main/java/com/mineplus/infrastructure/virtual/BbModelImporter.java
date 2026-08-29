@@ -459,6 +459,11 @@ public class BbModelImporter {
     }
 
     private static String extractTextureIdentifier(String rawValue) {
+        // Blockbench writes "path": null when textures are linked from an external
+        // library; the fallback chain (relative_path, name) then has to answer.
+        if (rawValue == null) {
+            return null;
+        }
         String normalized = rawValue.replace('\\', '/').trim();
         if (normalized.isEmpty()) {
             return null;
