@@ -93,7 +93,7 @@ public final class MachineProcessManager {
 
         hookBus.publish(new MultiBlockLifecycleEvent(
                 MultiBlockLifecycleEventType.PROCESS_START, type, instance, null, null));
-        type.hook().onProcessStart(instance, recipe);
+        safeHook(instance, "onProcessStart", () -> type.hook().onProcessStart(instance, recipe));
         DebugLogger.info("MachineProcessManager: Started process '" + recipe.id()
                 + "' on instance " + instanceId + " (" + full.totalTicks() + " ticks base).");
         return true;
@@ -145,6 +145,21 @@ public final class MachineProcessManager {
      * @return the number of processes that completed during this advance
      */
     public int advanceAll(int intervalTicks) {
+        return advanceAll(intervalTicks, null);
+    }
+
+    /**
+     * Advances all running processes by one lifecycle tick interval, reporting
+     * every instance whose process state changed to the optional
+     * {@code dirtySink} so the caller can stage incremental persistence for
+     * exactly those instances.
+     *
+     * @param intervalTicks the number of ticks between lifecycle ticks (always 20 today)
+     * @param dirtySink     optional consumer invoked with each instance id whose
+     *                      encoded process state was read or written this pass
+     * @return the number of processes that completed during this advance
+     */
+    public int advanceAll(int intervalTicks, java.util.function.Consumer<UUID> dirtySink) {
         int completed = 0;
         List<MachineProcessCompletion> finished = new ArrayList<>();
         for (MultiBlockInstance instance : registry.getInstances()) {
@@ -168,6 +183,9 @@ public final class MachineProcessManager {
             if (recipe == null || type == null || !recipe.machineTypeId().equalsIgnoreCase(type.id())) {
                 // Recipe/type vanished (e.g. config reload) — drop the orphaned process.
                 MachineProcess.clearFrom(instance.mutableStateData());
+                if (dirtySink != null) {
+                    dirtySink.accept(instance.id());
+                }
                 DebugLogger.info("MachineProcessManager: Dropped orphaned process '"
                         + process.recipeId() + "' on instance " + instance.id() + " (recipe/type missing).");
                 continue;
@@ -181,16 +199,34 @@ public final class MachineProcessManager {
                         process.recipeId(), process.machineTypeId(), process.totalTicks(), remaining);
                 updated.encodeInto(instance.mutableStateData());
             }
+            if (dirtySink != null) {
+                dirtySink.accept(instance.id());
+            }
         }
 
         for (MachineProcessCompletion completion : finished) {
             hookBus.publish(new MultiBlockLifecycleEvent(
                     MultiBlockLifecycleEventType.PROCESS_COMPLETE,
                     completion.type(), completion.instance(), null, null));
-            completion.type().hook().onProcessComplete(completion.instance(), completion.recipe());
+            safeHook(completion.instance(), "onProcessComplete",
+                    () -> completion.type().hook().onProcessComplete(completion.instance(), completion.recipe()));
             completed++;
         }
         return completed;
+    }
+
+    /**
+     * Runs a direct per-type hook dispatch with exception isolation: a throwing
+     * module hook is logged and skipped instead of aborting the advancement loop.
+     */
+    private void safeHook(MultiBlockInstance instance, String phase, Runnable dispatch) {
+        try {
+            dispatch.run();
+        } catch (Throwable throwable) {
+            DebugLogger.severe("MachineProcessManager: Hook '" + phase + "' of type '" + instance.typeId()
+                    + "' (instance " + instance.id() + ") threw; isolating and continuing. "
+                    + throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+        }
     }
 
     /** Resolves the current level's speed multiplier for an instance, clamped to [0, ...]. */

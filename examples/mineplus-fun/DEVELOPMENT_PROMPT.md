@@ -47,6 +47,17 @@ the Core is absent.
 - `basicInfrastructureApi()` — lightweight creation/placement/lookup helpers.
 - `jsonInfrastructureApi()` — `reloadAll()`, `reloadModelDefinitions()`, `reloadMultiBlocks()`,
   `reloadRecipes()`.
+- `moduleSupport()` — the module toolkit (`ModuleSupport`, see §7a).
+
+Supporting Core utilities every module should use instead of hand-rolling:
+
+- `com.mineplus.infrastructure.core.util.ModelPoints` — CENTER-origin pixel→world transforms
+  (`toWorld`, `toWorldOffset`, `direction`); identical to the renderer's math.
+- `com.mineplus.infrastructure.core.state.TypedState` — typed view over persisted `stateData`
+  (`of(instance).getInt/setInt/getLong/getDouble/getBoolean/...`).
+- `com.mineplus.infrastructure.core.util.Cooldowns` — self-pruning per-key cooldown map
+  (`tryAcquire`, `isReady`, `remove`, `prune`); the standard interact-pair dedupe.
+- `com.mineplus.infrastructure.core.gui.AbstractMachineGui` — machine-GUI base class (see §8).
 
 ## 4. Interaction & lifecycle mechanics (verified facts)
 
@@ -68,6 +79,13 @@ Consequences:
 - Hook dispatch on removal is **split**: `removeBlock(id, actor, destroy=true)` fires
   `onBreak` (block break, destroy), `destroy=false` fires `onRemove`. Cleanup logic (dropping
   stored items, clearing feature state) must be implemented in **both**.
+- Direct hook dispatch and GUI callbacks are **exception-isolated** by the Core: a throwing
+  module hook is logged (`Hook 'onTick' of type '...' threw; isolating and continuing.`) and
+  skipped. Never rely on an exception escaping to cancel a Core operation — return values
+  and cancelled events are the control surface.
+- Persistence is **incremental** on hot paths: place/upgrade/remove and per-tick process
+  advancement stage single-instance upserts/deletes; only reload/shutdown do a full replace.
+  `stateData` writes from GUI captures are picked up by the write-behind cycle within ~1s.
 - Hook overrides survive reloads: `registerHook` stores an override that
   `MultiBlockConfigLoader`/`clearTypes` re-applies to freshly loaded types. Registering the hook
   before or after `jsonInfrastructureApi().reloadAll()` works either way.
@@ -100,14 +118,12 @@ Consequences:
   "front", pre-rotate the placement quaternion by ±90° around Y in the place command. The
   cannon's muzzle is at model −X, so its command applies `.rotateY(-Math.PI / 2)`.
 - `instance.rotation()` is exactly what the renderer uses. To compute world positions from
-  bbmodel pixels, replicate the renderer's CENTER-origin transform:
-
-  ```
-  world = anchorBlock + (0.5, 0.5, 0.5) + R · (p_pixels / 16 − (0, 0.5, 0))
-  ```
-
-  where `R = instance.rotation()`. This keeps feature geometry (muzzle position, launch axis)
-  glued to the rendered model for every placement rotation.
+  bbmodel pixels, use `ModelPoints` (`core.util`) — `toWorld(instance, world, pixels)` for
+  points, `direction(instance, axis)` for model-space axes. It applies the renderer's
+  CENTER-origin transform (`world = anchor + (0.5,0.5,0.5) + R·(p/16 − (0,0.5,0))`), keeping
+  feature geometry (muzzle position, launch axis, seats) glued to the rendered model for
+  every placement rotation. Do **not** re-derive the formula per feature — the three copies
+  the cannon used to carry were a drift risk.
 - Origin modes: `free`-format models anchor CENTER (pixel (0,0,0) = anchor block center at base);
   `java_block`/`java_item` anchor GRID (corner), unless geometry is center-authored. Per-model
   overrides live in `models/<key>.meta.json`. Both example machines are CENTER.
@@ -142,55 +158,75 @@ Consequences:
 
 1. Ship `defaults/multiblocks/<id>.json` and `defaults/models/*.bbmodel` (plus optionally
    `defaults/recipes/<id>_recipes.json`) inside the module jar.
-2. In `onEnable`, copy them into the **Core's** data folder
-   (`context.plugin().getDataFolder()`), then call `context.jsonInfrastructureApi().reloadAll()`.
-   Overwrite models (`overwrite=true`) but not JSON configs (`overwrite=false`) so server owners'
-   config edits survive module updates.
+2. In `onEnable`, install them into the **Core's** data folder with
+   `context.moduleSupport().installDefault(plugin, resource, target, overwrite)`, then call
+   `context.jsonInfrastructureApi().reloadAll()`. Overwrite models (`true`) but not JSON
+   configs (`false`) so server owners' config edits survive module updates.
 3. Register GUIs via `registerGui(key, gui)` and behavior via `registerHook(typeId, hook)`.
 4. Feature package layout (mirror the juicer/cannon):
 
    ```
-   com.mineplus.fun.<feature>/
+   com.mineplus.<module>.<feature>/
      <Feature>Keys.java        — namespaced String constants (machine id, gui key, state keys)
      <Feature>Feature.java     — enable(): install resources, register gui/hook/listeners, reloadAll()
      <Feature>Hook.java        — MultiBlockHook with the game behavior
-     gui/<Feature>Gui.java     — InfrastructureGui + InteractiveInfrastructureGui
+     gui/<Feature>Gui.java     — extends AbstractMachineGui (Core base class)
      <Feature>SubCommand.java  — implements com.mineplus.infrastructure.command.SubCommand
    ```
 
    The cannon additionally splits behavior into collaborators — copy this shape when a feature
    outgrows one hook: `CannonMountManager` (seat entities + session state + view clamp),
    `CannonAimListener` (bow-release firing), `CannonProjectiles` (projectile launch +
-   explosion calibration), `CannonTntStore` (persistent ammo).
-
-5. Wire the feature into `MineplusFunPlugin.onEnable/onCommand/onTabComplete` and `plugin.yml`
-   (command entry + `mineplusfun.admin.<feature>` permission).
+   explosion calibration), `CannonTntStore` (persistent ammo, on `TypedState`).
+5. Register the feature's command with
+   `context.moduleSupport().registerCommand(this, "<label>", new <Feature>SubCommand(context))`
+   — no `plugin.yml` command entry and no `onCommand`/`onTabComplete` dispatch in the plugin
+   main. Declare only the permission in `plugin.yml`.
 6. Recipes are optional — only features that consult `recipeManager().findMatch(...)` need a
    recipes JSON (the cannon has none).
 
+### 7a. Module toolkit quick reference (`context.moduleSupport()`)
+
+- `installDefault(module, classpathResource, dataRelativePath, overwrite)` — copies an
+  embedded jar resource into the Core's data folder.
+- `resolveLooked(player, range, typeId)` — "the machine I'm looking at": anchor block first,
+  then rendered-model id. Pass `null` as `typeId` to accept any type. Replaces every module's
+  hand-rolled `findLooked`.
+- `registerCommand(module, label, subCommand)` — dynamic top-level command registration on
+  the server command map; enforces the subcommand's `permission()`.
+
 ## 8. GUI patterns that work with the Core
 
+- Extend `AbstractMachineGui` (Core, `core.gui`). The base class owns all interaction
+  guarding: top/bottom raw-slot routing, shift-click cancellation from the player
+  inventory, click cancellation on every non-container top slot, insertion guards on
+  container slots (cursor, hotbar swaps — off-hand arrives as button 40 — and drags all
+  route through `accepts(slot, item)`), take-only output slots, filler, and
+  capture-on-next-tick. Subclasses implement only:
+  - `title(instance)`, `layout(inventory, instance)`;
+  - `containerSlots()` (+ `takeOnlySlots()` for outputs, `accepts(slot, item)` for
+    validation);
+  - `onButtonClick(player, instance, slot, event)` for buttons;
+  - `capture(player, instance, inventory)` — persist contents; called on close and one
+    tick after every accepted interaction, so slot contents are final.
+  Helpers: `instance(id)`, `type(instance)`, `fill(...)`, `named(...)`, `fillerPane()`,
+  `plugin()`, `captureLater(...)`.
 - The Core tracks **one open GUI session per player** (`InfrastructureGuiManager`); opening a
   second GUI replaces the session, and click/drag/close are dispatched only while the event's
-  top inventory is the tracked one.
-- Layout: fill non-functional slots with named filler panes; leave functional slots `null`.
-  Cancel clicks on non-functional top slots and cancel shift-clicks from the bottom inventory
-  when the GUI cannot accept arbitrary items.
-- Guard **every** insertion path into a restricted slot: the cursor
-  (`event.getCursor()`), hotbar-number swaps (`event.getHotbarButton() >= 0` — the off-hand
-  swap arrives as button 40; `InventoryAction.SWAP_WITH_OFFHAND` does **not** exist in
-  spigot-api-1.21.1), and drags (`event.getOldCursor()`).
-- Persist GUI contents on close *and* after each accepted click/drag. The result of a click is
-  not yet applied when the event fires, so capture state on the next tick:
-  `Bukkit.getScheduler().runTask(plugin, () -> capture(...))`.
+  top inventory is the tracked one. Sessions are dropped on player quit, and GUI callbacks
+  are exception-isolated like hooks.
 - State capture reads from the event's top inventory. If a foreign item somehow lands in a
   restricted slot, return it to the player (inventory/drop) instead of destroying it.
 
 ## 9. Persistent machine state
 
 - `instance.mutableStateData()` is a `Map<String, String>` that the Core's snapshot layer
-  persists — values survive restarts together with the instance. This is the right place for
-  machine state like ammunition counts (see `CannonTntStore`).
+  persists — values survive restarts together with the instance. Access it through
+  `TypedState.of(instance)` (`getInt/setInt/getLong/getDouble/getBoolean/...`) instead of
+  hand-rolled parsing (see `CannonTntStore`). After mutating `stateData` outside a Core
+  lifecycle path (hooks, GUI captures), call
+  `context.infrastructureApi().stagePersist(instance.id())` so the change is queued for the
+  async persistence flush.
 - Plain in-memory maps (like the Juicer's `machineContents`) do **not** survive restarts; prefer
   `stateData` for anything the player would consider lost progress.
 - Multi-material stores: give each material its own state key (`cannon_tnt_count`,

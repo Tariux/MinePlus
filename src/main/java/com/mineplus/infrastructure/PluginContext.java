@@ -5,6 +5,7 @@ import com.mineplus.infrastructure.core.InfrastructureEngine;
 import com.mineplus.infrastructure.core.api.BasicInfrastructureApi;
 import com.mineplus.infrastructure.core.api.InfrastructureApi;
 import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
+import com.mineplus.infrastructure.module.ModuleSupport;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 
@@ -17,6 +18,7 @@ public final class PluginContext {
     private final InfrastructureApi infrastructureApi;
     private final BasicInfrastructureApi basicInfrastructureApi;
     private final JsonInfrastructureApi jsonInfrastructureApi;
+    private final ModuleSupport moduleSupport;
 
     private PluginContext(
             MineplusPlugin plugin,
@@ -25,7 +27,8 @@ public final class PluginContext {
             InfrastructureEngine infrastructureEngine,
             InfrastructureApi infrastructureApi,
             BasicInfrastructureApi basicInfrastructureApi,
-            JsonInfrastructureApi jsonInfrastructureApi
+            JsonInfrastructureApi jsonInfrastructureApi,
+            ModuleSupport moduleSupport
     ) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
@@ -34,6 +37,7 @@ public final class PluginContext {
         this.infrastructureApi = infrastructureApi;
         this.basicInfrastructureApi = basicInfrastructureApi;
         this.jsonInfrastructureApi = jsonInfrastructureApi;
+        this.moduleSupport = moduleSupport;
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -47,7 +51,8 @@ public final class PluginContext {
                 infrastructureEngine,
                 infrastructureEngine.api(),
                 infrastructureEngine.basicApi(),
-                infrastructureEngine.jsonApi()
+                infrastructureEngine.jsonApi(),
+                new ModuleSupport(plugin, infrastructureEngine.registry(), virtualBlockManager)
         );
     }
 
@@ -81,5 +86,10 @@ public final class PluginContext {
 
     public JsonInfrastructureApi jsonInfrastructureApi() {
         return jsonInfrastructureApi;
+    }
+
+    /** Module toolkit: resource installation, looked-at resolution, command registration. */
+    public ModuleSupport moduleSupport() {
+        return moduleSupport;
     }
 }

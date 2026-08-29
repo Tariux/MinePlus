@@ -8,10 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.block.Block;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -79,7 +76,7 @@ public final class JuicerSubCommand implements SubCommand {
                 return true;
             }
             case "remove" -> {
-                MultiBlockInstance looked = findLooked(player);
+                MultiBlockInstance looked = context.moduleSupport().resolveLooked(player, 6, JuicerKeys.MACHINE_ID);
                 if (looked == null) {
                     player.sendMessage(ChatColor.RED + "Look at a Juicer to remove it.");
                     return true;
@@ -91,7 +88,7 @@ public final class JuicerSubCommand implements SubCommand {
                 return true;
             }
             case "upgrade" -> {
-                MultiBlockInstance looked = findLooked(player);
+                MultiBlockInstance looked = context.moduleSupport().resolveLooked(player, 6, JuicerKeys.MACHINE_ID);
                 if (looked == null) {
                     player.sendMessage(ChatColor.RED + "Look at a Juicer to upgrade it.");
                     return true;
@@ -139,25 +136,5 @@ public final class JuicerSubCommand implements SubCommand {
         }
 
         return Collections.emptyList();
-    }
-
-    private MultiBlockInstance findLooked(Player player) {
-        Block block = player.getTargetBlockExact(6);
-        if (block == null) {
-            return null;
-        }
-
-        Location location = block.getLocation();
-        MultiBlockInstance byOrigin = context.basicInfrastructureApi().getAt(location);
-        if (byOrigin != null && byOrigin.typeId().equalsIgnoreCase(JuicerKeys.MACHINE_ID)) {
-            return byOrigin;
-        }
-
-        UUID renderedModelId = context.virtualBlockManager().getInstanceIdAt(location);
-        MultiBlockInstance byRender = context.infrastructureEngine().lifecycleManager().findByRenderedModelId(renderedModelId);
-        if (byRender != null && byRender.typeId().equalsIgnoreCase(JuicerKeys.MACHINE_ID)) {
-            return byRender;
-        }
-        return null;
     }
 }

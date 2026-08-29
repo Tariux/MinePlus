@@ -6,20 +6,21 @@ import com.mineplus.fun.cannon.CannonSubCommand;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.juicer.JuicerSubCommand;
 import com.mineplus.infrastructure.PluginContext;
-import java.util.Collections;
-import java.util.List;
 import org.bukkit.Bukkit;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Example "module" plugin that turns the Mineplus Core engine into a Juicer game feature.
+ * Example "module" plugin that turns the Mineplus Core engine into Juicer and
+ * Cannon game features.
  *
  * <p>This plugin is intentionally a <em>separate</em> artifact from the Core. It depends on
  * the Core at runtime (see {@code plugin.yml -> depend: [Mineplus]}) and obtains the Core
- * API through {@link MineplusPlugin#getPluginContext()}. None of the juicer game logic lives
+ * API through {@link MineplusPlugin#getPluginContext()}. None of the game logic lives
  * in the Core; the Core remains a dependency-only engine.
+ *
+ * <p>Commands are registered dynamically through the Core's module toolkit
+ * ({@code context.moduleSupport().registerCommand(...)}) — no per-command
+ * {@code plugin.yml} entries or hand-written dispatch in {@code onCommand}.
  */
 public final class MineplusFunPlugin extends JavaPlugin {
 
@@ -53,6 +54,10 @@ public final class MineplusFunPlugin extends JavaPlugin {
 
         this.cannonFeature = new CannonFeature(this, context);
         this.cannonFeature.enable();
+
+        context.moduleSupport().registerCommand(this, "juicer", new JuicerSubCommand(context));
+        context.moduleSupport().registerCommand(this, "cannon", new CannonSubCommand(context));
+
         getLogger().info("[MineplusFun] Juicer and Cannon modules enabled on top of Mineplus Core.");
     }
 
@@ -64,33 +69,5 @@ public final class MineplusFunPlugin extends JavaPlugin {
         this.cannonFeature = null;
         this.juicerFeature = null;
         this.context = null;
-    }
-
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (context == null) {
-            return false;
-        }
-        if (command.getName().equalsIgnoreCase("juicer")) {
-            return new JuicerSubCommand(context).execute(sender, label, args);
-        }
-        if (command.getName().equalsIgnoreCase("cannon")) {
-            return new CannonSubCommand(context).execute(sender, label, args);
-        }
-        return false;
-    }
-
-    @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (context == null) {
-            return Collections.emptyList();
-        }
-        if (command.getName().equalsIgnoreCase("juicer")) {
-            return new JuicerSubCommand(context).tabComplete(sender, args);
-        }
-        if (command.getName().equalsIgnoreCase("cannon")) {
-            return new CannonSubCommand(context).tabComplete(sender, args);
-        }
-        return Collections.emptyList();
     }
 }

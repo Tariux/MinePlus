@@ -9,13 +9,8 @@ website: https://github.com/Tariux/MinePlus
 # Hard dependency: the Core engine must be present and enabled first.
 depend: [Mineplus]
 
-commands:
-  juicer:
-    description: Juicer machine controls (MineplusFun module)
-    usage: /juicer <place|remove|upgrade|give>
-  cannon:
-    description: Cannon machine controls (MineplusFun module)
-    usage: /cannon <place|remove|upgrade>
+# Commands (/juicer, /cannon) are registered dynamically at enable time via
+# context.moduleSupport().registerCommand(...) - no plugin.yml entries needed.
 
 permissions:
   mineplusfun.admin.juicer:

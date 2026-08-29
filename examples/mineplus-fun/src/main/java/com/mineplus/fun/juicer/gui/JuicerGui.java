@@ -1,8 +1,7 @@
 package com.mineplus.fun.juicer.gui;
 
 import com.mineplus.fun.juicer.JuicerKeys;
-import com.mineplus.infrastructure.core.gui.InfrastructureGui;
-import com.mineplus.infrastructure.core.gui.InteractiveInfrastructureGui;
+import com.mineplus.infrastructure.core.gui.AbstractMachineGui;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
@@ -13,20 +12,24 @@ import com.mineplus.infrastructure.registry.ItemRegistry;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class JuicerGui implements InfrastructureGui, InteractiveInfrastructureGui {
+/**
+ * Juicer machine menu built on the Core's {@link AbstractMachineGui}: the base
+ * class owns slot guarding (cursor, hotbar swaps, drags), shift-click
+ * cancellation, and capture-on-next-tick; this class only defines layout,
+ * container topology, and the craft/upgrade behavior.
+ */
+public final class JuicerGui extends AbstractMachineGui {
 
     private static final int INPUT_SLOT = 11;
     private static final int OUTPUT_SLOT = 15;
@@ -34,8 +37,6 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
     private static final int UPGRADE_SLOT = 22;
     private static final int SIZE = 27;
 
-    private final JavaPlugin plugin;
-    private final MultiBlockRegistry registry;
     private final MultiBlockLifecycleManager lifecycleManager;
     private final RecipeManager recipeManager;
     private final ItemRegistry itemRegistry;
@@ -48,8 +49,7 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
             RecipeManager recipeManager,
             ItemRegistry itemRegistry
     ) {
-        this.plugin = plugin;
-        this.registry = registry;
+        super(plugin, registry, SIZE);
         this.lifecycleManager = lifecycleManager;
         this.recipeManager = recipeManager;
         this.itemRegistry = itemRegistry;
@@ -57,10 +57,13 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
     }
 
     @Override
-    public void open(Player player, MultiBlockInstance instance) {
-        String title = ChatColor.DARK_GREEN + "Juicer Lv." + instance.level();
-        Inventory inventory = Bukkit.createInventory(player, SIZE, title);
-        fillLayout(inventory, instance);
+    protected String title(MultiBlockInstance instance) {
+        return ChatColor.DARK_GREEN + "Juicer Lv." + instance.level();
+    }
+
+    @Override
+    protected void layout(Inventory inventory, MultiBlockInstance instance) {
+        fill(inventory, fillerPane());
 
         StoredContents contents = machineContents.get(instance.id());
         if (contents != null) {
@@ -72,51 +75,31 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
             }
         }
 
-        player.openInventory(inventory);
+        inventory.setItem(CRAFT_SLOT, named(Material.LIME_DYE, ChatColor.GREEN + "Process"));
+        inventory.setItem(UPGRADE_SLOT, buildUpgradeButton(instance));
     }
 
     @Override
-    public void onClick(Player player, UUID instanceId, InventoryClickEvent event) {
-        MultiBlockInstance instance = registry.getInstance(instanceId);
-        if (instance == null) {
-            event.setCancelled(true);
+    protected Set<Integer> containerSlots() {
+        return Set.of(INPUT_SLOT, OUTPUT_SLOT);
+    }
+
+    @Override
+    protected Set<Integer> takeOnlySlots() {
+        return Set.of(OUTPUT_SLOT);
+    }
+
+    @Override
+    protected void onButtonClick(Player player, MultiBlockInstance instance, int slot, InventoryClickEvent event) {
+        if (slot == CRAFT_SLOT) {
+            craft(player, instance, event.getView().getTopInventory());
             return;
         }
 
-        Inventory top = event.getView().getTopInventory();
-        int rawSlot = event.getRawSlot();
-        if (rawSlot >= top.getSize()) {
-            if (event.isShiftClick()) {
-                event.setCancelled(true);
-            }
-            return;
-        }
-
-        if (rawSlot == INPUT_SLOT) {
-            scheduleStateCapture(instanceId, top);
-            return;
-        }
-
-        if (rawSlot == OUTPUT_SLOT) {
-            if (event.getCursor() != null && event.getCursor().getType() != Material.AIR) {
-                event.setCancelled(true);
-            } else {
-                scheduleStateCapture(instanceId, top);
-            }
-            return;
-        }
-
-        if (rawSlot == CRAFT_SLOT) {
-            event.setCancelled(true);
-            craft(player, instance, top);
-            return;
-        }
-
-        if (rawSlot == UPGRADE_SLOT) {
-            event.setCancelled(true);
+        if (slot == UPGRADE_SLOT) {
             boolean upgraded = lifecycleManager.upgrade(instance.id(), player);
             if (upgraded) {
-                MultiBlockInstance refreshed = registry.getInstance(instance.id());
+                MultiBlockInstance refreshed = instance(instance.id());
                 if (refreshed != null) {
                     open(player, refreshed);
                 }
@@ -124,30 +107,15 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
             } else {
                 player.sendMessage(ChatColor.RED + "Upgrade failed. Check required materials.");
             }
-            return;
         }
-
-        event.setCancelled(true);
     }
 
     @Override
-    public void onDrag(Player player, UUID instanceId, InventoryDragEvent event) {
-        int topSize = event.getView().getTopInventory().getSize();
-        for (int slot : event.getRawSlots()) {
-            if (slot < topSize && slot != INPUT_SLOT) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-        scheduleStateCapture(instanceId, event.getView().getTopInventory());
-    }
-
-    @Override
-    public void onClose(Player player, UUID instanceId, InventoryCloseEvent event) {
-        Inventory top = event.getView().getTopInventory();
-        ItemStack input = copyOrNull(top.getItem(INPUT_SLOT));
-        ItemStack output = copyOrNull(top.getItem(OUTPUT_SLOT));
-        machineContents.put(instanceId, new StoredContents(input, output));
+    protected void capture(Player player, MultiBlockInstance instance, Inventory inventory) {
+        machineContents.put(instance.id(), new StoredContents(
+                copyOrNull(inventory.getItem(INPUT_SLOT)),
+                copyOrNull(inventory.getItem(OUTPUT_SLOT))
+        ));
     }
 
     private void craft(Player player, MultiBlockInstance instance, Inventory inventory) {
@@ -207,20 +175,8 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
         player.sendMessage(ChatColor.GREEN + "Juicing complete.");
     }
 
-    private void fillLayout(Inventory inventory, MultiBlockInstance instance) {
-        ItemStack filler = named(Material.GRAY_STAINED_GLASS_PANE, " ");
-        for (int slot = 0; slot < SIZE; slot++) {
-            inventory.setItem(slot, filler);
-        }
-
-        inventory.setItem(INPUT_SLOT, null);
-        inventory.setItem(OUTPUT_SLOT, null);
-        inventory.setItem(CRAFT_SLOT, named(Material.LIME_DYE, ChatColor.GREEN + "Process"));
-        inventory.setItem(UPGRADE_SLOT, buildUpgradeButton(instance));
-    }
-
     private ItemStack buildUpgradeButton(MultiBlockInstance instance) {
-        MultiBlockType type = registry.getType(instance.typeId());
+        MultiBlockType type = type(instance);
         if (type == null || type.level(instance.level() + 1) == null) {
             return named(Material.BARRIER, ChatColor.RED + "Max Level");
         }
@@ -235,14 +191,6 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
             lore.add(ChatColor.YELLOW + "- " + entry.getValue() + "x " + entry.getKey());
         }
         meta.setLore(lore);
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private ItemStack named(Material material, String name) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(name);
         item.setItemMeta(meta);
         return item;
     }
@@ -299,13 +247,6 @@ public final class JuicerGui implements InfrastructureGui, InteractiveInfrastruc
         }
         existing.setAmount(existing.getAmount() + outputItem.getAmount());
         inventory.setItem(OUTPUT_SLOT, existing);
-    }
-
-    private void scheduleStateCapture(UUID instanceId, Inventory inventory) {
-        Bukkit.getScheduler().runTask(plugin, () -> machineContents.put(instanceId, new StoredContents(
-                copyOrNull(inventory.getItem(INPUT_SLOT)),
-                copyOrNull(inventory.getItem(OUTPUT_SLOT))
-        )));
     }
 
     private ItemStack copyOrNull(ItemStack item) {

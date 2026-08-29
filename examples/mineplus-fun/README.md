@@ -133,14 +133,18 @@ The Core exposes its API through `PluginContext`, obtained from the Core plugin 
 MineplusPlugin core = (MineplusPlugin) Bukkit.getPluginManager().getPlugin("Mineplus");
 PluginContext context = core.getPluginContext();
 
-CannonMountManager mounts = new CannonMountManager(plugin);
+// Install shipped resources into the Core's data folder (models overwrite, configs don't)
+context.moduleSupport().installDefault(plugin, "defaults/models/cannon-3-1-1.bbmodel", "models/cannon-3-1-1.bbmodel", true);
+context.moduleSupport().installDefault(plugin, "defaults/multiblocks/cannon.json", "multiblocks/cannon.json", false);
+
 context.itemRegistry().register(new CarrotJuiceItemDefinition());
 context.infrastructureApi().registerHook("cannon", new CannonFireHook(context, mounts));
 context.infrastructureApi().registerGui("cannon_gui", new CannonGui(plugin, registry, mounts));
+context.moduleSupport().registerCommand(plugin, "cannon", new CannonSubCommand(context)); // dynamic /cannon
 context.jsonInfrastructureApi().reloadAll(); // load shipped JSON definitions
 ```
 
-Module content (models, multiblocks, recipes) is shipped *inside the module jar* and copied into the **Core's** data folder at enable time, then loaded via `reloadAll()`.
+Module content (models, multiblocks, recipes) is shipped *inside the module jar* and installed into the **Core's** data folder at enable time through the Core's module toolkit (`context.moduleSupport()`), then loaded via `reloadAll()`. Commands are registered dynamically on the server command map — no `plugin.yml` command entries. Machine GUIs extend the Core's `AbstractMachineGui` base (slot guarding, drag/hotbar validation, and capture-on-next-tick are inherited); model geometry (muzzles, seats) resolves through `ModelPoints`, and persistent counters through `TypedState`.
 
 ## 🔨 Building
 

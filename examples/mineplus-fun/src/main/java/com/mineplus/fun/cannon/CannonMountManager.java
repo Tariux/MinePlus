@@ -1,6 +1,7 @@
 package com.mineplus.fun.cannon;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.util.ModelPoints;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -27,7 +28,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
@@ -359,11 +359,7 @@ public final class CannonMountManager implements Listener {
      * vertical barrel (no meaningful forward heading, so the view is left free).
      */
     private float boreYawDeg(MultiBlockInstance instance) {
-        Vector3f axis = new Vector3f(-1.0f, 0.0f, 0.0f);
-        Quaternionf rotation = instance.rotation();
-        if (rotation != null) {
-            rotation.transform(axis);
-        }
+        Vector3f axis = ModelPoints.direction(instance, new Vector3f(-1.0f, 0.0f, 0.0f));
         if (Math.abs(axis.x) < 1.0E-4F && Math.abs(axis.z) < 1.0E-4F) {
             return Float.NaN;
         }
@@ -415,19 +411,7 @@ public final class CannonMountManager implements Listener {
         if (world == null) {
             return null;
         }
-
-        Vector3f seatOffset = new Vector3f(SEAT_PIXELS).mul(1.0f / 16.0f).sub(0.0f, 0.5f, 0.0f);
-        Quaternionf rotation = instance.rotation();
-        if (rotation != null) {
-            rotation.transform(seatOffset);
-        }
-
-        return new Location(
-                world,
-                instance.coordinate().x() + 0.5D + seatOffset.x,
-                instance.coordinate().y() + 0.5D + seatOffset.y,
-                instance.coordinate().z() + 0.5D + seatOffset.z
-        );
+        return ModelPoints.toWorld(instance, world, SEAT_PIXELS);
     }
 
     private ItemStack createLanyard() {

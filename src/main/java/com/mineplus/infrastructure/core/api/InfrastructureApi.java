@@ -90,4 +90,15 @@ public interface InfrastructureApi {
      * @return the current process, or {@code null} if none is running
      */
     MachineProcess getProcess(UUID instanceId);
+
+    /**
+     * Stages an instance's current state (including {@code stateData}) for
+     * asynchronous incremental persistence. Call this after mutating
+     * {@code instance.mutableStateData()} from hooks or GUI callbacks — the
+     * Core's own lifecycle paths stage themselves, but state written outside
+     * them would otherwise wait for the next lifecycle event.
+     *
+     * @param instanceId the machine instance whose state changed
+     */
+    void stagePersist(UUID instanceId);
 }

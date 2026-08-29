@@ -16,6 +16,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,10 +27,14 @@ import org.bukkit.scheduler.BukkitTask;
  * Write-behind persistence facade over SQLite.
  *
  * <p>Producers on the main thread call {@link #enqueueFullReplace(Collection)} which only
- * stages an immutable snapshot list in memory (cheap). The actual SQLite transaction is
- * performed by a repeating asynchronous flush task (see {@link #startAutoFlush(Plugin)}),
- * so database I/O never blocks the main server thread. A synchronous write is still
- * available through {@link #flushNow()} for shutdown and migration paths.
+ * stages an immutable snapshot list in memory (cheap). Hot per-instance paths use
+ * {@link #enqueueChange(MultiBlockSnapshot)} / {@link #enqueueDelete(UUID)} instead so a
+ * single mutation no longer rewrites every row (incremental persistence); the two modes
+ * coexist and a pending full replace supersedes staged increments. The actual SQLite
+ * transaction is performed by a repeating asynchronous flush task (see
+ * {@link #startAutoFlush(Plugin)}), so database I/O never blocks the main server thread.
+ * A synchronous write is still available through {@link #flushNow()} for shutdown and
+ * migration paths.
  *
  * <p>Concurrency: the staged payload is guarded by {@code lock}, and the flush body is
  * serialized by {@code flushLock} so an in-flight asynchronous flush and a shutdown
@@ -54,6 +59,8 @@ public final class PersistenceFacade {
     private volatile long lastErrorAt;
     private volatile String lastError;
     private volatile List<MultiBlockSnapshot> queuedFullReplace;
+    private volatile java.util.Map<UUID, MultiBlockSnapshot> queuedUpserts;
+    private volatile java.util.Set<UUID> queuedDeletes;
     private volatile BukkitTask autoFlushTask;
     private SqlitePersistenceTx currentTx;
     private SqliteConnectionFactory connectionFactory;
@@ -73,6 +80,8 @@ public final class PersistenceFacade {
         this.lastErrorAt = 0L;
         this.lastError = "";
         this.queuedFullReplace = null;
+        this.queuedUpserts = null;
+        this.queuedDeletes = null;
     }
 
     public void initialize() {
@@ -149,6 +158,49 @@ public final class PersistenceFacade {
     }
 
     /**
+     * Stages a single-instance upsert for the next flush (incremental
+     * persistence). No I/O; safe on hot main-thread paths. Coalesces by
+     * instance id — only the latest snapshot per id is written.
+     *
+     * @param snapshot the changed instance snapshot to persist
+     */
+    public void enqueueChange(MultiBlockSnapshot snapshot) {
+        if (snapshot == null || snapshot.id() == null) {
+            return;
+        }
+        synchronized (lock) {
+            if (queuedUpserts == null) {
+                queuedUpserts = new java.util.LinkedHashMap<>();
+            }
+            queuedUpserts.put(snapshot.id(), snapshot);
+            if (queuedDeletes != null) {
+                queuedDeletes.remove(snapshot.id());
+            }
+        }
+    }
+
+    /**
+     * Stages a single-instance delete for the next flush. No I/O; safe on hot
+     * main-thread paths.
+     *
+     * @param id the removed instance id
+     */
+    public void enqueueDelete(UUID id) {
+        if (id == null) {
+            return;
+        }
+        synchronized (lock) {
+            if (queuedDeletes == null) {
+                queuedDeletes = new java.util.LinkedHashSet<>();
+            }
+            queuedDeletes.add(id);
+            if (queuedUpserts != null) {
+                queuedUpserts.remove(id);
+            }
+        }
+    }
+
+    /**
      * Starts the asynchronous write-behind flush cycle. The repeating task runs off
      * the main thread every {@code flushIntervalTicks} (from {@link PersistenceConfig})
      * and writes the staged payload, if any, in a single SQLite transaction. Does
@@ -198,40 +250,115 @@ public final class PersistenceFacade {
             return;
         }
         synchronized (flushLock) {
-            List<MultiBlockSnapshot> payload;
+            List<MultiBlockSnapshot> fullPayload = null;
+            List<MultiBlockSnapshot> upserts = null;
+            List<UUID> deletes = null;
             synchronized (lock) {
-                payload = queuedFullReplace;
-                queuedFullReplace = null;
+                if (queuedFullReplace != null) {
+                    fullPayload = queuedFullReplace;
+                    queuedFullReplace = null;
+                    queuedUpserts = null;
+                    queuedDeletes = null;
+                } else {
+                    if (queuedUpserts != null && !queuedUpserts.isEmpty()) {
+                        upserts = new ArrayList<>(queuedUpserts.values());
+                    }
+                    if (queuedDeletes != null && !queuedDeletes.isEmpty()) {
+                        deletes = new ArrayList<>(queuedDeletes);
+                    }
+                    queuedUpserts = null;
+                    queuedDeletes = null;
+                }
             }
 
-            if (payload == null) {
+            if (fullPayload == null && upserts == null && deletes == null) {
                 DebugLogger.info("PersistenceFacade.flushNow: no payload queued, skipping flush.");
                 return;
             }
 
             long started = System.currentTimeMillis();
-            DebugLogger.info("PersistenceFacade.flushNow: Flushing " + payload.size() + " snapshots to SQLite...");
-            try (SqlitePersistenceTx tx = beginTx()) {
-                if (tx == null) {
-                    logger.log(Level.SEVERE, "PersistenceFacade.flushNow: transaction init failed, could not flush "
-                            + payload.size() + " snapshots; data remains in memory until the next flush.");
-                    requeuePayload(payload);
-                    return;
-                }
-                tx.multiBlocks().replaceAll(payload);
-                tx.meta().put("last_full_replace_at", Long.toString(System.currentTimeMillis()));
-                tx.commit();
-                flushCount.incrementAndGet();
-                writtenRows.addAndGet(payload.size());
-                lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
-                DebugLogger.info("PersistenceFacade.flushNow: Flushed " + payload.size() + " snapshots in "
-                        + lastFlushDurationMs + "ms.");
-            } catch (SQLException | RuntimeException exception) {
-                rememberError("flush-failed: " + exception.getMessage());
-                logger.log(Level.SEVERE, "Failed to flush persistence snapshot (" + payload.size()
-                        + " snapshots); the data stays staged in memory and the next flush will retry as a full replace.",
-                        exception);
+            if (fullPayload != null) {
+                flushFullReplace(fullPayload, started);
+            } else {
+                flushIncremental(upserts, deletes, started);
+            }
+        }
+    }
+
+    private void flushFullReplace(List<MultiBlockSnapshot> payload, long started) {
+        DebugLogger.info("PersistenceFacade.flushNow: Flushing " + payload.size() + " snapshots to SQLite (full replace)...");
+        try (SqlitePersistenceTx tx = beginTx()) {
+            if (tx == null) {
+                logger.log(Level.SEVERE, "PersistenceFacade.flushNow: transaction init failed, could not flush "
+                        + payload.size() + " snapshots; data remains in memory until the next flush.");
                 requeuePayload(payload);
+                return;
+            }
+            tx.multiBlocks().replaceAll(payload);
+            tx.meta().put("last_full_replace_at", Long.toString(System.currentTimeMillis()));
+            tx.commit();
+            flushCount.incrementAndGet();
+            writtenRows.addAndGet(payload.size());
+            lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
+            DebugLogger.info("PersistenceFacade.flushNow: Flushed " + payload.size() + " snapshots in "
+                    + lastFlushDurationMs + "ms.");
+        } catch (SQLException | RuntimeException exception) {
+            rememberError("flush-failed: " + exception.getMessage());
+            logger.log(Level.SEVERE, "Failed to flush persistence snapshot (" + payload.size()
+                    + " snapshots); the data stays staged in memory and the next flush will retry as a full replace.",
+                    exception);
+            requeuePayload(payload);
+        }
+    }
+
+    private void flushIncremental(List<MultiBlockSnapshot> upserts, List<UUID> deletes, long started) {
+        int total = (upserts == null ? 0 : upserts.size()) + (deletes == null ? 0 : deletes.size());
+        DebugLogger.info("PersistenceFacade.flushNow: Flushing " + total + " incremental changes to SQLite...");
+        try (SqlitePersistenceTx tx = beginTx()) {
+            if (tx == null) {
+                logger.log(Level.SEVERE, "PersistenceFacade.flushNow: transaction init failed, could not flush "
+                        + total + " incremental changes; they remain staged until the next flush.");
+                requeueIncremental(upserts, deletes);
+                return;
+            }
+            if (upserts != null && !upserts.isEmpty()) {
+                tx.multiBlocks().upsertAll(upserts);
+            }
+            if (deletes != null && !deletes.isEmpty()) {
+                tx.multiBlocks().deleteAll(deletes);
+            }
+            tx.commit();
+            flushCount.incrementAndGet();
+            if (upserts != null) {
+                writtenRows.addAndGet(upserts.size());
+            }
+            lastFlushDurationMs = Math.max(0L, System.currentTimeMillis() - started);
+            DebugLogger.info("PersistenceFacade.flushNow: Flushed " + total + " incremental changes in "
+                    + lastFlushDurationMs + "ms.");
+        } catch (SQLException | RuntimeException exception) {
+            rememberError("flush-failed: " + exception.getMessage());
+            logger.log(Level.SEVERE, "Failed to flush incremental persistence changes (" + total
+                    + "); the changes stay staged in memory and the next flush will retry.",
+                    exception);
+            requeueIncremental(upserts, deletes);
+        }
+    }
+
+    private void requeueIncremental(List<MultiBlockSnapshot> upserts, List<UUID> deletes) {
+        synchronized (lock) {
+            if (upserts != null) {
+                if (queuedUpserts == null) {
+                    queuedUpserts = new java.util.LinkedHashMap<>();
+                }
+                for (MultiBlockSnapshot snapshot : upserts) {
+                    queuedUpserts.putIfAbsent(snapshot.id(), snapshot);
+                }
+            }
+            if (deletes != null) {
+                if (queuedDeletes == null) {
+                    queuedDeletes = new java.util.LinkedHashSet<>();
+                }
+                queuedDeletes.addAll(deletes);
             }
         }
     }

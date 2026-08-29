@@ -3,10 +3,9 @@ package com.mineplus.fun.cannon;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
-import java.util.HashMap;
-import java.util.Map;
+import com.mineplus.infrastructure.core.util.Cooldowns;
+import com.mineplus.infrastructure.core.util.ModelPoints;
 import java.util.Random;
-import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -17,7 +16,6 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
@@ -36,10 +34,8 @@ import org.joml.Vector3f;
  * Core would then always open the GUI on interact. Instead this hook decides per
  * interaction and opens the registered GUI itself through {@code openGui}.
  *
- * <p>Firing geometry follows the Core's CENTER origin convention: model pixel
- * {@code (0,0,0)} is the anchor block's center at its base, so a model point
- * {@code p} (in pixels) sits at {@code anchorCenter + R · (p/16 - (0, 1/2, 0))},
- * where {@code R} is the instance rotation - the same transform the display
+ * <p>Firing geometry follows the Core's CENTER origin convention through
+ * {@link ModelPoints}: the shared transform is exactly what the display
  * renderer applies, so the shot always leaves the rendered barrel.
  */
 public final class CannonFireHook implements MultiBlockHook {
@@ -49,8 +45,6 @@ public final class CannonFireHook implements MultiBlockHook {
 
     /** Barrel axis in model space: the cannon fires toward −X. */
     private static final Vector3f BARREL_AXIS = new Vector3f(-1.0f, 0.0f, 0.0f);
-
-    private static final float BLOCKS_PER_PIXEL = 1.0f / 16.0f;
 
     /** Launch speed in blocks per tick; combined with the elevation this lands ~15 blocks away. */
     private static final double MUZZLE_SPEED = 0.95D;
@@ -69,13 +63,13 @@ public final class CannonFireHook implements MultiBlockHook {
 
     private final PluginContext context;
     private final CannonMountManager mounts;
-    private final Map<UUID, Long> lastFiredAt;
+    private final Cooldowns fireCooldowns;
     private final Random random;
 
     public CannonFireHook(PluginContext context, CannonMountManager mounts) {
         this.context = context;
         this.mounts = mounts;
-        this.lastFiredAt = new HashMap<>();
+        this.fireCooldowns = new Cooldowns();
         this.random = new Random();
     }
 
@@ -86,7 +80,7 @@ public final class CannonFireHook implements MultiBlockHook {
             return;
         }
 
-        if (isHoldingTorch(actor)) {
+        if (isHolding(actor, Material.TORCH)) {
             fire(instance, actor);
             return;
         }
@@ -99,11 +93,11 @@ public final class CannonFireHook implements MultiBlockHook {
         if (mounts.session(actor) != null) {
             return;
         }
-        if (isHoldingSaddle(actor)) {
+        if (isHolding(actor, Material.SADDLE)) {
             mounts.mount(actor, instance);
             return;
         }
-        if (isHoldingTorch(actor)) {
+        if (isHolding(actor, Material.TORCH)) {
             actor.sendMessage(ChatColor.GRAY + "This cannon is worked from the gunner's seat. Mount it with a"
                     + " saddle or through its menu, then draw the lanyard to fire.");
             return;
@@ -133,7 +127,8 @@ public final class CannonFireHook implements MultiBlockHook {
 
     /** Returns any loaded ammunition to the world and unseats the gunner so nothing is silently destroyed. */
     private void cleanup(MultiBlockInstance instance) {
-        lastFiredAt.remove(instance.id());
+        fireCooldowns.remove(instance.id());
+        fireCooldowns.prune(FIRE_COOLDOWN_MILLIS * 10L);
         mounts.ejectInstance(instance.id());
         dropLoadedTnt(instance);
     }
@@ -164,37 +159,23 @@ public final class CannonFireHook implements MultiBlockHook {
         }
     }
 
-    private boolean isHoldingTorch(Player actor) {
+    /** True when the player holds the material in the main hand, or in the off hand while the main hand is empty. */
+    private boolean isHolding(Player actor, Material material) {
         ItemStack mainHand = actor.getInventory().getItemInMainHand();
-        if (mainHand != null && mainHand.getType() == Material.TORCH) {
+        if (mainHand != null && mainHand.getType() == material) {
             return true;
         }
         ItemStack offHand = actor.getInventory().getItemInOffHand();
         return mainHand != null
                 && mainHand.getType().isAir()
                 && offHand != null
-                && offHand.getType() == Material.TORCH;
-    }
-
-    private boolean isHoldingSaddle(Player actor) {
-        ItemStack mainHand = actor.getInventory().getItemInMainHand();
-        if (mainHand != null && mainHand.getType() == Material.SADDLE) {
-            return true;
-        }
-        ItemStack offHand = actor.getInventory().getItemInOffHand();
-        return mainHand != null
-                && mainHand.getType().isAir()
-                && offHand != null
-                && offHand.getType() == Material.SADDLE;
+                && offHand.getType() == material;
     }
 
     private void fire(MultiBlockInstance instance, Player actor) {
-        long now = System.currentTimeMillis();
-        Long last = lastFiredAt.get(instance.id());
-        if (last != null && now - last < FIRE_COOLDOWN_MILLIS) {
+        if (!fireCooldowns.tryAcquire(instance.id(), FIRE_COOLDOWN_MILLIS)) {
             return;
         }
-        lastFiredAt.put(instance.id(), now);
 
         boolean fireball = CannonTntStore.hasFireballLoaded(instance);
         int loaded = fireball ? CannonTntStore.loadFireballs(instance) : CannonTntStore.load(instance);
@@ -213,19 +194,10 @@ public final class CannonFireHook implements MultiBlockHook {
         } else {
             CannonTntStore.save(instance, loaded - 1);
         }
+        context.infrastructureApi().stagePersist(instance.id());
 
-        Quaternionf rotation = instance.rotation();
-        Vector3f muzzleOffset = new Vector3f(MUZZLE_PIXELS).mul(BLOCKS_PER_PIXEL).sub(0.0f, 0.5f, 0.0f);
-        rotation.transform(muzzleOffset);
-        Vector3f barrelAxis = new Vector3f(BARREL_AXIS);
-        rotation.transform(barrelAxis);
-
-        Location muzzle = new Location(
-                world,
-                instance.coordinate().x() + 0.5D + muzzleOffset.x,
-                instance.coordinate().y() + 0.5D + muzzleOffset.y,
-                instance.coordinate().z() + 0.5D + muzzleOffset.z
-        );
+        Location muzzle = ModelPoints.toWorld(instance, world, MUZZLE_PIXELS);
+        Vector3f barrelAxis = ModelPoints.direction(instance, BARREL_AXIS);
         muzzle.add(barrelAxis.x * BARREL_CLEARANCE, barrelAxis.y * BARREL_CLEARANCE, barrelAxis.z * BARREL_CLEARANCE);
 
         Vector launchDirection = fireball
