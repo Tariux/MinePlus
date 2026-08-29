@@ -60,9 +60,9 @@ The Core's right-click flow, in order (`MultiBlockLifecycleManager.interact`):
 Consequences:
 
 - **Unconditional menu** (Juicer pattern): put `"gui": "<key>"` in the multiblock JSON.
-- **Conditional interaction** (Cannon pattern: torch fires, anything else opens the menu):
-  register the JSON *without* a `gui` key and let the hook decide; the hook opens the menu
-  itself via `context.infrastructureApi().openGui(key, player, instance)`.
+- **Conditional interaction** (Cannon pattern: saddle mounts, torch fires, else opens the
+  menu): register the JSON *without* a `gui` key and let the hook decide; the hook opens the
+  menu itself via `context.infrastructureApi().openGui(key, player, instance)`.
 - `PlayerInteractEvent` fires for **both hands** — main- and off-hand arrive as a near-simultaneous
   pair. A feature-level cooldown (~1s, keyed by instance id) is the standard dedupe.
 - Hook dispatch on removal is **split**: `removeBlock(id, actor, destroy=true)` fires
@@ -72,6 +72,19 @@ Consequences:
   `MultiBlockConfigLoader`/`clearTypes` re-applies to freshly loaded types. Registering the hook
   before or after `jsonInfrastructureApi().reloadAll()` works either way.
 - Breaking any barrier cell of the structure removes the whole instance (Core listener).
+
+### Upgrades (verified facts, `MultiBlockLifecycleManager.upgrade`)
+
+- The consumed cost is the **target level's** `upgradeCost` (level N+1's map), read through
+  `UpgradeManager`. Both `minecraft:*` vanilla keys and custom item keys work; `hasRequirements`
+  counts matching stacks across the whole inventory.
+- Creative-mode players **skip** the material check and consumption (vanilla convention).
+- The instance must be `ACTIVE`; if the model swap fails after materials were consumed, the
+  Core reverts the level and **refunds** the cost (inventory first, drops on overflow).
+- `onUpgrade(instance, oldLevel, newLevel, actor)` fires on the hook — the right place for
+  feature announcements or state migration.
+- An in-GUI upgrade button calls `lifecycleManager().upgrade(instanceId, player)` (see
+  `CannonGui`/`JuicerGui`), never the raw `UpgradeManager`.
 
 ## 5. Rotation, placement & model-space math
 
@@ -107,6 +120,12 @@ Consequences:
   and `resolution` before hardcoding feature constants. On this Windows machine use PowerShell
   (`ConvertFrom-Json`) — the sandbox shell is PowerShell 5.1, so bash-isms like `find -type f`
   fail; prefer the Glob/Grep tools for file work.
+- **Texture gotcha:** models whose textures are linked from an external Blockbench library
+  export `"path": null` on every texture entry. The Core importer falls back to
+  `relative_path` → `name` (filename minus extension), which resolves the same vanilla
+  materials — but older Core builds NPE'd on the null. If `/mineplus reload` warns
+  `Cannot invoke "String.replace(char, char)"`, the deployed Core jar predates the fix
+  (see §12, deploy discipline).
 - Determine functional axes **from geometry evidence, not the model name or first glance**. The
   cannon's muzzle is the ring at x = −15 (bore along −X at y = 6.5, z = 0); the decorative wheel
   assemblies sit at *both* X ends and the breech looks similar to the muzzle at a glance. A wrong
@@ -114,8 +133,10 @@ Consequences:
   matters, record the evidence (which elements, which coordinates) in the javadoc next to the
   constant.
 - User-supplied models arrive in the repo `temp/` folder. Copy them into
-  `src/main/resources/defaults/models/` byte-identical.
+  `src/main/resources/defaults/models/` byte-identical (verify the SHA256 after copying).
 - Multiblock ids are snake_case (`cannon`, `juicer_machine`); the JSON `name` is display-only.
+- The Core parses a level's model file directly if its per-type model key is not preloaded, so a
+  module only needs to place the `.bbmodel` file — no model-key registration juggling.
 
 ## 7. Adding a multiblock machine (standard recipe)
 
@@ -131,11 +152,16 @@ Consequences:
    ```
    com.mineplus.fun.<feature>/
      <Feature>Keys.java        — namespaced String constants (machine id, gui key, state keys)
-     <Feature>Feature.java     — enable(): install resources, register gui/hook, reloadAll()
+     <Feature>Feature.java     — enable(): install resources, register gui/hook/listeners, reloadAll()
      <Feature>Hook.java        — MultiBlockHook with the game behavior
      gui/<Feature>Gui.java     — InfrastructureGui + InteractiveInfrastructureGui
      <Feature>SubCommand.java  — implements com.mineplus.infrastructure.command.SubCommand
    ```
+
+   The cannon additionally splits behavior into collaborators — copy this shape when a feature
+   outgrows one hook: `CannonMountManager` (seat entities + session state + view clamp),
+   `CannonAimListener` (bow-release firing), `CannonProjectiles` (projectile launch +
+   explosion calibration), `CannonTntStore` (persistent ammo).
 
 5. Wire the feature into `MineplusFunPlugin.onEnable/onCommand/onTabComplete` and `plugin.yml`
    (command entry + `mineplusfun.admin.<feature>` permission).
@@ -167,15 +193,57 @@ Consequences:
   machine state like ammunition counts (see `CannonTntStore`).
 - Plain in-memory maps (like the Juicer's `machineContents`) do **not** survive restarts; prefer
   `stateData` for anything the player would consider lost progress.
+- Multi-material stores: give each material its own state key (`cannon_tnt_count`,
+  `cannon_fireball_count`) and one accessor pair per material. Keep a single GUI slot by making
+  it accept any of the store's materials and writing "one material set, others zeroed" on
+  capture — the slot then always displays what fires next.
 
-## 10. Projectile physics quick reference (TNTPrimed)
+## 10. Projectiles, seats and aiming (cannon-proven patterns)
+
+### Projectile physics quick reference
 
 - `TNTPrimed`: velocity is blocks/tick; vanilla TNT uses ~0.04/tick gravity, ×0.98/tick drag,
   80-tick default fuse. `setSource(actor)` attributes the explosion.
-- A natural ~20-block arc from a horizontal barrel: speed 1.3 at 20° elevation, plus ±1.5° yaw
-  spread. Spawn the entity ~0.5 blocks beyond the muzzle so it clears the barrel.
+- Calibrated speeds (natural feel, no cannon screenshake): level-1 fixed shot 0.95 b/t;
+  level-2 bow-draw range 0.55–1.9 b/t (draw force 0.12–1.0). Spawn the entity ~0.5–0.75 blocks
+  beyond the muzzle so it clears the barrel.
+- **Explosion intensity calibration:** vanilla TNT power 4 is overkill. Tag the launched entity
+  (`addScoreboardTag`), cancel its `EntityExplodeEvent`, and re-issue
+  `world.createExplosion(loc, 2.2F, false, true)` — power 2.2 keeps a satisfying but gentle
+  crater and knockback. Re-entrancy safe: the replacement explosion has no source entity, so it
+  cannot re-enter the handler.
+- **Conditional payload (fireball-first):** check the ammo store at fire time — fire charges
+  fire a `LargeFireball` instead of TNT. Fireballs fly **straight** (no gravity) and detonate on
+  impact; give them their own, lower speed factor (~0.45×) or they outrun every arc. Fireballs
+  move by acceleration: `setDirection(vector × speed)` works, `setVelocity` alone does not.
+  `setIsIncendiary(false)` avoids griefy fires; `setShooter(player)` attributes it.
 - Verified constants in `libs/paper-api-1.21.jar`: `Sound.ENTITY_GENERIC_EXPLODE`,
-  `Sound.ENTITY_TNT_PRIMED`, `Particle.EXPLOSION`, `Particle.CLOUD`.
+  `Sound.ENTITY_TNT_PRIMED`, `Sound.ENTITY_GHAST_SHOOT`, `Particle.EXPLOSION`, `Particle.CLOUD`.
+
+### Mounting a player to a stationary multiblock
+
+- Seat = invisible **marker armor stand** (`setMarker(true)` so it has no collision/hitbox),
+  `setSmall(true)`, `setGravity(false)`, `setInvulnerable(true)`, `setPersistent(false)`, tagged
+  with the instance id in its PDC. `stand.addPassenger(player)` pins the player — riding
+  neutralises WASD while leaving the camera free.
+- Seat position comes from model pixels through the same CENTER-origin transform as the muzzle
+  math (§5). One block *behind* the model reads better than on top of it: the level-2 cannon's
+  rearmost geometry is x=23px, so the seat sits at x=39px (one full block past the rear), y=13px,
+  z=0 on the bore centreline. Rider height is a sitting-posture constant, tuned in `SEAT_PIXELS`.
+- **View clamping (180° arc):** a per-tick task wraps each mounted player's yaw into
+  ±90° around the bore heading (`wrapDegrees`, yaw = `atan2(-x, z)` of the world-space barrel
+  axis) and snaps violators back with `Entity#setRotation(yaw, pitch)`. Never teleport a rider —
+  teleport dismounts passengers. Stop the task when the last session ends.
+- **Aiming tool without arrows:** mounting hands the player a tagged "Cannon Lanyard" bow plus a
+  single tagged "Cannon Match" arrow — the vanilla client refuses to draw a bow without an arrow
+  somewhere in the inventory, so the match exists purely to unlock the draw. Cancel
+  `EntityShootBowEvent`, read `getForce()` (the vanilla 0–1 charge curve), and fire the cannon
+  instead; the match is never consumed.
+- Marker-item hygiene: block `PlayerDropItemEvent` for tagged tools, strip them from joining
+  players (crash/kick leaks), and reclaim them on every dismount path (sneak-dismount via
+  `EntityDismountEvent`, quit, instance break/remove, plugin disable).
+- A seated gunner aiming down at their own cannon would trigger the multiblock's interact flow
+  mid-draw — ignore interactions from any mounted session in `onInteract`.
 
 ## 11. Verifying the API surface (stub jars)
 
@@ -191,7 +259,7 @@ javap -classpath "../../libs/paper-api-1.21.jar" org.bukkit.event.inventory.Inve
 Known traps: `InventoryAction.SWAP_WITH_OFFHAND` does not exist; `World.spawn(Location, Class)`
 is inherited from `RegionAccessor`, not declared on `World`.
 
-## 12. Packaging & build workflow
+## 12. Packaging, build & deploy discipline
 
 - Module `build.gradle` must include the Core jar
   (`compileOnly files("../../build/libs/mineplus-1.0.0.jar")`) plus the same library stubs the
@@ -201,6 +269,17 @@ is inherited from `RegionAccessor`, not declared on `World`.
   in-game behavior. When implementing, state the expected observable outcome (e.g. "the TNT
   should spawn at the ring end and fly away from the player") so the user can verify it on the
   live server.
+- **Deploy discipline (the most expensive non-bug of this cycle):** after changing *Core* code,
+  rebuild and redeploy the Core jar too — a stale `Mineplus.jar` silently re-runs old behavior
+  while the sources look fixed. Verify with jar timestamps vs. source edit times before
+  debugging "nothing happens":
+  `Get-Item build\libs\mineplus-1.0.0.jar` vs. the edited source's `LastWriteTime`.
+- Server-side config files in the **Core's** data folder (`multiblocks/*.json`) are never
+  overwritten on module update (`overwrite=false`); after editing a shipped JSON you must
+  delete/reconcile the deployed copy by hand or edits will not appear.
+- `/mineplus reload` re-reads models and multiblock JSON without a restart — use it to verify
+  parse warnings quickly. Startup log order: Core enables first, module second; if the module
+  reports "Mineplus Core is not initialized", read *upward* for the Core's real exception.
 
 ## 13. Conventions to follow
 
@@ -217,9 +296,12 @@ Both live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.
 
 - **juicer** (`com.mineplus.fun.juicer`): unconditional GUI (JSON `gui` key), recipes, custom
   items, recipe-driven crafting, upgrade button.
-- **cannon** (`com.mineplus.fun.cannon`): conditional interaction (torch fires, else opens the
-  menu — no `gui` key, hook-driven `openGui`), `stateData` ammo counter persisted across
-  restarts, rotation-aware placement (`createMultiBlock` + `placeMultiBlock` with −90°
-  compensation), CENTER-origin muzzle math, `TNTPrimed` ballistics, break/remove cleanup.
+- **cannon** (`com.mineplus.fun.cannon`): conditional interaction (level 1: torch fires, else
+  opens the menu; level 2: saddle mounts — no `gui` key, hook-driven `openGui`), two-level
+  upgrade with vanilla-key costs, `stateData` ammo store (TNT + fire charges, fireball-first
+  firing) persisted across restarts, rotation-aware placement (`createMultiBlock` +
+  `placeMultiBlock` with −90° compensation), CENTER-origin muzzle math, gunner's seat (marker
+  armor stand one block behind the model, 180° view clamp, lanyard bow + match arrow),
+  `TNTPrimed` ballistics with calibrated explosion power, break/remove cleanup.
 
 Copy the reference whose interaction model matches your feature.

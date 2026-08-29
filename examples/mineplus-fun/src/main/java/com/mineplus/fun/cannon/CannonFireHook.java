@@ -15,7 +15,6 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.TNTPrimed;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
@@ -53,8 +52,8 @@ public final class CannonFireHook implements MultiBlockHook {
 
     private static final float BLOCKS_PER_PIXEL = 1.0f / 16.0f;
 
-    /** Launch speed in blocks per tick; combined with the elevation this lands ~20 blocks away. */
-    private static final double MUZZLE_SPEED = 1.3D;
+    /** Launch speed in blocks per tick; combined with the elevation this lands ~15 blocks away. */
+    private static final double MUZZLE_SPEED = 0.95D;
 
     /** Fixed elevation for ground placements, giving the shot a natural ballistic arc. */
     private static final double ELEVATION_DEGREES = 20.0D;
@@ -141,10 +140,6 @@ public final class CannonFireHook implements MultiBlockHook {
 
     /** Returns any loaded ammunition to the world so it is never silently destroyed. */
     private void dropLoadedTnt(MultiBlockInstance instance) {
-        int loaded = CannonTntStore.load(instance);
-        if (loaded <= 0) {
-            return;
-        }
         World world = Bukkit.getWorld(instance.coordinate().worldName());
         if (world == null) {
             return;
@@ -155,8 +150,18 @@ public final class CannonFireHook implements MultiBlockHook {
                 instance.coordinate().y() + 0.5D,
                 instance.coordinate().z() + 0.5D
         );
-        world.dropItemNaturally(dropLocation, new ItemStack(Material.TNT, loaded));
-        CannonTntStore.save(instance, 0);
+
+        int tnt = CannonTntStore.load(instance);
+        if (tnt > 0) {
+            world.dropItemNaturally(dropLocation, new ItemStack(Material.TNT, tnt));
+            CannonTntStore.save(instance, 0);
+        }
+
+        int fireballs = CannonTntStore.loadFireballs(instance);
+        if (fireballs > 0) {
+            world.dropItemNaturally(dropLocation, new ItemStack(Material.FIRE_CHARGE, fireballs));
+            CannonTntStore.saveFireballs(instance, 0);
+        }
     }
 
     private boolean isHoldingTorch(Player actor) {
@@ -191,9 +196,10 @@ public final class CannonFireHook implements MultiBlockHook {
         }
         lastFiredAt.put(instance.id(), now);
 
-        int loaded = CannonTntStore.load(instance);
+        boolean fireball = CannonTntStore.hasFireballLoaded(instance);
+        int loaded = fireball ? CannonTntStore.loadFireballs(instance) : CannonTntStore.load(instance);
         if (loaded <= 0) {
-            actor.sendMessage(ChatColor.RED + "The cannon is empty. Load TNT through its menu.");
+            actor.sendMessage(ChatColor.RED + "The cannon is empty. Load TNT or fire charges through its menu.");
             return;
         }
 
@@ -202,7 +208,11 @@ public final class CannonFireHook implements MultiBlockHook {
             return;
         }
 
-        CannonTntStore.save(instance, loaded - 1);
+        if (fireball) {
+            CannonTntStore.saveFireballs(instance, loaded - 1);
+        } else {
+            CannonTntStore.save(instance, loaded - 1);
+        }
 
         Quaternionf rotation = instance.rotation();
         Vector3f muzzleOffset = new Vector3f(MUZZLE_PIXELS).mul(BLOCKS_PER_PIXEL).sub(0.0f, 0.5f, 0.0f);
@@ -218,16 +228,22 @@ public final class CannonFireHook implements MultiBlockHook {
         );
         muzzle.add(barrelAxis.x * BARREL_CLEARANCE, barrelAxis.y * BARREL_CLEARANCE, barrelAxis.z * BARREL_CLEARANCE);
 
-        TNTPrimed projectile = world.spawn(muzzle, TNTPrimed.class);
-        projectile.setSource(actor);
-        projectile.setVelocity(launchVelocity(barrelAxis));
+        Vector launchDirection = fireball
+                ? new Vector(barrelAxis.x, barrelAxis.y, barrelAxis.z)
+                : launchVelocity(barrelAxis);
+        CannonProjectiles.launch(world, muzzle, launchDirection, MUZZLE_SPEED, actor, fireball);
 
-        world.playSound(muzzle, Sound.ENTITY_GENERIC_EXPLODE, 0.6F, 1.5F);
-        world.playSound(muzzle, Sound.ENTITY_TNT_PRIMED, 1.0F, 1.0F);
+        world.playSound(muzzle, Sound.ENTITY_GENERIC_EXPLODE, 0.4F, 1.5F);
+        if (fireball) {
+            actor.playSound(actor.getLocation(), Sound.ENTITY_GHAST_SHOOT, 0.8F, 1.2F);
+        } else {
+            world.playSound(muzzle, Sound.ENTITY_TNT_PRIMED, 1.0F, 1.0F);
+        }
         world.spawnParticle(Particle.EXPLOSION, muzzle, 1);
-        world.spawnParticle(Particle.CLOUD, muzzle, 25, 0.25D, 0.25D, 0.25D, 0.05D);
+        world.spawnParticle(Particle.CLOUD, muzzle, 20, 0.25D, 0.25D, 0.25D, 0.05D);
 
-        actor.sendMessage(ChatColor.GRAY + "Cannon fired. TNT remaining: " + (loaded - 1) + ".");
+        String payload = fireball ? "fire charge" : "TNT";
+        actor.sendMessage(ChatColor.GRAY + "Cannon fires a " + payload + ". Ammunition remaining: " + (loaded - 1) + ".");
     }
 
     /**
