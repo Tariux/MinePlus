@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -135,8 +136,14 @@ public final class MultiBlockRegistry {
         return instanceId == null ? null : instancesById.get(instanceId);
     }
 
-    public Collection<MultiBlockInstance> getInstances() {
-        return Collections.unmodifiableCollection(instancesById.values());
+    /**
+     * Returns a snapshot copy of all live instances. A copy (rather than a
+     * live view) guarantees that callers iterating while a hook removes an
+     * instance mid-loop — the tick loop being the canonical case — cannot hit
+     * a {@code ConcurrentModificationException} or see partially-mutated state.
+     */
+    public synchronized List<MultiBlockInstance> getInstances() {
+        return List.copyOf(instancesById.values());
     }
 
     public boolean hasAt(BlockCoordinate coordinate) {

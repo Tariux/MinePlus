@@ -3,58 +3,66 @@ package com.mineplus.fun.cannon.gui;
 import com.mineplus.fun.cannon.CannonKeys;
 import com.mineplus.fun.cannon.CannonMountManager;
 import com.mineplus.fun.cannon.CannonTntStore;
-import com.mineplus.infrastructure.core.gui.InfrastructureGui;
-import com.mineplus.infrastructure.core.gui.InteractiveInfrastructureGui;
+import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.core.gui.AbstractMachineGui;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
-import com.mineplus.infrastructure.core.multiblock.registry.MultiBlockRegistry;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Cannon context menu. The centre slot accepts and holds one stack of
- * ammunition — TNT (ballistic shots) or fire charges (straight-flying
- * fireballs, fired first while any are loaded). At level 1 the menu carries
- * the upgrade button (anvil, consumes the next level's cost); from level 2 it
- * offers the gunner's seat (saddle button that mounts the player) and a short
- * manual explaining the aimed-fire mechanics.
+ * Cannon context menu built on the Core's {@link AbstractMachineGui}. The
+ * centre slot accepts and holds one stack of ammunition — TNT (ballistic
+ * shots) or fire charges (straight-flying fireballs, fired first while any
+ * are loaded). At level 1 the menu carries the upgrade button (anvil,
+ * consumes the next level's cost); from level 2 it offers the gunner's seat
+ * (saddle button that mounts the player) and a short manual explaining the
+ * aimed-fire mechanics.
  */
-public final class CannonGui implements InfrastructureGui, InteractiveInfrastructureGui {
+public final class CannonGui extends AbstractMachineGui {
 
     private static final int SIZE = 9;
     private static final int AMMO_SLOT = 4;
     private static final int INFO_SLOT = 2;
     private static final int SADDLE_SLOT = 6;
 
-    private final JavaPlugin plugin;
-    private final MultiBlockRegistry registry;
+    private final PluginContext context;
     private final MultiBlockLifecycleManager lifecycleManager;
     private final CannonMountManager mounts;
 
-    public CannonGui(JavaPlugin plugin, MultiBlockRegistry registry, MultiBlockLifecycleManager lifecycleManager, CannonMountManager mounts) {
-        this.plugin = plugin;
-        this.registry = registry;
+    public CannonGui(JavaPlugin plugin, PluginContext context, MultiBlockLifecycleManager lifecycleManager, CannonMountManager mounts) {
+        super(plugin, context.infrastructureEngine().registry(), SIZE);
+        this.context = context;
         this.lifecycleManager = lifecycleManager;
         this.mounts = mounts;
     }
 
     @Override
-    public void open(Player player, MultiBlockInstance instance) {
-        Inventory inventory = Bukkit.createInventory(player, SIZE, ChatColor.DARK_GRAY + "Cannon");
-        fillLayout(inventory, instance);
+    protected String title(MultiBlockInstance instance) {
+        return ChatColor.DARK_GRAY + "Cannon";
+    }
+
+    @Override
+    protected void layout(Inventory inventory, MultiBlockInstance instance) {
+        boolean aimed = instance.level() >= CannonKeys.LEVEL_AIMED;
+        fill(inventory, fillerPane());
+        inventory.setItem(AMMO_SLOT, null);
+        inventory.setItem(INFO_SLOT, aimed ? manual() : upgradeButton(instance));
+        if (aimed) {
+            inventory.setItem(SADDLE_SLOT, saddleButton());
+        }
 
         // Fire charges display first because they are fired first.
         int fireballs = CannonTntStore.loadFireballs(instance);
@@ -66,115 +74,77 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
                 inventory.setItem(AMMO_SLOT, new ItemStack(Material.TNT, Math.min(tnt, 64)));
             }
         }
-
-        player.openInventory(inventory);
     }
 
     @Override
-    public void onClick(Player player, UUID instanceId, InventoryClickEvent event) {
-        MultiBlockInstance instance = registry.getInstance(instanceId);
-        if (instance == null) {
-            event.setCancelled(true);
-            return;
-        }
-
-        Inventory top = event.getView().getTopInventory();
-        int rawSlot = event.getRawSlot();
-        if (rawSlot >= top.getSize()) {
-            if (event.isShiftClick()) {
-                event.setCancelled(true);
-            }
-            return;
-        }
-
-        if (rawSlot != AMMO_SLOT) {
-            event.setCancelled(true);
-            if (rawSlot == INFO_SLOT && instance.level() < CannonKeys.LEVEL_AIMED) {
-                upgrade(player, instance);
-            } else if (rawSlot == SADDLE_SLOT && instance.level() >= CannonKeys.LEVEL_AIMED) {
-                UUID targetInstance = instance.id();
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    MultiBlockInstance live = registry.getInstance(targetInstance);
-                    if (live == null) {
-                        return;
-                    }
-                    player.closeInventory();
-                    mounts.mount(player, live);
-                });
-            }
-            return;
-        }
-
-        if (!isAmmoOrEmpty(event.getCursor())) {
-            event.setCancelled(true);
-            return;
-        }
-
-        ItemStack swapCandidate = swapCandidate(event);
-        if (!isAmmoOrEmpty(swapCandidate)) {
-            event.setCancelled(true);
-            return;
-        }
-
-        scheduleStateCapture(player, instanceId, top);
+    protected Set<Integer> containerSlots() {
+        return Set.of(AMMO_SLOT);
     }
 
     @Override
-    public void onDrag(Player player, UUID instanceId, InventoryDragEvent event) {
-        int topSize = event.getView().getTopInventory().getSize();
-        for (int slot : event.getRawSlots()) {
-            if (slot < topSize && slot != AMMO_SLOT) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-
-        if (!isAmmoOrEmpty(event.getOldCursor())) {
-            event.setCancelled(true);
-            return;
-        }
-
-        scheduleStateCapture(player, instanceId, event.getView().getTopInventory());
+    protected boolean accepts(int slot, ItemStack item) {
+        return item == null || item.getType().isAir()
+                || item.getType() == Material.TNT
+                || item.getType() == Material.FIRE_CHARGE;
     }
 
     @Override
-    public void onClose(Player player, UUID instanceId, InventoryCloseEvent event) {
-        capture(player, instanceId, event.getView().getTopInventory());
-    }
-
-    /**
-     * The item a hotbar-number (or off-hand, reported as button 40) swap click would
-     * move into the TNT slot.
-     */
-    private ItemStack swapCandidate(InventoryClickEvent event) {
-        if (event.getHotbarButton() >= 0) {
-            return event.getWhoClicked().getInventory().getItem(event.getHotbarButton());
+    protected void onButtonClick(Player player, MultiBlockInstance instance, int slot, InventoryClickEvent event) {
+        if (slot == INFO_SLOT && instance.level() < CannonKeys.LEVEL_AIMED) {
+            upgrade(player, instance);
+        } else if (slot == SADDLE_SLOT && instance.level() >= CannonKeys.LEVEL_AIMED) {
+            UUID targetInstance = instance.id();
+            Bukkit.getScheduler().runTask(plugin(), () -> {
+                MultiBlockInstance live = instance(targetInstance);
+                if (live == null) {
+                    return;
+                }
+                player.closeInventory();
+                mounts.mount(player, live);
+            });
         }
-        return null;
     }
 
-    private boolean isAmmoOrEmpty(ItemStack item) {
-        return item == null || item.getType().isAir() || item.getType() == Material.TNT || item.getType() == Material.FIRE_CHARGE;
-    }
+    @Override
+    protected void capture(Player player, MultiBlockInstance instance, Inventory inventory) {
+        ItemStack ammo = inventory.getItem(AMMO_SLOT);
+        if (ammo == null || ammo.getType().isAir()) {
+            CannonTntStore.save(instance, 0);
+            CannonTntStore.saveFireballs(instance, 0);
+            context.infrastructureApi().stagePersist(instance.id());
+            return;
+        }
 
-    private void fillLayout(Inventory inventory, MultiBlockInstance instance) {
-        boolean aimed = instance.level() >= CannonKeys.LEVEL_AIMED;
-        ItemStack filler = named(Material.GRAY_STAINED_GLASS_PANE, " ");
-        for (int slot = 0; slot < SIZE; slot++) {
-            inventory.setItem(slot, filler);
+        if (ammo.getType() == Material.TNT) {
+            CannonTntStore.save(instance, ammo.getAmount());
+            CannonTntStore.saveFireballs(instance, 0);
+            context.infrastructureApi().stagePersist(instance.id());
+            return;
+        }
+
+        if (ammo.getType() == Material.FIRE_CHARGE) {
+            CannonTntStore.saveFireballs(instance, ammo.getAmount());
+            CannonTntStore.save(instance, 0);
+            context.infrastructureApi().stagePersist(instance.id());
+            return;
+        }
+
+        // Defensive: the guarded interaction paths never let foreign items in,
+        // but never destroy player items if one somehow appears anyway.
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(ammo);
+        for (ItemStack leftover : overflow.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
         }
         inventory.setItem(AMMO_SLOT, null);
-        inventory.setItem(INFO_SLOT, aimed ? manual() : upgradeButton(instance));
-        if (aimed) {
-            inventory.setItem(SADDLE_SLOT, saddleButton());
-        }
+        CannonTntStore.save(instance, 0);
+        CannonTntStore.saveFireballs(instance, 0);
     }
 
     /** Upgrades through the Core lifecycle (consumes the next level's cost), then refreshes the menu. */
     private void upgrade(Player player, MultiBlockInstance instance) {
         UUID instanceId = instance.id();
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            MultiBlockInstance live = registry.getInstance(instanceId);
+        Bukkit.getScheduler().runTask(plugin(), () -> {
+            MultiBlockInstance live = instance(instanceId);
             if (live == null) {
                 return;
             }
@@ -183,7 +153,7 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
                 player.sendMessage(ChatColor.RED + "Upgrade failed. Check materials and level cap.");
                 return;
             }
-            MultiBlockInstance refreshed = registry.getInstance(instanceId);
+            MultiBlockInstance refreshed = instance(instanceId);
             if (refreshed != null) {
                 open(player, refreshed);
             }
@@ -191,7 +161,7 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
     }
 
     private ItemStack upgradeButton(MultiBlockInstance instance) {
-        MultiBlockType type = registry.getType(instance.typeId());
+        MultiBlockType type = type(instance);
         if (type == null || type.level(instance.level() + 1) == null) {
             return named(Material.BARRIER, ChatColor.RED + "Max Level");
         }
@@ -238,53 +208,5 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
 
     private ItemStack saddleButton() {
         return named(Material.SADDLE, ChatColor.GOLD + "Take the Gunner's Seat");
-    }
-
-    private void scheduleStateCapture(Player player, UUID instanceId, Inventory inventory) {
-        Bukkit.getScheduler().runTask(plugin, () -> capture(player, instanceId, inventory));
-    }
-
-    private void capture(Player player, UUID instanceId, Inventory inventory) {
-        MultiBlockInstance instance = registry.getInstance(instanceId);
-        if (instance == null) {
-            return;
-        }
-
-        ItemStack ammo = inventory.getItem(AMMO_SLOT);
-        if (ammo == null || ammo.getType().isAir()) {
-            CannonTntStore.save(instance, 0);
-            CannonTntStore.saveFireballs(instance, 0);
-            return;
-        }
-
-        if (ammo.getType() == Material.TNT) {
-            CannonTntStore.save(instance, ammo.getAmount());
-            CannonTntStore.saveFireballs(instance, 0);
-            return;
-        }
-
-        if (ammo.getType() == Material.FIRE_CHARGE) {
-            CannonTntStore.saveFireballs(instance, ammo.getAmount());
-            CannonTntStore.save(instance, 0);
-            return;
-        }
-
-        // Defensive: the guarded interaction paths never let foreign items in,
-        // but never destroy player items if one somehow appears anyway.
-        Map<Integer, ItemStack> overflow = player.getInventory().addItem(ammo);
-        for (ItemStack leftover : overflow.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
-        }
-        inventory.setItem(AMMO_SLOT, null);
-        CannonTntStore.save(instance, 0);
-        CannonTntStore.saveFireballs(instance, 0);
-    }
-
-    private ItemStack named(Material material, String name) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(name);
-        item.setItemMeta(meta);
-        return item;
     }
 }

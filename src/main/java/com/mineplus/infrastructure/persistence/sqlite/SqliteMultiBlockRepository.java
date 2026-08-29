@@ -11,6 +11,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 public final class SqliteMultiBlockRepository implements MultiBlockRepository {
 
@@ -115,5 +116,54 @@ public final class SqliteMultiBlockRepository implements MultiBlockRepository {
             insert.executeBatch();
         }
         DebugLogger.info("SqliteMultiBlockRepository: Upserted " + snapshots.size() + " rows in '" + table + "'.");
+    }
+
+    @Override
+    public void upsertAll(Collection<MultiBlockSnapshot> snapshots) throws SQLException {
+        if (snapshots == null || snapshots.isEmpty()) {
+            return;
+        }
+        String upsertSql = "INSERT OR REPLACE INTO " + table + "(id, payload) VALUES(?, ?)";
+        int upserted = 0;
+        try (PreparedStatement insert = connection.prepareStatement(upsertSql)) {
+            for (MultiBlockSnapshot snapshot : snapshots) {
+                if (snapshot == null || snapshot.id() == null) {
+                    continue;
+                }
+                insert.setString(1, snapshot.id().toString());
+                insert.setString(2, gson.toJson(snapshot));
+                insert.addBatch();
+                upserted++;
+            }
+            insert.executeBatch();
+        }
+        DebugLogger.info("SqliteMultiBlockRepository: Incrementally upserted " + upserted + " rows in '" + table + "'.");
+    }
+
+    @Override
+    public void deleteAll(Collection<UUID> ids) throws SQLException {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        List<String> idStrings = new ArrayList<>(ids.size());
+        for (UUID id : ids) {
+            if (id != null) {
+                idStrings.add(id.toString());
+            }
+        }
+        int totalDeleted = 0;
+        for (int from = 0; from < idStrings.size(); from += DELETE_BATCH_SIZE) {
+            int to = Math.min(from + DELETE_BATCH_SIZE, idStrings.size());
+            List<String> batch = idStrings.subList(from, to);
+            String deleteSql = "DELETE FROM " + table
+                    + " WHERE id IN (" + String.join(",", java.util.Collections.nCopies(batch.size(), "?")) + ")";
+            try (PreparedStatement delete = connection.prepareStatement(deleteSql)) {
+                for (int i = 0; i < batch.size(); i++) {
+                    delete.setString(i + 1, batch.get(i));
+                }
+                totalDeleted += delete.executeUpdate();
+            }
+        }
+        DebugLogger.info("SqliteMultiBlockRepository: Incrementally deleted " + totalDeleted + " rows from '" + table + "'.");
     }
 }

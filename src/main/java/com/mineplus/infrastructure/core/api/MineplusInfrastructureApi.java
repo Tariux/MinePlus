@@ -156,4 +156,9 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     public MachineProcess getProcess(UUID instanceId) {
         return processManager == null ? null : processManager.get(instanceId);
     }
+
+    @Override
+    public void stagePersist(UUID instanceId) {
+        lifecycleManager.markDirty(instanceId);
+    }
 }

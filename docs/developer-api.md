@@ -10,7 +10,7 @@ Mineplus exposes three usage tiers. They stack: a machine defined through JSON (
 | **2 — Basic** | `BasicInfrastructureApi` | Simple place/remove/lookup add-ons |
 | **3 — Advanced** | `InfrastructureApi` | Full hooks, lifecycle listeners, GUIs, links, signals, processes |
 
-**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Hooks](#multiblock-hooks) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
+**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Module Toolkit](#module-toolkit) · [Hooks](#multiblock-hooks) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
 
 ---
 
@@ -39,6 +39,7 @@ context.infrastructureEngine() // .registry() .lifecycleManager() .recipeManager
 context.basicInfrastructureApi()
 context.infrastructureApi()
 context.jsonInfrastructureApi()
+context.moduleSupport()        // module toolkit: resource install, looked-at resolution, command registration
 ```
 
 Always perform the dependency check in `onEnable` and disable with a human-readable message if the core is absent — see the reference implementation in [`MineplusFunPlugin.java`](../examples/mineplus-fun/src/main/java/com/mineplus/fun/MineplusFunPlugin.java).
@@ -92,6 +93,7 @@ Use this tier when your workflow is config-first and you only need runtime reloa
 | Links & signals | `linkBlocks`, `unlinkBlocks`, `getLinkedBlocks`, `autoLinkNeighbors`, `sendSignal` |
 | Timed processes | `startProcess`, `cancelProcess`, `getProcess` |
 | Lookups | `getBlock`, `getBlockAt` |
+| Persistence | `stagePersist(instanceId)` — stage an instance's state (incl. `stateData`) for the async write-behind queue; call after mutating `stateData` from hooks/GUI callbacks |
 
 **Working examples:** [`examples/code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) • the complete [`mineplus-fun`](../examples/mineplus-fun/README.md) module (Juicer + Cannon)
 
@@ -100,9 +102,37 @@ Use this tier when your workflow is config-first and you only need runtime reloa
 - On right-click, the core resolves the instance from the clicked block (anchor location **or** any barrier collision cell), fires `INTERACT`, calls your hook's `onInteract`, and — **if the type's JSON `gui` key is non-blank — opens that GUI automatically**.
 - Conditional interactions (torch fires, empty hand opens menu): omit the `gui` key and call `openGui(key, player, instance)` yourself from the hook — exactly how the [Cannon](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonFireHook.java) works.
 - The core tracks **one open GUI session per player**; click/drag/close events are dispatched to your `InteractiveInfrastructureGui` only while the player's top inventory is the tracked one.
-- `PlayerInteractEvent` fires for **both hands** (main + off-hand arrive as a near-simultaneous pair) — use a feature-level cooldown to dedupe, like the Cannon's 1-second fire cooldown.
+- `PlayerInteractEvent` fires for **both hands** (main + off-hand arrive as a near-simultaneous pair) — use the Core's `Cooldowns` utility (or a feature-level cooldown) to dedupe, like the Cannon's 1-second fire cooldown.
 - Hook dispatch on removal is split: `removeBlock(id, actor, destroy=true)` fires `onBreak`, `destroy=false` fires `onRemove`. Implement cleanup in **both**.
 - Hook overrides survive `/mineplus reload` — register before or after reloads, the registry re-applies them.
+- Direct hook dispatch (and GUI callbacks) are **exception-isolated**: a throwing module hook is logged and skipped instead of aborting the lifecycle operation or the tick loop.
+
+---
+
+## Module Toolkit
+
+`context.moduleSupport()` (`ModuleSupport`) absorbs the boilerplate every module used to duplicate:
+
+| Method | Description |
+|---|---|
+| `installDefault(module, classpathResource, dataRelativePath, overwrite)` | Copies an embedded resource from your jar into the **Core's** data folder. Convention: `overwrite=true` for models, `false` for JSON configs (owner edits survive module updates). |
+| `resolveLooked(player, range, typeId)` | Resolves the machine the player is looking at (anchor block first, then rendered-model id). `typeId` may be `null` for any type. |
+
+```java
+ModuleSupport support = context.moduleSupport();
+support.installDefault(this, "defaults/models/cannon-3-1-1.bbmodel", "models/cannon-3-1-1.bbmodel", true);
+support.installDefault(this, "defaults/multiblocks/cannon.json", "multiblocks/cannon.json", false);
+context.jsonInfrastructureApi().reloadAll();
+```
+
+`registerCommand(module, label, SubCommand)` registers one of the Core's `SubCommand` implementations as a top-level Bukkit command at enable time — no `plugin.yml` command entries, no hand-written `onCommand`/`onTabComplete` dispatch. The subcommand's `permission()` is enforced by the wrapper.
+
+### Supporting utilities
+
+- **`ModelPoints`** (`core.util`) — CENTER-origin model→world math: `toWorld(instance, world, pixels)`, `toWorldOffset`, `direction(instance, modelAxis)`. Uses the exact transform the renderer applies, so muzzles/seats/mounts can never drift from the visuals.
+- **`TypedState`** (`core.state`) — typed view over persisted `stateData`: `TypedState.of(instance).getInt/setInt/getLong/getDouble/getBoolean/...`. Replaces hand-rolled string parsing in every store class (see `CannonTntStore`).
+- **`Cooldowns`** (`core.util`) — self-pruning per-key cooldown map: `tryAcquire(key, millis)`, `isReady`, `remove`, `prune`. The standard main/off-hand interact dedupe.
+- **`AbstractMachineGui`** (`core.gui`) — base class for machine menus. The base owns all interaction guarding (cursor, hotbar swaps, drags, shift-clicks), take-only output slots, filler, and capture-on-next-tick; subclasses implement only `title`, `layout`, `containerSlots`, `accepts`, `onButtonClick`, and `capture` (see `JuicerGui`/`CannonGui`).
 
 ---
 
@@ -128,17 +158,17 @@ advancedApi.registerHook("cannon", new MultiBlockHook() {
 
 ### Persistent machine state
 
-`instance.mutableStateData()` is a `Map<String, String>` that the core's snapshot layer persists — values survive restarts together with the instance. This is the right home for machine state like ammunition counts, fuel, or progress (see [`CannonTntStore`](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonTntStore.java)). Plain in-memory maps do **not** survive restarts.
+`instance.mutableStateData()` is a `Map<String, String>` that the core's snapshot layer persists — values survive restarts together with the instance. This is the right home for machine state like ammunition counts, fuel, or progress. Prefer the typed view `TypedState.of(instance)` (`getInt`, `setInt`, `getBoolean`, …) over raw string parsing (see [`CannonTntStore`](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonTntStore.java)). Plain in-memory maps do **not** survive restarts.
 
 ### Model-space → world-space math
 
-`instance.rotation()` is exactly the rotation the renderer applies. To compute world positions from bbmodel pixels (muzzle points, particle origins, direction logic), replicate the renderer's CENTER-origin transform:
+`instance.rotation()` is exactly the rotation the renderer applies. To compute world positions from bbmodel pixels (muzzle points, particle origins, direction logic), use the Core's `ModelPoints` helpers, which apply the renderer's CENTER-origin transform:
 
 ```
 world = anchorBlock + (0.5, 0.5, 0.5) + R · (p_pixels / 16 − (0, 0.5, 0))
 ```
 
-This keeps feature geometry glued to the rendered model for every placement rotation — the technique used by the [Cannon's firing math](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonFireHook.java).
+`ModelPoints.toWorld(instance, world, pixels)`, `toWorldOffset(...)`, and `direction(instance, axis)` keep feature geometry glued to the rendered model for every placement rotation — the technique used by the [Cannon's firing math](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonFireHook.java).
 
 ---
 
@@ -192,7 +222,7 @@ What runs underneath your feature code:
 | `ModelRenderingManager` | Maps machine level → `.bbmodel` rendering through `VirtualBlockManager` |
 | `VirtualBlockManager` | Session-local mapping + automatic cleanup of orphaned `BlockDisplay` "ghost" entities on chunk loads |
 | `MachineProcessManager` | Timed crafting processes; state in per-instance `stateData`, restart-safe |
-| `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`) via an asynchronous write-behind queue: gameplay calls stage snapshots in memory, a background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |
+| `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`) via an asynchronous write-behind queue with **incremental writes**: hot paths (place/upgrade/remove, process advancement) stage single-instance upserts/deletes, so one mutation no longer rewrites every row; bulk paths (reload, shutdown) stage a full replace. A background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |
 | `HookBus` | Publishes lifecycle events to registered listeners |
 | `MultiBlockLinkingSystem` | Directed links and signal propagation |
 

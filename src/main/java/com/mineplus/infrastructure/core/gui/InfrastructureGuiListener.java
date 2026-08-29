@@ -5,6 +5,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 public final class InfrastructureGuiListener implements Listener {
 
@@ -27,5 +28,10 @@ public final class InfrastructureGuiListener implements Listener {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         guiManager.handleClose(event);
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        guiManager.handleQuit(event.getPlayer());
     }
 }

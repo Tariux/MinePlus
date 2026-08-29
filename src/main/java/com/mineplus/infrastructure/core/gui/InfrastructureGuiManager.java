@@ -55,7 +55,7 @@ public final class InfrastructureGuiManager {
 
         InfrastructureGui gui = guis.get(session.key());
         if (gui instanceof InteractiveInfrastructureGui interactiveGui && event.getWhoClicked() instanceof Player player) {
-            interactiveGui.onClick(player, session.instanceId(), event);
+            dispatch(player, session, "onClick", () -> interactiveGui.onClick(player, session.instanceId(), event));
         }
     }
 
@@ -71,7 +71,7 @@ public final class InfrastructureGuiManager {
 
         InfrastructureGui gui = guis.get(session.key());
         if (gui instanceof InteractiveInfrastructureGui interactiveGui && event.getWhoClicked() instanceof Player player) {
-            interactiveGui.onDrag(player, session.instanceId(), event);
+            dispatch(player, session, "onDrag", () -> interactiveGui.onDrag(player, session.instanceId(), event));
         }
     }
 
@@ -83,7 +83,35 @@ public final class InfrastructureGuiManager {
 
         InfrastructureGui gui = guis.get(session.key());
         if (gui instanceof InteractiveInfrastructureGui interactiveGui && event.getPlayer() instanceof Player player) {
-            interactiveGui.onClose(player, session.instanceId(), event);
+            dispatch(player, session, "onClose", () -> interactiveGui.onClose(player, session.instanceId(), event));
+        }
+    }
+
+    /**
+     * Drops a player's open GUI session without firing {@code onClose}. Called
+     * on player quit, where the inventory is gone and no close event carries
+     * meaningful state — without this, sessions leaked for offline players.
+     */
+    public void handleQuit(Player player) {
+        openSessions.remove(player.getUniqueId());
+    }
+
+    /**
+     * Runs a GUI callback with exception isolation: a throwing module GUI is
+     * logged and skipped instead of breaking the inventory-event pipeline for
+     * every other module.
+     */
+    private void dispatch(Player player, OpenGuiSession session, String callback, Runnable invocation) {
+        try {
+            invocation.run();
+        } catch (Throwable throwable) {
+            org.bukkit.plugin.Plugin owner = org.bukkit.Bukkit.getPluginManager().getPlugin("Mineplus");
+            java.util.logging.Logger logger = owner == null
+                    ? java.util.logging.Logger.getLogger("Mineplus")
+                    : owner.getLogger();
+            logger.log(java.util.logging.Level.SEVERE,
+                    "GUI '" + session.key() + "' threw in " + callback + " for player " + player.getName()
+                            + "; isolating and continuing.", throwable);
         }
     }
 

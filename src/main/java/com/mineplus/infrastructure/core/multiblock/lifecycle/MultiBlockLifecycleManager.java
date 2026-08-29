@@ -226,7 +226,7 @@ public final class MultiBlockLifecycleManager {
 
         registry.addInstance(instance);
         fire(MultiBlockLifecycleEventType.CREATE, type, instance, null, null);
-        persistInstances();
+        markDirty(instance);
         DebugLogger.info("create: Created multiblock instance " + instance.id() + " of type '" + typeId + "' at " + coordinate + ".");
         return instance;
     }
@@ -279,7 +279,7 @@ public final class MultiBlockLifecycleManager {
         if (modelId == null) {
             DebugLogger.severe("place: render() returned null for instance " + id + ". Rolling back to CREATED.");
             EntityStateMachine.transition(instance, EntityStatus.CREATED);
-            persistInstances();
+            markDirty(instance);
             return false;
         }
         registry.bindRenderedModelId(instance.id(), modelId);
@@ -289,7 +289,7 @@ public final class MultiBlockLifecycleManager {
         fire(MultiBlockLifecycleEventType.PLACE, type, instance, actor, null);
         instance.setStatus(EntityStatus.ACTIVE);
         fire(MultiBlockLifecycleEventType.ACTIVATE, type, instance, actor, null);
-        persistInstances();
+        markDirty(instance);
         DebugLogger.info("place: Placed and activated instance " + id + " (modelKey='" + instance.modelKey() + "').");
         return true;
     }
@@ -318,13 +318,12 @@ public final class MultiBlockLifecycleManager {
         }
 
         fire(MultiBlockLifecycleEventType.INTERACT, type, instance, player, null);
-        type.hook().onInteract(instance, player);
+        safeHook(instance, "onInteract", () -> type.hook().onInteract(instance, player));
 
         if (!type.guiKey().isBlank()) {
             guiManager.open(type.guiKey(), player, instance);
         }
 
-        persistInstances();
         return true;
     }
 
@@ -363,8 +362,10 @@ public final class MultiBlockLifecycleManager {
         registry.bindRenderedModelId(instance.id(), swappedModel);
 
         fire(MultiBlockLifecycleEventType.UPGRADE, type, instance, player, null);
-        type.hook().onUpgrade(instance, oldLevel, instance.level(), player);
-        persistInstances();
+        MultiBlockInstance upgradedInstance = instance;
+        safeHook(instance, "onUpgrade", () ->
+                type.hook().onUpgrade(upgradedInstance, oldLevel, upgradedInstance.level(), player));
+        markDirty(instance);
         return true;
     }
 
@@ -399,13 +400,13 @@ public final class MultiBlockLifecycleManager {
         if (type != null) {
             if (destroy) {
                 fire(MultiBlockLifecycleEventType.DESTRUCTION, type, instance, actor, null);
-                type.hook().onBreak(instance, actor);
+                safeHook(instance, "onBreak", () -> type.hook().onBreak(instance, actor));
             } else {
                 fire(MultiBlockLifecycleEventType.REMOVE, type, instance, actor, null);
-                type.hook().onRemove(instance, actor);
+                safeHook(instance, "onRemove", () -> type.hook().onRemove(instance, actor));
             }
         }
-        persistInstances();
+        persistenceFacade.enqueueDelete(instanceId);
         DebugLogger.info("remove: Removed instance " + instanceId + " (destroy=" + destroy + ").");
         return true;
     }
@@ -423,7 +424,7 @@ public final class MultiBlockLifecycleManager {
     public void tick() {
         long now = System.currentTimeMillis();
         if (processManager != null) {
-            processManager.advanceAll(TICK_INTERVAL_TICKS);
+            processManager.advanceAll(TICK_INTERVAL_TICKS, this::markDirty);
         }
         for (MultiBlockInstance instance : registry.getInstances()) {
             MultiBlockType type = registry.getType(instance.typeId());
@@ -431,27 +432,29 @@ public final class MultiBlockLifecycleManager {
                 continue;
             }
             EntityStatus status = instance.status() == null ? EntityStatus.CREATED : instance.status();
-            if (status == EntityStatus.ACTIVE) {
-                if (!EntityStateMachine.validateChunkLoaded(instance)) {
-                    continue;
-                }
-                instance.setLastHeartbeat(now);
+            if (status != EntityStatus.ACTIVE) {
+                continue;
+            }
+            if (!EntityStateMachine.validateChunkLoaded(instance)) {
+                continue;
+            }
+            instance.setLastHeartbeat(now);
 
-                if (instance.renderedModelId() == null && instance.modelKey() != null && !instance.modelKey().isBlank()) {
-                    if (EntityStateMachine.validateWorldLoaded(instance)) {
-                        UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
-                        if (modelId != null) {
-                            registry.bindRenderedModelId(instance.id(), modelId);
-                            DebugLogger.info("tick: Deferred render succeeded for instance " + instance.id() + ".");
-                            fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
-                        } else {
-                            DebugLogger.warning("tick: Deferred render FAILED for instance " + instance.id() + " (render returned null).");
-                        }
+            if (instance.renderedModelId() == null && instance.modelKey() != null && !instance.modelKey().isBlank()) {
+                if (EntityStateMachine.validateWorldLoaded(instance)) {
+                    UUID modelId = renderingManager.render(type, instance, plugin.getDataFolder());
+                    if (modelId != null) {
+                        registry.bindRenderedModelId(instance.id(), modelId);
+                        DebugLogger.info("tick: Deferred render succeeded for instance " + instance.id() + ".");
+                        fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
+                    } else {
+                        DebugLogger.warning("tick: Deferred render FAILED for instance " + instance.id() + " (render returned null).");
                     }
                 }
             }
+
             fire(MultiBlockLifecycleEventType.TICK, type, instance, null, null);
-            type.hook().onTick(instance);
+            safeHook(instance, "onTick", () -> type.hook().onTick(instance));
         }
     }
 
@@ -465,7 +468,7 @@ public final class MultiBlockLifecycleManager {
             return;
         }
         fire(MultiBlockLifecycleEventType.CRAFT, type, instance, actor, null);
-        type.hook().onCraft(instance, actor);
+        safeHook(instance, "onCraft", () -> type.hook().onCraft(instance, actor));
     }
 
     public void use(UUID instanceId, Player actor) {
@@ -490,7 +493,7 @@ public final class MultiBlockLifecycleManager {
             return;
         }
         fire(MultiBlockLifecycleEventType.USAGE, type, instance, null, signal);
-        type.hook().onSignal(instance, signal);
+        safeHook(instance, "onSignal", () -> type.hook().onSignal(instance, signal));
     }
 
     public MultiBlockInstance findByLocation(org.bukkit.block.Block block) {
@@ -530,35 +533,52 @@ public final class MultiBlockLifecycleManager {
     }
 
     /**
-     * Periodic heartbeat flush. Chunk-aware, matching {@link #tick()}: instances in
-     * unloaded chunks are skipped, so a server whose machines all sit in unloaded
-     * chunks stages nothing and the persistence layer stays idle. The heartbeat
-     * timestamp is only ever written and persisted (never used for decisions), so
-     * pausing it for unloaded machines has no behavioral side effects.
+     * Periodic heartbeat refresh. Chunk-aware, matching {@link #tick()}: instances in
+     * unloaded chunks are skipped. The heartbeat timestamp is only ever written and
+     * persisted (never used for decisions), so this pass deliberately stages nothing
+     * for persistence — heartbeat updates ride along with the next dirty write of
+     * the instance instead of re-writing every row every 5 seconds.
      */
     public void flushHeartbeats() {
         long now = System.currentTimeMillis();
-        boolean needsFlush = false;
         for (MultiBlockInstance instance : registry.getInstances()) {
-            if (instance.status() == EntityStatus.ACTIVE) {
-                if (!EntityStateMachine.validateChunkLoaded(instance)) {
-                    continue;
-                }
+            if (instance.status() == EntityStatus.ACTIVE
+                    && EntityStateMachine.validateChunkLoaded(instance)) {
                 instance.setLastHeartbeat(now);
-                needsFlush = true;
             }
-        }
-        if (needsFlush) {
-            persistInstances();
         }
     }
 
     /**
-     * Stages the current state of all instances for asynchronous persistence.
-     * Snapshots are captured on the main thread (instances are main-thread state)
-     * but no SQLite I/O happens here; the {@link PersistenceFacade} write-behind
-     * cycle performs the actual flush off-thread. All lifecycle hot paths
-     * (create/place/interact/upgrade/remove/tick/heartbeat) call this.
+     * Stages a single changed instance for asynchronous incremental persistence
+     * (upsert by id). No I/O happens here; snapshots are captured on the main
+     * thread and the {@link PersistenceFacade} write-behind cycle flushes them
+     * off-thread. Hot lifecycle paths (create/place/upgrade/remove, process
+     * advancement) use this instead of the full-replace
+     * {@link #persistInstances()} to avoid rewriting every row per mutation.
+     *
+     * <p>Public because hooks and GUI callbacks mutate {@code stateData}
+     * outside the lifecycle manager's own write paths; they must call this
+     * (exposed to modules as {@code InfrastructureApi.stagePersist}) so their
+     * changes reach the persistence queue.
+     */
+    public void markDirty(MultiBlockInstance instance) {
+        persistenceFacade.enqueueChange(MultiBlockSnapshot.from(instance));
+        DebugLogger.info("markDirty: Staged instance " + instance.id() + " for incremental persistence.");
+    }
+
+    /** {@link #markDirty(MultiBlockInstance)} by instance id; no-op if the instance no longer exists. */
+    public void markDirty(UUID instanceId) {
+        MultiBlockInstance instance = registry.getInstance(instanceId);
+        if (instance != null) {
+            markDirty(instance);
+        }
+    }
+
+    /**
+     * Stages the current state of all instances as a full-replace payload for
+     * asynchronous persistence. Used by bulk/admin paths (reconcile, reload,
+     * shutdown) where many instances may have changed at once.
      */
     private void persistInstances() {
         List<MultiBlockSnapshot> snapshots = registry.getInstances().stream()
@@ -581,7 +601,7 @@ public final class MultiBlockLifecycleManager {
             UUID modelId = renderingManager.swapModel(type, instance, plugin.getDataFolder());
             registry.bindRenderedModelId(instance.id(), modelId);
             fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
-            type.hook().onModelReload(instance);
+            safeHook(instance, "onModelReload", () -> type.hook().onModelReload(instance));
         }
         persistInstances();
     }
@@ -605,8 +625,8 @@ public final class MultiBlockLifecycleManager {
         UUID modelId = renderingManager.swapModel(type, instance, plugin.getDataFolder());
         registry.bindRenderedModelId(instance.id(), modelId);
         fire(MultiBlockLifecycleEventType.MODEL_RELOAD, type, instance, null, null);
-        type.hook().onModelReload(instance);
-        persistInstances();
+        safeHook(instance, "onModelReload", () -> type.hook().onModelReload(instance));
+        markDirty(instance);
         return modelId != null;
     }
 
@@ -687,5 +707,21 @@ public final class MultiBlockLifecycleManager {
             MultiBlockSignal signal
     ) {
         hookBus.publish(new MultiBlockLifecycleEvent(type, definition, instance, actor, signal));
+    }
+
+    /**
+     * Runs a direct per-type hook dispatch with exception isolation: a throwing
+     * module hook is logged and skipped instead of aborting the enclosing
+     * lifecycle operation (or the whole tick loop). Mirrors the per-listener
+     * isolation the {@link HookBus} already applies to bus listeners.
+     */
+    private void safeHook(MultiBlockInstance instance, String phase, Runnable dispatch) {
+        try {
+            dispatch.run();
+        } catch (Throwable throwable) {
+            plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                    "Hook '" + phase + "' of type '" + instance.typeId() + "' (instance " + instance.id()
+                            + ") threw; isolating and continuing.", throwable);
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.mineplus.fun.cannon;
 
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.util.ModelPoints;
 import java.util.Random;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -15,7 +16,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.util.Vector;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
@@ -44,8 +44,6 @@ public final class CannonAimListener implements Listener {
 
     /** Barrel axis in model space: the cannon fires toward -X. */
     private static final Vector3f BARREL_AXIS = new Vector3f(-1.0f, 0.0f, 0.0f);
-
-    private static final float BLOCKS_PER_PIXEL = 1.0f / 16.0f;
 
     /** Draws weaker than this (vanilla taps) produce a dry click and no shot. */
     private static final float MIN_DRAW_FORCE = 0.12F;
@@ -142,21 +140,10 @@ public final class CannonAimListener implements Listener {
         } else {
             CannonTntStore.save(instance, loaded - 1);
         }
+        context.infrastructureApi().stagePersist(instance.id());
 
-        Quaternionf rotation = instance.rotation();
-        Vector3f muzzleOffset = new Vector3f(MUZZLE_PIXELS).mul(BLOCKS_PER_PIXEL).sub(0.0f, 0.5f, 0.0f);
-        Vector3f axisOffset = new Vector3f(BARREL_AXIS);
-        if (rotation != null) {
-            rotation.transform(muzzleOffset);
-            rotation.transform(axisOffset);
-        }
-
-        Location muzzle = new Location(
-                world,
-                instance.coordinate().x() + 0.5D + muzzleOffset.x,
-                instance.coordinate().y() + 0.5D + muzzleOffset.y,
-                instance.coordinate().z() + 0.5D + muzzleOffset.z
-        );
+        Location muzzle = ModelPoints.toWorld(instance, world, MUZZLE_PIXELS);
+        Vector3f axisOffset = ModelPoints.direction(instance, BARREL_AXIS);
         Vector barrelAxis = new Vector(axisOffset.x, axisOffset.y, axisOffset.z);
 
         Vector aim = clampToAimCone(player.getEyeLocation().getDirection(), barrelAxis);
