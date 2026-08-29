@@ -11,7 +11,6 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.TNTPrimed;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityShootBowEvent;
@@ -24,9 +23,11 @@ import org.joml.Vector3f;
  * mechanics: the gunner draws the Cannon Lanyard exactly like a bow, and the
  * release's draw force (0..1 over 20 ticks, the vanilla charge curve) scales
  * the muzzle speed. The vanilla arrow launch is always cancelled - the cannon
- * fires a TNTPrimed from its muzzle instead, along the gunner's view
- * direction clamped into a cone around the bore so the stationary cannon
- * never shoots backwards through itself.
+ * fires from its muzzle instead, along the gunner's view direction clamped
+ * into a cone around the bore so the stationary cannon never shoots
+ * backwards through itself. Projectile choice follows the ammunition store:
+ * a loaded fire charge fires a straight-flying fireball, otherwise TNT flies
+ * a ballistic arc (see {@link CannonProjectiles}).
  */
 public final class CannonAimListener implements Listener {
 
@@ -50,10 +51,10 @@ public final class CannonAimListener implements Listener {
     private static final float MIN_DRAW_FORCE = 0.12F;
 
     /** Muzzle speed at the weakest accepted draw, in blocks per tick. */
-    private static final double MIN_MUZZLE_SPEED = 0.7D;
+    private static final double MIN_MUZZLE_SPEED = 0.55D;
 
     /** Muzzle speed at a full 20-tick draw, in blocks per tick. */
-    private static final double MAX_MUZZLE_SPEED = 2.8D;
+    private static final double MAX_MUZZLE_SPEED = 1.9D;
 
     /** Maximum random yaw deviation per shot, in degrees. */
     private static final double SPREAD_DEGREES = 1.0D;
@@ -123,10 +124,11 @@ public final class CannonAimListener implements Listener {
             return;
         }
 
-        int loaded = CannonTntStore.load(instance);
+        boolean fireball = CannonTntStore.hasFireballLoaded(instance);
+        int loaded = fireball ? CannonTntStore.loadFireballs(instance) : CannonTntStore.load(instance);
         if (loaded <= 0) {
             player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.7F, 0.5F);
-            player.sendMessage(ChatColor.RED + "The cannon is empty. Load TNT through its menu.");
+            player.sendMessage(ChatColor.RED + "The cannon is empty. Load TNT or fire charges through its menu.");
             return;
         }
 
@@ -135,7 +137,11 @@ public final class CannonAimListener implements Listener {
             return;
         }
 
-        CannonTntStore.save(instance, loaded - 1);
+        if (fireball) {
+            CannonTntStore.saveFireballs(instance, loaded - 1);
+        } else {
+            CannonTntStore.save(instance, loaded - 1);
+        }
 
         Quaternionf rotation = instance.rotation();
         Vector3f muzzleOffset = new Vector3f(MUZZLE_PIXELS).mul(BLOCKS_PER_PIXEL).sub(0.0f, 0.5f, 0.0f);
@@ -163,18 +169,21 @@ public final class CannonAimListener implements Listener {
         );
         double speed = MIN_MUZZLE_SPEED + force * (MAX_MUZZLE_SPEED - MIN_MUZZLE_SPEED);
 
-        TNTPrimed projectile = world.spawn(launchPoint, TNTPrimed.class);
-        projectile.setSource(player);
-        projectile.setVelocity(aim.clone().multiply(speed));
+        CannonProjectiles.launch(world, launchPoint, aim, speed, player, fireball);
 
         player.playSound(player.getLocation(), Sound.ENTITY_ARROW_SHOOT, 1.0F, 0.55F);
-        world.playSound(muzzle, Sound.ENTITY_GENERIC_EXPLODE, 0.5F + 0.5F * force, 1.7F - 0.5F * force);
-        world.playSound(muzzle, Sound.ENTITY_TNT_PRIMED, 1.0F, 1.0F);
+        if (fireball) {
+            player.playSound(player.getLocation(), Sound.ENTITY_GHAST_SHOOT, 0.8F, 1.2F);
+        } else {
+            world.playSound(muzzle, Sound.ENTITY_GENERIC_EXPLODE, 0.4F + 0.3F * force, 1.7F - 0.5F * force);
+            world.playSound(muzzle, Sound.ENTITY_TNT_PRIMED, 1.0F, 1.0F);
+        }
         world.spawnParticle(Particle.EXPLOSION, muzzle, 1);
         world.spawnParticle(Particle.CLOUD, muzzle, (int) (12 + 28 * force), 0.3D, 0.3D, 0.3D, 0.05D);
 
-        player.sendMessage(ChatColor.GRAY + "Cannon fired (draw " + Math.round(force * 100.0F) + "%)."
-                + " TNT remaining: " + (loaded - 1) + ".");
+        String payload = fireball ? "fire charge" : "TNT";
+        player.sendMessage(ChatColor.GRAY + "Cannon fires a " + payload + " (draw " + Math.round(force * 100.0F) + "%)."
+                + " Ammunition remaining: " + (loaded - 1) + ".");
     }
 
     /**

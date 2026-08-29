@@ -25,16 +25,17 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Cannon context menu. The centre slot always accepts and holds one stack of
- * TNT (each shot consumes one). At level 1 the menu carries the upgrade button
- * (anvil, consumes the next level's cost); from level 2 it offers the gunner's
- * seat (saddle button that mounts the player) and a short manual explaining
- * the aimed-fire mechanics.
+ * Cannon context menu. The centre slot accepts and holds one stack of
+ * ammunition — TNT (ballistic shots) or fire charges (straight-flying
+ * fireballs, fired first while any are loaded). At level 1 the menu carries
+ * the upgrade button (anvil, consumes the next level's cost); from level 2 it
+ * offers the gunner's seat (saddle button that mounts the player) and a short
+ * manual explaining the aimed-fire mechanics.
  */
 public final class CannonGui implements InfrastructureGui, InteractiveInfrastructureGui {
 
     private static final int SIZE = 9;
-    private static final int TNT_SLOT = 4;
+    private static final int AMMO_SLOT = 4;
     private static final int INFO_SLOT = 2;
     private static final int SADDLE_SLOT = 6;
 
@@ -55,9 +56,15 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
         Inventory inventory = Bukkit.createInventory(player, SIZE, ChatColor.DARK_GRAY + "Cannon");
         fillLayout(inventory, instance);
 
-        int loaded = CannonTntStore.load(instance);
-        if (loaded > 0) {
-            inventory.setItem(TNT_SLOT, new ItemStack(Material.TNT, Math.min(loaded, 64)));
+        // Fire charges display first because they are fired first.
+        int fireballs = CannonTntStore.loadFireballs(instance);
+        if (fireballs > 0) {
+            inventory.setItem(AMMO_SLOT, new ItemStack(Material.FIRE_CHARGE, Math.min(fireballs, 64)));
+        } else {
+            int tnt = CannonTntStore.load(instance);
+            if (tnt > 0) {
+                inventory.setItem(AMMO_SLOT, new ItemStack(Material.TNT, Math.min(tnt, 64)));
+            }
         }
 
         player.openInventory(inventory);
@@ -80,7 +87,7 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
             return;
         }
 
-        if (rawSlot != TNT_SLOT) {
+        if (rawSlot != AMMO_SLOT) {
             event.setCancelled(true);
             if (rawSlot == INFO_SLOT && instance.level() < CannonKeys.LEVEL_AIMED) {
                 upgrade(player, instance);
@@ -98,13 +105,13 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
             return;
         }
 
-        if (!isTntOrEmpty(event.getCursor())) {
+        if (!isAmmoOrEmpty(event.getCursor())) {
             event.setCancelled(true);
             return;
         }
 
         ItemStack swapCandidate = swapCandidate(event);
-        if (!isTntOrEmpty(swapCandidate)) {
+        if (!isAmmoOrEmpty(swapCandidate)) {
             event.setCancelled(true);
             return;
         }
@@ -116,13 +123,13 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
     public void onDrag(Player player, UUID instanceId, InventoryDragEvent event) {
         int topSize = event.getView().getTopInventory().getSize();
         for (int slot : event.getRawSlots()) {
-            if (slot < topSize && slot != TNT_SLOT) {
+            if (slot < topSize && slot != AMMO_SLOT) {
                 event.setCancelled(true);
                 return;
             }
         }
 
-        if (!isTntOrEmpty(event.getOldCursor())) {
+        if (!isAmmoOrEmpty(event.getOldCursor())) {
             event.setCancelled(true);
             return;
         }
@@ -146,8 +153,8 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
         return null;
     }
 
-    private boolean isTntOrEmpty(ItemStack item) {
-        return item == null || item.getType().isAir() || item.getType() == Material.TNT;
+    private boolean isAmmoOrEmpty(ItemStack item) {
+        return item == null || item.getType().isAir() || item.getType() == Material.TNT || item.getType() == Material.FIRE_CHARGE;
     }
 
     private void fillLayout(Inventory inventory, MultiBlockInstance instance) {
@@ -156,7 +163,7 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
         for (int slot = 0; slot < SIZE; slot++) {
             inventory.setItem(slot, filler);
         }
-        inventory.setItem(TNT_SLOT, null);
+        inventory.setItem(AMMO_SLOT, null);
         inventory.setItem(INFO_SLOT, aimed ? manual() : upgradeButton(instance));
         if (aimed) {
             inventory.setItem(SADDLE_SLOT, saddleButton());
@@ -217,7 +224,8 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
         ItemStack item = named(Material.SPYGLASS, ChatColor.GOLD + "Gunner's Manual");
         ItemMeta meta = item.getItemMeta();
         meta.setLore(List.of(
-                ChatColor.GRAY + "Load TNT into the centre slot.",
+                ChatColor.GRAY + "Load TNT or fire charges into the centre",
+                ChatColor.GRAY + "slot; fire charges are fired first.",
                 ChatColor.GRAY + "Take the gunner's seat here, or right-click",
                 ChatColor.GRAY + "the cannon while holding a saddle.",
                 ChatColor.GRAY + "Draw the Cannon Lanyard like a bow to fire;",
@@ -242,25 +250,34 @@ public final class CannonGui implements InfrastructureGui, InteractiveInfrastruc
             return;
         }
 
-        ItemStack tnt = inventory.getItem(TNT_SLOT);
-        if (tnt == null || tnt.getType().isAir()) {
+        ItemStack ammo = inventory.getItem(AMMO_SLOT);
+        if (ammo == null || ammo.getType().isAir()) {
+            CannonTntStore.save(instance, 0);
+            CannonTntStore.saveFireballs(instance, 0);
+            return;
+        }
+
+        if (ammo.getType() == Material.TNT) {
+            CannonTntStore.save(instance, ammo.getAmount());
+            CannonTntStore.saveFireballs(instance, 0);
+            return;
+        }
+
+        if (ammo.getType() == Material.FIRE_CHARGE) {
+            CannonTntStore.saveFireballs(instance, ammo.getAmount());
             CannonTntStore.save(instance, 0);
             return;
         }
 
-        if (tnt.getType() != Material.TNT) {
-            // Defensive: the guarded interaction paths never let foreign items in,
-            // but never destroy player items if one somehow appears anyway.
-            Map<Integer, ItemStack> overflow = player.getInventory().addItem(tnt);
-            for (ItemStack leftover : overflow.values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), leftover);
-            }
-            inventory.setItem(TNT_SLOT, null);
-            CannonTntStore.save(instance, 0);
-            return;
+        // Defensive: the guarded interaction paths never let foreign items in,
+        // but never destroy player items if one somehow appears anyway.
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(ammo);
+        for (ItemStack leftover : overflow.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
         }
-
-        CannonTntStore.save(instance, tnt.getAmount());
+        inventory.setItem(AMMO_SLOT, null);
+        CannonTntStore.save(instance, 0);
+        CannonTntStore.saveFireballs(instance, 0);
     }
 
     private ItemStack named(Material material, String name) {

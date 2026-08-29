@@ -39,6 +39,7 @@ public final class CannonFeature {
         this.mounts = new CannonMountManager(plugin);
         Bukkit.getPluginManager().registerEvents(mounts, plugin);
         Bukkit.getPluginManager().registerEvents(new CannonAimListener(context, mounts), plugin);
+        Bukkit.getPluginManager().registerEvents(new CannonProjectiles(), plugin);
 
         context.infrastructureApi().registerGui(
                 CannonKeys.GUI_KEY,
