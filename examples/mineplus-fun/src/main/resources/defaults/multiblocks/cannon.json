@@ -10,6 +10,18 @@
       "guiOptions": {
         "title": "Cannon"
       }
+    },
+    "2": {
+      "model": "models/cannon-3-1-1-bigger.bbmodel",
+      "speed": 1.25,
+      "durability": 250.0,
+      "upgradeCost": {
+        "minecraft:iron_ingot": 8,
+        "minecraft:tnt": 4
+      },
+      "guiOptions": {
+        "title": "Cannon II"
+      }
     }
   }
 }

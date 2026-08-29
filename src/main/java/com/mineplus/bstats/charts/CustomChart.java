@@ -1,6 +1,6 @@
-package org.bstats.charts;
+package com.mineplus.bstats.charts;
 
-import org.bstats.json.JsonObjectBuilder;
+import com.mineplus.bstats.json.JsonObjectBuilder;
 
 import java.util.function.BiConsumer;
 

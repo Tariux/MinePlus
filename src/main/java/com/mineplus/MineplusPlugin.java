@@ -14,9 +14,9 @@ import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
 import com.mineplus.infrastructure.core.gui.InfrastructureGuiListener;
 import com.mineplus.infrastructure.listener.InfrastructureListener;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import com.mineplus.bstats.bukkit.Metrics;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bstats.bukkit.Metrics;
 
 public final class MineplusPlugin extends JavaPlugin {
 

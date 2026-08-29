@@ -1,7 +1,7 @@
-package org.bstats;
+package com.mineplus.bstats;
 
-import org.bstats.charts.CustomChart;
-import org.bstats.json.JsonObjectBuilder;
+import com.mineplus.bstats.charts.CustomChart;
+import com.mineplus.bstats.json.JsonObjectBuilder;
 
 import javax.net.ssl.HttpsURLConnection;
 import java.io.BufferedReader;

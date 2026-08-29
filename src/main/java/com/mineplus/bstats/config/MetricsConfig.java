@@ -1,4 +1,4 @@
-package org.bstats.config;
+package com.mineplus.bstats.config;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;

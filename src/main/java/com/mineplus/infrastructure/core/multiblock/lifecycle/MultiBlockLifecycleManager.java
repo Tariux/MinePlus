@@ -6,6 +6,7 @@ import com.mineplus.infrastructure.core.events.MultiBlockSignal;
 import com.mineplus.infrastructure.core.gui.InfrastructureGuiManager;
 import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.core.multiblock.linking.MultiBlockLinkingSystem;
 import com.mineplus.infrastructure.core.multiblock.progress.MachineProcessManager;
@@ -344,6 +345,10 @@ public final class MultiBlockLifecycleManager {
         }
 
         int oldLevel = instance.level();
+        MultiBlockLevel next = type.level(oldLevel + 1);
+        if (next == null) {
+            return false;
+        }
         if (!upgradeManager.consumeUpgradeCost(type, instance, player)) {
             return false;
         }
@@ -352,6 +357,7 @@ public final class MultiBlockLifecycleManager {
         UUID swappedModel = renderingManager.swapModel(type, instance, plugin.getDataFolder());
         if (swappedModel == null) {
             instance.setLevel(oldLevel);
+            upgradeManager.refundUpgradeCost(player, next.upgradeCost());
             return false;
         }
         registry.bindRenderedModelId(instance.id(), swappedModel);

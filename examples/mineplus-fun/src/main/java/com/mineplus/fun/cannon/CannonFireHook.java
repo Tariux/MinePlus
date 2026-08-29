@@ -22,22 +22,30 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
- * Cannon behaviour hook: right-clicking with a torch fires the cannon, any other
- * interaction opens the ammunition menu.
+ * Cannon behaviour hook. Interaction is level-dependent:
  *
- * <p>The multiblock type is registered <em>without</em> a GUI key on purpose — the
+ * <ul>
+ *   <li>Level 1 (classic): right-clicking with a torch fires a fixed-power
+ *       shot; anything else opens the ammunition menu.</li>
+ *   <li>Level 2 (Cannon II): right-clicking with a saddle takes the gunner's
+ *       seat; anything else opens the menu, which also offers the seat. Firing
+ *       happens through the mounted aiming bow - see
+ *       {@link CannonAimListener} and {@link CannonMountManager}.</li>
+ * </ul>
+ *
+ * <p>The multiblock type is registered <em>without</em> a GUI key on purpose - the
  * Core would then always open the GUI on interact. Instead this hook decides per
  * interaction and opens the registered GUI itself through {@code openGui}.
  *
  * <p>Firing geometry follows the Core's CENTER origin convention: model pixel
  * {@code (0,0,0)} is the anchor block's center at its base, so a model point
  * {@code p} (in pixels) sits at {@code anchorCenter + R · (p/16 - (0, 1/2, 0))},
- * where {@code R} is the instance rotation — the same transform the display
+ * where {@code R} is the instance rotation - the same transform the display
  * renderer applies, so the shot always leaves the rendered barrel.
  */
 public final class CannonFireHook implements MultiBlockHook {
 
-    /** Muzzle exit point in model pixels: the barrel bore runs along −X at y=6.5, z=0. */
+    /** Level-1 muzzle exit point in model pixels: the barrel bore runs along −X at y=6.5, z=0. */
     private static final Vector3f MUZZLE_PIXELS = new Vector3f(-15.0f, 6.5f, 0.0f);
 
     /** Barrel axis in model space: the cannon fires toward −X. */
@@ -61,17 +69,24 @@ public final class CannonFireHook implements MultiBlockHook {
     private static final long FIRE_COOLDOWN_MILLIS = 1000L;
 
     private final PluginContext context;
+    private final CannonMountManager mounts;
     private final Map<UUID, Long> lastFiredAt;
     private final Random random;
 
-    public CannonFireHook(PluginContext context) {
+    public CannonFireHook(PluginContext context, CannonMountManager mounts) {
         this.context = context;
+        this.mounts = mounts;
         this.lastFiredAt = new HashMap<>();
         this.random = new Random();
     }
 
     @Override
     public void onInteract(MultiBlockInstance instance, Player actor) {
+        if (instance.level() >= CannonKeys.LEVEL_AIMED) {
+            interactAimed(instance, actor);
+            return;
+        }
+
         if (isHoldingTorch(actor)) {
             fire(instance, actor);
             return;
@@ -79,20 +94,53 @@ public final class CannonFireHook implements MultiBlockHook {
         context.infrastructureApi().openGui(CannonKeys.GUI_KEY, actor, instance);
     }
 
+    private void interactAimed(MultiBlockInstance instance, Player actor) {
+        // A seated gunner pointing at their own cannon is aiming, not interacting;
+        // without this guard the menu would pop open mid-draw.
+        if (mounts.session(actor) != null) {
+            return;
+        }
+        if (isHoldingSaddle(actor)) {
+            mounts.mount(actor, instance);
+            return;
+        }
+        if (isHoldingTorch(actor)) {
+            actor.sendMessage(ChatColor.GRAY + "This cannon is worked from the gunner's seat. Mount it with a"
+                    + " saddle or through its menu, then draw the lanyard to fire.");
+            return;
+        }
+        context.infrastructureApi().openGui(CannonKeys.GUI_KEY, actor, instance);
+    }
+
+    @Override
+    public void onUpgrade(MultiBlockInstance instance, int previousLevel, int nextLevel, Player actor) {
+        if (actor == null || nextLevel < CannonKeys.LEVEL_AIMED) {
+            return;
+        }
+        actor.sendMessage(ChatColor.GOLD + "The cannon is reborn as Cannon II.");
+        actor.sendMessage(ChatColor.GRAY + "Take the gunner's seat with a saddle (or from its menu) and draw the"
+                + " lanyard bow to aim and fire - longer draws hit harder.");
+    }
+
     @Override
     public void onBreak(MultiBlockInstance instance, Player actor) {
-        dropLoadedTnt(instance);
+        cleanup(instance);
     }
 
     @Override
     public void onRemove(MultiBlockInstance instance, Player actor) {
+        cleanup(instance);
+    }
+
+    /** Returns any loaded ammunition to the world and unseats the gunner so nothing is silently destroyed. */
+    private void cleanup(MultiBlockInstance instance) {
+        lastFiredAt.remove(instance.id());
+        mounts.ejectInstance(instance.id());
         dropLoadedTnt(instance);
     }
 
     /** Returns any loaded ammunition to the world so it is never silently destroyed. */
     private void dropLoadedTnt(MultiBlockInstance instance) {
-        lastFiredAt.remove(instance.id());
-
         int loaded = CannonTntStore.load(instance);
         if (loaded <= 0) {
             return;
@@ -121,6 +169,18 @@ public final class CannonFireHook implements MultiBlockHook {
                 && mainHand.getType().isAir()
                 && offHand != null
                 && offHand.getType() == Material.TORCH;
+    }
+
+    private boolean isHoldingSaddle(Player actor) {
+        ItemStack mainHand = actor.getInventory().getItemInMainHand();
+        if (mainHand != null && mainHand.getType() == Material.SADDLE) {
+            return true;
+        }
+        ItemStack offHand = actor.getInventory().getItemInOffHand();
+        return mainHand != null
+                && mainHand.getType().isAir()
+                && offHand != null
+                && offHand.getType() == Material.SADDLE;
     }
 
     private void fire(MultiBlockInstance instance, Player actor) {

@@ -1,8 +1,8 @@
-package org.bstats.bukkit;
+package com.mineplus.bstats.bukkit;
 
-import org.bstats.MetricsBase;
-import org.bstats.charts.CustomChart;
-import org.bstats.json.JsonObjectBuilder;
+import com.mineplus.bstats.MetricsBase;
+import com.mineplus.bstats.charts.CustomChart;
+import com.mineplus.bstats.json.JsonObjectBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;

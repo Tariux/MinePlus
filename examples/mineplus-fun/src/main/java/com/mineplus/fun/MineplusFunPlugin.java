@@ -58,6 +58,9 @@ public final class MineplusFunPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (this.cannonFeature != null) {
+            this.cannonFeature.disable();
+        }
         this.cannonFeature = null;
         this.juicerFeature = null;
         this.context = null;
