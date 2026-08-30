@@ -1,7 +1,7 @@
 # 🎪 MineplusFun — Reference Module for the Mineplus Core
 
 [![](https://img.shields.io/badge/tier-module%20plugin-purple)](../../README.md)
-[![](https://img.shields.io/badge/machines-3-orange)](#-the-juicer)
+[![](https://img.shields.io/badge/machines-4-orange)](#-the-juicer)
 [![](https://img.shields.io/badge/Java-21-blue)](https://adoptium.net/)
 
 > **Navigate:** [Examples](../README.md) • [Developer API](../../docs/developer-api.md) • [Module Development Guide](DEVELOPMENT_PROMPT.md) • [Project README](../../README.md)
@@ -9,13 +9,14 @@
 `mineplus-fun` is the **canonical reference implementation** of a *module plugin* built on top of the Mineplus Core engine. It demonstrates the intended architecture:
 
 - **Core (`Mineplus`)** is a dependency-only engine. It ships no game content — only the framework (virtual Blockbench rendering, multiblock registry/lifecycle, recipes, GUIs, item registry, linking/signals, persistence) and a few admin commands.
-- **Module (`MineplusFun`)** is a completely separate plugin that depends on the Core and adds *game logic* — in this case, three complete machines:
+- **Module (`MineplusFun`)** is a completely separate plugin that depends on the Core and adds *game logic* — in this case, four complete features:
 
 | Machine | What it demonstrates |
 |---|---|
 | 🧃 **[Juicer](#-the-juicer)** | Unconditional GUI (JSON `gui` key), recipes, custom items, upgrade button |
 | 💥 **[Cannon](#-the-cannon)** | Conditional interaction, `TNTPrimed` ballistics, persistent ammo, rotation-aware placement, mountable level 2 with vanilla-bow aiming |
 | ⚙️ **[Gear](#%EF%B8%8F-the-gear)** | bbmodel clip animation, redstone activation, chain reaction through the `AnimationApi` |
+| 🍷 **[Wine](#%EF%B8%8F-the-wine-tasting-flight)** | Texel surface baking — five 16x16 sprites reconstructed pixel-by-pixel out of vanilla palette blocks, compared side by side in a tasting flight |
 
 The game logic lives **entirely** in this module — the Core knows nothing about the machines.
 
@@ -54,6 +55,18 @@ examples/mineplus-fun/            # Example module (separate plugin)
       CannonTntStore.java         # persistent ammo counter (stateData)
       CannonSubCommand.java
       gui/CannonGui.java          # TNT ammunition menu + gunner's seat button
+    gear/
+      GearFeature.java            # wires the Gear into the Core API
+      GearKeys.java
+      GearHook.java               # lifecycle re-evaluation of the redstone grid
+      GearGrid.java               # flood-fill activation from powered seeds
+      GearRedstoneListener.java   # instant response on BlockRedstoneEvent
+      GearSubCommand.java
+    wine/
+      WineFeature.java            # installs 5 model+texture+meta triplets + multiblock JSONs
+      WineKeys.java
+      WineVariant.java            # the flight lineup (key -> type id -> display name)
+      WineSubCommand.java         # /wine place|flight|remove|clear|status
    src/main/resources/
      plugin.yml
      defaults/                     # bbmodels + multiblock/recipe JSON (shipped in this jar)
@@ -61,8 +74,12 @@ examples/mineplus-fun/            # Example module (separate plugin)
        models/juicer-machine-level-2.bbmodel
        models/cannon-3-1-1.bbmodel
        models/cannon-3-1-1-bigger.bbmodel
+       models/gear-1-1.bbmodel
+       models/strad-wine.bbmodel  # + stal/red/chenet/solaris (with *_wine.png + .meta.json)
        multiblocks/juicer_machine.json
        multiblocks/cannon.json
+       multiblocks/gear.json
+       multiblocks/wine.json      # + wine-stal/red/chenet/solaris.json
        recipes/juicer_machine_recipes.json
 ```
 
@@ -152,6 +169,31 @@ A single-block gear modeled in Blockbench ([model](src/main/resources/defaults/m
 - *Clip from the model file* — the animation rides inside the `.bbmodel`; the multiblock JSON declares **no** `animations` autoplay because rotation is *state-driven*, not unconditional.
 - *Grid evaluation* ([`GearGrid`](src/main/java/com/mineplus/fun/gear/GearGrid.java)) — every half second (plus instantly on `BlockRedstoneEvent` and lifecycle hooks) the module flood-fills the active set from redstone-powered seeds across face-adjacent gears. Reachability-based, so a ring of gears can never self-sustain after the power is cut.
 - *Phase synchronization* — a gear joining a running train starts its clip at the neighbour's current animation time, so meshed gears rotate in lockstep; the whole train plays the same clip at the same rate.
+
+---
+
+## 🍷 The Wine Tasting Flight
+
+Five vinery wine bottles — **Strad, Stal, Red, Chenet, Solaris** — each reconstructed from its own hand-drawn 16x16 sprite by the Core's **texel surface baker**: every face is decomposed into texels, each texel is quantized to the nearest visually-flat vanilla block, and merged same-color runs become thin plates. The result reads as pixel art built from concretes and terracottas — **zero resource pack, completely vanilla clients**.
+
+**Command:** `/wine <place [variant]|flight|remove|clear|status>`
+
+| Action | Effect |
+|---|---|
+| `place [variant]` | Place a single bottle (defaults to `strad`); variants: `strad`, `stal`, `red`, `chenet`, `solaris` |
+| `flight` | Lay out the **tasting flight**: one bottle of every variant in a row on the surface you are looking at, perpendicular to your facing, each rotated toward you |
+| `remove` | Remove the bottle you are looking at |
+| `clear` | Remove every wine bottle within 24 blocks |
+| `status` | List all placed bottles grouped by variant |
+
+**Why five bottles?** Each sprite stresses the texel pipeline differently — flat two-tone labels, shaded glass gradients, rotated UV windows — so the side-by-side flight makes bake-quality differences visible at a glance. Verify any bake with `/mineplus model info <key>-wine` (grid histogram, palette usage, merged plate count, budget verdict).
+
+**Implementation highlights:**
+
+- *Per-model opt-in* — each [`<key>-wine.meta.json`](src/main/resources/defaults/models/strad-wine.meta.json) sets `"texelMode": "AUTO"` and raises the per-instance plate budget above the global default (384, or 768 for the gradient-heavy Stal sprite).
+- *Vanilla-format imports* — the models were converted from the Vinery mod's `java_block` JSON (geometry kept in [0..16] corner space so the Core's AUTO origin detection anchors them GRID like any vanilla block model); the tall Stal bottle (18 pixels) simply occupies the block above its anchor.
+- *Pruned visible cubes* — nested label-band cubes and zero-depth decals were dropped from the conversion (redundant in an opaque renderer); intentional nesting is handled by the Core's occlusion culling at bake time.
+- *No hook, no GUI* — a pure showcase feature: resources + a subcommand, exactly the minimal `ModuleFeature` shape to copy for decorative content.
 
 ---
 

@@ -1,0 +1,5 @@
+﻿{
+  "texelMode": "AUTO",
+  "maxTexelPlatesPerInstance": 768,
+  "voxelMode": "OFF"
+}

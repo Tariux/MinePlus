@@ -21,12 +21,15 @@ public enum CubeFace {
 
     /**
      * Axis index of the face's U coordinate in the vanilla box-unwrap convention
-     * (U is horizontal in the texture for side faces).
+     * (U is horizontal in the texture for side faces), consistent with
+     * {@code FaceUvAnalyzer.facePixelSize}: north/south faces unwrap along X,
+     * east/west faces along Z, top/bottom along X. Distinct from
+     * {@link #normalAxis()} for every face.
      */
     public int uAxis() {
         return switch (this) {
-            case EAST, WEST, UP, DOWN -> 0;
-            default -> 2;
+            case EAST, WEST -> 2;
+            default -> 0;
         };
     }
 

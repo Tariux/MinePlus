@@ -3,7 +3,7 @@ version: ${version}
 main: com.mineplus.fun.MineplusFunPlugin
 api-version: '1.21'
 author: Tariux
-description: Reference module for Mineplus - the Juicer, the Cannon, the Gear, and the texel-baked Wine Bottle.
+description: Reference module for Mineplus - the Juicer, the Cannon, the Gear, and the texel-baked Wine Tasting Flight.
 website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.
@@ -23,5 +23,5 @@ permissions:
     description: Allows using Gear controls
     default: op
   mineplusfun.admin.wine:
-    description: Allows using Wine Bottle controls
+    description: Allows using Wine Bottle and tasting flight controls
     default: op

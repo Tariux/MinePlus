@@ -379,24 +379,28 @@ public final class VoxelOccupancyCalculator {
     /**
      * Packs a cell into a long: three 21-bit signed bitfields (x at 42, y at 21, z at 0).
      * All three fields are 21 bits — a 22-bit z field would overlap y's lowest bit.
+     * Shared with the voxel rendering baker, which works in the same cell lattice.
      */
-    static long pack(int x, int y, int z) {
+    public static long pack(int x, int y, int z) {
         return ((long) (x & 0x1F_FFFF) << 42)
                 | ((long) (y & 0x1F_FFFF) << 21)
                 | (long) (z & 0x1F_FFFF);
     }
 
-    private static int unpackX(long value) {
+    /** Unpacks the x field of a {@link #pack packed} cell. */
+    public static int unpackX(long value) {
         int v = (int) (value >>> 42);
         return (v << 11) >> 11;
     }
 
-    private static int unpackY(long value) {
+    /** Unpacks the y field of a {@link #pack packed} cell. */
+    public static int unpackY(long value) {
         int v = ((int) (value >>> 21)) & 0x1F_FFFF;
         return (v << 11) >> 11;
     }
 
-    private static int unpackZ(long value) {
+    /** Unpacks the z field of a {@link #pack packed} cell. */
+    public static int unpackZ(long value) {
         int v = ((int) value) & 0x1F_FFFF;
         return (v << 11) >> 11;
     }

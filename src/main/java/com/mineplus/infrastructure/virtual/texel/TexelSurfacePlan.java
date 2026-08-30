@@ -21,6 +21,12 @@ import java.util.List;
  * cube's base display with it, so cutout holes reveal a matching local color instead
  * of the filename-resolver fallback.
  *
+ * <p>{@code cutoutCells} counts the <i>genuine</i> transparent survivors (rim-reached
+ * post-infill): the see-through holes of layered cutout art — a transparent glass
+ * band whose label shows through. A cube with any cutout face must not render its
+ * full-cube base display, which would z-block the layered content behind the holes
+ * (see {@code DisplayEmitter}).
+ *
  * <p>Plans are recomputed on reload, never persisted.
  */
 public record TexelSurfacePlan(
@@ -29,7 +35,8 @@ public record TexelSurfacePlan(
         List<Rect> plates,
         int dominantPaletteIndex,
         int dominantArea,
-        int occludedCells
+        int occludedCells,
+        int cutoutCells
 ) {
 
     public TexelSurfacePlan {

@@ -5,7 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-08-29
+## [1.3.0]
+
+Rendering pipeline deep-dive: the texel and voxel bakers rebuilt for resource
+efficiency and visual fidelity, plus the wine tasting flight showcase module
+content (five texel-baked vinery bottles with `/wine flight`).
+
+### Core engine (`Mineplus`) — texel surface baking
+
+#### Added
+
+- **Enclosed-transparency infill**: transparent texels flood-reached from the
+  grid rim are genuine silhouette cutout and stay; enclosed transparent texels
+  (atlas padding, anti-aliased speckle) are infilled with the majority palette
+  entry of their opaque 4-neighbors — corner/edge holes that previously exposed
+  the base display's dominant color disappear while real cutouts survive.
+- **Partial-visibility corner rescue**: a texel whose plate center is buried in
+  another cube but whose footprint straddles the occluder boundary (label-band
+  overhangs) is rescued when any footprint corner probe is visible — boundary
+  texels are never silently dropped.
+- **Alpha-weighted texel accumulation**: supersamples contribute their color
+  weighted by alpha, and a texel covered below half its footprint emits no
+  plate — anti-aliased sprite rims no longer drag blended dark colors through
+  the cutout threshold as halos.
+- **Flipped-UV sampling**: reversed UV windows (`u1 > u2`) now sample mirrored,
+  matching vanilla's interpretation, instead of clamping to the window's min
+  edge.
+
+#### Changed
+
+- `TexelSampler` rewritten over a bulk-extracted ARGB raster
+  (`TextureImageStore.raster()`): the window + in-plane-rotation affine is
+  precomputed into six coefficients, and `sample()` is pure primitive
+  arithmetic (no allocation, no per-call `BufferedImage.getRGB` color-model
+  dispatch) — the per-texel hot loop of both bakers is garbage-free.
+- `TexelPalette.match` caches packed-RGB results (bounded, self-clearing) —
+  repeat colors collapse the 51-entry redmean scan to one array lookup.
+- Occlusion probes reuse scratch vectors across the whole bake loop
+  (previously one `Vector3f` per probe per texel).
+
+### Core engine (`Mineplus`) — voxel reconstruction
+
+#### Added
+
+- **XZ greedy rectangle merging**: same-color, same-emission voxels merge into
+  maximal XZ rectangles per Y level (the texel merger's algorithm applied to
+  the voxel grid); a uniform N×N floor collapses from N runs to one display.
+  Extreme-XZ models fall back to X-only runs under a merge-grid guard.
+
+#### Fixed
+
+- **Interior culling order dependence**: culling previously removed voxels
+  while iterating the occupancy map, so removing one interior voxel un-occupied
+  a face and let adjacent interior voxels escape culling (surfacing as white
+  neutral voxels inside otherwise uniform models). Interiorhood is now decided
+  against the full occupancy in one pass, then removed in a second.
+
+#### Changed
+
+- Per-cube geometry (inverse matrix, model-space AABB, candidate cell ranges)
+  is precomputed once per bake and shared by both rasterization passes;
+  axis-aligned cubes (the AUTO-eligible majority) resolve cell spans
+  analytically from translation/scale with zero matrix transforms — the
+  probed-cell loop allocates nothing per cell.
+- `VoxelRun` carries XZ extents (`lengthX`/`widthZ`) instead of a +X length;
+  spawn-side scale follows.
+
+### Core engine (`Mineplus`) — spawn path
+
+#### Changed
+
+- `Display.Brightness` instances are cached per emission level instead of
+  allocated per spawned display.
+
+### Module content (`MineplusFun`)
+
+#### Added
+
+- **Wine tasting flight** (`com.mineplus.fun.wine`): five texel-baked vinery
+  bottles (Strad, Stal, Red, Chenet, Solaris) converted from vanilla
+  `java_block` JSON, each with its own 16×16 sprite and `texelMode: AUTO` meta
+  (raised plate budgets). `/wine place [variant]|flight|remove|clear|status` —
+  the flight lays all five out side by side for bake comparison. All wine metas
+  pin `voxelMode: OFF` so the texel-plate showcase is never hijacked by the
+  voxel AUTO strategy.
+
+## [1.2.0]
+
+**Blockbench animations now play on vanilla clients.** Clips, bones, and keyframes ride inside the `.bbmodel` — the core samples them server-side and the vanilla client interpolates to its own frame rate. No mods, no resource packs.
+
+### Animation engine
+
+- **Dual-input control:**
+  - **Internal (data):** autoplay per multiblock level — `"animations": ["rotate_gear"]` in the level JSON (survives restarts and upgrades) — or per raw model via `.meta.json`.
+  - **External (code):** `context.animationApi()` with selectors — trigger one clip, one bone, or the whole model:
+    ```java
+    anim.triggerAnimation(id, AnimationSelector.animation("recoil"));
+    anim.triggerAnimation(id, AnimationSelector.bone("turret"));
+    anim.setAnimationEnabled(id, AnimationSelector.bone("wheel"), false);
+    ```
+- **Bone hierarchy** — animating an outliner group moves all nested children; deltas compose down the tree with Blockbench Euler order. Concurrent clips blend additively.
+- **Loop modes** — `once` (returns to rest), `loop`, `hold` (freezes the end frame).
+- **Hooks** — `onAnimationStart` / `onAnimationComplete` on `MultiBlockHook`, exception-isolated.
+- **Config** — new `ANIMATION` section in `settings.mp.yml` (`ENABLED`, `TICK_INTERVAL_TICKS`, `INTERPOLATION_TICKS`, `AUTOPLAY`), hot-reloadable.
+- `/mineplus model info` now reports bones, clips, loop modes, and track counts.
+
+### New reference feature: the Gear
+
+`/gear place` a gear, power it with redstone, and it spins. Place gears next to each other and they chain-react as an interlocking train — phase-synced, and reachability-based, so a ring of gears never self-sustains after you cut the power.
+
+### Module lifecycle refactor (MineplusFun)
+
+- New `ModuleFeature` contract: features are a one-line list entry; bootstrap is exception-isolated per feature.
+- **One** coordinated `reloadAll()` per module instead of one per feature — faster startup with every feature you add.
+
+### Fixes
+
+- **False "Insufficient space"** — a model that failed to parse reported an occupancy problem; load failures now say so and point at the server log.
+- **Cannon view-clamp exception spam** — removed the impossible per-tick camera clamp (`Player#setRotation` throws on 1.21+); aiming stays bounded by the 60° fire-time cone.
+
+<img width="1020" height="704" alt="image" src="https://github.com/user-attachments/assets/c484b8f9-e08c-45f9-831d-e9fd959f62e7" />
+
+## [1.1.0]
 
 Core engine hardening and a new module toolkit: the architecture pass that made
 the engine faster under load, fault-isolated against misbehaving modules, and
@@ -99,8 +220,6 @@ Modules built against 1.0.0 run unchanged, but should migrate to the toolkit
 at their leisure. **Core and module must be rebuilt and redeployed together**
 with this release.
 
-[1.1.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.1.0
-
 ## [1.0.0] — 2026-08-29
 
 First public release.
@@ -164,4 +283,5 @@ world injections. Everything in-game comes from your JSON or API calls.
 - `/juicer` and `/cannon` admin commands with tab completion.
 - `DEVELOPMENT_PROMPT.md` — the canonical module-building guide.
 
+[1.1.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.0.0

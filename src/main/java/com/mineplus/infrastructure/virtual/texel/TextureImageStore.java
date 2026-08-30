@@ -26,9 +26,43 @@ public final class TextureImageStore {
     private final File rootFolder;
     private final Map<String, BufferedImage> cache = new ConcurrentHashMap<>();
     private final Set<String> missing = ConcurrentHashMap.newKeySet();
+    private final Map<String, TextureRaster> rasters = new ConcurrentHashMap<>();
+
+    /**
+     * Bulk-extracted ARGB pixel array of a texture: one linear {@code getRGB} bulk
+     * copy per texture, consumed by {@link TexelSampler}'s hot sampling loop. Per-
+     * sample {@code BufferedImage.getRGB(x, y)} calls route through the raster's
+     * color model per invocation; the array form indexes directly and makes
+     * sampling allocation-free.
+     */
+    public record TextureRaster(int[] argb, int width, int height) {
+    }
 
     public TextureImageStore(File rootFolder) {
         this.rootFolder = rootFolder;
+    }
+
+    /**
+     * Bulk ARGB raster for a texture name, or {@code null} when unresolvable.
+     * Extracted once per texture and cached alongside the decoded image.
+     */
+    public TextureRaster raster(String name, File modelFile) {
+        String key = normalize(name);
+        if (key.isEmpty()) {
+            return null;
+        }
+        TextureRaster cached = rasters.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        BufferedImage image = texture(name, modelFile);
+        if (image == null) {
+            return null;
+        }
+        int[] argb = image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth());
+        TextureRaster raster = new TextureRaster(argb, image.getWidth(), image.getHeight());
+        rasters.put(key, raster);
+        return raster;
     }
 
     /**
@@ -69,6 +103,7 @@ public final class TextureImageStore {
     public void clear() {
         cache.clear();
         missing.clear();
+        rasters.clear();
     }
 
     public int cachedImageCount() {

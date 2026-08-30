@@ -1,0 +1,96 @@
+﻿{
+	"meta": {"format_version": "5.0", "model_format": "java_block", "box_uv": false},
+	"name": "chenet-wine",
+	"model_identifier": "",
+	"java_block_version": "1.21.11",
+	"credit": "Made by Satisfy",
+	"visible_box": [1, 1, 0],
+	"resolution": {"width": 16, "height": 16},
+	"elements": [
+		{
+			"name": "layer0", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [7, 7, 7], "to": [9, 14, 9], "autouv": 0, "color": 1, "origin": [8, 10.5, 8],
+			"faces": {
+				"north": {"uv": [3, 1, 5, 8], "texture": 0},
+				"east": {"uv": [3, 1, 5, 8], "texture": 0},
+				"south": {"uv": [3, 1, 5, 8], "texture": 0},
+				"west": {"uv": [3, 1, 5, 8], "texture": 0},
+				"up": {"uv": [14, 8, 16, 10], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000000"
+		},
+		{
+			"name": "layer1", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [5, 0, 5], "to": [11, 8, 11], "autouv": 0, "color": 1, "origin": [8, 4, 8],
+			"faces": {
+				"north": {"uv": [1, 8, 7, 16], "texture": 0},
+				"east": {"uv": [1, 8, 7, 16], "texture": 0},
+				"south": {"uv": [1, 8, 7, 16], "texture": 0},
+				"west": {"uv": [1, 8, 7, 16], "texture": 0},
+				"up": {"uv": [8, 8, 14, 14], "texture": 0},
+				"down": {"uv": [8, 8, 14, 14], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000001"
+		},
+		{
+			"name": "layer2", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [4, 1, 4], "to": [12, 7, 12], "autouv": 0, "color": 1, "origin": [8, 4, 8],
+			"faces": {
+				"north": {"uv": [0, 9, 8, 15], "texture": 0},
+				"east": {"uv": [0, 9, 8, 15], "texture": 0},
+				"south": {"uv": [0, 9, 8, 15], "texture": 0},
+				"west": {"uv": [0, 9, 8, 15], "texture": 0},
+				"up": {"uv": [8, 0, 16, 8], "texture": 0},
+				"down": {"uv": [8, 0, 16, 8], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000002"
+		},
+		{
+			"name": "layer3", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [4.679, 1.539, 4.679], "to": [11.321, 4.941, 11.321], "autouv": 0, "color": 1, "origin": [8.000, 3.240, 8.000],
+			"faces": {
+				"north": {"uv": [9.75, 6.5, 11.75, 7.5], "texture": 0},
+				"east": {"uv": [12, 5, 14, 6], "texture": 0},
+				"south": {"uv": [12, 3.5, 14, 4.5], "texture": 0},
+				"west": {"uv": [12, 0, 14, 1], "texture": 0},
+				"up": {"uv": [14, 3.5, 12, 1.5], "texture": 0},
+				"down": {"uv": [14, 8, 12, 10], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000003"
+		},
+		{
+			"name": "layer4", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [4.58, 1.08, 4.58], "to": [11.42, 6.12, 11.42], "autouv": 0, "color": 1, "origin": [8.00, 3.60, 8.00],
+			"faces": {
+				"north": {"uv": [14, 4.5, 16, 6], "texture": 0},
+				"east": {"uv": [14, 3, 16, 4.5], "texture": 0},
+				"south": {"uv": [14, 1.5, 16, 3], "texture": 0},
+				"west": {"uv": [14, 0, 16, 1.5], "texture": 0},
+				"up": {"uv": [16, 10, 14, 8], "texture": 0},
+				"down": {"uv": [16, 6, 14, 8], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000004"
+		},
+		{
+			"name": "layer5", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
+			"from": [6, 11, 6], "to": [10, 13, 10], "autouv": 0, "color": 1, "origin": [8, 12, 8],
+			"faces": {
+				"north": {"uv": [2, 2, 6, 4], "texture": 0},
+				"east": {"uv": [2, 2, 6, 4], "texture": 0},
+				"south": {"uv": [2, 2, 6, 4], "texture": 0},
+				"west": {"uv": [2, 2, 6, 4], "texture": 0},
+				"up": {"uv": [16, 16, 12, 12], "texture": 0},
+				"down": {"uv": [16, 16, 12, 12], "texture": 0}
+			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000005"
+		}
+	],
+	"outliner": [
+		"aabbcc00-0000-4000-8000-000000000000",
+		"aabbcc00-0000-4000-8000-000000000001",
+		"aabbcc00-0000-4000-8000-000000000002",
+		"aabbcc00-0000-4000-8000-000000000003",
+		"aabbcc00-0000-4000-8000-000000000004",
+		"aabbcc00-0000-4000-8000-000000000005"
+	],
+	"textures": [
+		{
+			"name": "chenet_wine.png", "relative_path": "../vinery/textures/block/wine/chenet_wine.png", "folder": "block/wine", "namespace": "vinery", "id": "0", "width": 16, "height": 16, "uv_width": 16, "uv_height": 16,
+			"particle": true, "visible": true, "internal": true, "saved": true, "uuid": "aabbcc00-0000-4000-8000-999999999999"
+		}
+	]
+}
