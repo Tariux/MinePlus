@@ -178,6 +178,17 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
             }
         }
         persistInstances();
+
+        // All restores for loaded worlds have populated the active-render map by now:
+        // any tagged display entity still standing in a loaded chunk belongs to a
+        // previous session's render (chunks loaded before our listener registered
+        // never got the onChunkLoad cleanup) and z-fights the fresh displays exactly
+        // in place. Deferred-world instances keep their entities — their chunks are
+        // not loaded here, and the registry guard in the sweep preserves live ones.
+        int ghosts = renderingManager.virtualBlockManager().sweepGhostDisplays();
+        if (ghosts > 0) {
+            DebugLogger.info("reconcile: swept " + ghosts + " stale display entities left by a previous session.");
+        }
         DebugLogger.info("reconcile: checked=" + checked + " corrupted=" + corrupted + " deferred=" + deferred + " rendered=" + rendered);
     }
 

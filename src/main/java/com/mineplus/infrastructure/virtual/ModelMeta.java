@@ -16,7 +16,8 @@ import java.util.Locale;
  *   "texelMode": "AUTO",
  *   "texelDetail": "FACE",
  *   "maxTexelPlatesPerFace": 96,
- *   "maxTexelPlatesPerInstance": 150
+ *   "maxTexelPlatesPerInstance": 150,
+ *   "texelBrightness": 15
  * }
  * }</pre>
  * Any omitted field falls back to the global settings default.
@@ -28,7 +29,8 @@ public record ModelMeta(
         TexelMode texelMode,
         TexelDetail texelDetail,
         Integer maxTexelPlatesPerFace,
-        Integer maxTexelPlatesPerInstance
+        Integer maxTexelPlatesPerInstance,
+        Integer texelBrightness
 ) {
 
     public ModelMeta {
@@ -36,6 +38,8 @@ public record ModelMeta(
         maxTexelPlatesPerFace = maxTexelPlatesPerFace == null ? null : Math.max(1, maxTexelPlatesPerFace);
         maxTexelPlatesPerInstance = maxTexelPlatesPerInstance == null
                 ? null : Math.max(1, maxTexelPlatesPerInstance);
+        texelBrightness = texelBrightness == null
+                ? null : Math.max(0, Math.min(15, texelBrightness));
     }
 
     public enum OriginMode {
@@ -208,13 +212,14 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
         return originMode == null && collisionMode == null && autoplay.isEmpty()
                 && texelMode == null && texelDetail == null
-                && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null;
+                && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
+                && texelBrightness == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -240,6 +245,7 @@ public record ModelMeta(
             TexelDetail texelDetail = null;
             Integer maxTexelPlatesPerFace = null;
             Integer maxTexelPlatesPerInstance = null;
+            Integer texelBrightness = null;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -252,13 +258,14 @@ public record ModelMeta(
                     case "texelDetail" -> texelDetail = TexelDetail.fromKey(readString(json), null);
                     case "maxTexelPlatesPerFace" -> maxTexelPlatesPerFace = readPositiveInt(json);
                     case "maxTexelPlatesPerInstance" -> maxTexelPlatesPerInstance = readPositiveInt(json);
+                    case "texelBrightness" -> texelBrightness = readBrightness(json);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
             return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
-                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance);
+                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
@@ -282,6 +289,21 @@ public record ModelMeta(
         try {
             int value = json.nextInt();
             return value > 0 ? value : null;
+        } catch (NumberFormatException | IllegalStateException malformed) {
+            json.skipValue();
+            return null;
+        }
+    }
+
+    /** Display brightness override (0-15); out-of-range or malformed values become null. */
+    private static Integer readBrightness(com.google.gson.stream.JsonReader json) throws Exception {
+        if (json.peek() == com.google.gson.stream.JsonToken.NULL) {
+            json.nextNull();
+            return null;
+        }
+        try {
+            int value = json.nextInt();
+            return value >= 0 && value <= 15 ? value : null;
         } catch (NumberFormatException | IllegalStateException malformed) {
             json.skipValue();
             return null;

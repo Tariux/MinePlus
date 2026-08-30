@@ -9,12 +9,17 @@ import java.util.List;
  *
  * <p>Rectangles are grid-cell ranges: {@code (x, y)} is the cell column/row in the
  * window's coordinate frame (row 0 = top of the UV window, i.e. the top of the face),
- * and {@code paletteIndex} addresses {@link TexelPalette}. Transparent cells never
- * appear in any rectangle, so the base display shows through there — which is why the
- * plan also carries the face's <i>dominant</i> palette entry (largest total cell
- * area, deterministic tie-break to the lower index): the emitter colors the cube's
- * base display with it, so cutout holes reveal a matching local color instead of the
- * filename-resolver fallback.
+ * and {@code paletteIndex} addresses {@link TexelPalette}. Transparent cells and
+ * <i>occluded</i> cells (texels whose plate would sit inside another cube's solid —
+ * the buried midsection of a band-wrapped body, a cork's hidden base) never appear
+ * in any rectangle, so no entity is spawned inside other geometry: every emitted
+ * plate occupies its own distinct, visible space. Occluded cell counts are tracked
+ * per face for diagnostics.
+ *
+ * <p>The plan also carries the face's <i>dominant</i> palette entry (largest total
+ * cell area, deterministic tie-break to the lower index): the emitter colors the
+ * cube's base display with it, so cutout holes reveal a matching local color instead
+ * of the filename-resolver fallback.
  *
  * <p>Plans are recomputed on reload, never persisted.
  */
@@ -23,7 +28,8 @@ public record TexelSurfacePlan(
         int gridHeight,
         List<Rect> plates,
         int dominantPaletteIndex,
-        int dominantArea
+        int dominantArea,
+        int occludedCells
 ) {
 
     public TexelSurfacePlan {

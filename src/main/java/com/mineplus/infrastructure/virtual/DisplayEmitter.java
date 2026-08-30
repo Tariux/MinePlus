@@ -47,6 +47,19 @@ public final class DisplayEmitter {
     public static final float EPS_OUT = 1.0f / 1024.0f;
 
     /**
+     * Outward offset of <b>texel</b> plates from their face. Texel baking plates every
+     * textured face of a model, so the plate plane and the base display's face coexist
+     * at sub-millimeter depth separation everywhere — at grazing angles and moderate
+     * camera distances that intermittently loses depth order and shimmers (two
+     * differently-textured entities fighting in close proximity). Four times the legacy
+     * separation resolves the fight while staying visually flush: 1/256 block is
+     * 1/16 of a model pixel, far below any perceivable float. Sibling texel plates on
+     * one face all share this single plane side-by-side, so they never fight each
+     * other. <b>Keep in sync with {@code TexelSurfaceBaker}'s occlusion probe offset.</b>
+     */
+    public static final float TEXEL_EPS_OUT = 1.0f / 256.0f;
+
+    /**
      * One emitted display: material + TRS + brightness, entity-agnostic. The block data
      * is created lazily so geometry-only consumers never need a Bukkit server.
      */
@@ -437,7 +450,7 @@ public final class DisplayEmitter {
         if (Math.abs(cubeScale.get(axis)) < 1.0e-6f) {
             cubeScale.setComponent(axis, 1.0e-6f);
         }
-        float epsLocal = EPS_OUT / cubeScale.get(axis);
+        float epsLocal = TEXEL_EPS_OUT / cubeScale.get(axis);
         float thicknessLocal = PLATE_THICKNESS / cubeScale.get(axis);
 
         Matrix4f cubeMatrix = cubeMatrix(cube);
