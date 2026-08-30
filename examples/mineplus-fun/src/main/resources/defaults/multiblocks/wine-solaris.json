@@ -1,0 +1,15 @@
+{
+  "id": "wine_bottle_solaris",
+  "name": "Solaris Wine Bottle",
+  "levels": {
+    "1": {
+      "model": "models/solaris-wine.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Solaris Wine"
+      }
+    }
+  }
+}

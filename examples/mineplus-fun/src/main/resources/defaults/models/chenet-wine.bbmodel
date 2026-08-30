@@ -1,6 +1,6 @@
 ﻿{
 	"meta": {"format_version": "5.0", "model_format": "java_block", "box_uv": false},
-	"name": "strad-wine",
+	"name": "chenet-wine",
 	"model_identifier": "",
 	"java_block_version": "1.21.11",
 	"credit": "Made by Satisfy",
@@ -9,12 +9,12 @@
 	"elements": [
 		{
 			"name": "layer0", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [7, 8, 7], "to": [9, 16, 9], "autouv": 0, "color": 1, "origin": [8, 12, 8],
+			"from": [7, 7, 7], "to": [9, 14, 9], "autouv": 0, "color": 1, "origin": [8, 10.5, 8],
 			"faces": {
-				"north": {"uv": [3, 0, 5, 8], "texture": 0},
-				"east": {"uv": [3, 0, 5, 8], "texture": 0},
-				"south": {"uv": [3, 0, 5, 8], "texture": 0},
-				"west": {"uv": [3, 0, 5, 8], "texture": 0},
+				"north": {"uv": [3, 1, 5, 8], "texture": 0},
+				"east": {"uv": [3, 1, 5, 8], "texture": 0},
+				"south": {"uv": [3, 1, 5, 8], "texture": 0},
+				"west": {"uv": [3, 1, 5, 8], "texture": 0},
 				"up": {"uv": [14, 8, 16, 10], "texture": 0}
 			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000000"
 		},
@@ -68,24 +68,15 @@
 		},
 		{
 			"name": "layer5", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [6, 13, 6], "to": [10, 15, 10], "autouv": 0, "color": 1, "origin": [8, 14, 8],
+			"from": [6, 11, 6], "to": [10, 13, 10], "autouv": 0, "color": 1, "origin": [8, 12, 8],
 			"faces": {
-				"north": {"uv": [2, 1, 6, 3], "texture": 0},
-				"east": {"uv": [2, 1, 6, 3], "texture": 0},
-				"south": {"uv": [2, 1, 6, 3], "texture": 0},
-				"west": {"uv": [2, 1, 6, 3], "texture": 0},
+				"north": {"uv": [2, 2, 6, 4], "texture": 0},
+				"east": {"uv": [2, 2, 6, 4], "texture": 0},
+				"south": {"uv": [2, 2, 6, 4], "texture": 0},
+				"west": {"uv": [2, 2, 6, 4], "texture": 0},
 				"up": {"uv": [16, 16, 12, 12], "texture": 0},
 				"down": {"uv": [16, 16, 12, 12], "texture": 0}
 			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000005"
-		},
-		{
-			"name": "layer6", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [5, 10, 8], "to": [7, 12, 8], "autouv": 0, "color": 1, "origin": [6, 11, 8],
-			"faces": {
-				"north": {"uv": [5, 4, 7, 6], "texture": 0},
-				"south": {"uv": [7, 4, 5, 6], "texture": 0},
-				"down": {"uv": [0, 0, 2, 0], "texture": 0}
-			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000006"
 		}
 	],
 	"outliner": [
@@ -94,12 +85,11 @@
 		"aabbcc00-0000-4000-8000-000000000002",
 		"aabbcc00-0000-4000-8000-000000000003",
 		"aabbcc00-0000-4000-8000-000000000004",
-		"aabbcc00-0000-4000-8000-000000000005",
-		"aabbcc00-0000-4000-8000-000000000006"
+		"aabbcc00-0000-4000-8000-000000000005"
 	],
 	"textures": [
 		{
-			"name": "strad_wine.png", "relative_path": "../vinery/textures/block/wine/strad_wine.png", "folder": "block/wine", "namespace": "vinery", "id": "0", "width": 16, "height": 16, "uv_width": 16, "uv_height": 16,
+			"name": "chenet_wine.png", "relative_path": "../vinery/textures/block/wine/chenet_wine.png", "folder": "block/wine", "namespace": "vinery", "id": "0", "width": 16, "height": 16, "uv_width": 16, "uv_height": 16,
 			"particle": true, "visible": true, "internal": true, "saved": true, "uuid": "aabbcc00-0000-4000-8000-999999999999"
 		}
 	]

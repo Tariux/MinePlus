@@ -173,6 +173,16 @@ public final class TexelPalette {
     /** Lazily created default block data per entry, shared across all plates. */
     private static final BlockData[] BLOCK_DATA = new BlockData[MATERIALS.length];
 
+    /**
+     * Palette index of the neutral surface: {@code WHITE_CONCRETE}, the same
+     * material {@code TextureMaterialResolver} falls back to for unresolvable
+     * texture names and {@code DisplayEmitter} renders untextured faces with.
+     * Consumers without any texture sample (an untextured face, a fully
+     * transparent voxel) quantize to this entry so the voxel reconstruction
+     * matches the legacy pipeline's neutral surface.
+     */
+    public static final int NEUTRAL_INDEX = 0;
+
     /** Number of palette entries. */
     public static int size() {
         return MATERIALS.length;
@@ -186,6 +196,15 @@ public final class TexelPalette {
     /** Material name for a palette index (diagnostics). */
     public static String materialName(int index) {
         return MATERIALS[index].name();
+    }
+
+    /**
+     * Measured average RGB of a palette entry, packed {@code 0xRRGGBB} — the
+     * color consumers should use when they need a palette entry's tone without
+     * sampling a texture (e.g. the voxel baker's neutral-surface default).
+     */
+    public static int rgb(int index) {
+        return (RGB[index * 3] << 16) | (RGB[index * 3 + 1] << 8) | RGB[index * 3 + 2];
     }
 
     /**
@@ -203,13 +222,38 @@ public final class TexelPalette {
     }
 
     /**
+     * Packed-RGB match cache: {@code match} is a pure function of the clamped RGB
+     * triple, and bakers call it once per texel per supersample over source art
+     * that resolves to a few hundred unique colors at most. The cache collapses
+     * the 51-entry redmean scan to one array lookup for repeat colors. Bounded —
+     * pathological inputs (e.g. a gradient texture) trigger a full clear rather
+     * than unbounded growth; clearing is safe because the function is pure.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, Integer> MATCH_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MATCH_CACHE_LIMIT = 1 << 16;
+
+    /**
      * Nearest palette entry for an RGB color, by redmean perceptual distance, at full
      * 8-bit precision. A 51-entry scan per texel is trivially fast at load time, and
      * skipping any intermediate quantization guarantees distinct source colors stay
      * distinct.
      */
     public static int match(int red, int green, int blue) {
-        return nearest(clampChannel(red), clampChannel(green), clampChannel(blue));
+        int r = clampChannel(red);
+        int g = clampChannel(green);
+        int b = clampChannel(blue);
+        int packed = (r << 16) | (g << 8) | b;
+        Integer cached = MATCH_CACHE.get(packed);
+        if (cached != null) {
+            return cached;
+        }
+        int result = nearest(r, g, b);
+        if (MATCH_CACHE.size() >= MATCH_CACHE_LIMIT) {
+            MATCH_CACHE.clear();
+        }
+        MATCH_CACHE.put(packed, result);
+        return result;
     }
 
     /**

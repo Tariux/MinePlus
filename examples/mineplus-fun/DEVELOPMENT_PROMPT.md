@@ -417,5 +417,14 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   (flood-fill from powered seeds, so trains never self-sustain), phase-synced starts via
   `AnimationPlayback.startTime`, `BlockRedstoneEvent` for instant response plus a periodic
   re-evaluation. The canonical `AnimationApi` consumer (§10a).
+- **wine** (`com.mineplus.fun.wine`): pure showcase of the Core's texel surface baking —
+  five vinery bottles (Strad/Stal/Red/Chenet/Solaris) whose 16x16 sprites are reconstructed
+  pixel-by-pixel out of vanilla palette blocks with zero resource pack. Ships converted
+  `java_block`-format bbmodels (GRID anchor via AUTO detection, pruned to visible cubes),
+  one PNG per model, per-model `.meta.json` opt-ins (`texelMode: AUTO`, raised plate
+  budgets), and one multiblock type per variant. `/wine flight` lays all five out side by
+  side (row perpendicular to the player's snapped facing, shared placement rotation) for
+  comparing bakes; `/wine place [variant]|remove|clear|status` manage them. The minimal
+  resource-only feature shape: no hook, no GUI, no listeners.
 
 Copy the reference whose interaction model matches your feature.

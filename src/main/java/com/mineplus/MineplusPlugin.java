@@ -39,6 +39,7 @@ public final class MineplusPlugin extends JavaPlugin {
         virtualBlockManager = new VirtualBlockManager();
         virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
         virtualBlockManager.updateTexelSettings(configManager.getConfig().getTexelBaking());
+        virtualBlockManager.updateVoxelSettings(configManager.getConfig().getVoxelRendering());
         virtualBlockManager.loadModels(this);
 
         context = PluginContext.bootstrap(this, virtualBlockManager, configManager.getConfig().getAnimation());
@@ -115,6 +116,7 @@ public final class MineplusPlugin extends JavaPlugin {
         if (virtualBlockManager != null && configManager != null) {
             virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
             virtualBlockManager.updateTexelSettings(configManager.getConfig().getTexelBaking());
+            virtualBlockManager.updateVoxelSettings(configManager.getConfig().getVoxelRendering());
         }
         if (context != null && configManager != null) {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());

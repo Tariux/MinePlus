@@ -7,9 +7,13 @@ import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.virtual.texel.TexelPalette;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
 import com.mineplus.infrastructure.virtual.texel.TextureImageStore;
+import com.mineplus.infrastructure.virtual.voxel.VoxelModelBake;
+import com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings;
+import com.mineplus.infrastructure.virtual.voxel.VoxelSurfaceBaker;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
@@ -54,11 +58,13 @@ public class VirtualBlockManager implements Listener {
     private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
     private final Map<String, TexelBakeResult> texelBakes = new HashMap<>();
+    private final Map<String, VoxelModelBake> voxelBakes = new HashMap<>();
     private final Map<String, File> modelSourceFiles = new HashMap<>();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
     private TexelBakingSettings texelSettings = TexelBakingSettings.defaults();
+    private VoxelRenderingSettings voxelSettings = VoxelRenderingSettings.defaults();
     private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
 
@@ -100,6 +106,9 @@ public class VirtualBlockManager implements Listener {
     public void updateSettings(VirtualRenderingSettings settings) {
         this.settings = settings == null ? VirtualRenderingSettings.defaults() : settings;
         occupancyCalculator.clearCache();
+        // The voxel lattice depends on the origin mode, so a settings change can
+        // invalidate cached voxel plans (barrier cells recompute per spawn).
+        rebakeVoxelPlans();
     }
 
     /**
@@ -114,6 +123,25 @@ public class VirtualBlockManager implements Listener {
             bakeTexelSurfaces(entry.getKey(), entry.getValue(),
                     modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
         }
+        // Texel bake results feed the voxel strategy selection's legacy reporting.
+        rebakeVoxelPlans();
+    }
+
+    /**
+     * Applies global voxel rendering settings and re-bakes every loaded model's
+     * voxel reconstruction with them.
+     */
+    public void updateVoxelSettings(VoxelRenderingSettings settings) {
+        this.voxelSettings = settings == null ? VoxelRenderingSettings.defaults() : settings;
+        rebakeVoxelPlans();
+    }
+
+    private void rebakeVoxelPlans() {
+        voxelBakes.clear();
+        for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
+            bakeVoxelPlan(entry.getKey(), entry.getValue(),
+                    modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
+        }
     }
 
     public VirtualRenderingSettings settings() {
@@ -122,6 +150,10 @@ public class VirtualBlockManager implements Listener {
 
     public TexelBakingSettings texelSettings() {
         return texelSettings;
+    }
+
+    public VoxelRenderingSettings voxelSettings() {
+        return voxelSettings;
     }
 
     public void reloadModelDefinitions() {
@@ -166,6 +198,18 @@ public class VirtualBlockManager implements Listener {
     }
 
     /**
+     * Voxel reconstruction bake for a model (rendering strategy decision, merged
+     * display runs, and diagnostics), or {@code null} when unknown. A bake whose
+     * {@link VoxelModelBake#voxelRender()} is false keeps the legacy pipeline.
+     */
+    public VoxelModelBake getVoxelBake(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return voxelBakes.get(name.toLowerCase(Locale.ROOT));
+    }
+
+    /**
      * Whether a decodable PNG exists for a texture name used by a model — the
      * load-bearing precondition for texel rendering fidelity on that face.
      */
@@ -198,6 +242,7 @@ public class VirtualBlockManager implements Listener {
             modelSourceFiles.remove(key);
         }
         bakeTexelSurfaces(key, model, modelMeta.get(key), modelSourceFiles.get(key));
+        bakeVoxelPlan(key, model, modelMeta.get(key), modelSourceFiles.get(key));
     }
 
     public VoxelOccupancyCalculator occupancyCalculator() {
@@ -316,6 +361,7 @@ public class VirtualBlockManager implements Listener {
         modelMeta.clear();
         textureReports.clear();
         texelBakes.clear();
+        voxelBakes.clear();
         modelSourceFiles.clear();
         if (textureImageStore != null) {
             textureImageStore.clear();
@@ -356,6 +402,18 @@ public class VirtualBlockManager implements Listener {
                     + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
                     + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
         }
+    }
+
+    /**
+     * Bakes the adaptive rendering strategy decision and, when the voxel strategy
+     * is selected, the merged voxel runs for a registered model. Bake failures
+     * never break model load — the legacy pipeline renders the model unchanged.
+     */
+    private void bakeVoxelPlan(String key, VirtualModel model, ModelMeta meta, File modelFile) {
+        VoxelModelBake result = VoxelSurfaceBaker.bakeModel(
+                model, meta, modelFile, imageStore(), voxelSettings, settings,
+                texelBakes.get(key), effectiveOriginMode(model));
+        voxelBakes.put(key, result);
     }
 
     private TextureImageStore imageStore() {
@@ -412,11 +470,7 @@ public class VirtualBlockManager implements Listener {
         ModelMeta meta = getModelMeta(model.name());
         ModelMeta.CollisionMode collisionMode = meta.collisionMode() != null
                 ? meta.collisionMode() : settings.collisionMode();
-        ModelMeta.OriginMode originMode = meta.originMode() != null
-                ? meta.originMode() : settings.originMode();
-        if (originMode == null || originMode == ModelMeta.OriginMode.AUTO) {
-            originMode = ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes());
-        }
+        ModelMeta.OriginMode originMode = effectiveOriginMode(model);
 
         Location origin = new Location(
                 placement.location().getWorld(),
@@ -489,56 +543,69 @@ public class VirtualBlockManager implements Listener {
         TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
         List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans =
                 texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
-        // Readability floor for texel-baked models: vanilla's directional face shading
-        // crushes near-black palette materials into one unreadable mass outside full
-        // daylight. A per-model meta override (texelBrightness, 0-15) keeps every
-        // display at a minimum light level so the palette art stays legible while the
+        VoxelModelBake voxelBake = voxelBakes.get(model.name().toLowerCase(Locale.ROOT));
+        // The strategy selection already refuses animated models (voxel displays
+        // cannot bind to cube bones); the guard keeps a stale bake honest.
+        boolean voxelRender = voxelBake != null && voxelBake.voxelRender() && !animated;
+        // Readability floor for palette-quantized models (texel plates or voxel
+        // reconstruction): vanilla's directional face shading crushes near-black
+        // palette materials into one unreadable mass outside full daylight. A
+        // per-model meta override (texelBrightness, 0-15) keeps every display at
+        // a minimum light level so the palette art stays legible while the
         // top/side/bottom shading still separates the faces.
         ModelMeta spawnMeta = getModelMeta(model.name());
-        int brightnessFloor = texelCubePlans != null && spawnMeta.texelBrightness() != null
+        int brightnessFloor = spawnMeta.texelBrightness() != null
+                && (voxelRender || texelCubePlans != null)
                 ? spawnMeta.texelBrightness() : 0;
-        int cubeIndex = 0;
-        for (BakedCube cube : model.cubes()) {
-            Map<CubeFace, TexelSurfacePlan> facePlans =
-                    texelCubePlans != null && cubeIndex < texelCubePlans.size()
-                            ? texelCubePlans.get(cubeIndex)
-                            : null;
-            for (DisplayEmitter.EmittedDisplay item
-                    : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
-                BlockDisplay display = (BlockDisplay) origin.getWorld().spawnEntity(
-                        displayOrigin, EntityType.BLOCK_DISPLAY);
-                display.setBlock(item.blockData());
-                display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
-                int emission = Math.max(item.lightEmission(), brightnessFloor);
-                if (emission > 0) {
-                    display.setBrightness(new Display.Brightness(emission, 15));
-                }
 
-                Vector3f translation = new Vector3f(item.translation());
-                globalRotation.transform(translation);
-                translation.add(pivotOffset).sub(rotatedPivotOffset);
-
-                display.setTransformation(new org.bukkit.util.Transformation(
-                        translation,
-                        new Quaternionf(globalRotation).mul(item.leftRotation()),
-                        item.scale(),
-                        item.rightRotation()
-                ));
-                spawnedEntities.add(display.getUniqueId());
-
-                if (animated && cube.boneIndex() >= 0) {
-                    animationBindings.add(new AnimationBinding(
-                            cube.boneIndex(),
-                            display.getUniqueId(),
-                            new Matrix4f()
-                                    .translate(item.translation())
-                                    .rotate(item.leftRotation())
-                                    .scale(item.scale())
-                                    .rotate(item.rightRotation())
-                    ));
-                }
+        if (voxelRender) {
+            // Voxel reconstruction: one display per merged XZ rectangle of
+            // same-color, same-emission voxels. Run origins are model-space
+            // (lattice-shifted), so they compose through the identical
+            // rotation/pivot math as cube displays and can never drift from the
+            // barrier lattice.
+            for (VoxelModelBake.VoxelRun run : voxelBake.runs()) {
+                DisplayEmitter.EmittedDisplay item = new DisplayEmitter.EmittedDisplay(
+                        TexelPalette.material(run.paletteIndex()),
+                        new Vector3f(run.x(), run.y(), run.z()),
+                        new Quaternionf(),
+                        new Vector3f(run.lengthX(), 1.0f, run.widthZ()),
+                        new Quaternionf(),
+                        run.lightEmission(),
+                        () -> TexelPalette.blockData(run.paletteIndex())
+                );
+                spawnedEntities.add(spawnDisplayEntity(
+                        displayOrigin, instanceId, item, brightnessFloor,
+                        globalRotation, pivotOffset, rotatedPivotOffset));
             }
-            cubeIndex++;
+        } else {
+            int cubeIndex = 0;
+            for (BakedCube cube : model.cubes()) {
+                Map<CubeFace, TexelSurfacePlan> facePlans =
+                        texelCubePlans != null && cubeIndex < texelCubePlans.size()
+                                ? texelCubePlans.get(cubeIndex)
+                                : null;
+                for (DisplayEmitter.EmittedDisplay item
+                        : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
+                    UUID displayId = spawnDisplayEntity(
+                            displayOrigin, instanceId, item, brightnessFloor,
+                            globalRotation, pivotOffset, rotatedPivotOffset);
+                    spawnedEntities.add(displayId);
+
+                    if (animated && cube.boneIndex() >= 0) {
+                        animationBindings.add(new AnimationBinding(
+                                cube.boneIndex(),
+                                displayId,
+                                new Matrix4f()
+                                        .translate(item.translation())
+                                        .rotate(item.leftRotation())
+                                        .scale(item.scale())
+                                        .rotate(item.rightRotation())
+                        ));
+                    }
+                }
+                cubeIndex++;
+            }
         }
 
         Vector3f pivotCorrection = null;
@@ -556,6 +623,68 @@ public class VirtualBlockManager implements Listener {
                 pivotCorrection
         ));
         return instanceId;
+    }
+
+    /** Shared brightness instances per emission level (0-15); Bukkit allocates per call otherwise. */
+    private static final Display.Brightness[] BRIGHTNESS_BY_LEVEL = new Display.Brightness[16];
+
+    static {
+        for (int level = 0; level < BRIGHTNESS_BY_LEVEL.length; level++) {
+            BRIGHTNESS_BY_LEVEL[level] = new Display.Brightness(level, 15);
+        }
+    }
+
+    /**
+     * Spawns one {@code BlockDisplay} for an emitted display item at the shared
+     * display origin: block data, instance tag, brightness floor, and the
+     * rotation/pivot composition {@code t' = R·t + (C−DO) − R·(C−DO)} every
+     * rendering strategy (classic plates, texel plates, voxel runs) funnels
+     * through, so all strategies stay on one transform pipeline.
+     */
+    private UUID spawnDisplayEntity(
+            Location displayOrigin,
+            UUID instanceId,
+            DisplayEmitter.EmittedDisplay item,
+            int brightnessFloor,
+            Quaternionf globalRotation,
+            Vector3f pivotOffset,
+            Vector3f rotatedPivotOffset
+    ) {
+        BlockDisplay display = (BlockDisplay) displayOrigin.getWorld().spawnEntity(
+                displayOrigin, EntityType.BLOCK_DISPLAY);
+        display.setBlock(item.blockData());
+        display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
+        int emission = Math.max(item.lightEmission(), brightnessFloor);
+        if (emission > 0) {
+            display.setBrightness(BRIGHTNESS_BY_LEVEL[Math.min(emission, 15)]);
+        }
+
+        Vector3f translation = new Vector3f(item.translation());
+        globalRotation.transform(translation);
+        translation.add(pivotOffset).sub(rotatedPivotOffset);
+
+        display.setTransformation(new org.bukkit.util.Transformation(
+                translation,
+                new Quaternionf(globalRotation).mul(item.leftRotation()),
+                item.scale(),
+                item.rightRotation()
+        ));
+        return display.getUniqueId();
+    }
+
+    /**
+     * The model's effective origin mode — the single resolution used by both the
+     * spawn path and the voxel bake, so the voxel lattice can never disagree
+     * with the anchor the displays spawn from.
+     */
+    private ModelMeta.OriginMode effectiveOriginMode(VirtualModel model) {
+        ModelMeta meta = getModelMeta(model.name());
+        ModelMeta.OriginMode originMode = meta.originMode() != null
+                ? meta.originMode() : settings.originMode();
+        if (originMode == null || originMode == ModelMeta.OriginMode.AUTO) {
+            originMode = ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes());
+        }
+        return originMode;
     }
 
     private void rollbackSpawn(Set<Location> barrierBlocks, List<UUID> spawnedEntities) {

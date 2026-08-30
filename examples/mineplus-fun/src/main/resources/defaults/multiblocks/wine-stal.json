@@ -1,0 +1,15 @@
+{
+  "id": "wine_bottle_stal",
+  "name": "Stal Wine Bottle",
+  "levels": {
+    "1": {
+      "model": "models/stal-wine.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Stal Wine"
+      }
+    }
+  }
+}

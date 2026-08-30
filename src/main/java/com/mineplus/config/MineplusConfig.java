@@ -5,6 +5,7 @@ import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.VoxelOccupancyCalculator;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
@@ -13,6 +14,7 @@ public class MineplusConfig {
     private final VirtualRenderingSettings virtualRendering;
     private final AnimationSettings animation;
     private final TexelBakingSettings texelBaking;
+    private final VoxelRenderingSettings voxelRendering;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -21,12 +23,14 @@ public class MineplusConfig {
 
     public MineplusConfig(boolean additionalDebugLogs) {
         this(additionalDebugLogs, VirtualRenderingSettings.defaults(),
-                AnimationSettings.defaults(), TexelBakingSettings.defaults(), 0);
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(),
+                VoxelRenderingSettings.defaults(), 0);
     }
 
     public MineplusConfig(boolean additionalDebugLogs, VirtualRenderingSettings virtualRendering) {
         this(additionalDebugLogs, virtualRendering,
-                AnimationSettings.defaults(), TexelBakingSettings.defaults(), 0);
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(),
+                VoxelRenderingSettings.defaults(), 0);
     }
 
     public MineplusConfig(
@@ -35,7 +39,8 @@ public class MineplusConfig {
             int updateCheckResourceId
     ) {
         this(additionalDebugLogs, virtualRendering,
-                AnimationSettings.defaults(), TexelBakingSettings.defaults(), updateCheckResourceId);
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(),
+                VoxelRenderingSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -45,7 +50,7 @@ public class MineplusConfig {
             int updateCheckResourceId
     ) {
         this(additionalDebugLogs, virtualRendering, animation,
-                TexelBakingSettings.defaults(), updateCheckResourceId);
+                TexelBakingSettings.defaults(), VoxelRenderingSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -55,12 +60,26 @@ public class MineplusConfig {
             TexelBakingSettings texelBaking,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation,
+                texelBaking, VoxelRenderingSettings.defaults(), updateCheckResourceId);
+    }
+
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            VoxelRenderingSettings voxelRendering,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
                 : virtualRendering;
         this.animation = animation == null ? AnimationSettings.defaults() : animation;
         this.texelBaking = texelBaking == null ? TexelBakingSettings.defaults() : texelBaking;
+        this.voxelRendering = voxelRendering == null
+                ? VoxelRenderingSettings.defaults() : voxelRendering;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -78,6 +97,10 @@ public class MineplusConfig {
 
     public TexelBakingSettings getTexelBaking() {
         return texelBaking;
+    }
+
+    public VoxelRenderingSettings getVoxelRendering() {
+        return voxelRendering;
     }
 
     public int getUpdateCheckResourceId() {
@@ -120,5 +143,9 @@ public class MineplusConfig {
 
     public static TexelBakingSettings parseTexelBaking(FileConfiguration yaml, TexelBakingSettings fallback) {
         return TexelBakingSettings.parse(yaml, fallback);
+    }
+
+    public static VoxelRenderingSettings parseVoxelRendering(FileConfiguration yaml, VoxelRenderingSettings fallback) {
+        return VoxelRenderingSettings.parse(yaml, fallback);
     }
 }

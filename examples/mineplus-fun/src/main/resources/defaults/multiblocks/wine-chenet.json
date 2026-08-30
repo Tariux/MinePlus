@@ -1,0 +1,15 @@
+{
+  "id": "wine_bottle_chenet",
+  "name": "Chenet Wine Bottle",
+  "levels": {
+    "1": {
+      "model": "models/chenet-wine.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Chenet Wine"
+      }
+    }
+  }
+}

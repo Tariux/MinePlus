@@ -107,6 +107,17 @@ public final class DisplayEmitter {
      * deterministic: faces in {@link CubeFace} declaration order, a face's texel
      * plates in scan order before the next face.
      *
+     * <p><b>Layered cutout cubes drop the base display.</b> A cube whose plan carries
+     * genuine cutout cells (transparent glass showing the label behind) must not
+     * render its full-cube base display: the base's faces sit at the cube boundary,
+     * in front of every inner layer, and would z-block the layered content exactly
+     * at the cutout holes — the classic "base model protruding beyond the layer
+     * margins" artifact. Occluded plan cells are covered by the neighbor's own
+     * geometry and cutout cells show the inner layer (or, for true silhouette
+     * cutouts, the world behind), so omitting the base is visually exact. Untextured
+     * faces of such a cube are plated with the dominant material so they never
+     * vanish.
+     *
      * @param cube             the cube to emit
      * @param perFaceRendering whether per-face plates are enabled (false = single
      *                         display; texel plates are a per-face plate tier, so they
@@ -128,23 +139,42 @@ public final class DisplayEmitter {
         if (dominantPalette >= 0) {
             base = TexelPalette.material(dominantPalette);
         }
+        boolean cutout = hasCutout(texelPlans);
         List<EmittedDisplay> output = new ArrayList<>();
-        output.add(baseDisplay(cube, base, dominantFaceAmong(cube, effective, base)));
+        if (!cutout) {
+            output.add(baseDisplay(cube, base, dominantFaceAmong(cube, effective, base)));
+        }
         for (Map.Entry<CubeFace, Material> entry : effective.entrySet()) {
             CubeFace faceKey = entry.getKey();
             TexelSurfacePlan plan = texelPlans == null ? null : texelPlans.get(faceKey);
             if (plan != null) {
                 output.addAll(texelDisplays(cube, faceKey, plan));
-            } else if (entry.getValue() != base) {
+            } else if (entry.getValue() != base || cutout) {
                 if (dominantPalette >= 0 && !isTextured(cube, faceKey)) {
-                    // Untextured faces of texel-baked cubes inherit the dominant base
-                    // color instead of plating the fallback material.
+                    if (cutout) {
+                        // No base display: untextured faces plate the dominant
+                        // material instead of inheriting it, so they never vanish.
+                        output.addAll(plateDisplay(cube, faceKey, base));
+                    }
                     continue;
                 }
                 output.addAll(plateDisplay(cube, faceKey, entry.getValue()));
             }
         }
         return output;
+    }
+
+    /** Whether any of the cube's baked plans carries genuine cutout cells. */
+    private static boolean hasCutout(Map<CubeFace, TexelSurfacePlan> texelPlans) {
+        if (texelPlans == null) {
+            return false;
+        }
+        for (TexelSurfacePlan plan : texelPlans.values()) {
+            if (plan.cutoutCells() > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isTextured(BakedCube cube, CubeFace faceKey) {

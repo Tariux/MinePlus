@@ -1,6 +1,6 @@
 ﻿{
 	"meta": {"format_version": "5.0", "model_format": "java_block", "box_uv": false},
-	"name": "strad-wine",
+	"name": "stal-wine",
 	"model_identifier": "",
 	"java_block_version": "1.21.11",
 	"credit": "Made by Satisfy",
@@ -9,7 +9,7 @@
 	"elements": [
 		{
 			"name": "layer0", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [7, 8, 7], "to": [9, 16, 9], "autouv": 0, "color": 1, "origin": [8, 12, 8],
+			"from": [7, 10, 7], "to": [9, 18, 9], "autouv": 0, "color": 1, "origin": [8, 14, 8],
 			"faces": {
 				"north": {"uv": [3, 0, 5, 8], "texture": 0},
 				"east": {"uv": [3, 0, 5, 8], "texture": 0},
@@ -20,24 +20,24 @@
 		},
 		{
 			"name": "layer1", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [5, 0, 5], "to": [11, 8, 11], "autouv": 0, "color": 1, "origin": [8, 4, 8],
+			"from": [5, 0, 5], "to": [11, 10, 11], "autouv": 0, "color": 1, "origin": [8, 5, 8],
 			"faces": {
-				"north": {"uv": [1, 8, 7, 16], "texture": 0},
-				"east": {"uv": [1, 8, 7, 16], "texture": 0},
-				"south": {"uv": [1, 8, 7, 16], "texture": 0},
-				"west": {"uv": [1, 8, 7, 16], "texture": 0},
+				"north": {"uv": [1, 6, 7, 16], "texture": 0},
+				"east": {"uv": [1, 6, 7, 16], "texture": 0},
+				"south": {"uv": [1, 6, 7, 16], "texture": 0},
+				"west": {"uv": [1, 6, 7, 16], "texture": 0},
 				"up": {"uv": [8, 8, 14, 14], "texture": 0},
 				"down": {"uv": [8, 8, 14, 14], "texture": 0}
 			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000001"
 		},
 		{
 			"name": "layer2", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [4, 1, 4], "to": [12, 7, 12], "autouv": 0, "color": 1, "origin": [8, 4, 8],
+			"from": [4, 1, 4], "to": [12, 9, 12], "autouv": 0, "color": 1, "origin": [8, 5, 8],
 			"faces": {
-				"north": {"uv": [0, 9, 8, 15], "texture": 0},
-				"east": {"uv": [0, 9, 8, 15], "texture": 0},
-				"south": {"uv": [0, 9, 8, 15], "texture": 0},
-				"west": {"uv": [0, 9, 8, 15], "texture": 0},
+				"north": {"uv": [0, 7, 8, 15], "texture": 0},
+				"east": {"uv": [0, 7, 8, 15], "texture": 0},
+				"south": {"uv": [0, 7, 8, 15], "texture": 0},
+				"west": {"uv": [0, 7, 8, 15], "texture": 0},
 				"up": {"uv": [8, 0, 16, 8], "texture": 0},
 				"down": {"uv": [8, 0, 16, 8], "texture": 0}
 			}, "type": "cube", "uuid": "aabbcc00-0000-4000-8000-000000000002"
@@ -68,7 +68,7 @@
 		},
 		{
 			"name": "layer5", "box_uv": false, "render_order": "default", "rescale": false, "locked": false, "shade": true, "light_emission": 0, "export": true,
-			"from": [6, 13, 6], "to": [10, 15, 10], "autouv": 0, "color": 1, "origin": [8, 14, 8],
+			"from": [6, 15, 6], "to": [10, 17, 10], "autouv": 0, "color": 1, "origin": [8, 16, 8],
 			"faces": {
 				"north": {"uv": [2, 1, 6, 3], "texture": 0},
 				"east": {"uv": [2, 1, 6, 3], "texture": 0},
@@ -99,7 +99,7 @@
 	],
 	"textures": [
 		{
-			"name": "strad_wine.png", "relative_path": "../vinery/textures/block/wine/strad_wine.png", "folder": "block/wine", "namespace": "vinery", "id": "0", "width": 16, "height": 16, "uv_width": 16, "uv_height": 16,
+			"name": "stal_wine.png", "relative_path": "../vinery/textures/block/wine/stal_wine.png", "folder": "block/wine", "namespace": "vinery", "id": "0", "width": 16, "height": 16, "uv_width": 16, "uv_height": 16,
 			"particle": true, "visible": true, "internal": true, "saved": true, "uuid": "aabbcc00-0000-4000-8000-999999999999"
 		}
 	]
