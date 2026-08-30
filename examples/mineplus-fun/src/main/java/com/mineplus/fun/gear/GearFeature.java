@@ -1,8 +1,6 @@
 package com.mineplus.fun.gear;
 
-import com.mineplus.infrastructure.PluginContext;
-import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
-import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
+import com.mineplus.fun.ModuleFeature;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -15,21 +13,24 @@ import org.bukkit.plugin.java.JavaPlugin;
  * power or an adjacent rotating gear), controlled through the Core's
  * {@code AnimationApi} by {@link GearGrid}.
  */
-public final class GearFeature {
+public final class GearFeature extends ModuleFeature {
 
-    private final JavaPlugin plugin;
-    private final PluginContext context;
-    private final GearGrid grid;
+    private GearGrid grid;
     private int periodicTaskId = -1;
     private boolean evaluationScheduled;
 
-    public GearFeature(JavaPlugin plugin, PluginContext context) {
-        this.plugin = plugin;
-        this.context = context;
+    public GearFeature(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
+        super(plugin, context);
         this.grid = new GearGrid(context);
     }
 
-    public void enable() {
+    @Override
+    public String id() {
+        return "gear";
+    }
+
+    @Override
+    protected void onEnable() {
         var support = context.moduleSupport();
         support.installDefault(plugin, "defaults/models/gear-1-1.bbmodel", "models/gear-1-1.bbmodel", true);
         support.installDefault(plugin, "defaults/multiblocks/gear.json", "multiblocks/gear.json", false);
@@ -40,15 +41,19 @@ public final class GearFeature {
 
         periodicTaskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(
                 plugin, grid::evaluate, GearKeys.EVAL_INTERVAL_TICKS, GearKeys.EVAL_INTERVAL_TICKS);
-
-        context.jsonInfrastructureApi().reloadAll();
     }
 
-    public void disable() {
+    @Override
+    protected void onDisable() {
         if (periodicTaskId != -1) {
             Bukkit.getScheduler().cancelTask(periodicTaskId);
             periodicTaskId = -1;
         }
+    }
+
+    @Override
+    protected com.mineplus.infrastructure.command.SubCommand command() {
+        return new GearSubCommand(context, this);
     }
 
     /** Debounced evaluation: collapses redstone-event storms into one next-tick pass. */
@@ -64,7 +69,7 @@ public final class GearFeature {
     }
 
     /** Grid state for the {@code /gear status} diagnostic. */
-    public String describe(MultiBlockInstance instance) {
+    public String describe(com.mineplus.infrastructure.core.multiblock.MultiBlockInstance instance) {
         var state = context.animationApi().getAnimationState(instance.id(), GearKeys.ANIMATION_ROTATE);
         return state == null
                 ? "idle"

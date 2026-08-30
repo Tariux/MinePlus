@@ -35,7 +35,8 @@ examples/mineplus-fun/            # Example module (separate plugin)
   README.md
   DEVELOPMENT_PROMPT.md           # AI onboarding prompt for building new modules
   src/main/java/com/mineplus/fun/
-    MineplusFunPlugin.java        # entry point + Core dependency check
+    MineplusFunPlugin.java        # feature list + coordinated reload + reverse-order teardown
+    ModuleFeature.java            # feature lifecycle contract (start/command/stop, isolated)
     juicer/
       JuicerFeature.java          # wires the Juicer into the Core API
       JuicerKeys.java

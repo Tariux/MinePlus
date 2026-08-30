@@ -35,6 +35,10 @@ import org.bukkit.block.BlockFace;
  *       never self-sustains through a cycle.</li>
  * </ol>
  *
+ * <p>Adjacency is <b>cached</b>: gear anchors are immutable, so the gear id-set is a
+ * complete topology fingerprint — the O(n²) pairwise graph is rebuilt only when a
+ * gear is placed or removed, and the periodic/redstone evaluations pay O(n).
+ *
  * <p>Animation control goes through the Core's {@link AnimationApi}: newly
  * activated gears start the {@code rotate_gear} loop at the current animation
  * time of an already-spinning neighbour (phase sync), or at 0 when the whole
@@ -50,6 +54,11 @@ final class GearGrid {
 
     private final PluginContext context;
 
+    /** Cached gear snapshot of the last evaluation (empty = never evaluated). */
+    private List<MultiBlockInstance> cachedGears = List.of();
+    /** Cached face-adjacency graph of {@link #cachedGears}. */
+    private Map<UUID, List<MultiBlockInstance>> adjacency = Map.of();
+
     GearGrid(PluginContext context) {
         this.context = context;
     }
@@ -57,9 +66,14 @@ final class GearGrid {
     void evaluate() {
         List<MultiBlockInstance> gears = collectGears();
         if (gears.isEmpty()) {
+            cachedGears = List.of();
+            adjacency = Map.of();
             return;
         }
-        Map<UUID, List<MultiBlockInstance>> adjacency = buildAdjacency(gears);
+        if (topologyChanged(gears)) {
+            cachedGears = gears;
+            adjacency = buildAdjacency(gears);
+        }
 
         // Flood-fill the active set from the redstone-powered seeds.
         Set<UUID> active = new HashSet<>();
@@ -84,7 +98,7 @@ final class GearGrid {
             if (active.contains(gear.id())) {
                 if (!spinning && gear.renderedModelId() != null) {
                     animation.playAnimation(gear.id(), GearKeys.ANIMATION_ROTATE,
-                            new AnimationPlayback(1.0f, null, neighbourPhase(gear, adjacency, animation)));
+                            new AnimationPlayback(1.0f, null, neighbourPhase(gear, animation)));
                 }
             } else if (spinning) {
                 animation.stopAnimation(gear.id(), GearKeys.ANIMATION_ROTATE);
@@ -93,15 +107,32 @@ final class GearGrid {
     }
 
     /**
+     * True when the gear id-set differs from the cached snapshot. Gear anchors
+     * and ids are immutable once placed, so an unchanged id-set means unchanged
+     * topology and the cached adjacency graph stays valid.
+     */
+    private boolean topologyChanged(List<MultiBlockInstance> gears) {
+        if (gears.size() != cachedGears.size()) {
+            return true;
+        }
+        Set<UUID> cachedIds = new HashSet<>();
+        for (MultiBlockInstance gear : cachedGears) {
+            cachedIds.add(gear.id());
+        }
+        for (MultiBlockInstance gear : gears) {
+            if (!cachedIds.contains(gear.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Current animation time of an already-spinning neighbour, so a gear
      * joining a running train meshes in phase with it; 0 when no neighbour is
      * spinning yet (whole train starting together).
      */
-    private float neighbourPhase(
-            MultiBlockInstance gear,
-            Map<UUID, List<MultiBlockInstance>> adjacency,
-            AnimationApi animation
-    ) {
+    private float neighbourPhase(MultiBlockInstance gear, AnimationApi animation) {
         for (MultiBlockInstance neighbor : adjacency.getOrDefault(gear.id(), List.of())) {
             AnimationState state = animation.getAnimationState(neighbor.id(), GearKeys.ANIMATION_ROTATE);
             if (state != null && !state.paused()) {
@@ -122,16 +153,16 @@ final class GearGrid {
     }
 
     private Map<UUID, List<MultiBlockInstance>> buildAdjacency(List<MultiBlockInstance> gears) {
-        Map<UUID, List<MultiBlockInstance>> adjacency = new HashMap<>();
+        Map<UUID, List<MultiBlockInstance>> graph = new HashMap<>();
         for (int i = 0; i < gears.size(); i++) {
             for (int j = i + 1; j < gears.size(); j++) {
                 if (isAdjacent(gears.get(i).coordinate(), gears.get(j).coordinate())) {
-                    adjacency.computeIfAbsent(gears.get(i).id(), key -> new ArrayList<>()).add(gears.get(j));
-                    adjacency.computeIfAbsent(gears.get(j).id(), key -> new ArrayList<>()).add(gears.get(i));
+                    graph.computeIfAbsent(gears.get(i).id(), key -> new ArrayList<>()).add(gears.get(j));
+                    graph.computeIfAbsent(gears.get(j).id(), key -> new ArrayList<>()).add(gears.get(i));
                 }
             }
         }
-        return adjacency;
+        return graph;
     }
 
     /** Face-sharing anchors in the same world (the gear occupies one block). */
