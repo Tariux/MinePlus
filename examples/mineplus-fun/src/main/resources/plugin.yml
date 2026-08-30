@@ -3,13 +3,13 @@ version: ${version}
 main: com.mineplus.fun.MineplusFunPlugin
 api-version: '1.21'
 author: Tariux
-description: Reference module for Mineplus - the Juicer and the Cannon machines.
+description: Reference module for Mineplus - the Juicer, the Cannon, and the Gear machines.
 website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.
 depend: [Mineplus]
 
-# Commands (/juicer, /cannon) are registered dynamically at enable time via
+# Commands (/juicer, /cannon, /gear) are registered dynamically at enable time via
 # context.moduleSupport().registerCommand(...) - no plugin.yml entries needed.
 
 permissions:
@@ -18,4 +18,7 @@ permissions:
     default: op
   mineplusfun.admin.cannon:
     description: Allows using Cannon controls
+    default: op
+  mineplusfun.admin.gear:
+    description: Allows using Gear controls
     default: op

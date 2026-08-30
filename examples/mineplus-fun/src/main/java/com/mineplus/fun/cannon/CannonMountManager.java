@@ -27,16 +27,18 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 import org.joml.Vector3f;
 
 /**
  * Gunner's seat for level-2 cannons: the player rides an invisible marker
  * armor stand spawned one block behind the model on the bore centreline,
  * which pins their position to the cannon (riding neutralises WASD movement)
- * while leaving the view free for aiming. A per-tick task additionally clamps
- * the gunner's yaw to the cannon's forward 180-degree arc — no turning the
- * camera behind the piece.
+ * while leaving the view free for aiming. Aiming is bounded at fire time, not
+ * per-tick: the player's camera is client-authoritative, and forcing it
+ * server-side is impossible ({@code Player#setRotation} throws
+ * {@code UnsupportedOperationException} on modern Spigot/Paper, and teleporting
+ * would dismount the rider), so {@link CannonAimListener} instead clamps the
+ * launch direction into a cone around the bore when the lanyard is released.
  *
  * <p>On mount the gunner receives the "Cannon Lanyard" bow in their main hand
  * plus a "Cannon Match" arrow in a free slot. The vanilla bow draw requires an
@@ -60,13 +62,6 @@ public final class CannonMountManager implements Listener {
      */
     private static final Vector3f SEAT_PIXELS = new Vector3f(39.0f, 13.0f, 0.0f);
 
-    /**
-     * Half-angle of the gunner's allowed view arc, in degrees, centred on the
-     * bore's forward direction. The camera may sweep forward-left to
-     * forward-right but never behind the cannon.
-     */
-    private static final float VIEW_ARC_DEGREES = 90.0F;
-
     /** A mounted player, the seat entity they ride, and the bore's forward heading. */
     public record MountSession(UUID instanceId, UUID seatEntityId, float boreYawDeg) {
     }
@@ -77,7 +72,6 @@ public final class CannonMountManager implements Listener {
     private final NamespacedKey lanyardKey;
     private final NamespacedKey matchKey;
     private final NamespacedKey seatKey;
-    private BukkitTask viewClampTask;
 
     public CannonMountManager(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -168,7 +162,6 @@ public final class CannonMountManager implements Listener {
 
         sessions.put(player.getUniqueId(), new MountSession(instance.id(), seat.getUniqueId(), boreYawDeg(instance)));
         gunnerByInstance.put(instance.id(), player.getUniqueId());
-        startViewClampTask();
 
         player.getInventory().setItemInMainHand(createLanyard());
         if (offHandFree) {
@@ -182,7 +175,7 @@ public final class CannonMountManager implements Listener {
         player.sendMessage(ChatColor.GRAY + "Draw the " + ChatColor.WHITE + "Cannon Lanyard" + ChatColor.GRAY
                 + " like a bow to aim and fire - the longer you draw, the harder the shot.");
         player.sendMessage(ChatColor.GRAY + "The cannon's ammunition is your payload; fire charges are shot before TNT.");
-        player.sendMessage(ChatColor.GRAY + "Your view is locked to the cannon's front. Sneak to dismount.");
+        player.sendMessage(ChatColor.GRAY + "Shots fire forward along the barrel - aim within its arc. Sneak to dismount.");
     }
 
     /** Dismounts the player and reclaims the marker items (idempotent). */
@@ -198,7 +191,6 @@ public final class CannonMountManager implements Listener {
         }
         releaseInstance(session.instanceId(), player.getUniqueId());
         removeSeat(session.seatEntityId());
-        maybeStopViewClampTask();
         reclaimMarkers(player);
         player.sendMessage(message);
     }
@@ -211,7 +203,6 @@ public final class CannonMountManager implements Listener {
         }
         releaseInstance(session.instanceId(), player.getUniqueId());
         removeSeat(session.seatEntityId());
-        maybeStopViewClampTask();
         reclaimMarkers(player);
     }
 
@@ -226,7 +217,6 @@ public final class CannonMountManager implements Listener {
         if (session != null) {
             removeSeat(session.seatEntityId());
         }
-        maybeStopViewClampTask();
 
         Player gunner = Bukkit.getPlayer(gunnerId);
         if (gunner != null && gunner.isOnline()) {
@@ -261,7 +251,6 @@ public final class CannonMountManager implements Listener {
                 gunner.sendMessage(ChatColor.GRAY + "The gunner's seat vanishes.");
             }
         }
-        stopViewClampTask();
         purgeOrphanSeats();
     }
 
@@ -282,7 +271,6 @@ public final class CannonMountManager implements Listener {
         }
         releaseInstance(session.instanceId(), player.getUniqueId());
         removeSeat(session.seatEntityId());
-        maybeStopViewClampTask();
         reclaimMarkers(player);
     }
 
@@ -307,56 +295,9 @@ public final class CannonMountManager implements Listener {
     }
 
     /**
-     * Runs every tick while anyone is mounted and clamps each gunner's yaw to
-     * the cannon's forward 180-degree arc. {@link Entity#setRotation} is used
-     * because teleporting a riding player would dismount them.
-     */
-    private void startViewClampTask() {
-        if (viewClampTask != null) {
-            return;
-        }
-        viewClampTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            for (Map.Entry<UUID, MountSession> entry : sessions.entrySet()) {
-                Player gunner = Bukkit.getPlayer(entry.getKey());
-                if (gunner == null || !gunner.isOnline()) {
-                    continue;
-                }
-                clampView(gunner, entry.getValue().boreYawDeg());
-            }
-        }, 1L, 1L);
-    }
-
-    private void maybeStopViewClampTask() {
-        if (sessions.isEmpty()) {
-            stopViewClampTask();
-        }
-    }
-
-    private void stopViewClampTask() {
-        if (viewClampTask != null) {
-            viewClampTask.cancel();
-            viewClampTask = null;
-        }
-    }
-
-    /** Snaps the gunner's yaw back onto the forward arc's edge when they turn past it. */
-    private void clampView(Player gunner, float boreYawDeg) {
-        if (Float.isNaN(boreYawDeg)) {
-            return;
-        }
-
-        float yaw = gunner.getLocation().getYaw();
-        float delta = wrapDegrees(yaw - boreYawDeg);
-        if (delta > VIEW_ARC_DEGREES) {
-            gunner.setRotation(wrapDegrees(boreYawDeg + VIEW_ARC_DEGREES), gunner.getLocation().getPitch());
-        } else if (delta < -VIEW_ARC_DEGREES) {
-            gunner.setRotation(wrapDegrees(boreYawDeg - VIEW_ARC_DEGREES), gunner.getLocation().getPitch());
-        }
-    }
-
-    /**
      * Heading of the bore in world space, in Bukkit yaw degrees. NaN for a
-     * vertical barrel (no meaningful forward heading, so the view is left free).
+     * vertical barrel (no meaningful forward heading). Kept for feature
+     * diagnostics and future seat-orientation use.
      */
     private float boreYawDeg(MultiBlockInstance instance) {
         Vector3f axis = ModelPoints.direction(instance, new Vector3f(-1.0f, 0.0f, 0.0f));
@@ -364,18 +305,6 @@ public final class CannonMountManager implements Listener {
             return Float.NaN;
         }
         return (float) Math.toDegrees(Math.atan2(-axis.x, axis.z));
-    }
-
-    /** Wraps an angle in degrees into (-180, 180]. */
-    private static float wrapDegrees(float value) {
-        value %= 360.0F;
-        if (value >= 180.0F) {
-            value -= 360.0F;
-        }
-        if (value < -180.0F) {
-            value += 360.0F;
-        }
-        return value;
     }
 
     private void removeSeat(UUID seatEntityId) {

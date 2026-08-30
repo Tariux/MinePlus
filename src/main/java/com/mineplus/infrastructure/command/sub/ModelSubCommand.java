@@ -272,6 +272,8 @@ public final class ModelSubCommand implements SubCommand {
                 + ChatColor.GRAY + " (uniform " + uniformCubes + ", mixed " + mixedCubes
                 + (settings.perFaceRendering() ? "" : ", plates off") + ")");
 
+        describeAnimations(sender, model, meta);
+
         int resolved = 0;
         int fallback = 0;
         for (String textureName : textureNames) {
@@ -295,6 +297,61 @@ public final class ModelSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.YELLOW + "Occupancy cells: " + ChatColor.WHITE + cells.length / 3
                 + ChatColor.GRAY + " (identity orientation, " + collisionMode + " mode)"
                 + " | cache entries: " + manager.occupancyCalculator().cacheSize());
+    }
+
+    private void describeAnimations(
+            CommandSender sender,
+            com.mineplus.infrastructure.virtual.VirtualModel model,
+            com.mineplus.infrastructure.virtual.ModelMeta meta
+    ) {
+        if (model.bones().isEmpty() && model.animations().isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Animations: " + ChatColor.GRAY + "none");
+            return;
+        }
+
+        sender.sendMessage(ChatColor.YELLOW + "Bones: " + ChatColor.WHITE + model.bones().size()
+                + ChatColor.GRAY + " -> " + model.bones().stream()
+                        .map(com.mineplus.infrastructure.virtual.animation.VirtualBone::name)
+                        .collect(java.util.stream.Collectors.joining(", ")));
+
+        for (var clip : model.animations()) {
+            StringBuilder bones = new StringBuilder();
+            for (var entry : clip.animators().entrySet()) {
+                if (!bones.isEmpty()) {
+                    bones.append(", ");
+                }
+                bones.append(entry.getKey()).append(" [");
+                var tracks = entry.getValue();
+                boolean first = true;
+                if (!tracks.rotation().isEmpty()) {
+                    bones.append("rot:").append(tracks.rotation().size());
+                    first = false;
+                }
+                if (!tracks.position().isEmpty()) {
+                    if (!first) {
+                        bones.append(' ');
+                    }
+                    bones.append("pos:").append(tracks.position().size());
+                    first = false;
+                }
+                if (!tracks.scale().isEmpty()) {
+                    if (!first) {
+                        bones.append(' ');
+                    }
+                    bones.append("scl:").append(tracks.scale().size());
+                }
+                bones.append(']');
+            }
+            sender.sendMessage(ChatColor.YELLOW + "Animation '" + ChatColor.WHITE + clip.name()
+                    + ChatColor.YELLOW + "': " + ChatColor.WHITE + clip.loop()
+                    + ChatColor.GRAY + " len " + clip.length() + "s"
+                    + ChatColor.YELLOW + " animators: " + ChatColor.WHITE + bones);
+        }
+
+        if (!meta.autoplay().isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Meta autoplay: " + ChatColor.WHITE
+                    + String.join(", ", meta.autoplay()));
+        }
     }
 
     private void listInstances(CommandSender sender, int limit) {

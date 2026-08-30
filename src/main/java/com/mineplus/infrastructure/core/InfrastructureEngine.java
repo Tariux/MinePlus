@@ -1,9 +1,11 @@
 package com.mineplus.infrastructure.core;
 
 import com.mineplus.MineplusPlugin;
+import com.mineplus.infrastructure.core.api.AnimationApi;
 import com.mineplus.infrastructure.core.api.InfrastructureApi;
 import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
 import com.mineplus.infrastructure.core.api.BasicInfrastructureApi;
+import com.mineplus.infrastructure.core.api.MineplusAnimationApi;
 import com.mineplus.infrastructure.core.api.MineplusBasicInfrastructureApi;
 import com.mineplus.infrastructure.core.api.MineplusInfrastructureApi;
 import com.mineplus.infrastructure.core.api.MineplusJsonInfrastructureApi;
@@ -25,6 +27,8 @@ import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
+import com.mineplus.infrastructure.virtual.animation.ModelAnimationManager;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.List;
@@ -46,13 +50,28 @@ public final class InfrastructureEngine {
     private final InfrastructureApi api;
     private final BasicInfrastructureApi basicApi;
     private final JsonInfrastructureApi jsonApi;
+    private final AnimationApi animationApi;
+    private final ModelAnimationManager animationManager;
     private final MultiBlockConfigLoader configLoader;
     private final RecipeConfigLoader recipeLoader;
     private final MineplusPlugin plugin;
     private final java.util.logging.Logger logger;
     private int tickTaskId;
 
-    public InfrastructureEngine(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager, ItemRegistry itemRegistry) {
+    public InfrastructureEngine(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            ItemRegistry itemRegistry
+    ) {
+        this(plugin, virtualBlockManager, itemRegistry, AnimationSettings.defaults());
+    }
+
+    public InfrastructureEngine(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            ItemRegistry itemRegistry,
+            AnimationSettings animationSettings
+    ) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.registry = new MultiBlockRegistry();
@@ -62,6 +81,8 @@ public final class InfrastructureEngine {
         this.recipeManager = new RecipeManager();
         this.persistenceFacade = new PersistenceFacade(PersistenceConfig.defaults(plugin.getDataFolder()), plugin.getLogger());
         this.persistenceFacade.initialize();
+        this.animationManager = new ModelAnimationManager(plugin, virtualBlockManager);
+        this.animationManager.updateSettings(animationSettings);
         this.renderingManager = new ModelRenderingManager(virtualBlockManager);
         this.upgradeManager = new UpgradeManager(itemManager);
         this.linkingSystem = new MultiBlockLinkingSystem(registry);
@@ -78,6 +99,7 @@ public final class InfrastructureEngine {
                 processManager
         );
         virtualBlockManager.setLifecycleManager(lifecycleManager);
+        this.animationManager.bindBridge(lifecycleManager);
         this.api = new MineplusInfrastructureApi(
                 registry,
                 lifecycleManager,
@@ -89,6 +111,7 @@ public final class InfrastructureEngine {
         );
         this.basicApi = new MineplusBasicInfrastructureApi(registry, lifecycleManager);
         this.jsonApi = new MineplusJsonInfrastructureApi(this);
+        this.animationApi = new MineplusAnimationApi(registry, animationManager);
         this.configLoader = new MultiBlockConfigLoader(plugin, registry);
         this.recipeLoader = new RecipeConfigLoader(plugin, recipeManager);
         this.tickTaskId = -1;
@@ -114,6 +137,8 @@ public final class InfrastructureEngine {
             );
             DebugLogger.info("InfrastructureEngine: Scheduled lifecycle tick task (ID: " + tickTaskId + ").");
         }
+        animationManager.start();
+        DebugLogger.info("InfrastructureEngine: Animation runtime started.");
         lifecycleManager.startHeartbeat();
         DebugLogger.info("InfrastructureEngine: Heartbeat started.");
         persistenceFacade.startAutoFlush(plugin);
@@ -122,6 +147,8 @@ public final class InfrastructureEngine {
 
     public void shutdown() {
         DebugLogger.info("InfrastructureEngine: Shutting down. Saving persistent data...");
+        animationManager.stop();
+        DebugLogger.info("InfrastructureEngine: Animation runtime stopped.");
         if (tickTaskId != -1) {
             plugin.getServer().getScheduler().cancelTask(tickTaskId);
             tickTaskId = -1;
@@ -147,6 +174,19 @@ public final class InfrastructureEngine {
 
     public JsonInfrastructureApi jsonApi() {
         return jsonApi;
+    }
+
+    public AnimationApi animationApi() {
+        return animationApi;
+    }
+
+    public ModelAnimationManager animationManager() {
+        return animationManager;
+    }
+
+    /** Applies new global animation settings (config reload). */
+    public void updateAnimationSettings(AnimationSettings settings) {
+        animationManager.updateSettings(settings);
     }
 
     public MultiBlockRegistry registry() {

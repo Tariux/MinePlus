@@ -44,12 +44,14 @@ public final class ModelRenderingManager {
      *
      * @param clear true to remove non-air occupants (creative/admin policy); false to
      *              only report whether the area is free (standard-player policy)
+     * @return the inspection result, or {@code null} when the model (or its world/level)
+     *         could not be resolved — a load failure, not an occupancy verdict
      */
     public VirtualBlockManager.SpawnAreaResult prepareArea(
             MultiBlockType type, MultiBlockInstance instance, File pluginDataFolder, boolean clear) {
         Resolved resolved = resolve(type, instance, pluginDataFolder);
         if (resolved == null) {
-            return VirtualBlockManager.SpawnAreaResult.BLOCKED;
+            return null;
         }
         return virtualBlockManager.prepareSpawnArea(resolved.model(), resolved.placement(), clear);
     }

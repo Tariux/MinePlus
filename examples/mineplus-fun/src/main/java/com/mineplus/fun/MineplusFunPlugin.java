@@ -3,6 +3,8 @@ package com.mineplus.fun;
 import com.mineplus.MineplusPlugin;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.cannon.CannonSubCommand;
+import com.mineplus.fun.gear.GearFeature;
+import com.mineplus.fun.gear.GearSubCommand;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.juicer.JuicerSubCommand;
 import com.mineplus.infrastructure.PluginContext;
@@ -27,6 +29,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
     private PluginContext context;
     private JuicerFeature juicerFeature;
     private CannonFeature cannonFeature;
+    private GearFeature gearFeature;
 
     @Override
     public void onEnable() {
@@ -55,18 +58,26 @@ public final class MineplusFunPlugin extends JavaPlugin {
         this.cannonFeature = new CannonFeature(this, context);
         this.cannonFeature.enable();
 
+        this.gearFeature = new GearFeature(this, context);
+        this.gearFeature.enable();
+
         context.moduleSupport().registerCommand(this, "juicer", new JuicerSubCommand(context));
         context.moduleSupport().registerCommand(this, "cannon", new CannonSubCommand(context));
+        context.moduleSupport().registerCommand(this, "gear", new GearSubCommand(context, gearFeature));
 
-        getLogger().info("[MineplusFun] Juicer and Cannon modules enabled on top of Mineplus Core.");
+        getLogger().info("[MineplusFun] Juicer, Cannon, and Gear modules enabled on top of Mineplus Core.");
     }
 
     @Override
     public void onDisable() {
+        if (this.gearFeature != null) {
+            this.gearFeature.disable();
+        }
         if (this.cannonFeature != null) {
             this.cannonFeature.disable();
         }
         this.cannonFeature = null;
+        this.gearFeature = null;
         this.juicerFeature = null;
         this.context = null;
     }

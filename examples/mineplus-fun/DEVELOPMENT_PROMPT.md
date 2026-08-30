@@ -45,8 +45,9 @@ the Core is absent.
   `upgradeBlock`, `removeBlock`, `registerHook`, `registerGui`, `openGui`, `linkBlocks`,
   `sendSignal`, `startProcess`, `cancelProcess`, `getProcess`, `getBlock`, `getBlockAt`.
 - `basicInfrastructureApi()` — lightweight creation/placement/lookup helpers.
-- `jsonInfrastructureApi()` — `reloadAll()`, `reloadModelDefinitions()`, `reloadMultiBlocks()`,
-  `reloadRecipes()`.
+- `jsonInfrastructureApi()` — `reloadAll()`, `reloadModelDefinitions()`,
+  `reloadMultiBlocks()`, `reloadRecipes()`.
+- `animationApi()` — selector-based animation control (`AnimationApi`, see §10a).
 - `moduleSupport()` — the module toolkit (`ModuleSupport`, see §7a).
 
 Supporting Core utilities every module should use instead of hand-rolling:
@@ -175,7 +176,7 @@ Consequences:
    ```
 
    The cannon additionally splits behavior into collaborators — copy this shape when a feature
-   outgrows one hook: `CannonMountManager` (seat entities + session state + view clamp),
+   outgrows one hook: `CannonMountManager` (seat entities + session state),
    `CannonAimListener` (bow-release firing), `CannonProjectiles` (projectile launch +
    explosion calibration), `CannonTntStore` (persistent ammo, on `TypedState`).
 5. Register the feature's command with
@@ -266,10 +267,13 @@ Consequences:
   math (§5). One block *behind* the model reads better than on top of it: the level-2 cannon's
   rearmost geometry is x=23px, so the seat sits at x=39px (one full block past the rear), y=13px,
   z=0 on the bore centreline. Rider height is a sitting-posture constant, tuned in `SEAT_PIXELS`.
-- **View clamping (180° arc):** a per-tick task wraps each mounted player's yaw into
-  ±90° around the bore heading (`wrapDegrees`, yaw = `atan2(-x, z)` of the world-space barrel
-  axis) and snaps violators back with `Entity#setRotation(yaw, pitch)`. Never teleport a rider —
-  teleport dismounts passengers. Stop the task when the last session ends.
+- **Aim bounds (API trap):** player camera rotation is client-authoritative —
+  `Player#setRotation` throws `UnsupportedOperationException` on Spigot/Paper 1.21+
+  ("Cannot set rotation of players"), and teleporting a rider dismounts them, so a
+  per-tick camera clamp is impossible server-side. The cannon bounds *aiming at fire
+  time* instead: `CannonAimListener` clamps the launch direction into a cone around
+  the bore axis when the lanyard releases. Clamp what your feature controls (the
+  shot), never the player's view.
 - **Aiming tool without arrows:** mounting hands the player a tagged "Cannon Lanyard" bow plus a
   single tagged "Cannon Match" arrow — the vanilla client refuses to draw a bow without an arrow
   somewhere in the inventory, so the match exists purely to unlock the draw. Cancel
@@ -280,6 +284,63 @@ Consequences:
   `EntityDismountEvent`, quit, instance break/remove, plugin disable).
 - A seated gunner aiming down at their own cannon would trigger the multiblock's interact flow
   mid-draw — ignore interactions from any mounted session in `onInteract`.
+
+## 10a. Model animations (bbmodel clips + selector hooks)
+
+Blockbench animations ride inside the `.bbmodel` — animate **outliner groups**
+(bones), not loose cubes; a clip animating a parent group drags all nested bones.
+Clips carry deltas from rest (rotation in degrees, position in pixels, scale as
+multiplier). Loop modes: `once` (returns to rest), `loop`, `hold` (freezes the
+end frame).
+
+Two control surfaces:
+
+1. **Autoplay (internal data interface):** add `"animations": ["clip_name"]`
+   to the multiblock level JSON — the clip starts whenever that level renders,
+   including after restarts and upgrades (the new level's list replaces the old).
+   Raw debug-spawned models use `"autoplay": [...]` in `models/<key>.meta.json`.
+2. **Code hooks (external interface):** `context.animationApi()` with
+   `AnimationSelector`:
+
+```java
+AnimationApi anim = context.animationApi();
+
+// One-shot a whole clip from t=0 (forced once, then back to rest)
+anim.triggerAnimation(instance.id(), AnimationSelector.animation("recoil"));
+
+// Granular: only the named bone's tracks, inside every clip animating it
+anim.triggerAnimation(instance.id(), AnimationSelector.bone("turret"));
+
+// Continuous play / stop / pause / resume
+anim.playAnimation(instance.id(), "rotate_gear");
+anim.stopAnimation(instance.id(), "rotate_gear");
+
+// Gate a bone inside all matching clips (its parent still animates around it)
+anim.setAnimationEnabled(instance.id(), AnimationSelector.bone("wheel"), false);
+
+// Introspection (clip/bone names come from the bbmodel)
+anim.getAnimations(instance.id());
+anim.getBones(instance.id());
+anim.getAnimationState(instance.id(), "recoil");   // AnimationState or null
+```
+
+Verified facts / traps:
+
+- All calls take the **multiblock instance id** (resolved through its rendered
+  model). Raw `/mineplus model debugspawn` models accept the rendered model id.
+- Autoplay never overrides explicit control — it fires only the first time a
+  render appears; `stopAnimation` stays stopped until re-render (upgrade,
+  respawn, reload).
+- `onAnimationStart(instance, animation)` / `onAnimationComplete(instance,
+  animation)` exist on `MultiBlockHook` (exception-isolated like all hook
+  dispatch; looping clips fire start once and never complete).
+- Splines (catmullrom/bezier) sample as linear; molang keyframe expressions
+  fall back to 0 — keep keyframes numeric in Blockbench.
+- Diagnose parsing with `/mineplus model info <modelKey>` (bones, clips, loop
+  modes, per-bone track counts, meta autoplay).
+- Performance: models without both bones and clips cost nothing; animation
+  pushes are one `setTransformationMatrix` per bound display per tick with
+  client-side interpolation (`ANIMATION.TICK_INTERVAL_TICKS: 1` default).
 
 ## 11. Verifying the API surface (stub jars)
 
@@ -328,16 +389,21 @@ is inherited from `RegionAccessor`, not declared on `World`.
 
 ## 14. Reference features
 
-Both live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.md`):
+All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.md`):
 
 - **juicer** (`com.mineplus.fun.juicer`): unconditional GUI (JSON `gui` key), recipes, custom
   items, recipe-driven crafting, upgrade button.
 - **cannon** (`com.mineplus.fun.cannon`): conditional interaction (level 1: torch fires, else
   opens the menu; level 2: saddle mounts — no `gui` key, hook-driven `openGui`), two-level
   upgrade with vanilla-key costs, `stateData` ammo store (TNT + fire charges, fireball-first
-  firing) persisted across restarts, rotation-aware placement (`createMultiBlock` +
-  `placeMultiBlock` with −90° compensation), CENTER-origin muzzle math, gunner's seat (marker
-  armor stand one block behind the model, 180° view clamp, lanyard bow + match arrow),
-  `TNTPrimed` ballistics with calibrated explosion power, break/remove cleanup.
+   firing) persisted across restarts, rotation-aware placement (`createMultiBlock` +
+   `placeMultiBlock` with −90° compensation), CENTER-origin muzzle math, gunner's seat (marker
+   armor stand one block behind the model, fire-time aim cone, lanyard bow + match arrow),
+   `TNTPrimed` ballistics with calibrated explosion power, break/remove cleanup.
+- **gear** (`com.mineplus.fun.gear`): bbmodel clip animation driven by game state — redstone
+  adjacency activates the `rotate_gear` loop, face-adjacent gears chain-react
+  (flood-fill from powered seeds, so trains never self-sustain), phase-synced starts via
+  `AnimationPlayback.startTime`, `BlockRedstoneEvent` for instant response plus a periodic
+  re-evaluation. The canonical `AnimationApi` consumer (§10a).
 
 Copy the reference whose interaction model matches your feature.

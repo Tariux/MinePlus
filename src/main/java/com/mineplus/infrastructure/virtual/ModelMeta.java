@@ -2,6 +2,8 @@ package com.mineplus.infrastructure.virtual;
 
 import com.mineplus.util.DebugLogger;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -9,15 +11,21 @@ import java.util.Locale;
  * <pre>{@code
  * {
  *   "originMode": "GRID",
- *   "collisionMode": "SURFACE"
+ *   "collisionMode": "SURFACE",
+ *   "autoplay": ["rotate_gear"]
  * }
  * }</pre>
  * Any omitted field falls back to the global settings default.
  */
 public record ModelMeta(
         OriginMode originMode,
-        CollisionMode collisionMode
+        CollisionMode collisionMode,
+        List<String> autoplay
 ) {
+
+    public ModelMeta {
+        autoplay = autoplay == null ? List.of() : List.copyOf(autoplay);
+    }
 
     public enum OriginMode {
         /**
@@ -137,11 +145,11 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null);
+        return new ModelMeta(null, null, null);
     }
 
     public boolean isEmpty() {
-        return originMode == null && collisionMode == null;
+        return originMode == null && collisionMode == null && autoplay.isEmpty();
     }
 
     public static ModelMeta load(File modelFile) {
@@ -162,6 +170,7 @@ public record ModelMeta(
                      new com.google.gson.stream.JsonReader(new java.io.BufferedReader(new java.io.FileReader(metaFile)))) {
             OriginMode originMode = null;
             CollisionMode collisionMode = null;
+            List<String> autoplay = new ArrayList<>();
 
             json.beginObject();
             while (json.hasNext()) {
@@ -169,12 +178,13 @@ public record ModelMeta(
                 switch (field) {
                     case "originMode" -> originMode = OriginMode.fromKey(readString(json), null);
                     case "collisionMode" -> collisionMode = CollisionMode.fromKey(readString(json), null);
+                    case "autoplay" -> readStringArray(json, autoplay);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
-            return new ModelMeta(originMode, collisionMode);
+            return new ModelMeta(originMode, collisionMode, autoplay);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
@@ -188,5 +198,20 @@ public record ModelMeta(
             return null;
         }
         return json.nextString();
+    }
+
+    private static void readStringArray(com.google.gson.stream.JsonReader json, List<String> output) throws Exception {
+        if (json.peek() != com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+            json.skipValue();
+            return;
+        }
+        json.beginArray();
+        while (json.hasNext()) {
+            String value = readString(json);
+            if (value != null && !value.isBlank()) {
+                output.add(value.trim());
+            }
+        }
+        json.endArray();
     }
 }

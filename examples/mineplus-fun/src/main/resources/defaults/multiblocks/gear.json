@@ -1,0 +1,15 @@
+{
+  "id": "gear",
+  "name": "Gear",
+  "levels": {
+    "1": {
+      "model": "models/gear-1-1.bbmodel",
+      "speed": 1.0,
+      "durability": 50.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Gear"
+      }
+    }
+  }
+}

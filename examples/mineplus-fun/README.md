@@ -1,7 +1,7 @@
 # 🎪 MineplusFun — Reference Module for the Mineplus Core
 
 [![](https://img.shields.io/badge/tier-module%20plugin-purple)](../../README.md)
-[![](https://img.shields.io/badge/machines-2-orange)](#-the-juicer)
+[![](https://img.shields.io/badge/machines-3-orange)](#-the-juicer)
 [![](https://img.shields.io/badge/Java-21-blue)](https://adoptium.net/)
 
 > **Navigate:** [Examples](../README.md) • [Developer API](../../docs/developer-api.md) • [Module Development Guide](DEVELOPMENT_PROMPT.md) • [Project README](../../README.md)
@@ -9,14 +9,15 @@
 `mineplus-fun` is the **canonical reference implementation** of a *module plugin* built on top of the Mineplus Core engine. It demonstrates the intended architecture:
 
 - **Core (`Mineplus`)** is a dependency-only engine. It ships no game content — only the framework (virtual Blockbench rendering, multiblock registry/lifecycle, recipes, GUIs, item registry, linking/signals, persistence) and a few admin commands.
-- **Module (`MineplusFun`)** is a completely separate plugin that depends on the Core and adds *game logic* — in this case, two complete machines:
+- **Module (`MineplusFun`)** is a completely separate plugin that depends on the Core and adds *game logic* — in this case, three complete machines:
 
 | Machine | What it demonstrates |
 |---|---|
 | 🧃 **[Juicer](#-the-juicer)** | Unconditional GUI (JSON `gui` key), recipes, custom items, upgrade button |
 | 💥 **[Cannon](#-the-cannon)** | Conditional interaction, `TNTPrimed` ballistics, persistent ammo, rotation-aware placement, mountable level 2 with vanilla-bow aiming |
+| ⚙️ **[Gear](#%EF%B8%8F-the-gear)** | bbmodel clip animation, redstone activation, chain reaction through the `AnimationApi` |
 
-The game logic lives **entirely** in this module — the Core knows nothing about either machine.
+The game logic lives **entirely** in this module — the Core knows nothing about the machines.
 
 ---
 
@@ -122,6 +123,34 @@ The lanyard's draw works without real arrows because mounting also places a sing
 - *Model-accurate ballistics* — the muzzle position and firing axis are computed from the bbmodel's pixels through the same rotation transform the renderer uses, so the shot always leaves the visible barrel, for every placement orientation.
 - *Rotation-aware placement* — `/cannon place` uses `createMultiBlock` + `placeMultiBlock` with a −90° compensation so the muzzle points away from the player.
 - *Mounting via passenger seat* — [`CannonMountManager`](src/main/java/com/mineplus/fun/cannon/CannonMountManager.java) seats the gunner on an invisible marker armor stand (WASD is neutralised by riding; the seat clears the barrier collision layer), and [`CannonAimListener`](src/main/java/com/mineplus/fun/cannon/CannonAimListener.java) converts the vanilla bow release (`EntityShootBowEvent#getForce`) into the cannon shot.
+
+---
+
+## ⚙️ The Gear
+
+A single-block gear modeled in Blockbench ([model](src/main/resources/defaults/models/gear-1-1.bbmodel)) whose `rotate_gear` animation (a 3-second looping Y-rotation authored in the model itself) is driven by redstone — the first reference feature for the Core's animation engine.
+
+**Command:** `/gear <place|remove|status>`
+
+| Action | Effect |
+|---|---|
+| `place` | Place a Gear where you are looking |
+| `remove` | Remove the looked-at Gear |
+| `status` | List all gears with their power/animation state |
+
+**Activation rules:**
+
+| Situation | Result |
+|---|---|
+| **Redstone adjacent to the gear** (torch, lever, wire, redstone block, repeater) | The gear starts rotating |
+| **Gear placed next to a rotating gear** | It starts rotating too — the interlocking train, phase-synced to the neighbour |
+| **Power cut** | The whole train coasts to a stop (gears return to their rest pose) |
+
+**Implementation highlights:**
+
+- *Clip from the model file* — the animation rides inside the `.bbmodel`; the multiblock JSON declares **no** `animations` autoplay because rotation is *state-driven*, not unconditional.
+- *Grid evaluation* ([`GearGrid`](src/main/java/com/mineplus/fun/gear/GearGrid.java)) — every half second (plus instantly on `BlockRedstoneEvent` and lifecycle hooks) the module flood-fills the active set from redstone-powered seeds across face-adjacent gears. Reachability-based, so a ring of gears can never self-sustain after the power is cut.
+- *Phase synchronization* — a gear joining a running train starts its clip at the neighbour's current animation time, so meshed gears rotate in lockstep; the whole train plays the same clip at the same rate.
 
 ---
 
