@@ -36,6 +36,7 @@ public class ConfigManager {
             this.config = new MineplusConfig(
                     additionalDebugLogs,
                     MineplusConfig.parseVirtualRendering(yamlConfig, VirtualRenderingSettings.defaults()),
+                    MineplusConfig.parseAnimation(yamlConfig, com.mineplus.infrastructure.virtual.animation.AnimationSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -83,6 +84,22 @@ public class ConfigManager {
                       PER_FACE_RENDERING: true
                       # Anchor convention: AUTO (detect from model format and extent) | CENTER | GRID
                       ORIGIN_MODE: AUTO
+
+                    # Animation engine (bbmodel animations -> BlockDisplay transforms).
+                    # The server pushes target transforms every TICK_INTERVAL_TICKS and the
+                    # vanilla client interpolates between them, so motion renders at the
+                    # client's own frame rate.
+                    ANIMATION:
+                      # Master switch for the animation runtime.
+                      ENABLED: true
+                      # Server ticks between transform pushes (1 = every tick, the smoothest
+                      # a purely server-side renderer can update).
+                      TICK_INTERVAL_TICKS: 1
+                      # Client interpolation window in ticks; 0 = match TICK_INTERVAL_TICKS.
+                      INTERPOLATION_TICKS: 1
+                      # Auto-start animations declared in multiblock levels ("animations")
+                      # or model meta files ("autoplay").
+                      AUTOPLAY: true
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

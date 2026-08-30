@@ -12,6 +12,7 @@ import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.io.FileReader;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -67,7 +68,8 @@ public final class MultiBlockConfigLoader {
                 double durability = levelJson.has("durability") ? levelJson.get("durability").getAsDouble() : 1.0D;
                 Map<String, Integer> upgradeCost = parseIntMap(levelJson.getAsJsonObject("upgradeCost"));
                 Map<String, String> guiOptions = parseStringMap(levelJson.getAsJsonObject("guiOptions"));
-                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions));
+                List<String> animations = parseStringList(levelJson.get("animations"));
+                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations));
             }
 
             registry.registerType(new MultiBlockType(id, name, levels, new MultiBlockHook() {
@@ -97,5 +99,22 @@ public final class MultiBlockConfigLoader {
             map.put(key, object.get(key).getAsString());
         }
         return map;
+    }
+
+    /** Autoplay animation names ({@code levels.<n>.animations}); null member tolerated. */
+    private List<String> parseStringList(com.google.gson.JsonElement element) {
+        List<String> list = new java.util.ArrayList<>();
+        if (element == null || !element.isJsonArray()) {
+            return list;
+        }
+        for (com.google.gson.JsonElement entry : element.getAsJsonArray()) {
+            if (entry != null && entry.isJsonPrimitive() && entry.getAsString() != null) {
+                String value = entry.getAsString().trim();
+                if (!value.isEmpty()) {
+                    list.add(value);
+                }
+            }
+        }
+        return list;
     }
 }

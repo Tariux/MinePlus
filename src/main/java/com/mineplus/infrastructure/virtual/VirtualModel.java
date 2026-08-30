@@ -1,7 +1,11 @@
 package com.mineplus.infrastructure.virtual;
 
+import com.mineplus.infrastructure.virtual.animation.AnimationClip;
+import com.mineplus.infrastructure.virtual.animation.VirtualBone;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -11,7 +15,9 @@ public record VirtualModel(
         Map<String, String> textureMappings,
         Resolution resolution,
         String modelFormat,
-        List<VectorAnchor> anchors
+        List<VectorAnchor> anchors,
+        List<VirtualBone> bones,
+        List<AnimationClip> animations
 ) {
 
     public VirtualModel {
@@ -20,15 +26,22 @@ public record VirtualModel(
         resolution = resolution == null ? new Resolution(16, 16) : resolution;
         modelFormat = modelFormat == null || modelFormat.isBlank() ? null : modelFormat;
         anchors = anchors == null ? List.of() : List.copyOf(anchors);
+        bones = bones == null ? List.of() : List.copyOf(bones);
+        animations = animations == null ? List.of() : List.copyOf(animations);
     }
 
     public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings) {
-        this(name, cubes, textureMappings, null, null, null);
+        this(name, cubes, textureMappings, null, null, null, null, null);
     }
 
     public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings,
-                       Resolution resolution, String modelFormat) {
-        this(name, cubes, textureMappings, resolution, modelFormat, null);
+                        Resolution resolution, String modelFormat) {
+        this(name, cubes, textureMappings, resolution, modelFormat, null, null, null);
+    }
+
+    public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings,
+                        Resolution resolution, String modelFormat, List<VectorAnchor> anchors) {
+        this(name, cubes, textureMappings, resolution, modelFormat, anchors, null, null);
     }
 
     /**
@@ -40,6 +53,39 @@ public record VirtualModel(
             return Set.of();
         }
         return new LinkedHashSet<>(textureMappings.values());
+    }
+
+    public boolean hasAnimations() {
+        return !animations.isEmpty() && !bones.isEmpty();
+    }
+
+    /** Clip by name (case-insensitive), or {@code null}. */
+    public AnimationClip animation(String name) {
+        if (name == null || name.isBlank() || animations.isEmpty()) {
+            return null;
+        }
+        String normalized = name.trim().toLowerCase(Locale.ROOT);
+        for (AnimationClip clip : animations) {
+            if (clip.name().toLowerCase(Locale.ROOT).equals(normalized)) {
+                return clip;
+            }
+        }
+        return null;
+    }
+
+    /** Bone index by name (case-insensitive), or {@code -1}. Bones are in preorder. */
+    public int boneIndex(String name) {
+        if (name == null || name.isBlank() || bones.isEmpty()) {
+            return -1;
+        }
+        String normalized = name.trim().toLowerCase(Locale.ROOT);
+        List<VirtualBone> list = new ArrayList<>(bones);
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).name().toLowerCase(Locale.ROOT).equals(normalized)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** Texture resolution in pixels (bbmodel {@code resolution.width/height}), default 16x16. */

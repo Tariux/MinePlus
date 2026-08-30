@@ -13,7 +13,8 @@ public record BakedCube(
         Quaternionf rightRotation,
         Map<CubeFace, BakedFace> faces,
         String primaryTexture,
-        int lightEmission
+        int lightEmission,
+        int boneIndex
 ) {
 
     public BakedCube(
@@ -25,7 +26,20 @@ public record BakedCube(
             Map<CubeFace, BakedFace> faces,
             String primaryTexture
     ) {
-        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, 0);
+        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, 0, -1);
+    }
+
+    public BakedCube(
+            String name,
+            Vector3f translation,
+            Quaternionf leftRotation,
+            Vector3f scale,
+            Quaternionf rightRotation,
+            Map<CubeFace, BakedFace> faces,
+            String primaryTexture,
+            int lightEmission
+    ) {
+        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, lightEmission, -1);
     }
 
     public BakedCube {
@@ -40,6 +54,7 @@ public record BakedCube(
         }
         faces = Map.copyOf(faceCopy);
         lightEmission = Math.max(0, Math.min(15, lightEmission));
+        boneIndex = Math.max(-1, boneIndex);
     }
 
     /** True when this cube carries no rotation, so its OBB equals its AABB (voxelization fast path). */

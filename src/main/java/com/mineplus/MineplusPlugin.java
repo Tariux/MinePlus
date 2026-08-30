@@ -40,7 +40,7 @@ public final class MineplusPlugin extends JavaPlugin {
         virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
         virtualBlockManager.loadModels(this);
 
-        context = PluginContext.bootstrap(this, virtualBlockManager);
+        context = PluginContext.bootstrap(this, virtualBlockManager, configManager.getConfig().getAnimation());
         context.finalizeSetup();
 
         registerCommand();
@@ -114,6 +114,9 @@ public final class MineplusPlugin extends JavaPlugin {
         if (virtualBlockManager != null && configManager != null) {
             virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
         }
+        if (context != null && configManager != null) {
+            context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
+        }
     }
 
     public InfrastructureApi infrastructureApi() {
@@ -126,5 +129,9 @@ public final class MineplusPlugin extends JavaPlugin {
 
     public JsonInfrastructureApi jsonInfrastructureApi() {
         return context == null ? null : context.jsonInfrastructureApi();
+    }
+
+    public com.mineplus.infrastructure.core.api.AnimationApi animationApi() {
+        return context == null ? null : context.animationApi();
     }
 }

@@ -59,4 +59,28 @@ public interface MultiBlockHook {
      */
     default void onProcessComplete(MultiBlockInstance instance, MachineRecipe recipe) {
     }
+
+    /**
+     * Called when an animation of the instance's rendered model starts — via
+     * autoplay (level {@code animations} or model meta), the {@code AnimationApi},
+     * or a one-shot trigger. A looping animation fires this once per start, not
+     * per loop iteration.
+     *
+     * @param instance      the machine whose model animation started
+     * @param animationName the started clip's name (as authored in Blockbench)
+     */
+    default void onAnimationStart(MultiBlockInstance instance, String animationName) {
+    }
+
+    /**
+     * Called when an animation finishes — a {@code once} or {@code hold} clip
+     * reaching its end (looping clips never complete). The rendered pose is
+     * final when this fires: {@code hold} keeps the last frame, {@code once}
+     * returns the affected bones to rest.
+     *
+     * @param instance      the machine whose model animation completed
+     * @param animationName the completed clip's name
+     */
+    default void onAnimationComplete(MultiBlockInstance instance, String animationName) {
+    }
 }

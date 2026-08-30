@@ -2,6 +2,11 @@ package com.mineplus.infrastructure.virtual;
 
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
+import com.mineplus.infrastructure.virtual.animation.AnimationClip;
+import com.mineplus.infrastructure.virtual.animation.Keyframe;
+import com.mineplus.infrastructure.virtual.animation.KeyframeInterpolation;
+import com.mineplus.infrastructure.virtual.animation.LoopMode;
+import com.mineplus.infrastructure.virtual.animation.VirtualBone;
 import com.mineplus.util.DebugLogger;
 import java.io.BufferedReader;
 import java.io.File;
@@ -11,6 +16,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,6 +36,10 @@ import org.joml.Vector3f;
  * <p>The outliner matrix accumulation (pivot conjugation {@code T(origin/16)·R·T(-origin/16)}
  * chained through parents, cycle-safe) is preserved verbatim from the DOM importer; only the
  * input construction changed.
+ *
+ * <p>Animations are parsed in the same single pass: clip metadata, per-bone animators
+ * (keyed by outliner group uuid, converted to bone names), and keyframes with
+ * molang-tolerant value parsing (non-numeric expressions fall back to 0 and are reported).
  */
 public class BbModelImporter {
 
@@ -79,6 +89,7 @@ public class BbModelImporter {
         List<RawAnchor> rawAnchors = new ArrayList<>();
         List<RawGroup> rootOutliner = new ArrayList<>();
         List<String> rootElementUuids = new ArrayList<>();
+        List<RawAnimation> rawAnimations = new ArrayList<>();
 
         JsonReader json = new JsonReader(reader);
         json.setLenient(false);
@@ -91,6 +102,7 @@ public class BbModelImporter {
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
                 case "resolution" -> resolution = parseResolution(json);
                 case "meta" -> modelFormat = parseMeta(json);
+                case "animations" -> parseAnimations(json, rawAnimations);
                 default -> json.skipValue();
             }
         }
@@ -122,6 +134,15 @@ public class BbModelImporter {
                     elementEnabled,
                     new HashSet<>()
             );
+        }
+
+        // Bone graph from the outliner groups: preorder (parents precede children)
+        // so the animation evaluator can compose world deltas in one forward pass.
+        List<VirtualBone> bones = new ArrayList<>();
+        Map<String, Integer> boneIndexByUuid = new HashMap<>();
+        Map<String, Integer> elementBoneIndex = new HashMap<>();
+        for (RawGroup group : rootOutliner) {
+            buildBones(group, -1, bones, boneIndexByUuid, elementBoneIndex, new HashSet<>());
         }
 
         for (RawElement element : rawElements) {
@@ -180,7 +201,8 @@ public class BbModelImporter {
                     new Quaternionf(),
                     faces,
                     primaryTexture,
-                    element.lightEmission
+                    element.lightEmission,
+                    element.uuid == null ? -1 : elementBoneIndex.getOrDefault(element.uuid, -1)
             ));
         }
 
@@ -198,7 +220,18 @@ public class BbModelImporter {
             ));
         }
 
-        return new VirtualModel(name, bakedCubes, textureLookup.toIdMap(), resolution, modelFormat, anchors);
+        List<AnimationClip> animations = buildClips(rawAnimations, bones, boneIndexByUuid);
+
+        return new VirtualModel(
+                name,
+                bakedCubes,
+                textureLookup.toIdMap(),
+                resolution,
+                modelFormat,
+                anchors,
+                List.copyOf(bones),
+                animations
+        );
     }
 
     private static void parseTextures(JsonReader json, TextureLookup lookup) throws Exception {
@@ -328,6 +361,7 @@ public class BbModelImporter {
                     String fieldName = json.nextName();
                     switch (fieldName) {
                         case "uuid" -> group.uuid = nextStringOrNull(json);
+                        case "name" -> group.name = nextStringOrNull(json);
                         case "origin" -> group.origin = nextVector3(json);
                         case "rotation" -> group.rotation = nextVector3(json);
                         case "visibility" -> group.visibility = nextBoolean(json, true);
@@ -342,6 +376,244 @@ public class BbModelImporter {
             }
         }
         json.endArray();
+    }
+
+    private static void parseAnimations(JsonReader json, List<RawAnimation> output) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            RawAnimation animation = new RawAnimation();
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "name" -> animation.name = nextStringOrNull(json);
+                    case "loop" -> animation.loop = nextStringOrNull(json);
+                    case "length" -> animation.length = (float) nextDouble(json, 0.0);
+                    case "animators" -> parseAnimators(json, animation);
+                    default -> json.skipValue(); // uuid, override, snapping, markers, delays, ...
+                }
+            }
+            json.endObject();
+            output.add(animation);
+        }
+        json.endArray();
+    }
+
+    private static void parseAnimators(JsonReader json, RawAnimation animation) throws Exception {
+        json.beginObject();
+        while (json.hasNext()) {
+            String boneKey = json.nextName();
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            RawAnimator animator = new RawAnimator();
+            animator.uuid = boneKey;
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "name" -> animator.name = nextStringOrNull(json);
+                    case "type" -> animator.type = nextStringOrNull(json);
+                    case "keyframes" -> parseKeyframes(json, animator);
+                    default -> json.skipValue(); // rotation_global, quaternion_interpolation, ...
+                }
+            }
+            json.endObject();
+            // Only bone animators drive geometry; effect animators (sounds,
+            // particles, timelines) are dead branches for a display renderer.
+            if (animator.type == null || "bone".equalsIgnoreCase(animator.type)) {
+                animation.animators.put(boneKey, animator);
+            }
+        }
+        json.endObject();
+    }
+
+    private static void parseKeyframes(JsonReader json, RawAnimator animator) throws Exception {
+        json.beginArray();
+        while (json.hasNext()) {
+            if (json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            RawKeyframe keyframe = new RawKeyframe();
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "channel" -> keyframe.channel = nextStringOrNull(json);
+                    case "time" -> keyframe.time = (float) nextDouble(json, 0.0);
+                    case "interpolation" -> keyframe.interpolation = nextStringOrNull(json);
+                    case "data_points" -> parseDataPoints(json, keyframe);
+                    default -> json.skipValue();
+                }
+            }
+            json.endObject();
+            animator.keyframes.add(keyframe);
+        }
+        json.endArray();
+    }
+
+    /** Reads the first data point's x/y/z; the remaining points are skipped. */
+    private static void parseDataPoints(JsonReader json, RawKeyframe keyframe) throws Exception {
+        json.beginArray();
+        boolean first = true;
+        while (json.hasNext()) {
+            if (!first || json.peek() != JsonToken.BEGIN_OBJECT) {
+                json.skipValue();
+                continue;
+            }
+            first = false;
+            json.beginObject();
+            while (json.hasNext()) {
+                String fieldName = json.nextName();
+                switch (fieldName) {
+                    case "x" -> keyframe.x = nextMolangFloat(json, 0.0f);
+                    case "y" -> keyframe.y = nextMolangFloat(json, 0.0f);
+                    case "z" -> keyframe.z = nextMolangFloat(json, 0.0f);
+                    default -> json.skipValue();
+                }
+            }
+            json.endObject();
+        }
+        json.endArray();
+    }
+
+    /**
+     * Molang-tolerant numeric read: numbers and numeric strings parse; molang
+     * expressions (e.g. {@code math.sin(q.anim_time * 90)}) fall back to the
+     * given default — evaluating them needs an animation context the importer
+     * does not have.
+     */
+    private static float nextMolangFloat(JsonReader json, float fallback) throws Exception {
+        JsonToken peek = json.peek();
+        if (peek == JsonToken.NUMBER) {
+            return (float) json.nextDouble();
+        }
+        if (peek == JsonToken.STRING) {
+            String value = json.nextString();
+            try {
+                return Float.parseFloat(value.trim());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        if (peek == JsonToken.NULL) {
+            json.nextNull();
+            return fallback;
+        }
+        json.skipValue();
+        return fallback;
+    }
+
+    /**
+     * Builds the preorder bone list. Also records, for every element uuid, the
+     * index of its innermost containing group — the cube's animating bone.
+     */
+    private static int buildBones(
+            RawGroup group,
+            int parentIndex,
+            List<VirtualBone> bones,
+            Map<String, Integer> boneIndexByUuid,
+            Map<String, Integer> elementBoneIndex,
+            Set<String> visited
+    ) {
+        if (group.uuid != null && !group.uuid.isBlank()) {
+            if (!visited.add(group.uuid)) {
+                return -1;
+            }
+        }
+        int index = bones.size();
+        bones.add(null);
+        if (group.uuid != null && !group.uuid.isBlank()) {
+            boneIndexByUuid.put(group.uuid, index);
+        }
+        for (String childUuid : group.childElementUuids) {
+            if (childUuid != null && !childUuid.isBlank()) {
+                elementBoneIndex.put(childUuid, index);
+            }
+        }
+
+        List<Integer> childIndices = new ArrayList<>();
+        for (RawGroup child : group.children) {
+            int childIndex = buildBones(child, index, bones, boneIndexByUuid, elementBoneIndex, visited);
+            if (childIndex >= 0) {
+                childIndices.add(childIndex);
+            }
+        }
+
+        String name = group.name != null && !group.name.isBlank() ? group.name : "bone_" + index;
+        Vector3f pivot = group.origin == null ? new Vector3f() : new Vector3f(group.origin);
+        bones.set(index, new VirtualBone(name, group.uuid, parentIndex, pivot, childIndices));
+        return index;
+    }
+
+    /** Converts raw animation captures into clips keyed by bone name. */
+    private static List<AnimationClip> buildClips(
+            List<RawAnimation> rawAnimations,
+            List<VirtualBone> bones,
+            Map<String, Integer> boneIndexByUuid
+    ) {
+        List<AnimationClip> clips = new ArrayList<>();
+        for (RawAnimation raw : rawAnimations) {
+            Map<String, AnimationClip.BoneAnimation> animators = new LinkedHashMap<>();
+            float maxTime = 0.0f;
+            for (RawAnimator animator : raw.animators.values()) {
+                List<Keyframe> rotation = new ArrayList<>();
+                List<Keyframe> position = new ArrayList<>();
+                List<Keyframe> scale = new ArrayList<>();
+                for (RawKeyframe kf : animator.keyframes) {
+                    Keyframe converted = new Keyframe(
+                            kf.time, kf.x, kf.y, kf.z,
+                            KeyframeInterpolation.fromKey(kf.interpolation, KeyframeInterpolation.LINEAR)
+                    );
+                    String channel = kf.channel == null ? "" : kf.channel.trim().toLowerCase(Locale.ROOT);
+                    switch (channel) {
+                        case "rotation" -> rotation.add(converted);
+                        case "position" -> position.add(converted);
+                        case "scale" -> scale.add(converted);
+                        default -> {
+                        }
+                    }
+                    maxTime = Math.max(maxTime, kf.time);
+                }
+                if (rotation.isEmpty() && position.isEmpty() && scale.isEmpty()) {
+                    continue;
+                }
+
+                String boneName = null;
+                Integer boneIndex = animator.uuid == null ? null : boneIndexByUuid.get(animator.uuid);
+                if (boneIndex != null && boneIndex < bones.size()) {
+                    boneName = bones.get(boneIndex).name();
+                } else if (animator.name != null && !animator.name.isBlank()) {
+                    boneName = animator.name;
+                }
+                if (boneName == null || boneName.isBlank()) {
+                    DebugLogger.warning("bbmodel import: dropping animator without resolvable bone (uuid="
+                            + animator.uuid + ") in animation '" + raw.name + "'.");
+                    continue;
+                }
+                if (animators.put(boneName, new AnimationClip.BoneAnimation(rotation, position, scale)) != null) {
+                    DebugLogger.warning("bbmodel import: duplicate animator bone name '" + boneName
+                            + "' in animation '" + raw.name + "'; keeping the last one.");
+                }
+            }
+            if (animators.isEmpty()) {
+                continue;
+            }
+            float length = raw.length > 0.0f ? raw.length : maxTime;
+            clips.add(new AnimationClip(
+                    raw.name,
+                    LoopMode.fromKey(raw.loop, LoopMode.ONCE),
+                    length,
+                    animators
+            ));
+        }
+        return clips;
     }
 
     private static VirtualModel.Resolution parseResolution(JsonReader json) throws Exception {
@@ -580,6 +852,7 @@ public class BbModelImporter {
     /** Streaming holder for one outliner group. */
     private static final class RawGroup {
         String uuid;
+        String name;
         Vector3f origin;
         Vector3f rotation;
         boolean visibility = true;
@@ -615,6 +888,32 @@ public class BbModelImporter {
         String name;
         Vector3f origin;
         Vector3f rotation;
+    }
+
+    /** Streaming holder for one animation. */
+    private static final class RawAnimation {
+        String name;
+        String loop;
+        float length;
+        final Map<String, RawAnimator> animators = new LinkedHashMap<>();
+    }
+
+    /** Streaming holder for one bone animator of an animation. */
+    private static final class RawAnimator {
+        String uuid;
+        String name;
+        String type;
+        final List<RawKeyframe> keyframes = new ArrayList<>();
+    }
+
+    /** Streaming holder for one keyframe (first data point's channels). */
+    private static final class RawKeyframe {
+        String channel;
+        String interpolation;
+        float time;
+        float x;
+        float y;
+        float z;
     }
 
     /**

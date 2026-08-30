@@ -4,6 +4,7 @@ package com.mineplus.infrastructure.virtual;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
+import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -56,8 +58,25 @@ public class VirtualBlockManager implements Listener {
             Location origin,
             Quaternionf rotation,
             List<UUID> displayEntities,
-            Set<Location> barrierBlocks
+            Set<Location> barrierBlocks,
+            List<AnimationBinding> animationBindings,
+            Vector3f pivotCorrection
     ) {
+
+        public ActiveVirtualBlock {
+            animationBindings = animationBindings == null ? List.of() : List.copyOf(animationBindings);
+            pivotCorrection = pivotCorrection == null ? new Vector3f() : new Vector3f(pivotCorrection);
+        }
+    }
+
+    /**
+     * Live view of every spawned virtual block, keyed by rendered model id.
+     * The animation runtime drives off this map: new spawns appear here (any
+     * placement path) and removals drop out, so animation controllers attach
+     * and clean up without lifecycle wiring.
+     */
+    public Map<UUID, ActiveVirtualBlock> activeBlocksView() {
+        return Collections.unmodifiableMap(activeBlocks);
     }
 
     public void loadModels(JavaPlugin plugin) {
@@ -376,6 +395,8 @@ public class VirtualBlockManager implements Listener {
         Vector3f rotatedPivotOffset = new Vector3f(pivotOffset);
         globalRotation.transform(rotatedPivotOffset);
 
+        boolean animated = model.hasAnimations();
+        List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
         for (BakedCube cube : model.cubes()) {
             for (DisplayEmitter.EmittedDisplay item
                     : DisplayEmitter.emitCube(cube, settings.perFaceRendering())) {
@@ -398,7 +419,24 @@ public class VirtualBlockManager implements Listener {
                         item.rightRotation()
                 ));
                 spawnedEntities.add(display.getUniqueId());
+
+                if (animated && cube.boneIndex() >= 0) {
+                    animationBindings.add(new AnimationBinding(
+                            cube.boneIndex(),
+                            display.getUniqueId(),
+                            new Matrix4f()
+                                    .translate(item.translation())
+                                    .rotate(item.leftRotation())
+                                    .scale(item.scale())
+                                    .rotate(item.rightRotation())
+                    ));
+                }
             }
+        }
+
+        Vector3f pivotCorrection = null;
+        if (animated && !animationBindings.isEmpty()) {
+            pivotCorrection = new Vector3f(pivotOffset).sub(rotatedPivotOffset);
         }
 
         activeBlocks.put(instanceId, new ActiveVirtualBlock(
@@ -406,7 +444,9 @@ public class VirtualBlockManager implements Listener {
                 origin,
                 globalRotation,
                 spawnedEntities,
-                barrierBlocks
+                barrierBlocks,
+                animationBindings == null ? List.of() : animationBindings,
+                pivotCorrection
         ));
         return instanceId;
     }

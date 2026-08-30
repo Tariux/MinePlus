@@ -10,7 +10,7 @@ Mineplus exposes three usage tiers. They stack: a machine defined through JSON (
 | **2 — Basic** | `BasicInfrastructureApi` | Simple place/remove/lookup add-ons |
 | **3 — Advanced** | `InfrastructureApi` | Full hooks, lifecycle listeners, GUIs, links, signals, processes |
 
-**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Module Toolkit](#module-toolkit) · [Hooks](#multiblock-hooks) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
+**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Module Toolkit](#module-toolkit) · [Hooks](#multiblock-hooks) · [Animation Engine](#animation-engine) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
 
 ---
 
@@ -23,6 +23,7 @@ MineplusPlugin mineplus = MineplusPlugin.getInstance();
 BasicInfrastructureApi basicApi = mineplus.basicInfrastructureApi();
 JsonInfrastructureApi jsonApi = mineplus.jsonInfrastructureApi();
 InfrastructureApi advancedApi = mineplus.infrastructureApi();
+AnimationApi animationApi = mineplus.animationApi();
 ```
 
 Or through the full `PluginContext`, the recommended entry point for modules:
@@ -39,6 +40,7 @@ context.infrastructureEngine() // .registry() .lifecycleManager() .recipeManager
 context.basicInfrastructureApi()
 context.infrastructureApi()
 context.jsonInfrastructureApi()
+context.animationApi()          // selector-based animation control (play/stop/pause/trigger/enable)
 context.moduleSupport()        // module toolkit: resource install, looked-at resolution, command registration
 ```
 
@@ -153,6 +155,8 @@ advancedApi.registerHook("cannon", new MultiBlockHook() {
     @Override public void onSignal(MultiBlockInstance i, MultiBlockSignal signal) {}
     @Override public void onProcessStart(MultiBlockInstance i, MachineRecipe recipe) {}
     @Override public void onProcessComplete(MultiBlockInstance i, MachineRecipe recipe) {}
+    @Override public void onAnimationStart(MultiBlockInstance i, String animation) {}      // clip started (autoplay or API)
+    @Override public void onAnimationComplete(MultiBlockInstance i, String animation) {}   // once/hold clip reached its end
 });
 ```
 
@@ -169,6 +173,62 @@ world = anchorBlock + (0.5, 0.5, 0.5) + R · (p_pixels / 16 − (0, 0.5, 0))
 ```
 
 `ModelPoints.toWorld(instance, world, pixels)`, `toWorldOffset(...)`, and `direction(instance, axis)` keep feature geometry glued to the rendered model for every placement rotation — the technique used by the [Cannon's firing math](../examples/mineplus-fun/src/main/java/com/mineplus/fun/cannon/CannonFireHook.java).
+
+---
+
+## Animation Engine
+
+Blockbench animations travel inside the `.bbmodel` file — the importer parses clips, bone animators, and keyframes in the same streaming pass as the geometry. The runtime samples the tracks server-side and pushes composed `BlockDisplay` transforms; the vanilla client interpolates between pushes, so motion renders at the client's own frame rate (the maximum a purely server-side renderer can achieve; the server cannot emit updates faster than its own tick loop).
+
+**Two control interfaces:**
+
+1. **Internal data interface** — clips play straight from the model file. Declare autoplay per multiblock level (`"animations": ["rotate_gear"]` in the level JSON) or per raw model (`"autoplay"` in the model's `.meta.json`). JSON-declared autoplay wins over meta.
+2. **External hook interface** — `AnimationApi`, selector-based control from code. Selectors address whole clips, single bones, or everything:
+
+```java
+AnimationApi anim = context.animationApi();
+
+// Play a whole clip (respects the authored loop mode; override via AnimationPlayback)
+anim.playAnimation(instance.id(), "rotate_gear");
+anim.playAnimation(instance.id(), "recoil", AnimationPlayback.speed(2.0f));
+
+// One-shot trigger: restarts from t=0, forced to play once
+anim.triggerAnimation(instance.id(), AnimationSelector.animation("recoil"));
+
+// Granular: trigger only the named bone's tracks inside every clip animating it
+anim.triggerAnimation(instance.id(), AnimationSelector.bone("turret"));
+
+// Enable/disable whatever a selector addresses (pause/resume controllers,
+// or gate a bone's contribution inside all matching clips)
+anim.setAnimationEnabled(instance.id(), AnimationSelector.bone("wheel_front_left"), false);
+anim.setAnimationEnabled(instance.id(), AnimationSelector.all(), true);
+
+// Introspection
+anim.getAnimations(instance.id());          // clip names in the model
+anim.getBones(instance.id());               // bone (outliner group) names
+anim.getAnimationState(instance.id(), "recoil");  // playback snapshot or null
+```
+
+**Selector kinds** (`AnimationSelector`):
+
+| Selector | `playAnimation`-equivalent | `triggerAnimation` | `setAnimationEnabled` |
+|---|---|---|---|
+| `animation("name")` | — | one-shot that clip | pause/resume its controller |
+| `bone("name")` | — | one-shot restricted to that bone's tracks | gate the bone inside every controller animating it |
+| `all()` | — | one-shot every clip | pause/resume everything |
+
+**Verified behavior:**
+
+- **Bones are outliner groups.** A clip animating a parent group moves all nested child bones with it (the pose composes down the hierarchy). Cubes outside any group never animate.
+- Clip values are **deltas relative to the Blockbench rest pose** — rotation in degrees, position in pixels, scale as a multiplier. Multiple concurrent clips on one bone compose additively.
+- **Loop modes** (`loop` field): `once` plays and returns bones to rest (controller removed), `loop` wraps forever, `hold` freezes on the final frame.
+- `stopAnimation` removes a controller and snaps its bones back to rest; `pauseAnimation`/`resumeAnimation` freeze/continue at the current time.
+- Autoplay never overrides explicit control: it fires only the first time a rendered instance is seen, and a stopped clip stays stopped until the instance re-renders (upgrade swap, respawn, reload).
+- `onAnimationStart`/`onAnimationComplete` fire on the type's hook (exception-isolated like all hook dispatch). Looping clips fire start once per start, never complete.
+- All methods accept a multiblock instance id **or** — for raw `/mineplus model debugspawn`-ed models — the rendered model id itself.
+- Models without animations cost nothing: binding capture, tick work, and controllers only exist when the model carries both bones and clips.
+- Molang keyframe expressions fall back to `0` and are reported at import (`/mineplus model info` shows the parsed clip table).
+- `/mineplus model info <key>` reports bones, clips with loop mode/length/per-bone track counts, and meta autoplay.
 
 ---
 
@@ -220,6 +280,7 @@ What runs underneath your feature code:
 |---|---|
 | `MultiBlockLifecycleManager` | Drives create/place/interact/tick/upgrade/remove |
 | `ModelRenderingManager` | Maps machine level → `.bbmodel` rendering through `VirtualBlockManager` |
+| `ModelAnimationManager` | Animation runtime: samples clip keyframes, composes bone-hierarchy deltas, pushes display transforms (attached/cleaned automatically off the live render map) |
 | `VirtualBlockManager` | Session-local mapping + automatic cleanup of orphaned `BlockDisplay` "ghost" entities on chunk loads |
 | `MachineProcessManager` | Timed crafting processes; state in per-instance `stateData`, restart-safe |
 | `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`) via an asynchronous write-behind queue with **incremental writes**: hot paths (place/upgrade/remove, process advancement) stage single-instance upserts/deletes, so one mutation no longer rewrites every row; bulk paths (reload, shutdown) stage a full replace. A background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |

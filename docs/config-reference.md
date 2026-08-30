@@ -46,6 +46,7 @@ Reload everything from game with `/mineplus reload all`.
 | `durability` | `1.0` | Reserved for future use — not yet consumed by the engine |
 | `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
 | `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
+| `animations` | `[]` | Clip names to auto-play on this level's rendered model (see [Animation Engine](developer-api.md#animation-engine)) |
 
 ### Example
 
@@ -60,13 +61,15 @@ Reload everything from game with `/mineplus reload all`.
       "speed": 1.0,
       "durability": 100.0,
       "upgradeCost": { "core_plate": 8 },
-      "guiOptions": { "title": "Crusher I" }
+      "guiOptions": { "title": "Crusher I" },
+      "animations": ["crush_loop"]
     },
     "2": {
       "model": "models/crusher_lv2.bbmodel",
       "speed": 1.35,
       "durability": 160.0,
-      "upgradeCost": { "core_plate": 16 }
+      "upgradeCost": { "core_plate": 16 },
+      "animations": ["crush_loop", "steam_hiss"]
     }
   }
 }
@@ -129,9 +132,26 @@ The loader accepts either a single recipe object or a `{ "recipes": [ ... ] }` w
 | Per-face `uv` + `rotation` (all six directions) | ✅ parsed & used for material orientation |
 | Negative-coordinate geometry | ✅ preserved |
 | `light_emission` | ✅ per-cube display brightness |
-| Animations / timeline / embedded texture bitmaps | ❌ skipped (dead branches are never even allocated) |
+| Animations (clips, bone animators, keyframes) | ✅ parsed and playable (see below) |
+| Embedded texture bitmaps (`source` Base64 PNGs) / timeline setups | ❌ skipped (dead branches are never even allocated) |
 
 **Barrier occupancy is computed from transformed cube volumes** (union per cube), not from one full model bounding box — empty internal spaces stay free, so hollow structures are genuinely walkable.
+
+### Animations
+
+Blockbench animations live in the same `.bbmodel` file and are imported in the same streaming pass:
+
+| Animation feature | Status |
+|---|---|
+| Bone animators (outliner groups; parents drag nested children) | ✅ |
+| `rotation` / `position` / `scale` channels (deltas from rest) | ✅ |
+| `linear` / `step` keyframe interpolation | ✅ |
+| `catmullrom` / `bezier` / `ease` | ⚠️ sampled as linear (spline handles are not exported in keyframes) |
+| Loop modes `once` / `loop` / `hold` | ✅ |
+| Molang keyframe values (e.g. `math.sin(q.anim_time * 90)`) | ⚠️ fall back to `0` and are reported at import |
+| Effect animators (sounds, particles, timelines) | ❌ skipped — no client mod to play them |
+
+Autoplay is declared per multiblock level (`animations` key) or per raw model (`autoplay` in `.meta.json`); programmatic control goes through the `AnimationApi` (selectors for clips, bones, or the whole model). Full behavior: [Developer API → Animation Engine](developer-api.md#animation-engine).
 
 ---
 
@@ -256,11 +276,12 @@ Any global rendering setting can be overridden per model. Place a `models/<key>.
 ```json
 {
   "originMode": "GRID",
-  "collisionMode": "SURFACE"
+  "collisionMode": "SURFACE",
+  "autoplay": ["rotate_gear"]
 }
 ```
 
-Omitted fields fall back to the global `settings.mp.yml` values.
+Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence.
 
 ---
 
@@ -313,6 +334,18 @@ VIRTUAL_RENDERING:
   PER_FACE_RENDERING: true
   # Anchor convention: AUTO (detect) | CENTER | GRID
   ORIGIN_MODE: AUTO
+
+ANIMATION:
+  # Master switch for the animation runtime.
+  ENABLED: true
+  # Server ticks between transform pushes (1 = every tick, the smoothest
+  # a purely server-side renderer can update).
+  TICK_INTERVAL_TICKS: 1
+  # Client interpolation window in ticks; 0 = match TICK_INTERVAL_TICKS.
+  INTERPOLATION_TICKS: 1
+  # Auto-start animations declared in multiblock levels ("animations")
+  # or model meta files ("autoplay").
+  AUTOPLAY: true
 ```
 
 | Key | Values | Effect |
@@ -326,6 +359,10 @@ VIRTUAL_RENDERING:
 | `ROTATION_SNAP_THRESHOLD_DEGREES` | degrees | Deviation beyond this logs a `DebugLogger` warning |
 | `PER_FACE_RENDERING` | `true` / `false` | Emit per-face material plates for mixed-material cubes (better texture fidelity, more display entities) |
 | `ORIGIN_MODE` | `AUTO` / `CENTER` / `GRID` | Default anchor convention — see [Origin Modes](#anchor-conventions-origin-modes) |
+| `ANIMATION.ENABLED` | `true` / `false` | Master switch for the animation runtime |
+| `ANIMATION.TICK_INTERVAL_TICKS` | ticks ≥ 1 | Server ticks between transform pushes; `1` (default) pushes every tick and lets the client interpolate to its own frame rate |
+| `ANIMATION.INTERPOLATION_TICKS` | ticks ≥ 0 | Client interpolation window between pushes; `0` (default) matches the tick interval |
+| `ANIMATION.AUTOPLAY` | `true` / `false` | Auto-start clips declared in multiblock level `animations` keys or model `.meta.json` `autoplay` lists |
 
 ---
 

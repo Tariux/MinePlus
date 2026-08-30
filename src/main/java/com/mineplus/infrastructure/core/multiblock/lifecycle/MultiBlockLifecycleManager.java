@@ -17,6 +17,7 @@ import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.persistence.PersistenceFacade;
 import com.mineplus.infrastructure.persistence.snapshot.MultiBlockSnapshot;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import com.mineplus.infrastructure.virtual.animation.AnimationInstanceBridge;
 import com.mineplus.util.DebugLogger;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +31,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.joml.Quaternionf;
 
-public final class MultiBlockLifecycleManager {
+public final class MultiBlockLifecycleManager implements AnimationInstanceBridge {
 
     /** Interval of the repeating lifecycle tick task, in ticks. */
     private static final int TICK_INTERVAL_TICKS = 20;
@@ -258,6 +259,15 @@ public final class MultiBlockLifecycleManager {
                 || actor.getGameMode() == org.bukkit.GameMode.CREATIVE;
         VirtualBlockManager.SpawnAreaResult area = renderingManager.prepareArea(
                 type, instance, plugin.getDataFolder(), fullAccess);
+        if (area == null) {
+            if (actor != null) {
+                actor.sendMessage(org.bukkit.ChatColor.RED
+                        + "Failed to load this structure's model — check the server log for parse errors.");
+            }
+            DebugLogger.severe("place: Aborted placement of instance " + id
+                    + ": the model could not be resolved (missing file or parse failure).");
+            return false;
+        }
         if (area == VirtualBlockManager.SpawnAreaResult.BLOCKED) {
             if (actor != null) {
                 actor.sendMessage(org.bukkit.ChatColor.RED
@@ -689,6 +699,42 @@ public final class MultiBlockLifecycleManager {
             return null;
         }
         return registry.getInstanceByRenderedModelId(renderedModelId);
+    }
+
+    @Override
+    public MultiBlockInstance instanceForRenderedModel(UUID renderedModelId) {
+        return findByRenderedModelId(renderedModelId);
+    }
+
+    @Override
+    public List<String> declaredAnimations(MultiBlockInstance instance) {
+        if (instance == null) {
+            return List.of();
+        }
+        MultiBlockType type = registry.getType(instance.typeId());
+        if (type == null) {
+            return List.of();
+        }
+        MultiBlockLevel level = type.level(instance.level());
+        return level == null ? List.of() : level.animations();
+    }
+
+    @Override
+    public void onAnimationStart(MultiBlockInstance instance, String animation) {
+        MultiBlockType type = registry.getType(instance.typeId());
+        if (type != null) {
+            safeHook(instance, "onAnimationStart",
+                    () -> type.hook().onAnimationStart(instance, animation));
+        }
+    }
+
+    @Override
+    public void onAnimationComplete(MultiBlockInstance instance, String animation) {
+        MultiBlockType type = registry.getType(instance.typeId());
+        if (type != null) {
+            safeHook(instance, "onAnimationComplete",
+                    () -> type.hook().onAnimationComplete(instance, animation));
+        }
     }
 
     public Location toLocation(MultiBlockInstance instance) {
