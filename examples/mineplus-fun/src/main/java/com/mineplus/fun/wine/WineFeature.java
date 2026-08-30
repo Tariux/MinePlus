@@ -19,12 +19,18 @@ import org.bukkit.plugin.java.JavaPlugin;
  * label band, cork): the source file contained two cubes fully nested inside the
  * label band and a zero-depth decal embedded in the neck — redundant in an opaque
  * renderer (the band's base display occludes them) and a source of layered
- * artifacts. The full bake is ~338 merged plates across 23 faces.
+ * artifacts. The remaining intentional nesting (band wrapping the body, cork
+ * seated in the neck) is handled by the Core's occlusion culling: texels whose
+ * plates would sit inside another cube's solid emit nothing. The full bake is
+ * ~265 merged plates across 23 faces with ~238 buried cells culled.
  *
  * <p>{@code strad-wine.meta.json} opts the model in explicitly
  * ({@code "texelMode": "AUTO"}) and raises the per-instance plate budget to 384 —
  * above the global default of 150, exactly the "decorative model wants more
- * plates" case the per-model budget override exists for.
+ * plates" case the per-model budget override exists for. Lighting stays natural
+ * (no {@code texelBrightness} floor): the bottle reads through the palette's dark
+ * teal/black entries and vanilla's own directional face shading rather than a
+ * forced glow.
  *
  * <p>No hooks, GUI, or listeners: this feature exists to install the resources
  * (the JSON multiblock definition registers the {@code wine_bottle} type during

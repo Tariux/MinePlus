@@ -1,6 +1,5 @@
 package com.mineplus.infrastructure.virtual.texel;
 
-import java.util.Arrays;
 import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 
@@ -8,22 +7,35 @@ import org.bukkit.block.data.BlockData;
  * The curated vanilla flat-block palette for texel surface baking, with perceptual
  * (redmean) color matching.
  *
- * <p>Membership criteria: every entry must be <i>visually flat under arbitrary
- * scaling</i> — its texture noise must average to the perceived color and never read
- * as a pattern when a plate is small. Concretes (saturated backbone), concrete powders
- * (matte, slightly offset hues that fill palette-hull holes), terracottas (the
- * muted/desaturated band) plus a few gap fillers. Glazed terracottas (directional
- * pattern), stained glass (transparency), most wools (visible weave) and grained
- * materials (planks/logs) are deliberately excluded.
+ * <p><b>Flatness is a hard membership rule, not a preference.</b> A palette material
+ * renders on plates of arbitrary size — a plate stretches the block's texture to its
+ * own dimensions. Only materials whose texture noise averages to the perceived color
+ * and never reads as a pattern under arbitrary scaling are admitted: stretching a
+ * flat material is invisible (a solid color at any size), while stretching a
+ * patterned block would distort the pattern and degrade the render. This enforces the
+ * authoring rule "texture stretching is only permitted for flat (cement-family)
+ * surfaces" by construction: patterned vanilla blocks simply never enter the palette,
+ * so no plate can ever stretch a pattern. Colors are always the source texture's own
+ * (sampled 1:1 per texel); only the block choice is a nearest-flat-color match.
+ *
+ * <p>Membership: 16 concretes (saturated backbone), 16 concrete powders (matte, hue
+ * fillers), 16 terracottas (muted band; speckle ≤ ±5 RGB converges to the mean),
+ * snow block (near-white), obsidian (dark indigo) and warped wart (dark teal) — the
+ * two fill the otherwise-missing dark desaturated band so dark glass/shading art
+ * quantizes to coherent dark tones instead of cliff-flipping between black and
+ * saturated cyan. Glazed terracottas (directional pattern), stained glass
+ * (transparency), wools (visible weave), glowstone/sea lantern (mottle/frame
+ * patterns), smooth stone (border pattern) and grained materials (planks/logs) are
+ * deliberately excluded.
  *
  * <p>Color profiles are the alpha-weighted average RGB of the actual client texture,
  * measured once from the vanilla resource pack — not nominal wiki values. Entries are
  * a fixed parallel table ({@code RGB} triples + {@link Material}s); the matcher is a
- * branch-free linear scan with no allocation, fronted by a lazily filled 5-bit
- * (32³ = 32768-entry) lookup cache that is the only mutable state in this class.
- *
- * <p>Emissive palette entries (glowstone, sea lantern) never force display brightness —
- * brightness always follows the model's {@code light_emission} data.
+ * branch-free full-precision linear scan over the 51 entries with no allocation and
+ * no intermediate quantization — source shades that differ by even one RGB unit can
+ * resolve to different entries, so distinct texture properties are never merged into
+ * one uniform match. The only mutable state is the lazily created shared
+ * {@link BlockData} cache.
  */
 public final class TexelPalette {
 
@@ -90,13 +102,14 @@ public final class TexelPalette {
             143, 61, 46, // RED_TERRACOTTA
             39, 27, 24, // BLACK_TERRACOTTA
 
-            // Gap fillers — near-white, neutral gray, and two emissive warm/cool tones
+            // Gap fillers — near-white and the dark desaturated band: obsidian (dark
+            // indigo) and warped wart (dark teal) cover the otherwise-missing dark-blue
+            // range, so dark glass/shading art quantizes to coherent dark tones instead
+            // of cliff-flipping between black and the saturated cyan entries. All three
+            // are visually flat, so they stay stretch-safe.
             240, 251, 251, // SNOW_BLOCK
-            158, 158, 158, // SMOOTH_STONE
-            233, 233, 233, // WHITE_WOOL
-            157, 164, 165, // LIGHT_GRAY_WOOL
-            146, 111, 73, // GLOWSTONE
-            165, 194, 188 // SEA_LANTERN
+            19, 14, 34, // OBSIDIAN
+            18, 62, 68 // WARPED_WART_BLOCK
     };
 
     /** Parallel material table; index i corresponds to RGB triple at 3i..3i+2. */
@@ -153,22 +166,12 @@ public final class TexelPalette {
             Material.BLACK_TERRACOTTA,
 
             Material.SNOW_BLOCK,
-            Material.SMOOTH_STONE,
-            Material.WHITE_WOOL,
-            Material.LIGHT_GRAY_WOOL,
-            Material.GLOWSTONE,
-            Material.SEA_LANTERN
+            Material.OBSIDIAN,
+            Material.WARPED_WART_BLOCK
     };
-
-    /** Lazily filled 5-bit-per-channel exact-match cache; -1 = not computed yet. */
-    private static final int[] LOOKUP = new int[32 * 32 * 32];
 
     /** Lazily created default block data per entry, shared across all plates. */
     private static final BlockData[] BLOCK_DATA = new BlockData[MATERIALS.length];
-
-    static {
-        Arrays.fill(LOOKUP, -1);
-    }
 
     /** Number of palette entries. */
     public static int size() {
@@ -200,21 +203,65 @@ public final class TexelPalette {
     }
 
     /**
-     * Nearest palette entry for an RGB color, by redmean perceptual distance. The
-     * incoming color is quantized to 5 bits per channel through a lazily filled lookup
-     * cache, so repeated quantization is an array read.
+     * Nearest palette entry for an RGB color, by redmean perceptual distance, at full
+     * 8-bit precision. A 51-entry scan per texel is trivially fast at load time, and
+     * skipping any intermediate quantization guarantees distinct source colors stay
+     * distinct.
      */
     public static int match(int red, int green, int blue) {
+        return nearest(clampChannel(red), clampChannel(green), clampChannel(blue));
+    }
+
+    /**
+     * Nearest palette entry with <i>bounded</i> hysteresis: when the previously used
+     * entry is both within {@code tieTolerance} of the best entry's distance <b>and</b>
+     * inside the near-exact-match band ({@link #NEAR_MATCH_DISTANCE_SQ}), it is kept.
+     * Source art contains runs of near-identical shades jittered by a few RGB units;
+     * unbounded hysteresis would let a genuinely different color ride the current run
+     * whenever the two candidate distances happen to be close — merging distinct
+     * texture regions into one. The absolute cap confines hysteresis to genuine
+     * dither/jitter (≤ ~8 RGB units); anything farther always takes its own true
+     * nearest entry.
+     *
+     * @param preferredIndex the previous texel's palette entry, or {@code -1} for none
+     * @param tieTolerance   factor &gt; 1; a preferred distance within
+     *                       {@code best * tieTolerance} wins, inside the near band
+     */
+    public static int match(int red, int green, int blue, int preferredIndex, float tieTolerance) {
+        int best = match(red, green, blue);
+        if (preferredIndex < 0 || preferredIndex >= MATERIALS.length || preferredIndex == best) {
+            return best;
+        }
         int r = clampChannel(red);
         int g = clampChannel(green);
         int b = clampChannel(blue);
-        int key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
-        int index = LOOKUP[key];
-        if (index < 0) {
-            index = nearest(expand5(r >> 3), expand5(g >> 3), expand5(b >> 3));
-            LOOKUP[key] = index;
-        }
-        return index;
+        float bestDistance = distanceSq(r, g, b, best);
+        float preferredDistance = distanceSq(r, g, b, preferredIndex);
+        boolean nearExactMatch = preferredDistance <= NEAR_MATCH_DISTANCE_SQ;
+        return nearExactMatch && preferredDistance <= bestDistance * tieTolerance
+                ? preferredIndex : best;
+    }
+
+    /**
+     * Absolute redmean (squared) distance under which a color counts as a near-exact
+     * palette match — the only band where run-continuity hysteresis may engage.
+     * Corresponds to roughly 8 RGB units of jitter; genuinely different colors sit at
+     * distances in the thousands and never merge.
+     */
+    private static final float NEAR_MATCH_DISTANCE_SQ = 600.0f;
+
+    /** Redmean perceptual distance (squared) from an RGB color to a palette entry. */
+    private static float distanceSq(int r1, int g1, int b1, int index) {
+        int r2 = RGB[index * 3];
+        int g2 = RGB[index * 3 + 1];
+        int b2 = RGB[index * 3 + 2];
+        float rm = (r1 + r2) * 0.5f;
+        float dr = r1 - r2;
+        float dg = g1 - g2;
+        float db = b1 - b2;
+        return (2.0f + rm / 256.0f) * dr * dr
+                + 4.0f * dg * dg
+                + (2.0f + (255.0f - rm) / 256.0f) * db * db;
     }
 
     /**
@@ -248,10 +295,5 @@ public final class TexelPalette {
 
     private static int clampChannel(int value) {
         return Math.max(0, Math.min(255, value));
-    }
-
-    /** 5-bit channel value expanded back to 8-bit (v5 → v5*255/31). */
-    private static int expand5(int value) {
-        return (value << 3) | (value >> 2);
     }
 }

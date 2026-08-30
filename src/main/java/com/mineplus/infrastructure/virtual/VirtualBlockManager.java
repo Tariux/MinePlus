@@ -489,6 +489,14 @@ public class VirtualBlockManager implements Listener {
         TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
         List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans =
                 texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
+        // Readability floor for texel-baked models: vanilla's directional face shading
+        // crushes near-black palette materials into one unreadable mass outside full
+        // daylight. A per-model meta override (texelBrightness, 0-15) keeps every
+        // display at a minimum light level so the palette art stays legible while the
+        // top/side/bottom shading still separates the faces.
+        ModelMeta spawnMeta = getModelMeta(model.name());
+        int brightnessFloor = texelCubePlans != null && spawnMeta.texelBrightness() != null
+                ? spawnMeta.texelBrightness() : 0;
         int cubeIndex = 0;
         for (BakedCube cube : model.cubes()) {
             Map<CubeFace, TexelSurfacePlan> facePlans =
@@ -501,8 +509,9 @@ public class VirtualBlockManager implements Listener {
                         displayOrigin, EntityType.BLOCK_DISPLAY);
                 display.setBlock(item.blockData());
                 display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
-                if (item.lightEmission() > 0) {
-                    display.setBrightness(new Display.Brightness(item.lightEmission(), 15));
+                int emission = Math.max(item.lightEmission(), brightnessFloor);
+                if (emission > 0) {
+                    display.setBrightness(new Display.Brightness(emission, 15));
                 }
 
                 Vector3f translation = new Vector3f(item.translation());
@@ -573,6 +582,61 @@ public class VirtualBlockManager implements Listener {
                 }
             }
         }
+    }
+
+    /**
+     * Sweeps every loaded chunk in every world for tagged display entities whose
+     * rendered-model id is no longer live, and removes them — the startup complement
+     * to {@link #onChunkLoad}. Chunks near players load during world startup, before
+     * this plugin's chunk listener registers, so entities persisted by a previous
+     * session in those chunks never see a {@code ChunkLoadEvent}; without this sweep
+     * they survive alongside the fresh displays that {@code restoreForState} spawns
+     * under new ids and z-fight them exactly in place (color flicker with camera
+     * movement). Semantics mirror the chunk-load handler: entities belonging to a
+     * live multiblock instance are kept (its model may legitimately not be restored
+     * yet — deferred world), everything else tagged with our prefix but absent from
+     * {@code activeBlocks} is a ghost.
+     *
+     * @return the number of ghost displays removed
+     */
+    public int sweepGhostDisplays() {
+        int removed = 0;
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntitiesByClass(BlockDisplay.class)) {
+                String instanceTag = null;
+                for (String tag : entity.getScoreboardTags()) {
+                    if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
+                        instanceTag = tag;
+                        break;
+                    }
+                }
+                if (instanceTag == null) {
+                    continue;
+                }
+                try {
+                    UUID instanceId = UUID.fromString(instanceTag.substring(DISPLAY_TAG_PREFIX.length()));
+                    if (activeBlocks.containsKey(instanceId)) {
+                        continue;
+                    }
+                    if (lifecycleManager != null
+                            && lifecycleManager.registry().getInstance(instanceId) != null) {
+                        continue;
+                    }
+                    entity.remove();
+                    removed++;
+                } catch (IllegalArgumentException ignored) {
+                    // Malformed tag — treat as a ghost too.
+                    entity.remove();
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) {
+            DebugLogger.info("sweepGhostDisplays: removed " + removed
+                    + " stale display entit" + (removed == 1 ? "y" : "ies")
+                    + " from loaded chunks.");
+        }
+        return removed;
     }
 
     @EventHandler

@@ -32,7 +32,8 @@ public record TexelBakeResult(
         Map<String, Integer> gridHistogram,
         Map<Integer, Integer> paletteUsage,
         int effectiveMaxPlatesPerFace,
-        int effectiveMaxPlatesPerInstance
+        int effectiveMaxPlatesPerInstance,
+        int occludedCells
 ) {
 
     public TexelBakeResult {
@@ -67,6 +68,7 @@ public record TexelBakeResult(
         return new TexelBakeResult(false, mode, detail, empty,
                 0, 0, 0, 0, 0, 0, 0L, Map.of(), Map.of(),
                 settings == null ? 0 : settings.maxPlatesPerFace(),
-                settings == null ? 0 : settings.maxPlatesPerInstance());
+                settings == null ? 0 : settings.maxPlatesPerInstance(),
+                0);
     }
 }

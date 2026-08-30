@@ -281,11 +281,12 @@ Any global rendering setting can be overridden per model. Place a `models/<key>.
   "texelMode": "AUTO",
   "texelDetail": "FACE",
   "maxTexelPlatesPerFace": 96,
-  "maxTexelPlatesPerInstance": 150
+  "maxTexelPlatesPerInstance": 150,
+  "texelBrightness": 15
 }
 ```
 
-Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default.
+Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default; `texelBrightness` (0-15) sets a minimum display light level for texel-baked models so dark palette art stays readable in shade and at night.
 
 ---
 
@@ -393,11 +394,15 @@ TEXEL_BAKING:
 
 ### Texel Surface Baking
 
-Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla blocks** (16 concretes, 16 concrete powders, 16 terracottas, plus snow/smooth stone/white & light gray wool/glowstone/sea lantern): each texel's color is matched to the nearest palette entry by redmean perceptual distance, and adjacent same-color texels merge into single thin `BlockDisplay` plates (greedy rectangle merging, like vanilla chunk meshing).
+Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla blocks** (16 concretes, 16 concrete powders, 16 terracottas, plus snow block, obsidian and warped wart covering the dark desaturated band — 51 entries, all visually flat): each texel's color is matched to the nearest palette entry by redmean perceptual distance, and adjacent same-color texels merge into single thin `BlockDisplay` plates (greedy rectangle merging, like vanilla chunk meshing).
 
 - **Opt-in gesture:** place the texture PNG next to the model file (`models/<textureName>.png`) — models without adjacent PNGs render byte-identically to before. Bake never fails model load; unresolvable faces keep their legacy tier.
+- **Stretch safety by construction:** every palette entry is a visually flat block, so plates of any size render as a solid color — a stretched patterned block can never appear, because patterned blocks (wool weave, glazed terracotta, glowstone mottle, grained wood…) are excluded from the palette outright. Colors are always the source texture's own, sampled 1:1 per texel; only the block choice is a nearest-flat-color match.
+- **Occlusion culling (no overlapping entities):** texels whose plate would sit inside another cube's solid — the buried midsection of a band-wrapped body, a cork's hidden base — emit no plate. Every rendered plate occupies its own distinct, visible space; box-modeled nested geometry no longer produces layered surface artifacts. Culled-cell counts show in `/mineplus model info`.
 - **Effective grid:** the face's own pixel grid (a 16px face yields a 16×16 grid regardless of PNG resolution) — a 4×4 texture upscales to ≤16 plates, a 32×32 texture downsamples.
 - **Cutout transparency:** texels with alpha < 128 emit no plate; the underlying base display shows through. On texel-baked cubes the base display is colored with the cube's **dominant baked palette color** (largest world-area entry across its faces) instead of the filename-resolved material — so holes reveal a matching local tone rather than the resolver's white fallback, and untextured faces inherit it.
+- **Readability floor:** vanilla's directional face shading crushes near-black palette materials into one unreadable mass outside full daylight. A per-model `"texelBrightness": 0-15` meta override keeps every display at a minimum light level (the top/side/bottom shading still separates faces); unset follows the model's `light_emission` as before.
+- **Dithered art:** dithered gradient shading (checkerboard-blended shades, common in pixel art) reconstructs as alternating flat palette entries — a faithful but higher-contrast rendering of the dither. Prefer art with flat regions for clean results.
 - **Best content:** pixel art with flat regions; lettering, stripes, and gradients reconstruct as stair-stepped rectangles at 1px scale.
 - **Diagnostics:** `/mineplus model info <key>` reports faces baked, texel grids, palette usage histogram, merged plate counts, and budget verdicts; texture entries show `[png]`/`[no png]`.
 
@@ -416,6 +421,7 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 | `/mineplus model setlevel <look\|uuid> <level>` | Force an instance's level |
 | `/mineplus model models` | List all loaded model keys |
 | `/mineplus model debugspawn <modelKey>` | Spawn a raw model on the looked-at face |
+| `/mineplus model cleanup` | Sweep loaded chunks for ghost `BlockDisplay` entities (stale renders from a previous session or crashed swap) and remove them; also runs automatically on startup after instance reconcile |
 
 **Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model` — all default to op.
 

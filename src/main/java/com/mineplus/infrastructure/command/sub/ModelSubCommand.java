@@ -36,7 +36,7 @@ public final class ModelSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/mineplus model <list|inspect|info|remove|respawn|setlevel|models|debugspawn> ...";
+        return "/mineplus model <list|inspect|info|remove|respawn|setlevel|models|debugspawn|cleanup> ...";
     }
 
     @Override
@@ -138,6 +138,15 @@ public final class ModelSubCommand implements SubCommand {
                 }
                 return true;
             }
+            case "cleanup" -> {
+                int removed = context.virtualBlockManager().sweepGhostDisplays();
+                sender.sendMessage(removed == 0
+                        ? ChatColor.GREEN + "No ghost display entities found."
+                        : ChatColor.GREEN + "Removed " + removed + " ghost display entit"
+                                + (removed == 1 ? "y" : "ies") + ChatColor.GRAY
+                                + " (stale renders z-fighting live models).");
+                return true;
+            }
             case "debugspawn" -> {
                 if (!(sender instanceof Player player)) {
                     sender.sendMessage(ChatColor.RED + "Only players can spawn debug models.");
@@ -176,7 +185,7 @@ public final class ModelSubCommand implements SubCommand {
             List<String> completions = new ArrayList<>();
             StringUtil.copyPartialMatches(
                     args[0],
-                    List.of("list", "inspect", "info", "remove", "respawn", "setlevel", "models", "debugspawn"),
+                    List.of("list", "inspect", "info", "remove", "respawn", "setlevel", "models", "debugspawn", "cleanup"),
                     completions
             );
             Collections.sort(completions);
@@ -397,7 +406,10 @@ public final class ModelSubCommand implements SubCommand {
 
         sender.sendMessage(ChatColor.YELLOW + "  Merged plates: " + ChatColor.WHITE + bake.totalPlates()
                 + ChatColor.GRAY + " (avg " + String.format(java.util.Locale.ROOT, "%.1f", bake.averagePlatesPerFace())
-                + "/face, max " + bake.maxPlatesOnFace() + ")");
+                + "/face, max " + bake.maxPlatesOnFace() + ")"
+                + (bake.occludedCells() > 0
+                        ? ChatColor.GRAY + ", " + bake.occludedCells() + " occluded cells culled"
+                        : ""));
 
         var texelSettings = manager.texelSettings();
         boolean budgetOverridden = bake.effectiveMaxPlatesPerFace() != texelSettings.maxPlatesPerFace()
