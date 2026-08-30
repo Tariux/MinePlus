@@ -96,7 +96,9 @@ public final class ModelRenderingManager {
                 DebugLogger.severe("render: Failed to load or parse model file " + modelFile.getAbsolutePath() + " for key '" + modelKey + "'.");
                 return null;
             }
-            virtualBlockManager.registerModel(modelKey, model, ModelMeta.load(modelFile));
+            // The resolved file must travel with the registration: texel baking
+            // resolves texture PNGs relative to the model file's folder.
+            virtualBlockManager.registerModel(modelKey, model, ModelMeta.load(modelFile), modelFile);
         }
 
         Quaternionf rotation = instance.rotation();

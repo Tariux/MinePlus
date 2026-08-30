@@ -272,21 +272,26 @@ public final class ModelSubCommand implements SubCommand {
                 + ChatColor.GRAY + " (uniform " + uniformCubes + ", mixed " + mixedCubes
                 + (settings.perFaceRendering() ? "" : ", plates off") + ")");
 
+        describeTexelBaking(sender, manager, modelKey);
+
         describeAnimations(sender, model, meta);
 
         int resolved = 0;
         int fallback = 0;
         for (String textureName : textureNames) {
+            boolean hasPng = manager.hasTextureImage(modelKey, textureName);
             var resolution = com.mineplus.infrastructure.virtual.TextureMaterialResolver.resolveDetailed(textureName);
             String material = resolution.material().name();
             if (resolution.isFallback()) {
                 fallback++;
                 sender.sendMessage(ChatColor.YELLOW + "  " + textureName + " -> "
-                        + ChatColor.RED + material + ChatColor.GRAY + " (fallback)");
+                        + ChatColor.RED + material + ChatColor.GRAY + " (fallback)"
+                        + (hasPng ? ChatColor.AQUA + " [png]" : ChatColor.GRAY + " [no png]"));
             } else {
                 resolved++;
                 sender.sendMessage(ChatColor.YELLOW + "  " + textureName + " -> "
-                        + ChatColor.GREEN + material + ChatColor.GRAY + " [" + resolution.tierName() + "]");
+                        + ChatColor.GREEN + material + ChatColor.GRAY + " [" + resolution.tierName() + "]"
+                        + (hasPng ? ChatColor.AQUA + " [png]" : ChatColor.GRAY + " [no png]"));
             }
         }
         sender.sendMessage(ChatColor.YELLOW + "Textures: " + ChatColor.WHITE + resolved + " resolved"
@@ -352,6 +357,63 @@ public final class ModelSubCommand implements SubCommand {
             sender.sendMessage(ChatColor.YELLOW + "Meta autoplay: " + ChatColor.WHITE
                     + String.join(", ", meta.autoplay()));
         }
+    }
+
+    private void describeTexelBaking(
+            CommandSender sender,
+            com.mineplus.infrastructure.virtual.VirtualBlockManager manager,
+            String modelKey
+    ) {
+        var bake = manager.getTexelBake(modelKey);
+        if (bake == null || !bake.enabled()) {
+            sender.sendMessage(ChatColor.YELLOW + "Texel baking: " + ChatColor.GRAY + "OFF"
+                    + (bake != null ? ChatColor.GRAY + " (mode=" + bake.mode() + ")" : ""));
+            return;
+        }
+
+        sender.sendMessage(ChatColor.YELLOW + "Texel baking: " + ChatColor.GREEN + "ON"
+                + ChatColor.GRAY + " (mode=" + bake.mode() + ", detail=" + bake.detail() + ")");
+        sender.sendMessage(ChatColor.YELLOW + "  Faces baked: " + ChatColor.WHITE
+                + bake.facesBaked() + "/" + bake.facesTotal()
+                + ChatColor.GRAY + " (" + Math.max(0, bake.facesTotal() - bake.facesBaked())
+                + " used TILE/CROP_HALF, had no PNG, or fell to budget)");
+
+        if (!bake.gridHistogram().isEmpty()) {
+            String grids = bake.gridHistogram().entrySet().stream()
+                    .map(entry -> entry.getKey() + " (" + entry.getValue() + ")")
+                    .collect(java.util.stream.Collectors.joining(ChatColor.GRAY + ", " + ChatColor.WHITE));
+            sender.sendMessage(ChatColor.YELLOW + "  Texel grids: " + ChatColor.WHITE + grids);
+        }
+
+        if (!bake.paletteUsage().isEmpty()) {
+            String top = bake.paletteUsage().entrySet().stream()
+                    .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+                    .limit(8)
+                    .map(entry -> com.mineplus.infrastructure.virtual.texel.TexelPalette
+                            .materialName(entry.getKey()) + " " + entry.getValue())
+                    .collect(java.util.stream.Collectors.joining(ChatColor.GRAY + ", " + ChatColor.WHITE));
+            sender.sendMessage(ChatColor.YELLOW + "  Palette usage: " + ChatColor.WHITE + "top: " + top);
+        }
+
+        sender.sendMessage(ChatColor.YELLOW + "  Merged plates: " + ChatColor.WHITE + bake.totalPlates()
+                + ChatColor.GRAY + " (avg " + String.format(java.util.Locale.ROOT, "%.1f", bake.averagePlatesPerFace())
+                + "/face, max " + bake.maxPlatesOnFace() + ")");
+
+        var texelSettings = manager.texelSettings();
+        boolean budgetOverridden = bake.effectiveMaxPlatesPerFace() != texelSettings.maxPlatesPerFace()
+                || bake.effectiveMaxPlatesPerInstance() != texelSettings.maxPlatesPerInstance();
+        sender.sendMessage(ChatColor.YELLOW + "  Budget: " + ChatColor.WHITE
+                + bake.totalPlates() + "/" + bake.effectiveMaxPlatesPerInstance() + " per instance"
+                + ChatColor.GRAY + " (" + bake.effectiveMaxPlatesPerFace() + "/face"
+                + (budgetOverridden ? ", meta-overridden" : "") + ")"
+                + (bake.budgetFallbackFaces() > 0
+                        ? ChatColor.RED + " -> " + bake.budgetFallbackFaces() + " face(s) fell back"
+                        + " (" + bake.faceBudgetFallbacks() + " per-face, "
+                        + bake.instanceBudgetFallbacks() + " instance)"
+                        : ChatColor.GREEN + " -> ok"));
+
+        sender.sendMessage(ChatColor.YELLOW + "  Bake time: " + ChatColor.WHITE
+                + String.format(java.util.Locale.ROOT, "%.1f", bake.bakeTimeNanos() / 1_000_000.0) + " ms");
     }
 
     private void listInstances(CommandSender sender, int limit) {

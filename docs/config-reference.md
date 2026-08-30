@@ -167,7 +167,7 @@ Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes
 4. The primary texture name is mapped to a Minecraft `Material` via `TextureMaterialResolver` (curated map → direct match → suffix-strip → aliases → fuzzy → fallback).
 5. Unmatched names fall back to `WHITE_CONCRETE` and are reported per model via `/mineplus model info`.
 
-**Key limitation:** each cube renders as exactly one Minecraft block material. Per-face texture mixing, UV crops, and UV rotation are analyzed and used for *material orientation* (directional blocks like furnaces or logs get their `facing`/`axis` block states set correctly), but arbitrary per-face pixel art requires a client resource pack and is out of scope.
+**Beyond one material per face:** the UV alignment layer renders wrapping windows as native-density tile grids and half windows as slab-type crops, and — when a texture PNG sits next to the model file — **texel surface baking** reconstructs the actual texture pixel-by-pixel out of flat vanilla palette blocks (see [Texel Surface Baking](#texel-surface-baking)). Arbitrary sub-pixel UV cropping without a resource pack remains out of scope.
 
 ---
 
@@ -277,11 +277,15 @@ Any global rendering setting can be overridden per model. Place a `models/<key>.
 {
   "originMode": "GRID",
   "collisionMode": "SURFACE",
-  "autoplay": ["rotate_gear"]
+  "autoplay": ["rotate_gear"],
+  "texelMode": "AUTO",
+  "texelDetail": "FACE",
+  "maxTexelPlatesPerFace": 96,
+  "maxTexelPlatesPerInstance": 150
 }
 ```
 
-Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence.
+Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default.
 
 ---
 
@@ -346,6 +350,21 @@ ANIMATION:
   # Auto-start animations declared in multiblock levels ("animations")
   # or model meta files ("autoplay").
   AUTOPLAY: true
+
+TEXEL_BAKING:
+  # Global enable (false = rendering pipeline identical to before).
+  ENABLED: true
+  # AUTO | ON | OFF (per-model .meta.json overrides)
+  MODE: AUTO
+  # FACE | SUPERSAMPLE_2X2 | SUPERSAMPLE_4X4
+  DETAIL: FACE
+  # Merged-plate ceiling per face; above it the face falls back to the
+  # single-material plate.
+  MAX_PLATES_PER_FACE: 96
+  # Whole-instance plate budget; faces overflow in emission order.
+  MAX_PLATES_PER_INSTANCE: 150
+  # Hard grid edge cap per face (max texels per axis pre-merge).
+  MAX_GRID_EDGE: 64
 ```
 
 | Key | Values | Effect |
@@ -363,6 +382,24 @@ ANIMATION:
 | `ANIMATION.TICK_INTERVAL_TICKS` | ticks ≥ 1 | Server ticks between transform pushes; `1` (default) pushes every tick and lets the client interpolate to its own frame rate |
 | `ANIMATION.INTERPOLATION_TICKS` | ticks ≥ 0 | Client interpolation window between pushes; `0` (default) matches the tick interval |
 | `ANIMATION.AUTOPLAY` | `true` / `false` | Auto-start clips declared in multiblock level `animations` keys or model `.meta.json` `autoplay` lists |
+| `TEXEL_BAKING.ENABLED` | `true` / `false` | Global texel baking switch; `false` restores the pre-texel pipeline entirely |
+| `TEXEL_BAKING.MODE` | `AUTO` / `ON` / `OFF` | `AUTO` (default) bakes only faces that would use the FULL strategy and have a resolvable PNG; `ON` bakes every face with a resolvable PNG; `OFF` never bakes |
+| `TEXEL_BAKING.DETAIL` | `FACE` / `SUPERSAMPLE_2X2` / `SUPERSAMPLE_4X4` | Samples per texel: one center sample, or 4/16 area-averaged samples for close-up models |
+| `TEXEL_BAKING.MAX_PLATES_PER_FACE` | plates ≥ 1 | Merged-plate ceiling per face (default 96); above it the face falls back to the single-material plate |
+| `TEXEL_BAKING.MAX_PLATES_PER_INSTANCE` | plates ≥ 1 | Whole-instance texel plate budget (default 150); faces overflow in emission order |
+| `TEXEL_BAKING.MAX_GRID_EDGE` | cells ≥ 1 | Hard grid edge cap per face (default 64) — entity count scales with geometry, never with texture resolution |
+
+---
+
+### Texel Surface Baking
+
+Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla blocks** (16 concretes, 16 concrete powders, 16 terracottas, plus snow/smooth stone/white & light gray wool/glowstone/sea lantern): each texel's color is matched to the nearest palette entry by redmean perceptual distance, and adjacent same-color texels merge into single thin `BlockDisplay` plates (greedy rectangle merging, like vanilla chunk meshing).
+
+- **Opt-in gesture:** place the texture PNG next to the model file (`models/<textureName>.png`) — models without adjacent PNGs render byte-identically to before. Bake never fails model load; unresolvable faces keep their legacy tier.
+- **Effective grid:** the face's own pixel grid (a 16px face yields a 16×16 grid regardless of PNG resolution) — a 4×4 texture upscales to ≤16 plates, a 32×32 texture downsamples.
+- **Cutout transparency:** texels with alpha < 128 emit no plate; the underlying base display shows through. On texel-baked cubes the base display is colored with the cube's **dominant baked palette color** (largest world-area entry across its faces) instead of the filename-resolved material — so holes reveal a matching local tone rather than the resolver's white fallback, and untextured faces inherit it.
+- **Best content:** pixel art with flat regions; lettering, stripes, and gradients reconstruct as stair-stepped rectangles at 1px scale.
+- **Diagnostics:** `/mineplus model info <key>` reports faces baked, texel grids, palette usage histogram, merged plate counts, and budget verdicts; texture entries show `[png]`/`[no png]`.
 
 ---
 

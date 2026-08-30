@@ -4,6 +4,7 @@ import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.VoxelOccupancyCalculator;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
+import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
@@ -11,6 +12,7 @@ public class MineplusConfig {
     private final boolean additionalDebugLogs;
     private final VirtualRenderingSettings virtualRendering;
     private final AnimationSettings animation;
+    private final TexelBakingSettings texelBaking;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -18,11 +20,13 @@ public class MineplusConfig {
     }
 
     public MineplusConfig(boolean additionalDebugLogs) {
-        this(additionalDebugLogs, VirtualRenderingSettings.defaults(), AnimationSettings.defaults(), 0);
+        this(additionalDebugLogs, VirtualRenderingSettings.defaults(),
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(), 0);
     }
 
     public MineplusConfig(boolean additionalDebugLogs, VirtualRenderingSettings virtualRendering) {
-        this(additionalDebugLogs, virtualRendering, AnimationSettings.defaults(), 0);
+        this(additionalDebugLogs, virtualRendering,
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(), 0);
     }
 
     public MineplusConfig(
@@ -30,7 +34,8 @@ public class MineplusConfig {
             VirtualRenderingSettings virtualRendering,
             int updateCheckResourceId
     ) {
-        this(additionalDebugLogs, virtualRendering, AnimationSettings.defaults(), updateCheckResourceId);
+        this(additionalDebugLogs, virtualRendering,
+                AnimationSettings.defaults(), TexelBakingSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -39,11 +44,23 @@ public class MineplusConfig {
             AnimationSettings animation,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation,
+                TexelBakingSettings.defaults(), updateCheckResourceId);
+    }
+
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
                 : virtualRendering;
         this.animation = animation == null ? AnimationSettings.defaults() : animation;
+        this.texelBaking = texelBaking == null ? TexelBakingSettings.defaults() : texelBaking;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -57,6 +74,10 @@ public class MineplusConfig {
 
     public AnimationSettings getAnimation() {
         return animation;
+    }
+
+    public TexelBakingSettings getTexelBaking() {
+        return texelBaking;
     }
 
     public int getUpdateCheckResourceId() {
@@ -95,5 +116,9 @@ public class MineplusConfig {
                 section.getInt("INTERPOLATION_TICKS", defaults.interpolationTicks()),
                 section.getBoolean("AUTOPLAY", defaults.autoplay())
         );
+    }
+
+    public static TexelBakingSettings parseTexelBaking(FileConfiguration yaml, TexelBakingSettings fallback) {
+        return TexelBakingSettings.parse(yaml, fallback);
     }
 }
