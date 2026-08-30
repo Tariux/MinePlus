@@ -2,34 +2,34 @@ package com.mineplus.fun;
 
 import com.mineplus.MineplusPlugin;
 import com.mineplus.fun.cannon.CannonFeature;
-import com.mineplus.fun.cannon.CannonSubCommand;
 import com.mineplus.fun.gear.GearFeature;
-import com.mineplus.fun.gear.GearSubCommand;
 import com.mineplus.fun.juicer.JuicerFeature;
-import com.mineplus.fun.juicer.JuicerSubCommand;
 import com.mineplus.infrastructure.PluginContext;
+import java.util.ArrayList;
+import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Example "module" plugin that turns the Mineplus Core engine into Juicer and
- * Cannon game features.
+ * Example "module" plugin that turns the Mineplus Core engine into Juicer,
+ * Cannon, and Gear game features.
  *
  * <p>This plugin is intentionally a <em>separate</em> artifact from the Core. It depends on
  * the Core at runtime (see {@code plugin.yml -> depend: [Mineplus]}) and obtains the Core
  * API through {@link MineplusPlugin#getPluginContext()}. None of the game logic lives
  * in the Core; the Core remains a dependency-only engine.
  *
- * <p>Commands are registered dynamically through the Core's module toolkit
- * ({@code context.moduleSupport().registerCommand(...)}) — no per-command
- * {@code plugin.yml} entries or hand-written dispatch in {@code onCommand}.
+ * <p>Bootstrap order (see {@link ModuleFeature}): every feature installs its resources
+ * and registers hooks/listeners/GUIs first, then <b>one</b> coordinated
+ * {@code reloadAll()} loads all freshly installed definitions at once, then each
+ * feature's top-level command is registered. Features are exception-isolated, so one
+ * broken feature never prevents the others from booting. Teardown stops features in
+ * reverse enable order.
  */
 public final class MineplusFunPlugin extends JavaPlugin {
 
     private PluginContext context;
-    private JuicerFeature juicerFeature;
-    private CannonFeature cannonFeature;
-    private GearFeature gearFeature;
+    private final List<ModuleFeature> features = new ArrayList<>();
 
     @Override
     public void onEnable() {
@@ -52,33 +52,32 @@ public final class MineplusFunPlugin extends JavaPlugin {
             return;
         }
 
-        this.juicerFeature = new JuicerFeature(this, context);
-        this.juicerFeature.enable();
+        features.add(new JuicerFeature(this, context));
+        features.add(new CannonFeature(this, context));
+        features.add(new GearFeature(this, context));
 
-        this.cannonFeature = new CannonFeature(this, context);
-        this.cannonFeature.enable();
+        for (ModuleFeature feature : features) {
+            feature.start();
+        }
 
-        this.gearFeature = new GearFeature(this, context);
-        this.gearFeature.enable();
+        // One coordinated load of everything the features just installed —
+        // never reloadAll() from inside a feature.
+        context.jsonInfrastructureApi().reloadAll();
 
-        context.moduleSupport().registerCommand(this, "juicer", new JuicerSubCommand(context));
-        context.moduleSupport().registerCommand(this, "cannon", new CannonSubCommand(context));
-        context.moduleSupport().registerCommand(this, "gear", new GearSubCommand(context, gearFeature));
+        for (ModuleFeature feature : features) {
+            feature.registerCommand();
+        }
 
-        getLogger().info("[MineplusFun] Juicer, Cannon, and Gear modules enabled on top of Mineplus Core.");
+        getLogger().info("[MineplusFun] " + features.size()
+                + " features (Juicer, Cannon, Gear) enabled on top of Mineplus Core.");
     }
 
     @Override
     public void onDisable() {
-        if (this.gearFeature != null) {
-            this.gearFeature.disable();
+        for (int i = features.size() - 1; i >= 0; i--) {
+            features.get(i).stop();
         }
-        if (this.cannonFeature != null) {
-            this.cannonFeature.disable();
-        }
-        this.cannonFeature = null;
-        this.gearFeature = null;
-        this.juicerFeature = null;
+        features.clear();
         this.context = null;
     }
 }

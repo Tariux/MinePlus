@@ -159,30 +159,39 @@ Consequences:
 
 1. Ship `defaults/multiblocks/<id>.json` and `defaults/models/*.bbmodel` (plus optionally
    `defaults/recipes/<id>_recipes.json`) inside the module jar.
-2. In `onEnable`, install them into the **Core's** data folder with
-   `context.moduleSupport().installDefault(plugin, resource, target, overwrite)`, then call
-   `context.jsonInfrastructureApi().reloadAll()`. Overwrite models (`true`) but not JSON
-   configs (`false`) so server owners' config edits survive module updates.
+2. In `onEnable()`, install them into the **Core's** data folder with
+   `context.moduleSupport().installDefault(plugin, resource, target, overwrite)`.
+   Overwrite models (`true`) but not JSON configs (`false`) so server owners' config
+   edits survive module updates. Do **not** call `reloadAll()` from a feature — the
+   module bootstrap runs one coordinated `reloadAll()` after all features started, so
+   N features cost one model/registry reload instead of N.
 3. Register GUIs via `registerGui(key, gui)` and behavior via `registerHook(typeId, hook)`.
-4. Feature package layout (mirror the juicer/cannon):
+4. Feature classes extend `com.mineplus.<module>.ModuleFeature` (the module-internal
+   lifecycle contract: `id()`, `onEnable()`, optional `onDisable()`/`command()`).
+   Bootstrap is exception-isolated per feature — one broken feature logs severe and
+   the rest still boot. Package layout (mirror the juicer/cannon/gear):
 
    ```
-   com.mineplus.<module>.<feature>/
-     <Feature>Keys.java        — namespaced String constants (machine id, gui key, state keys)
-     <Feature>Feature.java     — enable(): install resources, register gui/hook/listeners, reloadAll()
-     <Feature>Hook.java        — MultiBlockHook with the game behavior
-     gui/<Feature>Gui.java     — extends AbstractMachineGui (Core base class)
-     <Feature>SubCommand.java  — implements com.mineplus.infrastructure.command.SubCommand
+   com.mineplus.<module>/
+     ModuleFeature.java           — feature lifecycle contract (start/command/stop)
+     <Module>Plugin.java          — feature list + coordinated reload + teardown
+     <module>.<feature>/
+      <Feature>Keys.java        — namespaced String constants (machine id, gui key, state keys)
+      <Feature>Feature.java     — extends ModuleFeature: install resources, register gui/hook/listeners
+      <Feature>Hook.java        — MultiBlockHook with the game behavior
+      gui/<Feature>Gui.java     — extends AbstractMachineGui (Core base class)
+      <Feature>SubCommand.java  — implements com.mineplus.infrastructure.command.SubCommand
    ```
 
    The cannon additionally splits behavior into collaborators — copy this shape when a feature
    outgrows one hook: `CannonMountManager` (seat entities + session state),
    `CannonAimListener` (bow-release firing), `CannonProjectiles` (projectile launch +
    explosion calibration), `CannonTntStore` (persistent ammo, on `TypedState`).
-5. Register the feature's command with
-   `context.moduleSupport().registerCommand(this, "<label>", new <Feature>SubCommand(context))`
-   — no `plugin.yml` command entry and no `onCommand`/`onTabComplete` dispatch in the plugin
-   main. Declare only the permission in `plugin.yml`.
+5. Expose the feature's command by overriding `command()` on the `ModuleFeature`
+   (returns the `SubCommand`); the bootstrap registers it as a top-level command
+   under the feature id via `context.moduleSupport().registerCommand(...)` —
+   no `plugin.yml` command entry and no `onCommand`/`onTabComplete` dispatch in
+   the plugin main. Declare only the permission in `plugin.yml`.
 6. Recipes are optional — only features that consult `recipeManager().findMatch(...)` need a
    recipes JSON (the cannon has none).
 
@@ -381,6 +390,9 @@ is inherited from `RegionAccessor`, not declared on `World`.
 ## 13. Conventions to follow
 
 - Package modules under `com.mineplus.<module>` (e.g. `com.mineplus.fun`).
+- Feature classes extend the module's `ModuleFeature` lifecycle contract; never call
+  `reloadAll()` from inside a feature (the module's bootstrap owns the single
+  coordinated reload) and never hand-wire enable/disable lists in the plugin main.
 - Keep the Core pristine: no feature code, no feature resources, no feature commands.
 - Prefer the Core's public APIs over reflection or internal classes.
 - Resource/model keys, GUI keys, hook keys, and item keys should be namespaced constants

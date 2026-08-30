@@ -1,7 +1,7 @@
 package com.mineplus.fun.cannon;
 
+import com.mineplus.fun.ModuleFeature;
 import com.mineplus.fun.cannon.gui.CannonGui;
-import com.mineplus.infrastructure.PluginContext;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -13,21 +13,24 @@ import org.bukkit.plugin.java.JavaPlugin;
  * toolkit ({@code context.moduleSupport()}). The multiblock is registered
  * without a GUI key; the {@link CannonFireHook} decides per interaction
  * whether to mount (level 2, saddle), fire (level 1, torch) or open the
- * context menu, so a {@code reloadAll()} after installation is enough to
- * activate the feature.
+ * context menu, so the module's single coordinated reload after installation
+ * is enough to activate the feature.
  */
-public final class CannonFeature {
+public final class CannonFeature extends ModuleFeature {
 
-    private final JavaPlugin plugin;
-    private final PluginContext context;
     private CannonMountManager mounts;
 
-    public CannonFeature(JavaPlugin plugin, PluginContext context) {
-        this.plugin = plugin;
-        this.context = context;
+    public CannonFeature(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
+        super(plugin, context);
     }
 
-    public void enable() {
+    @Override
+    public String id() {
+        return "cannon";
+    }
+
+    @Override
+    protected void onEnable() {
         var support = context.moduleSupport();
         support.installDefault(plugin, "defaults/models/cannon-3-1-1.bbmodel", "models/cannon-3-1-1.bbmodel", true);
         support.installDefault(plugin, "defaults/models/cannon-3-1-1-bigger.bbmodel", "models/cannon-3-1-1-bigger.bbmodel", true);
@@ -50,16 +53,22 @@ public final class CannonFeature {
 
         context.infrastructureApi().registerHook(CannonKeys.MACHINE_ID, new CannonFireHook(context, mounts));
 
-        // Load the freshly installed definitions into the Core engine, then clear
-        // any gunner's-seat stands orphaned by an unclean shutdown.
-        context.jsonInfrastructureApi().reloadAll();
+        // Purge gunner's-seat stands orphaned by an unclean shutdown. The purge
+        // scans for the seat PDC tag and never consults loaded instances, so it
+        // does not depend on the module's coordinated reload having run yet.
         mounts.purgeOrphanSeats();
     }
 
-    public void disable() {
+    @Override
+    protected void onDisable() {
         if (mounts != null) {
             mounts.shutdown();
             mounts = null;
         }
+    }
+
+    @Override
+    protected com.mineplus.infrastructure.command.SubCommand command() {
+        return new CannonSubCommand(context);
     }
 }

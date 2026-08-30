@@ -1,9 +1,9 @@
 package com.mineplus.fun.juicer;
 
+import com.mineplus.fun.ModuleFeature;
 import com.mineplus.fun.juicer.gui.JuicerGui;
 import com.mineplus.fun.juicer.items.CarrotJuiceItemDefinition;
 import com.mineplus.fun.juicer.items.MelonJuiceItemDefinition;
-import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockHook;
 import org.bukkit.ChatColor;
@@ -15,20 +15,22 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>Resources (bbmodels, multiblock + recipe JSON) are shipped inside this module's jar and
  * installed into the <em>Core's</em> data folder through the Core's module toolkit
- * ({@code context.moduleSupport()}); a {@code reloadAll()} then loads them without
- * restarting the server.
+ * ({@code context.moduleSupport()}); the module's single coordinated reload loads
+ * them without restarting the server.
  */
-public final class JuicerFeature {
+public final class JuicerFeature extends ModuleFeature {
 
-    private final JavaPlugin plugin;
-    private final PluginContext context;
-
-    public JuicerFeature(JavaPlugin plugin, PluginContext context) {
-        this.plugin = plugin;
-        this.context = context;
+    public JuicerFeature(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
+        super(plugin, context);
     }
 
-    public void enable() {
+    @Override
+    public String id() {
+        return "juicer";
+    }
+
+    @Override
+    protected void onEnable() {
         var support = context.moduleSupport();
         support.installDefault(plugin, "defaults/models/juicer-machine-level-1.bbmodel", "models/juicer-machine-level-1.bbmodel", true);
         support.installDefault(plugin, "defaults/models/juicer-machine-level-2.bbmodel", "models/juicer-machine-level-2.bbmodel", true);
@@ -60,8 +62,10 @@ public final class JuicerFeature {
                 actor.sendMessage(ChatColor.GRAY + "Juicer level " + instance.level() + " ready.");
             }
         });
+    }
 
-        // Load the freshly installed definitions into the Core engine.
-        context.jsonInfrastructureApi().reloadAll();
+    @Override
+    protected com.mineplus.infrastructure.command.SubCommand command() {
+        return new JuicerSubCommand(context);
     }
 }
