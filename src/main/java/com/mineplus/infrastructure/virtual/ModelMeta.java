@@ -12,7 +12,11 @@ import java.util.Locale;
  * {
  *   "originMode": "GRID",
  *   "collisionMode": "SURFACE",
- *   "autoplay": ["rotate_gear"]
+ *   "autoplay": ["rotate_gear"],
+ *   "texelMode": "AUTO",
+ *   "texelDetail": "FACE",
+ *   "maxTexelPlatesPerFace": 96,
+ *   "maxTexelPlatesPerInstance": 150
  * }
  * }</pre>
  * Any omitted field falls back to the global settings default.
@@ -20,11 +24,18 @@ import java.util.Locale;
 public record ModelMeta(
         OriginMode originMode,
         CollisionMode collisionMode,
-        List<String> autoplay
+        List<String> autoplay,
+        TexelMode texelMode,
+        TexelDetail texelDetail,
+        Integer maxTexelPlatesPerFace,
+        Integer maxTexelPlatesPerInstance
 ) {
 
     public ModelMeta {
         autoplay = autoplay == null ? List.of() : List.copyOf(autoplay);
+        maxTexelPlatesPerFace = maxTexelPlatesPerFace == null ? null : Math.max(1, maxTexelPlatesPerFace);
+        maxTexelPlatesPerInstance = maxTexelPlatesPerInstance == null
+                ? null : Math.max(1, maxTexelPlatesPerInstance);
     }
 
     public enum OriginMode {
@@ -144,12 +155,66 @@ public record ModelMeta(
         }
     }
 
+    /**
+     * Texel surface baking strategy for a model: decompose each face's UV-mapped
+     * texture into per-pixel texels quantized to the vanilla flat-block palette
+     * (see the {@code texel} package). {@code AUTO} only upgrades faces that would
+     * otherwise render with the FULL strategy and have a resolvable PNG next to the
+     * model; {@code ON} bakes every face with a resolvable PNG; {@code OFF} keeps the
+     * legacy one-material-per-face pipeline.
+     */
+    public enum TexelMode {
+        AUTO,
+        ON,
+        OFF;
+
+        public static TexelMode fromKey(String key, TexelMode fallback) {
+            if (key == null || key.isBlank()) {
+                return fallback;
+            }
+            try {
+                return TexelMode.valueOf(key.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                return fallback;
+            }
+        }
+    }
+
+    /** Sampling policy per texel: one center sample, or area-averaged supersampling. */
+    public enum TexelDetail {
+        FACE,
+        SUPERSAMPLE_2X2,
+        SUPERSAMPLE_4X4;
+
+        /** Sample grid edge length along each axis (1, 2 or 4). */
+        public int sampleCount() {
+            return switch (this) {
+                case SUPERSAMPLE_2X2 -> 2;
+                case SUPERSAMPLE_4X4 -> 4;
+                default -> 1;
+            };
+        }
+
+        public static TexelDetail fromKey(String key, TexelDetail fallback) {
+            if (key == null || key.isBlank()) {
+                return fallback;
+            }
+            try {
+                return TexelDetail.valueOf(key.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                return fallback;
+            }
+        }
+    }
+
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null);
+        return new ModelMeta(null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
-        return originMode == null && collisionMode == null && autoplay.isEmpty();
+        return originMode == null && collisionMode == null && autoplay.isEmpty()
+                && texelMode == null && texelDetail == null
+                && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -171,6 +236,10 @@ public record ModelMeta(
             OriginMode originMode = null;
             CollisionMode collisionMode = null;
             List<String> autoplay = new ArrayList<>();
+            TexelMode texelMode = null;
+            TexelDetail texelDetail = null;
+            Integer maxTexelPlatesPerFace = null;
+            Integer maxTexelPlatesPerInstance = null;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -179,12 +248,17 @@ public record ModelMeta(
                     case "originMode" -> originMode = OriginMode.fromKey(readString(json), null);
                     case "collisionMode" -> collisionMode = CollisionMode.fromKey(readString(json), null);
                     case "autoplay" -> readStringArray(json, autoplay);
+                    case "texelMode" -> texelMode = TexelMode.fromKey(readString(json), null);
+                    case "texelDetail" -> texelDetail = TexelDetail.fromKey(readString(json), null);
+                    case "maxTexelPlatesPerFace" -> maxTexelPlatesPerFace = readPositiveInt(json);
+                    case "maxTexelPlatesPerInstance" -> maxTexelPlatesPerInstance = readPositiveInt(json);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
-            return new ModelMeta(originMode, collisionMode, autoplay);
+            return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
+                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
@@ -198,6 +272,20 @@ public record ModelMeta(
             return null;
         }
         return json.nextString();
+    }
+
+    private static Integer readPositiveInt(com.google.gson.stream.JsonReader json) throws Exception {
+        if (json.peek() == com.google.gson.stream.JsonToken.NULL) {
+            json.nextNull();
+            return null;
+        }
+        try {
+            int value = json.nextInt();
+            return value > 0 ? value : null;
+        } catch (NumberFormatException | IllegalStateException malformed) {
+            json.skipValue();
+            return null;
+        }
     }
 
     private static void readStringArray(com.google.gson.stream.JsonReader json, List<String> output) throws Exception {

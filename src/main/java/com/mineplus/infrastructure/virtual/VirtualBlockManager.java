@@ -5,6 +5,11 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
+import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
+import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker;
+import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
+import com.mineplus.infrastructure.virtual.texel.TextureImageStore;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
@@ -48,9 +53,13 @@ public class VirtualBlockManager implements Listener {
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
     private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
+    private final Map<String, TexelBakeResult> texelBakes = new HashMap<>();
+    private final Map<String, File> modelSourceFiles = new HashMap<>();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
+    private TexelBakingSettings texelSettings = TexelBakingSettings.defaults();
+    private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
 
     public record ActiveVirtualBlock(
@@ -93,8 +102,26 @@ public class VirtualBlockManager implements Listener {
         occupancyCalculator.clearCache();
     }
 
+    /**
+     * Applies global texel baking settings and re-bakes every loaded model with them
+     * (decoded PNGs are retained — only the plans depend on the settings). A full
+     * model reload re-bakes through {@link #registerModel} anyway.
+     */
+    public void updateTexelSettings(TexelBakingSettings settings) {
+        this.texelSettings = settings == null ? TexelBakingSettings.defaults() : settings;
+        texelBakes.clear();
+        for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
+            bakeTexelSurfaces(entry.getKey(), entry.getValue(),
+                    modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
+        }
+    }
+
     public VirtualRenderingSettings settings() {
         return settings;
+    }
+
+    public TexelBakingSettings texelSettings() {
+        return texelSettings;
     }
 
     public void reloadModelDefinitions() {
@@ -127,17 +154,50 @@ public class VirtualBlockManager implements Listener {
         return textureReports.getOrDefault(name.toLowerCase(Locale.ROOT), Map.of());
     }
 
+    /**
+     * Texel surface bake result for a model (grid/plate/palette diagnostics and the
+     * per-face plans consumed at spawn time), or {@code null} when unknown.
+     */
+    public TexelBakeResult getTexelBake(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return texelBakes.get(name.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Whether a decodable PNG exists for a texture name used by a model — the
+     * load-bearing precondition for texel rendering fidelity on that face.
+     */
+    public boolean hasTextureImage(String modelName, String textureName) {
+        if (textureName == null || textureName.isBlank()) {
+            return false;
+        }
+        String key = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
+        return imageStore().isResolvable(textureName, modelSourceFiles.get(key));
+    }
+
     public void registerModel(String name, VirtualModel model) {
         registerModel(name, model, ModelMeta.empty());
     }
 
     public void registerModel(String name, VirtualModel model, ModelMeta meta) {
+        registerModel(name, model, meta, null);
+    }
+
+    public void registerModel(String name, VirtualModel model, ModelMeta meta, File modelFile) {
         if (name == null || model == null) {
             return;
         }
         String key = name.toLowerCase(Locale.ROOT);
         loadedModels.put(key, model);
         modelMeta.put(key, meta == null ? ModelMeta.empty() : meta);
+        if (modelFile != null) {
+            modelSourceFiles.put(key, modelFile);
+        } else {
+            modelSourceFiles.remove(key);
+        }
+        bakeTexelSurfaces(key, model, modelMeta.get(key), modelSourceFiles.get(key));
     }
 
     public VoxelOccupancyCalculator occupancyCalculator() {
@@ -255,6 +315,11 @@ public class VirtualBlockManager implements Listener {
         loadedModels.clear();
         modelMeta.clear();
         textureReports.clear();
+        texelBakes.clear();
+        modelSourceFiles.clear();
+        if (textureImageStore != null) {
+            textureImageStore.clear();
+        }
         occupancyCalculator.clearCache();
         if (plugin == null) {
             return;
@@ -272,9 +337,33 @@ public class VirtualBlockManager implements Listener {
 
         for (ModelImportCoordinator.ModelEntry entry : result.entries()) {
             VirtualModel model = entry.model();
-            registerModel(entry.key(), model, ModelMeta.load(entry.file()));
+            registerModel(entry.key(), model, ModelMeta.load(entry.file()), entry.file());
             textureReports.put(entry.key(), resolveTextureReport(model));
         }
+    }
+
+    /**
+     * Bakes texel surface plans for a registered model using the current settings.
+     * Bake failures never break model load — faces without resolvable PNGs simply
+     * keep their legacy rendering tiers.
+     */
+    private void bakeTexelSurfaces(String key, VirtualModel model, ModelMeta meta, File modelFile) {
+        TexelBakeResult result = TexelSurfaceBaker.bakeModel(
+                model, meta, modelFile, imageStore(), texelSettings);
+        texelBakes.put(key, result);
+        if (result.enabled() && result.facesBaked() > 0) {
+            DebugLogger.info("[TexelBaking] Model '" + key + "': baked " + result.facesBaked()
+                    + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
+                    + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
+        }
+    }
+
+    private TextureImageStore imageStore() {
+        if (textureImageStore == null) {
+            File root = plugin != null ? new File(plugin.getDataFolder(), MODELS_FOLDER) : null;
+            textureImageStore = new TextureImageStore(root);
+        }
+        return textureImageStore;
     }
 
     /**
@@ -397,9 +486,17 @@ public class VirtualBlockManager implements Listener {
 
         boolean animated = model.hasAnimations();
         List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
+        TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
+        List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans =
+                texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
+        int cubeIndex = 0;
         for (BakedCube cube : model.cubes()) {
+            Map<CubeFace, TexelSurfacePlan> facePlans =
+                    texelCubePlans != null && cubeIndex < texelCubePlans.size()
+                            ? texelCubePlans.get(cubeIndex)
+                            : null;
             for (DisplayEmitter.EmittedDisplay item
-                    : DisplayEmitter.emitCube(cube, settings.perFaceRendering())) {
+                    : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
                 BlockDisplay display = (BlockDisplay) origin.getWorld().spawnEntity(
                         displayOrigin, EntityType.BLOCK_DISPLAY);
                 display.setBlock(item.blockData());
@@ -432,6 +529,7 @@ public class VirtualBlockManager implements Listener {
                     ));
                 }
             }
+            cubeIndex++;
         }
 
         Vector3f pivotCorrection = null;

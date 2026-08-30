@@ -1,5 +1,7 @@
 package com.mineplus.infrastructure.virtual;
 
+import com.mineplus.infrastructure.virtual.texel.TexelPalette;
+import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -25,6 +27,12 @@ import org.joml.Vector3f;
  * half windows as slab-type crops with geometry compensation, other windows as the
  * full texture. In-plane UV rotation is applied only when the plate footprint is
  * invariant under it (square faces, or pure 180°).
+ *
+ * <p>Faces with a baked {@link TexelSurfacePlan} (texel surface baking) emit one thin
+ * plate per merged same-color rectangle instead — the face's texture reconstructed
+ * pixel-by-pixel out of flat vanilla palette blocks. Texel plates share the face's
+ * plane, thickness and outward offset, so they never fight each other; the in-plane UV
+ * rotation is baked into the sampling, so the plate geometry itself stays axis-aligned.
  */
 public final class DisplayEmitter {
 
@@ -68,20 +76,94 @@ public final class DisplayEmitter {
      *                         display in the primary texture's material)
      */
     public static List<EmittedDisplay> emitCube(BakedCube cube, boolean perFaceRendering) {
+        return emitCube(cube, perFaceRendering, null);
+    }
+
+    /**
+     * Emits the display list for one cube, consuming baked texel plans where present.
+     *
+     * <p>A face with a {@link TexelSurfacePlan} emits its merged palette plates
+     * regardless of whether its resolved material matches the base display — the
+     * plates <i>are</i> that face's rendering, and transparent texels show the base
+     * display through. When any face has a plan, the base display itself is colored
+     * with the cube's <i>dominant baked palette color</i> (largest world-area entry
+     * across its plans) instead of the filename-resolved material: cutout holes then
+     * reveal a matching local tone rather than the resolver's fallback (white for
+     * unresolvable texture names), and untextured faces inherit it instead of plating
+     * fallback material. Faces without plans keep the tiered plate logic. Emission is
+     * deterministic: faces in {@link CubeFace} declaration order, a face's texel
+     * plates in scan order before the next face.
+     *
+     * @param cube             the cube to emit
+     * @param perFaceRendering whether per-face plates are enabled (false = single
+     *                         display; texel plates are a per-face plate tier, so they
+     *                         require this too)
+     * @param texelPlans       baked plans keyed by face, or {@code null} for none
+     */
+    public static List<EmittedDisplay> emitCube(
+            BakedCube cube,
+            boolean perFaceRendering,
+            Map<CubeFace, TexelSurfacePlan> texelPlans
+    ) {
         if (!perFaceRendering) {
             return List.of(baseDisplay(cube, primaryMaterial(cube), dominantFace(cube)));
         }
 
         EnumMap<CubeFace, Material> effective = effectiveMaterials(cube);
         Material base = majorityMaterial(effective);
+        int dominantPalette = dominantPaletteIndex(cube, texelPlans);
+        if (dominantPalette >= 0) {
+            base = TexelPalette.material(dominantPalette);
+        }
         List<EmittedDisplay> output = new ArrayList<>();
         output.add(baseDisplay(cube, base, dominantFaceAmong(cube, effective, base)));
         for (Map.Entry<CubeFace, Material> entry : effective.entrySet()) {
-            if (entry.getValue() != base) {
-                output.addAll(plateDisplay(cube, entry.getKey(), entry.getValue()));
+            CubeFace faceKey = entry.getKey();
+            TexelSurfacePlan plan = texelPlans == null ? null : texelPlans.get(faceKey);
+            if (plan != null) {
+                output.addAll(texelDisplays(cube, faceKey, plan));
+            } else if (entry.getValue() != base) {
+                if (dominantPalette >= 0 && !isTextured(cube, faceKey)) {
+                    // Untextured faces of texel-baked cubes inherit the dominant base
+                    // color instead of plating the fallback material.
+                    continue;
+                }
+                output.addAll(plateDisplay(cube, faceKey, entry.getValue()));
             }
         }
         return output;
+    }
+
+    private static boolean isTextured(BakedCube cube, CubeFace faceKey) {
+        BakedFace face = cube.faces().get(faceKey);
+        return face != null && face.textureName() != null && !face.textureName().isBlank();
+    }
+
+    /**
+     * Dominant palette entry for a cube's baked plans, weighted by real world area
+     * (a plan's cell area scales its contribution so a 2x2 face cannot outvote an
+     * 8x8 one). {@code -1} when no plan carries a dominant entry.
+     */
+    private static int dominantPaletteIndex(BakedCube cube, Map<CubeFace, TexelSurfacePlan> texelPlans) {
+        if (texelPlans == null || texelPlans.isEmpty()) {
+            return -1;
+        }
+        int best = -1;
+        float bestWeight = 0.0f;
+        for (Map.Entry<CubeFace, TexelSurfacePlan> entry : texelPlans.entrySet()) {
+            TexelSurfacePlan plan = entry.getValue();
+            if (plan.dominantPaletteIndex() < 0 || plan.dominantArea() <= 0) {
+                continue;
+            }
+            float[] pixelSize = FaceUvAnalyzer.facePixelSize(entry.getKey(), cube);
+            float cellArea = (pixelSize[0] * pixelSize[1]) / (plan.gridWidth() * plan.gridHeight());
+            float weight = plan.dominantArea() * cellArea;
+            if (weight > bestWeight) {
+                bestWeight = weight;
+                best = plan.dominantPaletteIndex();
+            }
+        }
+        return best;
     }
 
     /** Effective material per face: own texture when defined, else the neutral surface. */
@@ -330,6 +412,67 @@ public final class DisplayEmitter {
             }
         }
         return OrientableBlockStates.oriented(material, face, plan.orientationDegrees());
+    }
+
+    /**
+     * Texel surface plates: one thin plate per merged same-color rectangle of a baked
+     * face plan. Same subdivision math as {@link #tileDisplays} — a rectangle covering
+     * grid cells {@code [x, x+w) x [y, y+h)} (row 0 = top of the UV window, plates
+     * build top-down) becomes a sub-rectangle of the face with exact edge coincidence
+     * on texel boundaries (small-integer divisions). All plates share one plane,
+     * thickness and outward offset, so they never z-fight each other; brightness
+     * follows the cube's {@code lightEmission}; block data is the palette entry's
+     * cached default state (flat palette materials carry no orientation).
+     */
+    private static List<EmittedDisplay> texelDisplays(
+            BakedCube cube, CubeFace face, TexelSurfacePlan plan) {
+        int axis = face.normalAxis();
+        int uAxis = face.uAxis();
+        int vAxis = face.vAxis();
+        boolean positive = face.positiveNormal();
+        int gridWidth = plan.gridWidth();
+        int gridHeight = plan.gridHeight();
+
+        Vector3f cubeScale = new Vector3f(cube.scale());
+        if (Math.abs(cubeScale.get(axis)) < 1.0e-6f) {
+            cubeScale.setComponent(axis, 1.0e-6f);
+        }
+        float epsLocal = EPS_OUT / cubeScale.get(axis);
+        float thicknessLocal = PLATE_THICKNESS / cubeScale.get(axis);
+
+        Matrix4f cubeMatrix = cubeMatrix(cube);
+        List<EmittedDisplay> output = new ArrayList<>(plan.plateCount());
+        for (TexelSurfacePlan.Rect rect : plan.plates()) {
+            float uStart = rect.x() / (float) gridWidth;
+            float uEnd = (rect.x() + rect.width()) / (float) gridWidth;
+            float vStart = rect.y() / (float) gridHeight;
+            float vEnd = (rect.y() + rect.height()) / (float) gridHeight;
+
+            Vector3f plateScale = new Vector3f(1.0f, 1.0f, 1.0f);
+            plateScale.setComponent(uAxis, uEnd - uStart);
+            plateScale.setComponent(vAxis, vEnd - vStart);
+            plateScale.setComponent(axis, thicknessLocal);
+
+            Vector3f plateTranslation = new Vector3f();
+            plateTranslation.setComponent(uAxis, uStart);
+            plateTranslation.setComponent(vAxis, 1.0f - vEnd);
+            plateTranslation.setComponent(axis, positive ? 1.0f + epsLocal : -epsLocal - thicknessLocal);
+
+            Matrix4f plateMatrix = new Matrix4f(cubeMatrix)
+                    .translate(plateTranslation)
+                    .scale(plateScale);
+
+            output.add(new EmittedDisplay(
+                    TexelPalette.material(rect.paletteIndex()),
+                    plateMatrix.getTranslation(new Vector3f()),
+                    plateMatrix.getUnnormalizedRotation(new Quaternionf()),
+                    plateMatrix.getScale(new Vector3f()),
+                    new Quaternionf(),
+                    cube.lightEmission(),
+                    () -> TexelPalette.blockData(rect.paletteIndex())
+            ));
+        }
+        return output;
     }
 
     private static Matrix4f cubeMatrix(BakedCube cube) {

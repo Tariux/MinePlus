@@ -37,6 +37,7 @@ public class ConfigManager {
                     additionalDebugLogs,
                     MineplusConfig.parseVirtualRendering(yamlConfig, VirtualRenderingSettings.defaults()),
                     MineplusConfig.parseAnimation(yamlConfig, com.mineplus.infrastructure.virtual.animation.AnimationSettings.defaults()),
+                    MineplusConfig.parseTexelBaking(yamlConfig, com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -100,6 +101,31 @@ public class ConfigManager {
                       # Auto-start animations declared in multiblock levels ("animations")
                       # or model meta files ("autoplay").
                       AUTOPLAY: true
+
+                    # Texel surface baking: reconstructs a face's texture pixel-by-pixel
+                    # out of flat vanilla palette blocks (concretes, powders, terracottas).
+                    # Requires the texture PNG to sit next to the model file (or in the
+                    # models folder root) — placing a PNG next to an existing model is the
+                    # opt-in gesture. Per-model overrides live in models/<key>.meta.json
+                    # ("texelMode": AUTO | ON | OFF, "texelDetail": FACE | SUPERSAMPLE_2X2
+                    # | SUPERSAMPLE_4X4).
+                    TEXEL_BAKING:
+                      # Global enable (false = rendering pipeline identical to before).
+                      ENABLED: true
+                      # AUTO: only faces that would otherwise use the FULL strategy and have
+                      # a resolvable PNG get baked (zero change for existing content).
+                      # ON: bake every face with a resolvable PNG. OFF: never bake.
+                      MODE: AUTO
+                      # Sampling per texel: FACE = one center sample; SUPERSAMPLE_2X2/_4X4
+                      # area-average the texel's texture footprint for close-up models.
+                      DETAIL: FACE
+                      # Merged-plate ceiling per face; above it the face falls back to the
+                      # single-material plate (surfaced by /mineplus model info).
+                      MAX_PLATES_PER_FACE: 96
+                      # Whole-instance plate budget; faces overflow in emission order.
+                      MAX_PLATES_PER_INSTANCE: 150
+                      # Hard grid edge cap per face (max texels per axis pre-merge).
+                      MAX_GRID_EDGE: 64
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

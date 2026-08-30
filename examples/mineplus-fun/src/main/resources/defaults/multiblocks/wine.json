@@ -1,0 +1,15 @@
+{
+  "id": "wine_bottle",
+  "name": "Strad Wine Bottle",
+  "levels": {
+    "1": {
+      "model": "models/strad-wine.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Strad Wine"
+      }
+    }
+  }
+}
