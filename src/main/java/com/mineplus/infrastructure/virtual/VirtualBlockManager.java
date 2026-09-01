@@ -545,8 +545,12 @@ public class VirtualBlockManager implements Listener {
                 texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
         VoxelModelBake voxelBake = voxelBakes.get(model.name().toLowerCase(Locale.ROOT));
         // The strategy selection already refuses animated models (voxel displays
-        // cannot bind to cube bones); the guard keeps a stale bake honest.
-        boolean voxelRender = voxelBake != null && voxelBake.voxelRender() && !animated;
+        // cannot bind to cube bones); the guard keeps a stale bake honest. A bake
+        // that selected VOXEL but produced zero runs (thin geometry whose cubes
+        // strictly overlap no lattice cell) must not render an invisible model —
+        // it falls back to the legacy cube pipeline below.
+        boolean voxelRender = voxelBake != null && voxelBake.voxelRender()
+                && !voxelBake.runs().isEmpty() && !animated;
         // Readability floor for palette-quantized models (texel plates or voxel
         // reconstruction): vanilla's directional face shading crushes near-black
         // palette materials into one unreadable mass outside full daylight. A
