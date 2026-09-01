@@ -149,7 +149,17 @@ public final class DisplayEmitter {
             TexelSurfacePlan plan = texelPlans == null ? null : texelPlans.get(faceKey);
             if (plan != null) {
                 output.addAll(texelDisplays(cube, faceKey, plan));
-            } else if (entry.getValue() != base || cutout) {
+                continue;
+            }
+            Material faceMaterial = entry.getValue();
+            if (dominantPalette >= 0 && faceMaterial == TextureMaterialResolver.fallback()) {
+                // Budget-fallback face whose texture name resolves to no vanilla
+                // material: plating the resolver fallback would paint it concrete
+                // white. The cube's dominant baked palette color is the best local
+                // estimate of what the face should look like instead.
+                faceMaterial = base;
+            }
+            if (faceMaterial != base || cutout) {
                 if (dominantPalette >= 0 && !isTextured(cube, faceKey)) {
                     if (cutout) {
                         // No base display: untextured faces plate the dominant
@@ -158,7 +168,7 @@ public final class DisplayEmitter {
                     }
                     continue;
                 }
-                output.addAll(plateDisplay(cube, faceKey, entry.getValue()));
+                output.addAll(plateDisplay(cube, faceKey, faceMaterial));
             }
         }
         return output;
@@ -313,11 +323,15 @@ public final class DisplayEmitter {
         float thicknessLocal = PLATE_THICKNESS / scale.get(axis);
 
         // Plate box in cube-local unit space: full-face footprint on tangent axes,
-        // thin skin on the normal axis — edges coincide exactly with the face.
+        // thin skin on the normal axis. The plate's outer surface sits at the face
+        // plane + eps (the only part that leaves the cube), and its body extends
+        // INWARD into the cube — plates stay flush with the block boundary instead
+        // of overflowing past it (thin walls previously grew by a full plate
+        // thickness on each side, sticking out past the collision cells).
         Vector3f plateScale = new Vector3f(1.0f, 1.0f, 1.0f);
         plateScale.setComponent(axis, thicknessLocal);
         Vector3f plateTranslation = new Vector3f();
-        float normalStart = positive ? 1.0f + epsLocal : -epsLocal - thicknessLocal;
+        float normalStart = positive ? 1.0f + epsLocal - thicknessLocal : -epsLocal;
         plateTranslation.setComponent(axis, normalStart);
 
         // In-plane UV rotation, guarded: only applied when the footprint is invariant
@@ -334,13 +348,16 @@ public final class DisplayEmitter {
         // Half-crop geometry compensation: a TOP/BOTTOM slab renders its texture on
         // only the top/bottom half of the unit block, so the plate doubles its
         // normal-axis thickness and shifts back, making the visible textured half
-        // coincide with the face rectangle.
+        // coincide with the face rectangle. Slab crops keep the legacy outward
+        // placement — flush placement would bury the slab's textured face inside
+        // the cube.
         if (plan.strategy() == FaceUvAnalyzer.UvPlan.Strategy.CROP_HALF
                 && (plan.half() == FaceUvAnalyzer.UvPlan.Half.TOP
                 || plan.half() == FaceUvAnalyzer.UvPlan.Half.BOTTOM)) {
             boolean topHalf = plan.half() == FaceUvAnalyzer.UvPlan.Half.TOP;
+            float faceStart = positive ? 1.0f + epsLocal : -epsLocal - thicknessLocal;
             plateTranslation.setComponent(axis,
-                    positive == topHalf ? normalStart - thicknessLocal : normalStart);
+                    positive == topHalf ? faceStart - thicknessLocal : faceStart);
             plateScale.setComponent(axis, thicknessLocal * 2.0f);
         }
 
@@ -411,7 +428,8 @@ public final class DisplayEmitter {
                 Vector3f tileTranslation = new Vector3f();
                 tileTranslation.setComponent(uAxis, uStart);
                 tileTranslation.setComponent(vAxis, 1.0f - vEnd);
-                tileTranslation.setComponent(axis, positive ? 1.0f + epsLocal : -epsLocal - thicknessLocal);
+                // Flush placement: outer surface at face plane + eps, body inward.
+                tileTranslation.setComponent(axis, positive ? 1.0f + epsLocal - thicknessLocal : -epsLocal);
 
                 Matrix4f tileMatrix = new Matrix4f(cubeMatrix)
                         .translate(tileTranslation)
@@ -499,7 +517,10 @@ public final class DisplayEmitter {
             Vector3f plateTranslation = new Vector3f();
             plateTranslation.setComponent(uAxis, uStart);
             plateTranslation.setComponent(vAxis, 1.0f - vEnd);
-            plateTranslation.setComponent(axis, positive ? 1.0f + epsLocal : -epsLocal - thicknessLocal);
+            // Flush placement: outer surface at face plane + eps, body inward —
+            // texel plates never push past the cube's face rectangle, so a fully
+            // plate-covered model stays inside its block bounds.
+            plateTranslation.setComponent(axis, positive ? 1.0f + epsLocal - thicknessLocal : -epsLocal);
 
             Matrix4f plateMatrix = new Matrix4f(cubeMatrix)
                     .translate(plateTranslation)

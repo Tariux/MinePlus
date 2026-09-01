@@ -1,0 +1,4 @@
+{
+  "maxTexelPlatesPerFace": 512,
+  "maxTexelPlatesPerInstance": 2048
+}

@@ -100,6 +100,13 @@ public final class RenderStrategySelector {
                     "AUTO requires cube bounds on the voxel lattice of the origin mode"
                             + " (off-lattice geometry would lose the silhouette)");
         }
+        if (spansSingleBlock(model)) {
+            return legacyStrategy(renderingSettings, texelBake,
+                    "AUTO keeps single-block models on the cube pipeline"
+                            + " (a one-block voxel reconstruction flattens per-face texture"
+                            + " detail into one palette block; run merging cannot reduce"
+                            + " an entity count this small)");
+        }
         if (!anyTextureImage) {
             return legacyStrategy(renderingSettings, texelBake,
                     "AUTO requires at least one resolvable texture PNG"
@@ -141,6 +148,44 @@ public final class RenderStrategySelector {
         return originMode == ModelMeta.OriginMode.GRID
                 ? new Vector3f(0.0f, 0.0f, 0.0f)
                 : new Vector3f(-0.5f, 0.0f, -0.5f);
+    }
+
+    /**
+     * Whether the model's world-space AABB fits inside one block on every axis
+     * (within {@code 1/256}). Single-block models keep the cube pipeline under
+     * AUTO: voxelizing them trades per-face texture detail for a silhouette that
+     * the cubes already represent exactly.
+     */
+    static boolean spansSingleBlock(VirtualModel model) {
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+        for (BakedCube cube : model.cubes()) {
+            Matrix4f matrix = new Matrix4f()
+                    .translate(cube.translation())
+                    .rotate(cube.leftRotation())
+                    .scale(cube.scale())
+                    .rotate(cube.rightRotation());
+            for (int corner = 0; corner < 8; corner++) {
+                Vector3f p = new Vector3f(
+                        (corner & 1) == 0 ? 0.0f : 1.0f,
+                        (corner & 2) == 0 ? 0.0f : 1.0f,
+                        (corner & 4) == 0 ? 0.0f : 1.0f);
+                matrix.transformPosition(p);
+                if (!Float.isFinite(p.x) || !Float.isFinite(p.y) || !Float.isFinite(p.z)) {
+                    return false;
+                }
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                minZ = Math.min(minZ, p.z);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+                maxZ = Math.max(maxZ, p.z);
+            }
+        }
+        float eps = 1.0f / 256.0f;
+        return (maxX - minX) <= 1.0f + eps
+                && (maxY - minY) <= 1.0f + eps
+                && (maxZ - minZ) <= 1.0f + eps;
     }
 
     /**

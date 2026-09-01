@@ -152,6 +152,15 @@ Consequences:
 - User-supplied models arrive in the repo `temp/` folder. Copy them into
   `src/main/resources/defaults/models/` byte-identical (verify the SHA256 after copying).
 - Multiblock ids are snake_case (`cannon`, `juicer_machine`); the JSON `name` is display-only.
+- **Texture-gradient trap (texel budgets):** a 16x16 sprite with 60+ distinct colors
+  (smooth wood grain, anti-aliased gradients) greedy-merges past the Core's default
+  96-plate per-face budget. Over-budget faces lose their texel bake and fall back —
+  for custom texture names that fallback used to be white concrete, so "only the
+  front face has color" is the signature symptom. The Core now degrades such faces
+  to the cube's dominant palette color, but full fidelity needs a per-model
+  `models/<key>.meta.json` with raised budgets (`maxTexelPlatesPerFace: 512`,
+  `maxTexelPlatesPerInstance: 2048` covers any 16x16 sprite) — see the Cabinet and
+  Wine metas. `/mineplus model info <key>` reports the per-face budget verdict.
 - The Core parses a level's model file directly if its per-type model key is not preloaded, so a
   module only needs to place the `.bbmodel` file — no model-key registration juggling.
 
@@ -218,7 +227,10 @@ Consequences:
     validation);
   - `onButtonClick(player, instance, slot, event)` for buttons;
   - `capture(player, instance, inventory)` — persist contents; called on close and one
-    tick after every accepted interaction, so slot contents are final.
+    tick after every accepted interaction, so slot contents are final;
+  - `onClosed(player, instance)` — after the close-path `capture`, once the player
+    actually shuts the menu (never on per-interaction captures); the hook for
+    close-time side effects like model swaps (see the Cabinet).
   Helpers: `instance(id)`, `type(instance)`, `fill(...)`, `named(...)`, `fillerPane()`,
   `plugin()`, `captureLater(...)`.
 - The Core tracks **one open GUI session per player** (`InfrastructureGuiManager`); opening a
@@ -426,5 +438,20 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   side (row perpendicular to the player's snapped facing, shared placement rotation) for
   comparing bakes; `/wine place [variant]|remove|clear|status` manage them. The minimal
   resource-only feature shape: no hook, no GUI, no listeners.
+- **cabinet** (`com.mineplus.fun.cabinet`): model-as-state storage — the multiblock's
+  level *is* the visual state. Two levels: level 1 renders the closed acacia cabinet,
+  level 2 the open one. Right-click (hook-driven, no JSON `gui` key) calls
+  `openGui` then `lifecycleManager().setLevel(id, 2)`; the storage `CabinetGui`
+  (18 container slots, `AbstractMachineGui`) overrides `onClosed` to
+  `setLevel(id, 1)` — closing the menu closes the cabinet. Contents persist per slot
+  as Base64 `ItemStack#serializeAsBytes` in `stateData` (persisted via
+  `stagePersist` in `capture`), and `onBreak`/`onRemove` both drop everything at the
+  anchor. The `setLevel` mechanism also fires no material cost — it is the raw
+  model-swap path (`upgrade()` is the cost-charging one). Ships per-model
+  `.meta.json` plate-budget opt-ins (`maxTexelPlatesPerFace: 512`,
+  `maxTexelPlatesPerInstance: 2048`): the vinery wood sprite is gradient-heavy
+  (60+ distinct colors per 16x16) and greedy-merges past the default 96-plate
+  per-face ceiling, which makes faces silently fall back to white concrete —
+  see the texture-gradient trap in §6.
 
 Copy the reference whose interaction model matches your feature.

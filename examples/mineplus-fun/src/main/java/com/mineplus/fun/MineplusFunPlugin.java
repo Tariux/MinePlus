@@ -1,6 +1,7 @@
 package com.mineplus.fun;
 
 import com.mineplus.MineplusPlugin;
+import com.mineplus.fun.cabinet.CabinetFeature;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
 import com.mineplus.fun.juicer.JuicerFeature;
@@ -13,7 +14,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * Example "module" plugin that turns the Mineplus Core engine into Juicer,
- * Cannon, and Gear game features.
+ * Cannon, Gear, Wine, and Cabinet game features.
  *
  * <p>This plugin is intentionally a <em>separate</em> artifact from the Core. It depends on
  * the Core at runtime (see {@code plugin.yml -> depend: [Mineplus]}) and obtains the Core
@@ -57,6 +58,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new CannonFeature(this, context));
         features.add(new GearFeature(this, context));
         features.add(new WineFeature(this, context));
+        features.add(new CabinetFeature(this, context));
 
         for (ModuleFeature feature : features) {
             feature.start();
@@ -71,7 +73,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine) enabled on top of Mineplus Core.");
+                + " features (Juicer, Cannon, Gear, Wine, Cabinet) enabled on top of Mineplus Core.");
     }
 
     @Override

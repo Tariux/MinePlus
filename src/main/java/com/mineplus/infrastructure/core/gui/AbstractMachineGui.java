@@ -168,6 +168,15 @@ public abstract class AbstractMachineGui implements InteractiveInfrastructureGui
             return;
         }
         capture(player, instance, event.getView().getTopInventory());
+        onClosed(player, instance);
+    }
+
+    /**
+     * Called after {@link #capture} when the player actually closes this GUI —
+     * never on the per-interaction {@code captureLater} captures. The override
+     * point for close-time side effects (model swaps, door animations).
+     */
+    protected void onClosed(Player player, MultiBlockInstance instance) {
     }
 
     /** The owning module plugin, for scheduling and logging. */

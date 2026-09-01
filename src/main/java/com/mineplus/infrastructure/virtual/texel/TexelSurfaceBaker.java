@@ -79,10 +79,11 @@ public final class TexelSurfaceBaker {
 
     /**
      * Where a plate's outer surface sits beyond its face, in blocks — must mirror
-     * {@code DisplayEmitter.TEXEL_EPS_OUT + PLATE_THICKNESS} so occlusion probes
-     * test exactly the geometry that renders.
+     * {@code DisplayEmitter.TEXEL_EPS_OUT} (plates are flush: outer surface at the
+     * face plane + eps, body inward) so occlusion probes test exactly the geometry
+     * that renders.
      */
-    private static final float PLATE_SURFACE_OFFSET_BLOCKS = 1.0f / 256.0f + 1.0f / 64.0f;
+    private static final float PLATE_SURFACE_OFFSET_BLOCKS = 1.0f / 256.0f;
 
     /**
      * Tangential containment shrink per axis, in blocks: a probe must be this far
