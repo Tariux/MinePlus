@@ -5,6 +5,8 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
+import com.mineplus.infrastructure.virtual.display.DisplayTransport;
+import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelPalette;
@@ -67,6 +69,7 @@ public class VirtualBlockManager implements Listener {
     private VoxelRenderingSettings voxelSettings = VoxelRenderingSettings.defaults();
     private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
+    private DisplayTransport displayTransport;
 
     public record ActiveVirtualBlock(
             String modelName,
@@ -97,6 +100,19 @@ public class VirtualBlockManager implements Listener {
     public void loadModels(JavaPlugin plugin) {
         this.plugin = plugin;
         loadModelDefinitions();
+    }
+
+    /**
+     * Attaches the packet-based display transport. When present, spawns create
+     * pooled never-spawned displays streamed per viewer (bundled, LOD-gated);
+     * when {@code null}, the legacy spawned-entity path runs unchanged.
+     */
+    public void setDisplayTransport(DisplayTransport transport) {
+        this.displayTransport = transport;
+    }
+
+    public DisplayTransport displayTransport() {
+        return displayTransport;
     }
 
     public void setLifecycleManager(MultiBlockLifecycleManager manager) {
@@ -304,6 +320,10 @@ public class VirtualBlockManager implements Listener {
 
     public void shutdown() {
         removeAllModels();
+        if (displayTransport != null) {
+            displayTransport.shutdown();
+            displayTransport = null;
+        }
     }
 
     public boolean exists(UUID instanceId) {
@@ -626,6 +646,11 @@ public class VirtualBlockManager implements Listener {
                 animationBindings == null ? List.of() : animationBindings,
                 pivotCorrection
         ));
+        if (displayTransport != null && displayTransport.isRunning()) {
+            // Registers the chunk index, attaches in-range viewers and drains the
+            // initial dirty state so the first animation delta carries only changes.
+            displayTransport.finishInstance(instanceId, displayOrigin, animated);
+        }
         return instanceId;
     }
 
@@ -654,7 +679,11 @@ public class VirtualBlockManager implements Listener {
             Vector3f pivotOffset,
             Vector3f rotatedPivotOffset
     ) {
-        BlockDisplay display = (BlockDisplay) displayOrigin.getWorld().spawnEntity(
+        if (displayTransport != null && displayTransport.isRunning()) {
+            return spawnPooledDisplayEntity(
+                    displayOrigin, instanceId, item, brightnessFloor,
+                    globalRotation, pivotOffset, rotatedPivotOffset);
+        }        BlockDisplay display = (BlockDisplay) displayOrigin.getWorld().spawnEntity(
                 displayOrigin, EntityType.BLOCK_DISPLAY);
         display.setBlock(item.blockData());
         display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
@@ -673,6 +702,43 @@ public class VirtualBlockManager implements Listener {
                 item.scale(),
                 item.rightRotation()
         ));
+        return display.getUniqueId();
+    }
+
+    /**
+     * Transport path: the display is a pooled, never-spawned entity streamed to
+     * viewers per player with LOD tiers and bundle batching. The instance tag
+     * stays on the Bukkit entity so sweep logic can still identify strays.
+     */
+    private UUID spawnPooledDisplayEntity(
+            Location displayOrigin,
+            UUID instanceId,
+            DisplayEmitter.EmittedDisplay item,
+            int brightnessFloor,
+            Quaternionf globalRotation,
+            Vector3f pivotOffset,
+            Vector3f rotatedPivotOffset
+    ) {
+        PooledDisplay pooled = displayTransport.beginInstance(instanceId, displayOrigin::getWorld);
+        BlockDisplay display = pooled.asBlockDisplay();
+        display.setBlock(item.blockData());
+        display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
+        int emission = Math.max(item.lightEmission(), brightnessFloor);
+        if (emission > 0) {
+            display.setBrightness(BRIGHTNESS_BY_LEVEL[Math.min(emission, 15)]);
+        }
+
+        Vector3f translation = new Vector3f(item.translation());
+        globalRotation.transform(translation);
+        translation.add(pivotOffset).sub(rotatedPivotOffset);
+
+        pooled.moveTo(displayTransport.nms(),
+                displayOrigin.getX(), displayOrigin.getY(), displayOrigin.getZ(), 0f, 0f);
+        pooled.setTransform(new Matrix4f()
+                .translate(translation)
+                .rotate(new Quaternionf(globalRotation).mul(item.leftRotation()))
+                .scale(item.scale())
+                .rotate(item.rightRotation()), 0);
         return display.getUniqueId();
     }
 
@@ -774,6 +840,9 @@ public class VirtualBlockManager implements Listener {
 
     @EventHandler
     public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
+        if (displayTransport != null && displayTransport.isRunning()) {
+            displayTransport.handleChunkLoad(event.getChunk());
+        }
         for (Entity entity : event.getChunk().getEntities()) {
             if (!(entity instanceof BlockDisplay)) {
                 continue;
@@ -797,6 +866,13 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
+    @EventHandler
+    public void onChunkUnload(org.bukkit.event.world.ChunkUnloadEvent event) {
+        if (displayTransport != null && displayTransport.isRunning()) {
+            displayTransport.handleChunkUnload(event.getChunk());
+        }
+    }
+
     private void removeModelInternal(UUID instanceId) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
         if (activeBlock == null) {
@@ -810,6 +886,11 @@ public class VirtualBlockManager implements Listener {
             blockToModelMap.remove(BlockCoordinate.from(loc));
         }
 
+        if (displayTransport != null && displayTransport.isRunning()) {
+            // Despawns every pooled display for every viewer and returns them to the pool.
+            displayTransport.removeInstance(instanceId);
+            return;
+        }
         for (UUID displayId : activeBlock.displayEntities()) {
             Entity display = Bukkit.getEntity(displayId);
             if (display != null) {

@@ -176,7 +176,7 @@ public final class ModelAnimationManager {
         }
 
         if (advanced || state.dirty) {
-            pushPose(state);
+            pushPose(renderedModelId, state);
             state.dirty = false;
         }
     }
@@ -231,27 +231,30 @@ public final class ModelAnimationManager {
         return controller;
     }
 
-    private void pushPose(AnimatedInstance state) {
+    private void pushPose(UUID renderedModelId, AnimatedInstance state) {
         VirtualModel model = virtualBlockManager.getModel(state.modelKey);
-        if (model == null) {
+        int boneCount = model == null ? 0 : model.bones().size();
+        if (boneCount == 0 && state.bindings.isEmpty()) {
             return;
         }
-
-        int boneCount = model.bones().size();
-        AnimationEvaluator.BoneDelta[] deltas = new AnimationEvaluator.BoneDelta[boneCount];
-        for (AnimationController controller : state.controllers.values()) {
-            for (Map.Entry<String, AnimationClip.BoneAnimation> entry : controller.clip().animators().entrySet()) {
-                int boneIndex = model.boneIndex(entry.getKey());
-                if (boneIndex < 0 || !controller.isBoneEnabled(boneIndex)) {
-                    continue;
+        AnimationEvaluator.BoneDelta[] deltas = new AnimationEvaluator.BoneDelta[Math.max(1, boneCount)];
+        if (model != null) {
+            for (AnimationController controller : state.controllers.values()) {
+                for (Map.Entry<String, AnimationClip.BoneAnimation> entry : controller.clip().animators().entrySet()) {
+                    int boneIndex = model.boneIndex(entry.getKey());
+                    if (boneIndex < 0 || boneIndex >= deltas.length || !controller.isBoneEnabled(boneIndex)) {
+                        continue;
+                    }
+                    if (deltas[boneIndex] == null) {
+                        deltas[boneIndex] = new AnimationEvaluator.BoneDelta();
+                    }
+                    AnimationEvaluator.accumulate(entry.getValue(), controller.time(), deltas[boneIndex]);
                 }
-                if (deltas[boneIndex] == null) {
-                    deltas[boneIndex] = new AnimationEvaluator.BoneDelta();
-                }
-                AnimationEvaluator.accumulate(entry.getValue(), controller.time(), deltas[boneIndex]);
             }
         }
-
+        if (boneCount == 0) {
+            boneCount = 1;
+        }
         Matrix4f[] pose = new Matrix4f[boneCount];
         for (int i = 0; i < boneCount; i++) {
             if (deltas[i] == null) {
@@ -278,21 +281,60 @@ public final class ModelAnimationManager {
                 out.mul(delta);
             }
             out.mul(binding.restLocal());
-            BlockDisplay display = (BlockDisplay) Bukkit.getEntity(binding.entityId());
-            if (display != null && display.isValid()) {
-                display.setTransformationMatrix(out);
+            applyPoseMatrix(renderedModelId, binding, out);
+        }
+    }
+
+    /**
+     * Pushes one composed bone matrix to the bound display. Through the display
+     * transport the write is dirty-tracked per viewer (only FULL-tier viewers
+     * receive animation frames; STATIC viewers are frozen by design), bundled
+     * into one packet per player per tick; the legacy path writes the entity
+     * directly and vanilla tracking streams it.
+     */
+    private void applyPoseMatrix(UUID renderedModelId, AnimationBinding binding, Matrix4f matrix) {
+        com.mineplus.infrastructure.virtual.display.DisplayTransport transport =
+                virtualBlockManager.displayTransport();
+        if (transport != null && transport.isRunning()) {
+            com.mineplus.infrastructure.virtual.display.pool.PooledDisplay pooled =
+                    transport.pool().byUniqueId(binding.entityId());
+            if (pooled != null && pooled.isInUse()) {
+                transport.updateTransform(renderedModelId, pooled, matrix,
+                        settings.effectiveInterpolationTicks());
+                return;
             }
+        }
+        BlockDisplay display = (BlockDisplay) Bukkit.getEntity(binding.entityId());
+        if (display != null && display.isValid()) {
+            display.setTransformationMatrix(matrix);
         }
     }
 
     private void applyInterpolation(AnimatedInstance state) {
         int ticks = settings.effectiveInterpolationTicks();
         for (AnimationBinding binding : state.bindings) {
-            BlockDisplay display = (BlockDisplay) Bukkit.getEntity(binding.entityId());
-            if (display != null && display.isValid()) {
+            applyToDisplay(binding.entityId(), display -> {
                 display.setInterpolationDuration(ticks);
                 display.setInterpolationDelay(0);
+            });
+        }
+    }
+
+    /** Display write helper routing through the transport pool or the legacy entity. */
+    private void applyToDisplay(UUID displayId, java.util.function.Consumer<BlockDisplay> write) {
+        com.mineplus.infrastructure.virtual.display.DisplayTransport transport =
+                virtualBlockManager.displayTransport();
+        if (transport != null && transport.isRunning()) {
+            com.mineplus.infrastructure.virtual.display.pool.PooledDisplay pooled =
+                    transport.pool().byUniqueId(displayId);
+            if (pooled != null && pooled.isInUse()) {
+                write.accept(pooled.asBlockDisplay());
+                return;
             }
+        }
+        BlockDisplay display = (BlockDisplay) Bukkit.getEntity(displayId);
+        if (display != null && display.isValid()) {
+            write.accept(display);
         }
     }
 
