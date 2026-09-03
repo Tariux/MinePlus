@@ -39,6 +39,7 @@ public class ConfigManager {
                     MineplusConfig.parseAnimation(yamlConfig, com.mineplus.infrastructure.virtual.animation.AnimationSettings.defaults()),
                     MineplusConfig.parseTexelBaking(yamlConfig, com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults()),
                     MineplusConfig.parseVoxelRendering(yamlConfig, com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings.defaults()),
+                    MineplusConfig.parseDisplayTransport(yamlConfig, com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -147,6 +148,29 @@ public class ConfigManager {
                       # Whole-model display budget after run merging; above it the model
                       # falls back to the legacy pipeline.
                       MAX_DISPLAYS: 1024
+
+                    # Display transport: packet-based streaming of the render pipeline's
+                    # displays. Instead of spawning real entities (vanilla tracking), every
+                    # display is a pooled never-spawned entity sent per viewer: dirty-state
+                    # suppression, one bundle packet per player per tick, distance LOD
+                    # (FULL = animated stream, STATIC = frozen visuals, beyond = removed).
+                    # When disabled or unsupported, the legacy spawned-entity path runs
+                    # exactly as before.
+                    DISPLAY_TRANSPORT:
+                      # Master switch (false = legacy world-spawn entities).
+                      ENABLED: false
+                      # <= FULL_RANGE: every update packet. <= STATIC_RANGE: static visual. Beyond: hidden.
+                      LOD:
+                        FULL_RANGE: 20
+                        STATIC_RANGE: 48
+                        # Ticks between LOD recomputations for moved players.
+                        CHECK_INTERVAL_TICKS: 5
+                      # Pooled idle displays kept per world before real client removal.
+                      POOL:
+                        MAX_IDLE_PER_WORLD: 512
+                      # Packets per bundle; the client rejects bundles above 4096.
+                      NETWORK:
+                        BUNDLE_LIMIT: 4000
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);
