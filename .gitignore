@@ -30,3 +30,4 @@ docs/assets/
 /scripts/
 /package.json
 /node_modules/
+package-lock.json

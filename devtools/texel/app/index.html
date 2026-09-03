@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mineplus Texel Devtool</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <header id="topbar">
+        <span id="brand">texel devtool</span>
+        <span class="dot" id="dot-code" title="pipeline code"></span>
+        <span class="dot" id="dot-daemon" title="bake daemon"></span>
+        <span id="status-text">starting…</span>
+        <span class="spacer"></span>
+        <button id="btn-recompile" class="btn small" title="Recompile pipeline + restart daemon (code hot reload)">↻ Recompile</button>
+        <button id="btn-bake" class="btn small primary" title="Re-bake the current model">Bake</button>
+    </header>
+
+    <div id="layout">
+        <aside id="left">
+            <h2>Models</h2>
+            <ul id="model-list"></ul>
+            <h2>Textures</h2>
+            <ul id="texture-list"></ul>
+        </aside>
+
+        <main id="viewport"></main>
+
+        <aside id="right">
+            <h2>View</h2>
+            <div class="controls">
+                <label><input type="radio" name="viewmode" value="reference" checked> Reference (textured)</label>
+                <label><input type="radio" name="viewmode" value="texel"> Texel plates</label>
+                <label><input type="radio" name="viewmode" value="voxel"> Voxel runs</label>
+                <label><input type="checkbox" id="layer-wireframe"> Plate wireframes</label>
+            </div>
+
+            <h2>Settings <span class="hint">(global — .meta.json overrides win)</span></h2>
+            <div class="controls" id="settings">
+                <label>Texel mode
+                    <select id="s-texelMode">
+                        <option>AUTO</option><option>ON</option><option>OFF</option>
+                    </select></label>
+                <label>Texel detail
+                    <select id="s-texelDetail">
+                        <option>FACE</option><option>SUPERSAMPLE_2X2</option><option>SUPERSAMPLE_4X4</option>
+                    </select></label>
+                <label>Max plates / face <input type="number" id="s-maxPlatesPerFace" value="96" min="1"></label>
+                <label>Max plates / instance <input type="number" id="s-maxPlatesPerInstance" value="150" min="1"></label>
+                <label>Max grid edge <input type="number" id="s-maxGridEdge" value="64" min="1"></label>
+                <label>Voxel mode
+                    <select id="s-voxelMode">
+                        <option>AUTO</option><option>ON</option><option>OFF</option>
+                    </select></label>
+                <label>Max voxel displays <input type="number" id="s-maxVoxelDisplays" value="1024" min="1"></label>
+                <label>Origin mode
+                    <select id="s-originMode">
+                        <option>AUTO</option><option>CENTER</option><option>GRID</option>
+                    </select></label>
+            </div>
+
+            <h2>Diagnostics</h2>
+            <div id="diagnostics"><p class="hint">no bake yet</p></div>
+        </aside>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
