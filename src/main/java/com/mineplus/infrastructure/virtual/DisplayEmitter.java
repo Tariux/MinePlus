@@ -13,14 +13,20 @@ import org.joml.Vector3f;
 
 /**
  * High-precision display emitter:
- * 1. Ultra-thin sub-millimeter plate skinning (1/512 block) eliminates corner gaps and cardboard protrusion.
+ * 1. Ultra-thin plate skinning (1/1024 block) with in-plane edge insets —
+ *    perpendicular plates sharing a cube edge are geometrically disjoint, so
+ *    they never interpenetrate no matter how thin the client renders them.
  * 2. Flush boundary alignment eliminates overlapping penetration and edge shadow lines.
  * 3. Strict hollowness preservation: absent/untextured faces emit zero geometry.
  */
 public final class DisplayEmitter {
 
-    /** Sub-millimeter microscopic plate thickness directed inward. */
-    public static final float PLATE_THICKNESS = 1.0f / 512.0f;
+    /**
+     * Microscopic plate thickness directed inward. Texel plates additionally
+     * inset in-plane by this amount at every face edge, so two perpendicular
+     * plates at a shared cube edge exactly touch instead of crossing.
+     */
+    public static final float PLATE_THICKNESS = 1.0f / 1024.0f;
 
     /** Outward anti-z-fight offset set to zero to keep boundary surfaces strictly flush. */
     public static final float EPS_OUT = 0.0f;
@@ -307,14 +313,25 @@ public final class DisplayEmitter {
 
         float thicknessLocal = PLATE_THICKNESS / cubeScale.get(axis);
 
+        // Corner disjointness: inset every plate in-plane by one plate thickness at
+        // each face edge. Two perpendicular plates sharing a cube edge then only
+        // ever touch (the inset of one cancels the thickness band of the other),
+        // so they can never interpenetrate — regardless of how thin the client
+        // actually renders them. The sub-millimeter loss of coverage per edge is
+        // invisible; cutout texels are unaffected (they emit nothing anyway).
+        float insetU = PLATE_THICKNESS / cubeScale.get(uAxis);
+        float insetV = PLATE_THICKNESS / cubeScale.get(vAxis);
+        float uSpan = 1.0f - 2.0f * insetU;
+        float vSpan = 1.0f - 2.0f * insetV;
+
         Matrix4f cubeMatrix = cubeMatrix(cube);
         List<EmittedDisplay> output = new ArrayList<>(plan.plateCount());
 
         for (TexelSurfacePlan.Rect rect : plan.plates()) {
-            float uStart = rect.x() / (float) gridWidth;
-            float uEnd = (rect.x() + rect.width()) / (float) gridWidth;
-            float vStart = rect.y() / (float) gridHeight;
-            float vEnd = (rect.y() + rect.height()) / (float) gridHeight;
+            float uStart = insetU + rect.x() / (float) gridWidth * uSpan;
+            float uEnd = insetU + (rect.x() + rect.width()) / (float) gridWidth * uSpan;
+            float vStart = insetV + rect.y() / (float) gridHeight * vSpan;
+            float vEnd = insetV + (rect.y() + rect.height()) / (float) gridHeight * vSpan;
 
             Vector3f plateScale = new Vector3f(1.0f, 1.0f, 1.0f);
             plateScale.setComponent(uAxis, uEnd - uStart);

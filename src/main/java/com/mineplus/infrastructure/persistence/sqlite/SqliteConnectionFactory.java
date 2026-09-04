@@ -42,8 +42,8 @@ public final class SqliteConnectionFactory {
         hc.setPoolName("MinePlus-SQLite-Pool");
         hc.setMaximumPoolSize(1); // SQLite is thread-safe for reads, but writes require strict sequential access
         hc.setConnectionTimeout(config.busyTimeoutMs());
-        hc.setIdleTimeout(60000);
-        hc.setMaxLifetime(600000);
+        // No idleTimeout: the pool is fixed-size (max = 1), where idleTimeout
+        // has no effect and only produces a startup warning.
 
         hc.addDataSourceProperty("journal_mode", "WAL");
         hc.addDataSourceProperty("synchronous", "NORMAL");

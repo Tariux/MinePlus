@@ -31,8 +31,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overflow-safe near world borders) and the entity pool's id index uses
   `Int2ObjectOpenHashMap`. Bundled as `libs/fastutil-8.5.14.jar`.
 
+#### Fixed
+
+- **Texel textures missing after load/reload** — instances restored or re-rendered
+  immediately after startup or `/mineplus reload models` could spawn before
+  their model's async bake finished, rendering without texel textures. Spawn
+  paths now wait (bounded, 10 s) for the model's in-flight bake, so texel
+  models always render with their bake — baking stays off-thread, but it can
+  no longer race the spawn.
+
 #### Changed
 
+- **Texel palette: polished granite removed** — its speckled orange pattern is
+  too conspicuous even at 1×1 (66 entries now).
+- **Concrete powders are no longer stretchable** — only pure-flat concretes
+  (and snow) merge into stretched rectangles; powders, terracottas and stones
+  stay 1×1 texels so their grain never smears when scaled.
+- **Plate thickness halved (1/512 → 1/1024 block)** — perpendicular plates
+  meeting at a shared cube edge now interpenetrate by an imperceptible sliver
+  instead of a visible overlap at surface intersections.
+- **Texel plates are corner-disjoint** — every texel plate is inset in-plane by
+  one plate thickness at each face edge, so perpendicular plates at a shared
+  cube edge exactly touch instead of crossing. The fix no longer depends on the
+  client honoring ultra-thin geometry: plates cannot interpenetrate even if the
+  renderer clamps or quantizes sub-millimeter scales.
 - **Texel baking is asynchronous** — `bakeTexelSurfaces` moved off the main
   thread onto a `CompletableFuture`; model registration and reload no longer
   stall on PNG decode + palette matching. Results are guarded by a bake
