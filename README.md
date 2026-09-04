@@ -41,13 +41,13 @@ What does that mean for your server?
 ## ✨ Feature Highlights
 
 - 🧱 **Virtual Blockbench rendering** — a single-pass streaming `.bbmodel` importer with negative-coordinate geometry, outliner pivot transforms, per-cube `light_emission`, and per-face UV analysis that maps textures onto vanilla block materials.
-- 🎞️ **Blockbench animations, playable in-game** — clips, bones, and keyframes ride inside the model file; the core samples them server-side and the vanilla client interpolates to its own frame rate. Autoplay via JSON, or drive parts from code with selector-based hooks (trigger `turret`, disable `wheel`, play `recoil`).
-- 🎯 **Geometry-aware collision** — per-cube SAT cell rasterization (`GEOMETRY` / `SURFACE` / `AABB` modes) places barrier blocks exactly where your model is solid. Hollow structures stay hollow; empty interiors stay walkable.
+- 🎞️ **Blockbench animations, playable in-game** — clips, bones, and keyframes ride inside the model file; the core samples them server-side (Folia's global scheduler or the standard scheduler, with viewer culling so off-screen models cost nothing) and the vanilla client interpolates to its own frame rate. Autoplay via JSON, or drive parts from code with selector-based hooks (trigger `turret`, disable `wheel`, play `recoil`).
+- 🎯 **Geometry-aware collision** — per-cube SAT cell rasterization (`GEOMETRY` / `SURFACE` / `AABB` modes) places barrier blocks exactly where your model is solid, with an allocation-free hot loop. Hollow structures stay hollow; empty interiors stay walkable.
 - 🧭 **Rotation-perfect placement** — rotations snap to the 24 orientation-preserving axis permutations, so barriers and visuals *never* drift apart, even on rotated placements.
 - 🗂️ **Multiblock registry & lifecycle** — create / place / interact / upgrade / tick / break with a full hook and lifecycle-event system.
 - ⏱️ **Timed crafting processes** — restart-safe, chunk-aware processes (vanilla furnace parity: paused in unloaded chunks, resumed on load), scaled by per-level `speed` multipliers.
 - 🔗 **Linking & signals** — pipe-network style auto-linking (`autoLinkNeighbors`) plus directed signal propagation between machines.
-- 💾 **SQLite persistence, off the main thread** — asynchronous write-behind queue; gameplay never blocks on disk I/O.
+- 💾 **SQLite persistence, off the main thread** — HikariCP-pooled connections with an asynchronous write-behind queue; gameplay never blocks on disk I/O.
 - 🖥️ **Built-in admin CLI** — inspect, respawn, reload, and diagnose every instance live.
 
 ---
@@ -173,7 +173,7 @@ MineplusPlugin
              └─ PersistenceFacade             (SQLite, async write-behind)
 ```
 
-- **Persistence** — state lives in `plugins/Mineplus/infrastructure.db`. Gameplay actions stage snapshots in memory; a background task flushes ~once per second and synchronously on shutdown/reload. After a hard crash, at most ~1 second of changes roll back.
+- **Persistence** — state lives in `plugins/Mineplus/infrastructure.db` behind a HikariCP-pooled connection. Gameplay actions stage snapshots in memory; a background task flushes ~once per second and synchronously on shutdown/reload. After a hard crash, at most ~1 second of changes roll back.
 - **Chunk awareness** — instances in unloaded chunks are fully skipped (no ticks, hooks, renders, or process advancement) and resume on chunk load — vanilla tile-entity parity.
 - **Ghost cleanup** — orphaned `BlockDisplay` entities from crashes are detected and cleaned on chunk load.
 

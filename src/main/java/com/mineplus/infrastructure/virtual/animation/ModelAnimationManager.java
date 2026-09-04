@@ -11,8 +11,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -40,8 +43,15 @@ public final class ModelAnimationManager {
     private final VirtualBlockManager virtualBlockManager;
     private AnimationSettings settings = AnimationSettings.defaults();
     private AnimationInstanceBridge bridge;
-    private int taskId = -1;
+    private BukkitTask tickTask;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
     private final Map<UUID, AnimatedInstance> instances = new HashMap<>();
+
+    // JOML object reuse (zero allocation in the animation loop); grown on demand
+    // for models with more bones than the initial capacity.
+    private static final int SCRATCH_INITIAL_BONES = 256;
+    private static final ThreadLocal<Matrix4f[]> SCRATCH_MATRICES = ThreadLocal.withInitial(() -> new Matrix4f[SCRATCH_INITIAL_BONES]);
+    private static final ThreadLocal<AnimationEvaluator.BoneDelta[]> SCRATCH_DELTAS = ThreadLocal.withInitial(() -> new AnimationEvaluator.BoneDelta[SCRATCH_INITIAL_BONES]);
 
     private static final class AnimatedInstance {
         final String modelKey;
@@ -77,30 +87,35 @@ public final class ModelAnimationManager {
 
     public void updateSettings(AnimationSettings settings) {
         this.settings = settings == null ? AnimationSettings.defaults() : settings;
-        if (taskId != -1) {
+        if (tickTask != null || foliaTask != null) {
             stop();
             start();
         }
     }
 
     public void start() {
-        if (!settings.enabled() || taskId != -1) {
+        if (!settings.enabled() || tickTask != null || foliaTask != null) {
             return;
         }
-        taskId = plugin.getServer().getScheduler().scheduleSyncRepeatingTask(
-                plugin,
-                this::tick,
-                Math.max(1, settings.tickIntervalTicks()),
-                Math.max(1, settings.tickIntervalTicks())
-        );
+        int interval = Math.max(1, settings.tickIntervalTicks());
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), interval, interval);
+        } catch (ClassNotFoundException e) {
+            tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, interval, interval);
+        }
         DebugLogger.info("ModelAnimationManager: animation tick scheduled (interval="
                 + settings.tickIntervalTicks() + " ticks).");
     }
 
     public void stop() {
-        if (taskId != -1) {
-            plugin.getServer().getScheduler().cancelTask(taskId);
-            taskId = -1;
+        if (tickTask != null) {
+            tickTask.cancel();
+            tickTask = null;
+        }
+        if (foliaTask != null) {
+            foliaTask.cancel();
+            foliaTask = null;
         }
         instances.clear();
     }
@@ -114,16 +129,29 @@ public final class ModelAnimationManager {
             if (block.animationBindings().isEmpty()) {
                 continue;
             }
-            AnimatedInstance state = instances.get(entry.getKey());
-            if (state == null) {
-                state = createInstance(entry.getKey(), block);
-                if (state == null) {
-                    continue;
-                }
-                instances.put(entry.getKey(), state);
+
+            // Frustum Culling / View check: Skip animating instances with no nearby players
+            if (!hasNearbyViewers(block.origin())) continue;
+
+            AnimatedInstance state = instances.computeIfAbsent(entry.getKey(), k -> createInstance(k, block));
+            if (state != null) {
+                stepInstance(entry.getKey(), state);
             }
-            stepInstance(entry.getKey(), state);
         }
+    }
+
+    private boolean hasNearbyViewers(Location loc) {
+        if (virtualBlockManager.displayTransport() == null || !virtualBlockManager.displayTransport().isRunning()) return true; // Legacy fallback
+        double maxDistSq = virtualBlockManager.displayTransport().settings().lodFullRangeSq();
+        for (Player p : loc.getWorld().getPlayers()) {
+            if (p.getLocation().distanceSquared(loc) <= maxDistSq) {
+                // Dot Product Frustum Check (Is the player looking at it?)
+                Vector3f dirToObj = new Vector3f((float)(loc.getX() - p.getLocation().getX()), (float)(loc.getY() - p.getLocation().getY()), (float)(loc.getZ() - p.getLocation().getZ())).normalize();
+                Vector3f lookDir = new Vector3f((float)p.getLocation().getDirection().getX(), (float)p.getLocation().getDirection().getY(), (float)p.getLocation().getDirection().getZ());
+                if (lookDir.dot(dirToObj) > 0.3f) return true; // Within ~70 degree cone of vision
+            }
+        }
+        return false;
     }
 
     private AnimatedInstance createInstance(UUID renderedModelId, VirtualBlockManager.ActiveVirtualBlock block) {
@@ -233,35 +261,35 @@ public final class ModelAnimationManager {
 
     private void pushPose(UUID renderedModelId, AnimatedInstance state) {
         VirtualModel model = virtualBlockManager.getModel(state.modelKey);
-        int boneCount = model == null ? 0 : model.bones().size();
-        if (boneCount == 0 && state.bindings.isEmpty()) {
-            return;
+        int boneCount = model == null ? 1 : Math.max(1, model.bones().size());
+
+        Matrix4f[] pose = SCRATCH_MATRICES.get();
+        AnimationEvaluator.BoneDelta[] deltas = SCRATCH_DELTAS.get();
+        if (boneCount > pose.length) {
+            pose = new Matrix4f[boneCount];
+            deltas = new AnimationEvaluator.BoneDelta[boneCount];
+            SCRATCH_MATRICES.set(pose);
+            SCRATCH_DELTAS.set(deltas);
         }
-        AnimationEvaluator.BoneDelta[] deltas = new AnimationEvaluator.BoneDelta[Math.max(1, boneCount)];
+
+        for (int i = 0; i < boneCount; i++) {
+            if (deltas[i] == null) deltas[i] = new AnimationEvaluator.BoneDelta();
+            else deltas[i].reset();
+            if (pose[i] == null) pose[i] = new Matrix4f();
+            else pose[i].identity();
+        }
+
         if (model != null) {
             for (AnimationController controller : state.controllers.values()) {
                 for (Map.Entry<String, AnimationClip.BoneAnimation> entry : controller.clip().animators().entrySet()) {
                     int boneIndex = model.boneIndex(entry.getKey());
-                    if (boneIndex < 0 || boneIndex >= deltas.length || !controller.isBoneEnabled(boneIndex)) {
-                        continue;
+                    if (boneIndex >= 0 && boneIndex < boneCount && controller.isBoneEnabled(boneIndex)) {
+                        AnimationEvaluator.accumulate(entry.getValue(), controller.time(), deltas[boneIndex]);
                     }
-                    if (deltas[boneIndex] == null) {
-                        deltas[boneIndex] = new AnimationEvaluator.BoneDelta();
-                    }
-                    AnimationEvaluator.accumulate(entry.getValue(), controller.time(), deltas[boneIndex]);
                 }
             }
+            AnimationEvaluator.composePose(model, deltas, pose);
         }
-        if (boneCount == 0) {
-            boneCount = 1;
-        }
-        Matrix4f[] pose = new Matrix4f[boneCount];
-        for (int i = 0; i < boneCount; i++) {
-            if (deltas[i] == null) {
-                deltas[i] = new AnimationEvaluator.BoneDelta();
-            }
-        }
-        AnimationEvaluator.composePose(model, deltas, pose);
 
         if (!state.interpolationApplied) {
             state.interpolationApplied = true;
@@ -275,10 +303,8 @@ public final class ModelAnimationManager {
                     .rotate(state.globalRotation);
             // Reload guard: bindings capture the spawn-time bone indices; a
             // reloaded model could theoretically have fewer bones.
-            Matrix4f delta = binding.boneIndex() >= 0 && binding.boneIndex() < pose.length
-                    ? pose[binding.boneIndex()] : null;
-            if (delta != null) {
-                out.mul(delta);
+            if (binding.boneIndex() >= 0 && binding.boneIndex() < boneCount) {
+                out.mul(pose[binding.boneIndex()]);
             }
             out.mul(binding.restLocal());
             applyPoseMatrix(renderedModelId, binding, out);

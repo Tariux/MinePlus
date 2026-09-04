@@ -325,7 +325,9 @@ UPDATE_CHECKER:
   RESOURCE_ID: 0
 
 VIRTUAL_RENDERING:
-  # Collision proxy cell lattice: AABB | GEOMETRY | SURFACE
+  # Collision proxy cell lattice: GEOMETRY | SURFACE | AABB
+  # (AABB is a compatibility alias — it resolves through the same
+  # per-cube geometry rasterization as GEOMETRY.)
   COLLISION_MODE: GEOMETRY
   # Cell shrink epsilon for geometry contact tests.
   COLLISION_EPSILON: 0.001
@@ -373,7 +375,7 @@ TEXEL_BAKING:
 |---|---|---|
 | `ADDITIONAL_DEBUG_LOGS` | `true` / `false` | Verbose lifecycle, rendering, persistence, and linking logs. Off by default; persistence errors are always logged regardless |
 | `UPDATE_CHECKER.RESOURCE_ID` | numeric | SpigotMC resource id for the optional version check on startup; `0` (default) disables it |
-| `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier cell rasterization: per-cube SAT (default), interior hollowing for walk-in structures, or legacy full-AABB fill |
+| `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier cell rasterization: per-cube SAT (default), interior hollowing for walk-in structures, or `AABB` — a compatibility alias resolved through the same geometry path |
 | `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
 | `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |
 | `ROTATION_SNAP` | `true` / `false` | Snap placement rotations to the 24 orientation-preserving axis permutations |
@@ -397,7 +399,7 @@ TEXEL_BAKING:
 
 Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla blocks** (16 concretes, 16 concrete powders, 16 terracottas, plus snow block, obsidian and warped wart covering the dark desaturated band — 51 entries, all visually flat): each texel's color is matched to the nearest palette entry by redmean perceptual distance, and adjacent same-color texels merge into single thin `BlockDisplay` plates (greedy rectangle merging, like vanilla chunk meshing).
 
-- **Opt-in gesture:** place the texture PNG next to the model file (`models/<textureName>.png`) — models without adjacent PNGs render byte-identically to before. Bake never fails model load; unresolvable faces keep their legacy tier.
+- **Opt-in gesture:** place the texture PNG next to the model file (`models/<textureName>.png`) — models without adjacent PNGs render byte-identically to before. Baking runs asynchronously off the main thread (results land moments after load; a reload or settings change discards in-flight bakes), so model registration and `/mineplus reload models` never stall on PNG decoding. Bake never fails model load; unresolvable faces keep their legacy tier.
 - **Stretch safety by construction:** every palette entry is a visually flat block, so plates of any size render as a solid color — a stretched patterned block can never appear, because patterned blocks (wool weave, glazed terracotta, glowstone mottle, grained wood…) are excluded from the palette outright. Colors are always the source texture's own, sampled 1:1 per texel; only the block choice is a nearest-flat-color match.
 - **Occlusion culling (no overlapping entities):** texels whose plate would sit inside another cube's solid — the buried midsection of a band-wrapped body, a cork's hidden base — emit no plate. Every rendered plate occupies its own distinct, visible space; box-modeled nested geometry no longer produces layered surface artifacts. Culled-cell counts show in `/mineplus model info`.
 - **Effective grid:** the face's own pixel grid (a 16px face yields a 16×16 grid regardless of PNG resolution) — a 4×4 texture upscales to ≤16 plates, a 32×32 texture downsamples.
