@@ -4,49 +4,50 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Greedy 2D rectangle merging over a quantized texel grid (the same idea as vanilla
- * chunk greedy meshing): scan in row-major order, extend each seed cell to the widest
- * same-index run on its row, then downward while every row matches, emit the
- * rectangle, mark visited.
- *
- * <p>Properties: O(w·h) with tiny constants; rectangles never overlap and jointly
- * cover every non-transparent cell; the output order is deterministic (scan order);
- * merging operates on quantized palette indices, so a merged rectangle is guaranteed
- * to be a single solid material with no seam risk.
+ * Greedy 2D rectangle merging with strict stretchability rules:
+ * Only completely uniform concrete materials are permitted to merge into stretched rectangles.
+ * All detailed textured materials are strictly constrained to 1x1 native texels.
  */
 public final class TexelMerge {
 
     private TexelMerge() {
     }
 
-    /**
-     * Merges a quantized grid into maximal rectangles.
-     *
-     * @param grid   flat grid in row-major order ({@code grid[row * width + col]});
-     *               {@code -1} marks a transparent/no-plate cell
-     * @param width  grid width in cells
-     * @param height grid height in cells
-     * @return merged rectangles in scan order
-     */
     public static List<TexelSurfacePlan.Rect> merge(int[] grid, int width, int height) {
+        return merge(grid, width, height, 0.0f);
+    }
+
+    public static List<TexelSurfacePlan.Rect> merge(int[] grid, int width, int height, float maxOklabDistance) {
         List<TexelSurfacePlan.Rect> rectangles = new ArrayList<>();
         if (grid == null || width <= 0 || height <= 0 || grid.length < width * height) {
             return rectangles;
         }
 
         boolean[] visited = new boolean[width * height];
+        boolean strict = maxOklabDistance <= 0.0f;
+
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int origin = y * width + x;
                 if (visited[origin] || grid[origin] < 0) {
                     continue;
                 }
-                int color = grid[origin];
+                int seedColor = grid[origin];
 
+                // Detailed/grained materials (terracotta, mud, stones) MUST NOT be stretched!
+                if (!TexelPalette.isStretchable(seedColor)) {
+                    rectangles.add(new TexelSurfacePlan.Rect(x, y, 1, 1, seedColor));
+                    visited[origin] = true;
+                    continue;
+                }
+
+                // Smooth concrete blocks merge greedily
                 int rectWidth = 1;
-                while (x + rectWidth < width
-                        && !visited[origin + rectWidth]
-                        && grid[origin + rectWidth] == color) {
+                while (x + rectWidth < width && !visited[origin + rectWidth]) {
+                    int neighbor = grid[origin + rectWidth];
+                    if (!isMatch(seedColor, neighbor, strict, maxOklabDistance)) {
+                        break;
+                    }
                     rectWidth++;
                 }
 
@@ -55,7 +56,8 @@ public final class TexelMerge {
                 while (y + rectHeight < height) {
                     int rowStart = (y + rectHeight) * width + x;
                     for (int cx = 0; cx < rectWidth; cx++) {
-                        if (visited[rowStart + cx] || grid[rowStart + cx] != color) {
+                        int cell = rowStart + cx;
+                        if (visited[cell] || !isMatch(seedColor, grid[cell], strict, maxOklabDistance)) {
                             break extendHeight;
                         }
                     }
@@ -68,9 +70,18 @@ public final class TexelMerge {
                         visited[rowStart + rx] = true;
                     }
                 }
-                rectangles.add(new TexelSurfacePlan.Rect(x, y, rectWidth, rectHeight, color));
+                rectangles.add(new TexelSurfacePlan.Rect(x, y, rectWidth, rectHeight, seedColor));
             }
         }
         return rectangles;
+    }
+
+    private static boolean isMatch(int seed, int candidate, boolean strict, float maxDist) {
+        if (candidate < 0) return false;
+        // If candidate is a non-stretchable material, do not absorb it into a stretched rect
+        if (!TexelPalette.isStretchable(candidate)) return false;
+        if (seed == candidate) return true;
+        if (strict) return false;
+        return TexelPalette.oklabDistance(seed, candidate) <= maxDist;
     }
 }
