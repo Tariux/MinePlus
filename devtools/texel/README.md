@@ -1,10 +1,9 @@
-# Texel/Voxel Hot-Reload Devtool
+# Texel Hot-Reload Devtool
 
-A standalone web environment for iterating on the texel surface baking and voxel
-reconstruction pipelines **without restarting a Minecraft server**. The tool runs
-the *actual compiled pipeline classes* (`BbModelImporter`, `FaceUvAnalyzer`,
-`TexelSurfaceBaker`, `VoxelSurfaceBaker`, `RenderStrategySelector`, …) in a
-headless JVM daemon — render parity with the server is structural, not
+A standalone web environment for iterating on the texel surface baking pipeline
+**without restarting a Minecraft server**. The tool runs the *actual compiled
+pipeline classes* (`BbModelImporter`, `FaceUvAnalyzer`, `TexelSurfaceBaker`, …)
+in a headless JVM daemon — render parity with the server is structural, not
 maintained by discipline.
 
 ## Run
@@ -35,10 +34,10 @@ server auto-stages one from the local Gradle cache, or you can drop
 2. **Per-model config loads automatically**: the model's `.meta.json` (reported
    by the daemon as `meta`, with a `meta` badge next to each affected setting)
    becomes the panel defaults; models without a meta file fall back to the
-   standard defaults (AUTO modes, 96/150 plate budgets, 1024 voxel displays).
+   standard defaults (AUTO modes, 96/150 plate budgets).
    Fields you edit afterwards are sent as explicit overrides and win over the
    meta file for that model until you select another.
-3. **Tweak settings** (texel mode/detail, budgets, voxel mode, origin mode) —
+3. **Tweak settings** (texel mode/detail, budgets, origin mode) —
    every change re-bakes through the daemon in milliseconds.
 4. **Edit pipeline Java** (`src/main/java/com/mineplus/infrastructure/virtual/...`)
    and save — the server recompiles, restarts the daemon, and the page re-bakes
@@ -53,11 +52,10 @@ never render one model's bake under another's settings.
 
 Layers: **Reference** shows the source-textured cubes (the goal), **Texel
 plates** shows the merged palette-quantized plate reconstruction (what the
-server would spawn), **Voxel runs** shows the voxel reconstruction when the
-strategy selects it. The diagnostics panel mirrors `/mineplus model info`
-(strategy + rationale, plate counts vs. budgets, grid histogram, palette usage).
+server would spawn). The diagnostics panel mirrors `/mineplus model info`
+(strategy, plate counts vs. budgets, grid histogram, palette usage).
 
-**View** (right panel) is exclusive: Reference / Texel plates / Voxel runs are
+**View** (right panel) is exclusive: Reference / Texel plates are
 alternative views of the same model — radios, not checkboxes, because showing
 the textured reference and the palette reconstruction at once reads as two
 blended, misaligned textures. Plate wireframes are a sub-option of the texel
@@ -90,15 +88,15 @@ browser (app/)                dev server (server.mjs)              bake daemon (
 
 - **`java/com/mineplus/devtools/texel/BakeDaemon.java`** — line-delimited JSON
   over stdin/stdout; one `bake` request runs import → texture scan → texel bake
-  → voxel bake → strategy selection and returns the full plan (cubes, per-face
-  plates, voxel runs, diagnostics, palette). Logs go to stderr only.
+  and returns the full plan (cubes, per-face plates, diagnostics, palette). Logs
+  go to stderr only.
 - **`java-stubs/`** — linkage stubs (`net.kyori.examination`) needed to load
   paper-api's `Material` headlessly; never invoked.
 - **`server/server.mjs`** — compiles `src/main/java` + daemon with `javac`,
   owns the daemon process (restart on crash/recompile), watches sources and
   asset roots, serves the app and the API (`/api/bake`, `/api/models`,
   `/api/asset`, `/api/events` SSE, `/api/recompile`).
-- **`app/`** — ES-module browser app; plate/voxel geometry is computed with the
+- **`app/`** — ES-module browser app; plate geometry is computed with the
   same `T·R·S·R` display-matrix composition and face-axis conventions as
   `DisplayEmitter` (see `js/geom.js`).
 

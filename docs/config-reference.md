@@ -275,20 +275,18 @@ Any global rendering setting can be overridden per model. Place a `models/<key>.
 
 ```json
 {
-  "originMode": "GRID",
-  "collisionMode": "SURFACE",
-  "autoplay": ["rotate_gear"],
-  "texelMode": "AUTO",
-  "texelDetail": "FACE",
-  "maxTexelPlatesPerFace": 96,
-  "maxTexelPlatesPerInstance": 150,
-  "texelBrightness": 15,
-  "voxelMode": "AUTO",
-  "maxVoxelDisplays": 1024
+   "originMode": "GRID",
+   "collisionMode": "SURFACE",
+   "autoplay": ["rotate_gear"],
+   "texelMode": "AUTO",
+   "texelDetail": "FACE",
+   "maxTexelPlatesPerFace": 96,
+   "maxTexelPlatesPerInstance": 150,
+   "texelBrightness": 15
 }
 ```
 
-Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default; `texelBrightness` (0-15) sets a minimum display light level for texel-baked models so dark palette art stays readable in shade and at night. `voxelMode`/`maxVoxelDisplays` override `VOXEL_RENDERING` for this model (see [Voxel Reconstruction](#voxel-reconstruction)); pin `"voxelMode": "OFF"` on texel-plate showcase models so the AUTO strategy cannot take them over.
+Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default; `texelBrightness` (0-15) sets a minimum display light level for texel-baked models so dark palette art stays readable in shade and at night.
 
 ---
 
@@ -327,7 +325,7 @@ UPDATE_CHECKER:
   RESOURCE_ID: 0
 
 VIRTUAL_RENDERING:
-  # Collision proxy voxelization: AABB | GEOMETRY | SURFACE
+  # Collision proxy cell lattice: AABB | GEOMETRY | SURFACE
   COLLISION_MODE: GEOMETRY
   # Cell shrink epsilon for geometry contact tests.
   COLLISION_EPSILON: 0.001
@@ -369,21 +367,13 @@ TEXEL_BAKING:
   # Hard grid edge cap per face (max texels per axis pre-merge).
   MAX_GRID_EDGE: 64
 
-VOXEL_RENDERING:
-  # Global enable (false = the legacy cube/plate pipeline for every model).
-  ENABLED: true
-  # AUTO | ON | OFF (per-model .meta.json overrides)
-  MODE: AUTO
-  # Whole-model display-run budget; a model exceeding it keeps the legacy
-  # pipeline instead of a partial reconstruction.
-  MAX_DISPLAYS: 1024
 ```
 
 | Key | Values | Effect |
 |---|---|---|
 | `ADDITIONAL_DEBUG_LOGS` | `true` / `false` | Verbose lifecycle, rendering, persistence, and linking logs. Off by default; persistence errors are always logged regardless |
 | `UPDATE_CHECKER.RESOURCE_ID` | numeric | SpigotMC resource id for the optional version check on startup; `0` (default) disables it |
-| `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier voxelization: per-cube SAT (default), interior hollowing for walk-in structures, or legacy full-AABB fill |
+| `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier cell rasterization: per-cube SAT (default), interior hollowing for walk-in structures, or legacy full-AABB fill |
 | `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
 | `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |
 | `ROTATION_SNAP` | `true` / `false` | Snap placement rotations to the 24 orientation-preserving axis permutations |
@@ -400,9 +390,6 @@ VOXEL_RENDERING:
 | `TEXEL_BAKING.MAX_PLATES_PER_FACE` | plates ≥ 1 | Merged-plate ceiling per face (default 96); above it the face falls back to the single-material plate |
 | `TEXEL_BAKING.MAX_PLATES_PER_INSTANCE` | plates ≥ 1 | Whole-instance texel plate budget (default 150); faces overflow in emission order |
 | `TEXEL_BAKING.MAX_GRID_EDGE` | cells ≥ 1 | Hard grid edge cap per face (default 64) — entity count scales with geometry, never with texture resolution |
-| `VOXEL_RENDERING.ENABLED` | `true` / `false` | Global voxel reconstruction switch; `false` keeps every model on the legacy pipeline |
-| `VOXEL_RENDERING.MODE` | `AUTO` / `ON` / `OFF` | `AUTO` (default) voxelizes only non-animated, axis-aligned, lattice-snapped, texture-backed models; `ON` attempts any non-animated model (off-lattice geometry approximated); `OFF` never voxelizes |
-| `VOXEL_RENDERING.MAX_DISPLAYS` | displays ≥ 1 | Whole-model merged-run ceiling (default 1024); a model exceeding it keeps the legacy pipeline |
 
 ---
 
@@ -419,17 +406,6 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 - **Dithered art:** dithered gradient shading (checkerboard-blended shades, common in pixel art) reconstructs as alternating flat palette entries — a faithful but higher-contrast rendering of the dither. Prefer art with flat regions for clean results.
 - **Best content:** pixel art with flat regions; lettering, stripes, and gradients reconstruct as stair-stepped rectangles at 1px scale.
 - **Diagnostics:** `/mineplus model info <key>` reports faces baked, texel grids, palette usage histogram, merged plate counts, and budget verdicts; texture entries show `[png]`/`[no png]`.
-
----
-
-### Voxel Reconstruction
-
-Voxel reconstruction replaces a model's whole display list with a **texel-aware 1×1×1 block lattice**: every occupied lattice voxel becomes one palette-quantized block (sampled area-weighted from the textures its faces map onto it), fully enclosed voxels are culled, and same-color voxels greedy-merge into XZ rectangles per Y level — a uniform 16×16 floor is a single `BlockDisplay`.
-
-- **When it activates (`AUTO`, default):** non-animated, all cubes axis-aligned, all cube bounds snapped to the voxel lattice of the origin mode, and at least one resolvable texture PNG — i.e. genuinely blocky, texture-backed models where one-block voxels are a *better* representation than cube plates. Everything else (rotated cubes, sub-block geometry, animated models) keeps the legacy pipeline untouched. `ON` attempts any non-animated model, approximating off-lattice geometry; `OFF` (or a per-model `"voxelMode": "OFF"` meta) never voxelizes — the recommended pin for texel-plate showcase models, which are otherwise AUTO-eligible.
-- **Color fidelity:** voxel colors come from the same `TexelSampler` the texel plates use (window mapping, in-plane rotation, cutout alpha), so the two representations can never disagree; buried seam faces between abutting cubes are gated out exactly like the texel baker's occlusion culling.
-- **Guards:** a probed-cell ceiling aborts pathological models and the display budget (`MAX_DISPLAYS`, per-model `maxVoxelDisplays`) falls back to the legacy pipeline — a model is never partially reconstructed.
-- **Diagnostics:** `/mineplus model info <key>` reports the strategy decision with its rationale, occupied/surface/culled voxel counts, merged display runs against the budget, palette usage, and bake time.
 
 ---
 
