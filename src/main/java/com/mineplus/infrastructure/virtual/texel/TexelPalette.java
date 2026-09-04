@@ -8,7 +8,8 @@ import org.bukkit.block.data.BlockData;
 /**
  * Curated vanilla flat-block palette for virtual rendering, powered by
  * perceptually-weighted Oklab color space, Minecraft directional shading compensation,
- * and a strict stretchability classification (only pure flat concretes are stretchable).
+ * and a strict stretchability classification: only pure flat concretes (and snow)
+ * may merge into stretched rectangles; powders, terracottas and stones stay 1x1.
  */
 public final class TexelPalette {
 
@@ -38,7 +39,7 @@ public final class TexelPalette {
             142, 32, 32,   // RED_CONCRETE
             8, 10, 15,     // BLACK_CONCRETE
 
-            // 16 concrete powders (Stretchable: fine matte grain)
+            // 16 concrete powders (NON-stretchable: fine grain reads as streaks when scaled — 1x1 only)
             221, 222, 222, // WHITE_CONCRETE_POWDER
             237, 150, 85,  // ORANGE_CONCRETE_POWDER
             213, 101, 202, // MAGENTA_CONCRETE_POWDER
@@ -89,7 +90,6 @@ public final class TexelPalette {
             72, 72, 73,    // POLISHED_DEEPSLATE
             158, 158, 158, // SMOOTH_STONE
             160, 166, 179, // CLAY
-            154, 106, 89,  // POLISHED_GRANITE
             132, 134, 133, // POLISHED_ANDESITE
             192, 193, 194, // POLISHED_DIORITE
             218, 207, 153, // CUT_SANDSTONE
@@ -164,7 +164,6 @@ public final class TexelPalette {
             Material.POLISHED_DEEPSLATE,
             Material.SMOOTH_STONE,
             Material.CLAY,
-            Material.POLISHED_GRANITE,
             Material.POLISHED_ANDESITE,
             Material.POLISHED_DIORITE,
             Material.CUT_SANDSTONE,
@@ -175,22 +174,21 @@ public final class TexelPalette {
     };
 
     /**
-     * Strict classification: ONLY concretes, powders and snow block are stretchable.
-     * All detailed blocks (terracottas, minerals, stones) are strictly 1x1.
+     * Strict classification: ONLY pure-flat concretes and snow block are stretchable.
+     * Concrete powders (grain reads as streaks when scaled), terracottas, and all
+     * detailed blocks are strictly 1x1. Polished granite is not in the palette at
+     * all — its speckled orange pattern draws the eye even at 1x1.
      */
     private static final boolean[] STRETCHABLE_FLAGS = new boolean[MATERIALS.length];
 
     static {
-        // 0..15: Concretes (true)
+        // 0..15: Concretes (true — pure flat texture)
         for (int i = 0; i < 16; i++) STRETCHABLE_FLAGS[i] = true;
-        // 16..31: Concrete powders (true)
-        for (int i = 16; i < 32; i++) STRETCHABLE_FLAGS[i] = true;
-        // 32..47: Terracottas (false)
-        for (int i = 32; i < 48; i++) STRETCHABLE_FLAGS[i] = false;
-        // 48: Snow block (true)
+        // 16..31: Concrete powders (false — grainy, 1x1 only)
+        // 32..47: Terracottas (false — organic mottled texture, 1x1 only)
+        // 48: Snow block (true — pure flat white)
         STRETCHABLE_FLAGS[48] = true;
-        // 49..end: Detailed blocks (false - strictly 1x1)
-        for (int i = 49; i < MATERIALS.length; i++) STRETCHABLE_FLAGS[i] = false;
+        // 49..end: Detailed blocks (false — strictly 1x1)
     }
 
     private static final BlockData[] BLOCK_DATA = new BlockData[MATERIALS.length];

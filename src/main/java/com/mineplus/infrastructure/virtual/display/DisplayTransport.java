@@ -261,7 +261,7 @@ public final class DisplayTransport {
 
     /** A chunk (re)loaded: re-apply tiers for its instances to nearby players. */
     public void handleChunkLoad(Chunk chunk) {
-        Set<RenderedInstance> inChunk = byChunk.get(Chunk.getChunkKey(chunk.getX(), chunk.getZ()));
+        Set<RenderedInstance> inChunk = byChunk.get(chunkKey(chunk.getX(), chunk.getZ()));
         if (inChunk == null) return;
         for (RenderedInstance instance : inChunk) {
             for (PooledDisplay d : instance.displays()) {
@@ -277,7 +277,7 @@ public final class DisplayTransport {
 
     /** A chunk unloaded: hide its instances from every viewer (the clients lost the chunk). */
     public void handleChunkUnload(Chunk chunk) {
-        Set<RenderedInstance> inChunk = byChunk.get(Chunk.getChunkKey(chunk.getX(), chunk.getZ()));
+        Set<RenderedInstance> inChunk = byChunk.get(chunkKey(chunk.getX(), chunk.getZ()));
         if (inChunk == null) return;
         for (RenderedInstance instance : inChunk) {
             for (Map.Entry<UUID, LodTier> entry : new HashMap<>(instance.viewers).entrySet()) {
@@ -360,8 +360,17 @@ public final class DisplayTransport {
     }
 
     private void indexChunk(RenderedInstance instance, Location origin) {
-        long key = Chunk.getChunkKey(origin.getBlockX() >> 4, origin.getBlockZ() >> 4);
+        long key = chunkKey(origin.getBlockX() >> 4, origin.getBlockZ() >> 4);
         byChunk.computeIfAbsent(key, k -> new HashSet<>()).add(instance);
+    }
+
+    /**
+     * Bukkit chunk-key packing (identical to the removed static
+     * {@code Chunk.getChunkKey(int, int)} API), inlined so the transport runs
+     * on runtimes that dropped the static method.
+     */
+    private static long chunkKey(int x, int z) {
+        return (x & 0xFFFFFFFFL) | ((z & 0xFFFFFFFFL) << 32);
     }
 
     private void removeFromChunkIndex(RenderedInstance instance) {
