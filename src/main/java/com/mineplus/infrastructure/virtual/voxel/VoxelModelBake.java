@@ -6,21 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Whole-model voxel bake output: the merged voxel runs consumed at spawn time
+ * Whole-model voxel bake output: the merged 3D voxel runs consumed at spawn time
  * plus the diagnostics surfaced by {@code /mineplus model info}.
- *
- * <p>One {@link VoxelRun} becomes one {@code BlockDisplay}: a maximal
- * XZ-plane rectangle of voxels (greedy-merged per Y level) sharing one palette
- * entry and one light emission. Run origins are in <b>model space</b> (the same
- * coordinate frame as cube translations, lattice-shifted for the model's origin
- * mode), so spawn-side transform composition treats them exactly like cube
- * displays. Rectangle merging — rather than runs along +X only — collapses
- * large same-color floors and walls from O(edge) displays to O(color-change)
- * displays, the dominant entity-count reduction for blocky world-scale models.
- *
- * <p>When {@link #strategy()} is not {@link RenderStrategy#VOXEL}, the run list
- * is empty and the existing rendering pipeline renders the model unchanged.
- * Plans are recomputed on reload, never persisted.
  */
 public record VoxelModelBake(
         RenderStrategy strategy,
@@ -44,18 +31,22 @@ public record VoxelModelBake(
     }
 
     /**
-     * One merged display run: model-space origin plus XZ extents, with the palette
-     * entry and light emission shared by all its voxels. Extents of 1 render a
-     * single voxel exactly.
+     * One merged 3D display run: model-space origin plus 3D extents (X, Y, Z),
+     * sharing a single palette entry and light emission.
      */
     public record VoxelRun(
             float x,
             float y,
             float z,
             int lengthX,
+            int heightY,
             int widthZ,
             int paletteIndex,
             int lightEmission
     ) {
+        /** Backward compatibility constructor (heightY = 1). */
+        public VoxelRun(float x, float y, float z, int lengthX, int widthZ, int paletteIndex, int lightEmission) {
+            this(x, y, z, lengthX, 1, widthZ, paletteIndex, lightEmission);
+        }
     }
 }
