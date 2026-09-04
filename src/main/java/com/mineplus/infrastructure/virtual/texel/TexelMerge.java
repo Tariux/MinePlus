@@ -5,8 +5,8 @@ import java.util.List;
 
 /**
  * Greedy 2D rectangle merging with strict stretchability rules:
- * Only completely uniform concrete materials are permitted to merge into stretched rectangles.
- * All detailed textured materials are strictly constrained to 1x1 native texels.
+ * only pure-flat concretes (and snow) may merge into stretched rectangles.
+ * Concrete powders, terracottas and all detailed materials are strictly 1x1.
  */
 public final class TexelMerge {
 
@@ -34,7 +34,7 @@ public final class TexelMerge {
                 }
                 int seedColor = grid[origin];
 
-                // Detailed/grained materials (terracotta, mud, stones) MUST NOT be stretched!
+                // Grained materials (powders, terracotta, mud, stones) MUST NOT be stretched!
                 if (!TexelPalette.isStretchable(seedColor)) {
                     rectangles.add(new TexelSurfacePlan.Rect(x, y, 1, 1, seedColor));
                     visited[origin] = true;

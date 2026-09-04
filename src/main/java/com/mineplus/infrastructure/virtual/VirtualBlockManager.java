@@ -24,6 +24,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -56,9 +59,12 @@ public class VirtualBlockManager implements Listener {
     private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
     private final Map<String, TexelBakeResult> texelBakes = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<TexelBakeResult>> texelBakeFutures = new ConcurrentHashMap<>();
     private final Map<String, File> modelSourceFiles = new ConcurrentHashMap<>();
     /** Bumped whenever bake results are invalidated; async bakes only land if still current. */
     private final AtomicLong texelBakeGeneration = new AtomicLong();
+    /** Upper bound for waiting on an in-flight bake when a spawn needs it. */
+    private static final long TEXEL_BAKE_JOIN_TIMEOUT_MS = 10_000L;
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
@@ -111,6 +117,7 @@ public class VirtualBlockManager implements Listener {
     public void updateTexelSettings(TexelBakingSettings settings) {
         this.texelSettings = settings == null ? TexelBakingSettings.defaults() : settings;
         texelBakes.clear();
+        texelBakeFutures.clear();
         texelBakeGeneration.incrementAndGet();
         for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
             bakeTexelSurfacesAsync(entry.getKey(), entry.getValue(),
@@ -151,7 +158,23 @@ public class VirtualBlockManager implements Listener {
 
     public TexelBakeResult getTexelBake(String name) {
         if (name == null || name.isBlank()) return null;
-        return texelBakes.get(name.toLowerCase(Locale.ROOT));
+        String key = name.toLowerCase(Locale.ROOT);
+        TexelBakeResult baked = texelBakes.get(key);
+        if (baked != null) return baked;
+        // Bake still in flight (async): wait for it so spawns/restores never
+        // render a texel model without its textures. Bounded — on timeout the
+        // model renders through the legacy tier rather than blocking forever.
+        CompletableFuture<TexelBakeResult> future = texelBakeFutures.get(key);
+        if (future == null) return null;
+        try {
+            return future.get(TEXEL_BAKE_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException | TimeoutException e) {
+            DebugLogger.warning("[TexelBaking] Waiting for model '" + key + "' bake failed: " + e.getMessage());
+            return null;
+        }
     }
 
     public boolean hasTextureImage(String modelName, String textureName) {
@@ -268,6 +291,7 @@ public class VirtualBlockManager implements Listener {
         modelMeta.clear();
         textureReports.clear();
         texelBakes.clear();
+        texelBakeFutures.clear();
         texelBakeGeneration.incrementAndGet();
         modelSourceFiles.clear();
         if (textureImageStore != null) {
@@ -295,22 +319,26 @@ public class VirtualBlockManager implements Listener {
 
     /**
      * Bakes texel surfaces off the main thread. The result only lands if no
-     * reload/settings change invalidated bakes while it was running.
+     * reload/settings change invalidated bakes while it was running; spawn
+     * paths waiting on the future always receive their own result regardless.
      */
     private void bakeTexelSurfacesAsync(String key, VirtualModel model, ModelMeta meta, File modelFile) {
         TexelBakingSettings settingsSnapshot = texelSettings;
         TextureImageStore store = imageStore();
         long generation = texelBakeGeneration.get();
-        CompletableFuture.supplyAsync(() -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot))
-                .thenAccept(result -> {
-                    if (texelBakeGeneration.get() != generation) return; // superseded by a reload
-                    texelBakes.put(key, result);
-                    if (result.enabled() && result.facesBaked() > 0) {
-                        DebugLogger.info("[TexelBaking] Model '" + key + "': baked async " + result.facesBaked()
-                                + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
-                                + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
-                    }
-                });
+        CompletableFuture<TexelBakeResult> future = CompletableFuture.supplyAsync(
+                () -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot));
+        texelBakeFutures.put(key, future);
+        future.thenAccept(result -> {
+            texelBakeFutures.remove(key, future);
+            if (texelBakeGeneration.get() != generation) return; // superseded by a reload
+            texelBakes.put(key, result);
+            if (result.enabled() && result.facesBaked() > 0) {
+                DebugLogger.info("[TexelBaking] Model '" + key + "': baked async " + result.facesBaked()
+                        + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
+                        + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
+            }
+        });
     }
 
     private synchronized TextureImageStore imageStore() {
@@ -408,7 +436,7 @@ public class VirtualBlockManager implements Listener {
 
         boolean animated = model.hasAnimations();
         List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
-        TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
+        TexelBakeResult texelBake = getTexelBake(model.name());
         List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
         ModelMeta spawnMeta = getModelMeta(model.name());
         int brightnessFloor = spawnMeta.texelBrightness() != null && texelCubePlans != null ? spawnMeta.texelBrightness() : 0;

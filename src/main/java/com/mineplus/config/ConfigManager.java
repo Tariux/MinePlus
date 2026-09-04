@@ -28,8 +28,9 @@ public class ConfigManager {
             saveDefaultConfig();
         }
 
+        YamlConfiguration yamlConfig = loadValidatedConfig();
+
         try {
-            YamlConfiguration yamlConfig = YamlConfiguration.loadConfiguration(configFile);
             boolean additionalDebugLogs = yamlConfig.getBoolean("ADDITIONAL_DEBUG_LOGS",
                     yamlConfig.getBoolean("additionalDebugLogs", false));
 
@@ -44,6 +45,40 @@ public class ConfigManager {
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Could not load configuration from settings.mp.yml, using defaults.", e);
             this.config = new MineplusConfig();
+        }
+    }
+
+    /**
+     * Loads settings.mp.yml, backing up and regenerating it if the file is not
+     * valid YAML (a hand edit gone wrong, or a file written by an older
+     * template). The regenerated template always parses, so the plugin
+     * self-heals instead of silently running on defaults forever.
+     */
+    private YamlConfiguration loadValidatedConfig() {
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.load(configFile);
+            return yaml;
+        } catch (Exception broken) {
+            File backup = new File(configFile.getParentFile(),
+                    "settings.mp.yml.broken-" + System.currentTimeMillis());
+            try {
+                Files.move(configFile.toPath(), backup.toPath());
+                logger.severe("settings.mp.yml is not valid YAML (" + broken.getMessage()
+                        + "). Moved the broken file to " + backup.getName()
+                        + " and regenerating the default template.");
+            } catch (IOException moveFailed) {
+                logger.log(Level.SEVERE, "settings.mp.yml is not valid YAML and could not be backed up ("
+                        + moveFailed.getMessage() + "); overwriting with the default template.", broken);
+            }
+            saveDefaultConfig();
+            try {
+                yaml.load(configFile);
+            } catch (Exception freshTemplateBroken) {
+                // The shipped template is fixed; this is unreachable unless the disk is failing.
+                logger.log(Level.SEVERE, "Freshly generated settings.mp.yml failed to parse.", freshTemplateBroken);
+            }
+            return yaml;
         }
     }
 
@@ -72,7 +107,9 @@ public class ConfigManager {
                     # Virtual rendering engine (bbmodel -> BlockDisplay pipeline).
                     # Per-model overrides live in models/<key>.meta.json.
                     VIRTUAL_RENDERING:
-                      # Collision proxy occupancy grid: AABB | GEOMETRY | SURFACE
+                      # Collision proxy occupancy grid: GEOMETRY | SURFACE | AABB
+                      # (AABB is a compatibility alias resolved through the
+                      # same per-cube geometry rasterization as GEOMETRY.)
                       COLLISION_MODE: GEOMETRY
                       # Cell shrink epsilon for geometry contact tests.
                       COLLISION_EPSILON: 0.001
@@ -126,7 +163,7 @@ public class ConfigManager {
                       # Whole-instance plate budget; faces overflow in emission order.
                       MAX_PLATES_PER_INSTANCE: 150
                       # Hard grid edge cap per face (max texels per axis pre-merge).
-                       MAX_GRID_EDGE: 64
+                      MAX_GRID_EDGE: 64
 
                     # Display transport: packet-based streaming of the render pipeline's
                     # displays. Instead of spawning real entities (vanilla tracking), every
