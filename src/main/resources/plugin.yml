@@ -6,6 +6,9 @@ author: Tariux
 description: Data-driven machines and custom structures for Minecraft, rendered on completely vanilla clients.
 website: https://github.com/Tariux/MinePlus
 
+libraries:
+  - com.zaxxer:HikariCP:5.1.0
+
 commands:
   mineplus:
     description: Mineplus Core runtime administration command

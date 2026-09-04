@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Core engine (`Mineplus`) — performance & runtime hardening
+
+#### Added
+
+- **HikariCP connection pooling for SQLite persistence** —
+  `SqliteConnectionFactory` now serves connections from a single-connection
+  HikariCP pool (WAL journal, `NORMAL` sync, `foreign_keys`, busy timeout as
+  datasource properties) instead of opening a raw `DriverManager` connection
+  per operation; the pool is closed on shutdown. HikariCP is declared as a
+  plugin library (`libraries:` in `plugin.yml`) so the server's library loader
+  provides it at runtime — fastutil and sqlite-jdbc already ship with the
+  server. Bundled for compilation as `libs/HikariCP-5.1.0.jar` and
+  `libs/fastutil-8.5.14.jar`.
+- **Folia support for the animation runtime** — on Folia, `ModelAnimationManager`
+  ticks through the `GlobalRegionScheduler`; on Paper/Spigot it keeps the
+  standard scheduler. `stop()` now cancels the Folia task for real.
+- **Viewer culling for animations** — instances with no player inside the
+  transport's full-LOD range and looking roughly toward the model (~70° cone)
+  skip their per-tick pose push entirely.
+- **fastutil collections on the hot paths** — occupancy cells use
+  `LongOpenHashSet` (packed 26/26/12-bit X/Z/Y keys, sign-extended on unpack,
+  overflow-safe near world borders) and the entity pool's id index uses
+  `Int2ObjectOpenHashMap`. Bundled as `libs/fastutil-8.5.14.jar`.
+
+#### Changed
+
+- **Texel baking is asynchronous** — `bakeTexelSurfaces` moved off the main
+  thread onto a `CompletableFuture`; model registration and reload no longer
+  stall on PNG decode + palette matching. Results are guarded by a bake
+  generation counter so a bake superseded by a reload/settings change is
+  discarded instead of landing stale.
+- **Allocation-free occupancy SAT** — `GeometryOccupancyCalculator` reuses
+  `ThreadLocal` scratch vectors and per-cube matrices in the rasterization
+  loop; cube/world matrices are rewritten in place instead of reallocated.
+- **`VirtualBlockManager` state maps are concurrent** — models, meta, source
+  files, texel bakes, and active-block lookups use `ConcurrentHashMap` so async
+  bakes and the main thread never contend.
+- **Animation pose loop is allocation-free** — pose/delta scratch arrays are
+  `ThreadLocal` (grown on demand for >256-bone models) instead of per-tick
+  allocations.
+- **NMS adapter uses `MethodHandle`s** — `ReflectionNmsAdapter` resolves every
+  constructor/method once into cached `MethodHandle`s/`Constructor`s; hot paths
+  only pay for `invoke`. CraftBukkit class resolution handles both versioned
+  and unversioned (Paper 1.20.5+) package layouts, and constructor matching is
+  strict on parameter types again.
+
+#### Removed
+
+- **Legacy `AABB` collision fill** — `COLLISION_MODE: AABB` no longer runs the
+  whole-model bounding-box fill; the value is kept as a compatibility alias
+  resolved through the same per-cube geometry rasterization as `GEOMETRY`.
+
 ## [1.4.0]
 
 ### Core engine (`Mineplus`) — voxel reconstruction removal

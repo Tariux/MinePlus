@@ -140,7 +140,7 @@ public record ModelMeta(
     }
 
     public enum CollisionMode {
-        /** Legacy full-model-AABB fill (compat escape hatch). */
+        /** Compatibility alias: resolved through the same per-cube geometry path as {@link #GEOMETRY}. */
         AABB,
         /** Per-cube geometry-aware collision: solid parts solid, voids open. */
         GEOMETRY,

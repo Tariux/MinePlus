@@ -389,6 +389,9 @@ public final class PersistenceFacade {
     public void shutdown(long timeoutMs) {
         stopAutoFlush();
         flushNow();
+        if (connectionFactory != null) {
+            connectionFactory.shutdown();
+        }
     }
 
     public PersistenceTx beginTransaction() {

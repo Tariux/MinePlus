@@ -15,7 +15,6 @@ import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,7 +22,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -48,14 +49,16 @@ public class VirtualBlockManager implements Listener {
     private static final Material BARRIER_MATERIAL = Material.BARRIER;
     private static final String MODELS_FOLDER = "models";
 
-    private final Map<String, VirtualModel> loadedModels = new HashMap<>();
-    private final Map<String, ModelMeta> modelMeta = new HashMap<>();
-    private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
-    private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
+    private final Map<String, VirtualModel> loadedModels = new ConcurrentHashMap<>();
+    private final Map<String, ModelMeta> modelMeta = new ConcurrentHashMap<>();
+    private final Map<BlockCoordinate, UUID> blockToModelMap = new ConcurrentHashMap<>();
+    private final Map<UUID, ActiveVirtualBlock> activeBlocks = new ConcurrentHashMap<>();
     private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
-    private final Map<String, TexelBakeResult> texelBakes = new HashMap<>();
-    private final Map<String, File> modelSourceFiles = new HashMap<>();
+    private final Map<String, TexelBakeResult> texelBakes = new ConcurrentHashMap<>();
+    private final Map<String, File> modelSourceFiles = new ConcurrentHashMap<>();
+    /** Bumped whenever bake results are invalidated; async bakes only land if still current. */
+    private final AtomicLong texelBakeGeneration = new AtomicLong();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
@@ -108,8 +111,9 @@ public class VirtualBlockManager implements Listener {
     public void updateTexelSettings(TexelBakingSettings settings) {
         this.texelSettings = settings == null ? TexelBakingSettings.defaults() : settings;
         texelBakes.clear();
+        texelBakeGeneration.incrementAndGet();
         for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
-            bakeTexelSurfaces(entry.getKey(), entry.getValue(),
+            bakeTexelSurfacesAsync(entry.getKey(), entry.getValue(),
                     modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
         }
     }
@@ -127,7 +131,7 @@ public class VirtualBlockManager implements Listener {
     }
 
     public Set<String> getAvailableModels() {
-        return Collections.unmodifiableSet(loadedModels.keySet());
+        return Set.copyOf(loadedModels.keySet());
     }
 
     public VirtualModel getModel(String name) {
@@ -174,7 +178,7 @@ public class VirtualBlockManager implements Listener {
         } else {
             modelSourceFiles.remove(key);
         }
-        bakeTexelSurfaces(key, model, modelMeta.get(key), modelSourceFiles.get(key));
+        bakeTexelSurfacesAsync(key, model, modelMeta.get(key), modelSourceFiles.get(key));
     }
 
     public GeometryOccupancyCalculator occupancyCalculator() {
@@ -264,6 +268,7 @@ public class VirtualBlockManager implements Listener {
         modelMeta.clear();
         textureReports.clear();
         texelBakes.clear();
+        texelBakeGeneration.incrementAndGet();
         modelSourceFiles.clear();
         if (textureImageStore != null) {
             textureImageStore.clear();
@@ -288,17 +293,27 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    private void bakeTexelSurfaces(String key, VirtualModel model, ModelMeta meta, File modelFile) {
-        TexelBakeResult result = TexelSurfaceBaker.bakeModel(model, meta, modelFile, imageStore(), texelSettings);
-        texelBakes.put(key, result);
-        if (result.enabled() && result.facesBaked() > 0) {
-            DebugLogger.info("[TexelBaking] Model '" + key + "': baked " + result.facesBaked()
-                    + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
-                    + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
-        }
+    /**
+     * Bakes texel surfaces off the main thread. The result only lands if no
+     * reload/settings change invalidated bakes while it was running.
+     */
+    private void bakeTexelSurfacesAsync(String key, VirtualModel model, ModelMeta meta, File modelFile) {
+        TexelBakingSettings settingsSnapshot = texelSettings;
+        TextureImageStore store = imageStore();
+        long generation = texelBakeGeneration.get();
+        CompletableFuture.supplyAsync(() -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot))
+                .thenAccept(result -> {
+                    if (texelBakeGeneration.get() != generation) return; // superseded by a reload
+                    texelBakes.put(key, result);
+                    if (result.enabled() && result.facesBaked() > 0) {
+                        DebugLogger.info("[TexelBaking] Model '" + key + "': baked async " + result.facesBaked()
+                                + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
+                                + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
+                    }
+                });
     }
 
-    private TextureImageStore imageStore() {
+    private synchronized TextureImageStore imageStore() {
         if (textureImageStore == null) {
             File root = plugin != null ? new File(plugin.getDataFolder(), MODELS_FOLDER) : null;
             textureImageStore = new TextureImageStore(root);
