@@ -57,7 +57,7 @@ public record BakedCube(
         boneIndex = Math.max(-1, boneIndex);
     }
 
-    /** True when this cube carries no rotation, so its OBB equals its AABB (voxelization fast path). */
+    /** True when this cube carries no rotation, so its OBB equals its AABB (occupancy fast path). */
     public boolean isAxisAligned() {
         Quaternionf r = leftRotation;
         return (r.x * r.x + r.y * r.y + r.z * r.z) <= 1.0e-4f;

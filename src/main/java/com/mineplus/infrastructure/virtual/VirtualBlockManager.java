@@ -8,13 +8,9 @@ import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
-import com.mineplus.infrastructure.virtual.texel.TexelPalette;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
 import com.mineplus.infrastructure.virtual.texel.TextureImageStore;
-import com.mineplus.infrastructure.virtual.voxel.VoxelModelBake;
-import com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings;
-import com.mineplus.infrastructure.virtual.voxel.VoxelSurfaceBaker;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
@@ -56,16 +52,14 @@ public class VirtualBlockManager implements Listener {
     private final Map<String, ModelMeta> modelMeta = new HashMap<>();
     private final Map<BlockCoordinate, UUID> blockToModelMap = new HashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new HashMap<>();
-    private final VoxelOccupancyCalculator occupancyCalculator = new VoxelOccupancyCalculator();
+    private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
     private final Map<String, TexelBakeResult> texelBakes = new HashMap<>();
-    private final Map<String, VoxelModelBake> voxelBakes = new HashMap<>();
     private final Map<String, File> modelSourceFiles = new HashMap<>();
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
     private TexelBakingSettings texelSettings = TexelBakingSettings.defaults();
-    private VoxelRenderingSettings voxelSettings = VoxelRenderingSettings.defaults();
     private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
     private DisplayTransport displayTransport;
@@ -109,7 +103,6 @@ public class VirtualBlockManager implements Listener {
     public void updateSettings(VirtualRenderingSettings settings) {
         this.settings = settings == null ? VirtualRenderingSettings.defaults() : settings;
         occupancyCalculator.clearCache();
-        rebakeVoxelPlans();
     }
 
     public void updateTexelSettings(TexelBakingSettings settings) {
@@ -117,20 +110,6 @@ public class VirtualBlockManager implements Listener {
         texelBakes.clear();
         for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
             bakeTexelSurfaces(entry.getKey(), entry.getValue(),
-                    modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
-        }
-        rebakeVoxelPlans();
-    }
-
-    public void updateVoxelSettings(VoxelRenderingSettings settings) {
-        this.voxelSettings = settings == null ? VoxelRenderingSettings.defaults() : settings;
-        rebakeVoxelPlans();
-    }
-
-    private void rebakeVoxelPlans() {
-        voxelBakes.clear();
-        for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
-            bakeVoxelPlan(entry.getKey(), entry.getValue(),
                     modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
         }
     }
@@ -141,10 +120,6 @@ public class VirtualBlockManager implements Listener {
 
     public TexelBakingSettings texelSettings() {
         return texelSettings;
-    }
-
-    public VoxelRenderingSettings voxelSettings() {
-        return voxelSettings;
     }
 
     public void reloadModelDefinitions() {
@@ -175,11 +150,6 @@ public class VirtualBlockManager implements Listener {
         return texelBakes.get(name.toLowerCase(Locale.ROOT));
     }
 
-    public VoxelModelBake getVoxelBake(String name) {
-        if (name == null || name.isBlank()) return null;
-        return voxelBakes.get(name.toLowerCase(Locale.ROOT));
-    }
-
     public boolean hasTextureImage(String modelName, String textureName) {
         if (textureName == null || textureName.isBlank()) return false;
         String key = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
@@ -205,10 +175,9 @@ public class VirtualBlockManager implements Listener {
             modelSourceFiles.remove(key);
         }
         bakeTexelSurfaces(key, model, modelMeta.get(key), modelSourceFiles.get(key));
-        bakeVoxelPlan(key, model, modelMeta.get(key), modelSourceFiles.get(key));
     }
 
-    public VoxelOccupancyCalculator occupancyCalculator() {
+    public GeometryOccupancyCalculator occupancyCalculator() {
         return occupancyCalculator;
     }
 
@@ -295,7 +264,6 @@ public class VirtualBlockManager implements Listener {
         modelMeta.clear();
         textureReports.clear();
         texelBakes.clear();
-        voxelBakes.clear();
         modelSourceFiles.clear();
         if (textureImageStore != null) {
             textureImageStore.clear();
@@ -328,13 +296,6 @@ public class VirtualBlockManager implements Listener {
                     + "/" + result.facesTotal() + " face(s) into " + result.totalPlates()
                     + " merged plate(s) in " + (result.bakeTimeNanos() / 1_000_000.0) + " ms.");
         }
-    }
-
-    private void bakeVoxelPlan(String key, VirtualModel model, ModelMeta meta, File modelFile) {
-        VoxelModelBake result = VoxelSurfaceBaker.bakeModel(
-                model, meta, modelFile, imageStore(), voxelSettings, settings,
-                texelBakes.get(key), effectiveOriginMode(model));
-        voxelBakes.put(key, result);
     }
 
     private TextureImageStore imageStore() {
@@ -434,52 +395,31 @@ public class VirtualBlockManager implements Listener {
         List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
         TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
         List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
-        VoxelModelBake voxelBake = voxelBakes.get(model.name().toLowerCase(Locale.ROOT));
-
-        boolean voxelRender = voxelBake != null && voxelBake.voxelRender() && !voxelBake.runs().isEmpty() && !animated;
         ModelMeta spawnMeta = getModelMeta(model.name());
-        int brightnessFloor = spawnMeta.texelBrightness() != null && (voxelRender || texelCubePlans != null) ? spawnMeta.texelBrightness() : 0;
+        int brightnessFloor = spawnMeta.texelBrightness() != null && texelCubePlans != null ? spawnMeta.texelBrightness() : 0;
 
-        if (voxelRender) {
-            // Full 3D Volumetric Meshing Application (scale matches lengthX, heightY, widthZ)
-            for (VoxelModelBake.VoxelRun run : voxelBake.runs()) {
-                DisplayEmitter.EmittedDisplay item = new DisplayEmitter.EmittedDisplay(
-                        TexelPalette.material(run.paletteIndex()),
-                        new Vector3f(run.x(), run.y(), run.z()),
-                        new Quaternionf(),
-                        new Vector3f(run.lengthX(), run.heightY(), run.widthZ()),
-                        new Quaternionf(),
-                        run.lightEmission(),
-                        () -> TexelPalette.blockData(run.paletteIndex())
-                );
-                spawnedEntities.add(spawnDisplayEntity(
-                        displayOrigin, instanceId, item, brightnessFloor,
-                        globalRotation, pivotOffset, rotatedPivotOffset));
-            }
-        } else {
-            int cubeIndex = 0;
-            for (BakedCube cube : model.cubes()) {
-                Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
-                        ? texelCubePlans.get(cubeIndex) : null;
-                for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
-                    UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
-                            globalRotation, pivotOffset, rotatedPivotOffset);
-                    spawnedEntities.add(displayId);
+        int cubeIndex = 0;
+        for (BakedCube cube : model.cubes()) {
+            Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
+                    ? texelCubePlans.get(cubeIndex) : null;
+            for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
+                UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
+                        globalRotation, pivotOffset, rotatedPivotOffset);
+                spawnedEntities.add(displayId);
 
-                    if (animated && cube.boneIndex() >= 0) {
-                        animationBindings.add(new AnimationBinding(
-                                cube.boneIndex(),
-                                displayId,
-                                new Matrix4f()
-                                        .translate(item.translation())
-                                        .rotate(item.leftRotation())
-                                        .scale(item.scale())
-                                        .rotate(item.rightRotation())
-                        ));
-                    }
+                if (animated && cube.boneIndex() >= 0) {
+                    animationBindings.add(new AnimationBinding(
+                            cube.boneIndex(),
+                            displayId,
+                            new Matrix4f()
+                                    .translate(item.translation())
+                                    .rotate(item.leftRotation())
+                                    .scale(item.scale())
+                                    .rotate(item.rightRotation())
+                    ));
                 }
-                cubeIndex++;
             }
+            cubeIndex++;
         }
 
         Vector3f pivotCorrection = null;

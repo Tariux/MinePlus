@@ -2,11 +2,9 @@ package com.mineplus.config;
 
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
-import com.mineplus.infrastructure.virtual.VoxelOccupancyCalculator;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
-import com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
@@ -15,7 +13,6 @@ public class MineplusConfig {
     private final VirtualRenderingSettings virtualRendering;
     private final AnimationSettings animation;
     private final TexelBakingSettings texelBaking;
-    private final VoxelRenderingSettings voxelRendering;
     private final DisplayTransportSettings displayTransport;
     private final int updateCheckResourceId;
 
@@ -26,13 +23,13 @@ public class MineplusConfig {
     public MineplusConfig(boolean additionalDebugLogs) {
         this(additionalDebugLogs, VirtualRenderingSettings.defaults(),
                 AnimationSettings.defaults(), TexelBakingSettings.defaults(),
-                VoxelRenderingSettings.defaults(), DisplayTransportSettings.defaults(), 0);
+                DisplayTransportSettings.defaults(), 0);
     }
 
     public MineplusConfig(boolean additionalDebugLogs, VirtualRenderingSettings virtualRendering) {
         this(additionalDebugLogs, virtualRendering,
                 AnimationSettings.defaults(), TexelBakingSettings.defaults(),
-                VoxelRenderingSettings.defaults(), 0);
+                0);
     }
 
     public MineplusConfig(
@@ -42,7 +39,7 @@ public class MineplusConfig {
     ) {
         this(additionalDebugLogs, virtualRendering,
                 AnimationSettings.defaults(), TexelBakingSettings.defaults(),
-                VoxelRenderingSettings.defaults(), updateCheckResourceId);
+                DisplayTransportSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -52,7 +49,8 @@ public class MineplusConfig {
             int updateCheckResourceId
     ) {
         this(additionalDebugLogs, virtualRendering, animation,
-                TexelBakingSettings.defaults(), VoxelRenderingSettings.defaults(), updateCheckResourceId);
+                TexelBakingSettings.defaults(), DisplayTransportSettings.defaults(),
+                updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -62,19 +60,7 @@ public class MineplusConfig {
             TexelBakingSettings texelBaking,
             int updateCheckResourceId
     ) {
-        this(additionalDebugLogs, virtualRendering, animation,
-                texelBaking, VoxelRenderingSettings.defaults(), updateCheckResourceId);
-    }
-
-    public MineplusConfig(
-            boolean additionalDebugLogs,
-            VirtualRenderingSettings virtualRendering,
-            AnimationSettings animation,
-            TexelBakingSettings texelBaking,
-            VoxelRenderingSettings voxelRendering,
-            int updateCheckResourceId
-    ) {
-        this(additionalDebugLogs, virtualRendering, animation, texelBaking, voxelRendering,
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking,
                 DisplayTransportSettings.defaults(), updateCheckResourceId);
     }
 
@@ -83,7 +69,6 @@ public class MineplusConfig {
             VirtualRenderingSettings virtualRendering,
             AnimationSettings animation,
             TexelBakingSettings texelBaking,
-            VoxelRenderingSettings voxelRendering,
             DisplayTransportSettings displayTransport,
             int updateCheckResourceId
     ) {
@@ -93,8 +78,6 @@ public class MineplusConfig {
                 : virtualRendering;
         this.animation = animation == null ? AnimationSettings.defaults() : animation;
         this.texelBaking = texelBaking == null ? TexelBakingSettings.defaults() : texelBaking;
-        this.voxelRendering = voxelRendering == null
-                ? VoxelRenderingSettings.defaults() : voxelRendering;
         this.displayTransport = displayTransport == null
                 ? DisplayTransportSettings.defaults() : displayTransport;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
@@ -114,10 +97,6 @@ public class MineplusConfig {
 
     public TexelBakingSettings getTexelBaking() {
         return texelBaking;
-    }
-
-    public VoxelRenderingSettings getVoxelRendering() {
-        return voxelRendering;
     }
 
     public DisplayTransportSettings getDisplayTransport() {
@@ -164,10 +143,6 @@ public class MineplusConfig {
 
     public static TexelBakingSettings parseTexelBaking(FileConfiguration yaml, TexelBakingSettings fallback) {
         return TexelBakingSettings.parse(yaml, fallback);
-    }
-
-    public static VoxelRenderingSettings parseVoxelRendering(FileConfiguration yaml, VoxelRenderingSettings fallback) {
-        return VoxelRenderingSettings.parse(yaml, fallback);
     }
 
     public static DisplayTransportSettings parseDisplayTransport(

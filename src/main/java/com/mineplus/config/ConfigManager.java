@@ -38,7 +38,6 @@ public class ConfigManager {
                     MineplusConfig.parseVirtualRendering(yamlConfig, VirtualRenderingSettings.defaults()),
                     MineplusConfig.parseAnimation(yamlConfig, com.mineplus.infrastructure.virtual.animation.AnimationSettings.defaults()),
                     MineplusConfig.parseTexelBaking(yamlConfig, com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults()),
-                    MineplusConfig.parseVoxelRendering(yamlConfig, com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings.defaults()),
                     MineplusConfig.parseDisplayTransport(yamlConfig, com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
@@ -73,7 +72,7 @@ public class ConfigManager {
                     # Virtual rendering engine (bbmodel -> BlockDisplay pipeline).
                     # Per-model overrides live in models/<key>.meta.json.
                     VIRTUAL_RENDERING:
-                      # Collision proxy voxelization: AABB | GEOMETRY | SURFACE
+                      # Collision proxy occupancy grid: AABB | GEOMETRY | SURFACE
                       COLLISION_MODE: GEOMETRY
                       # Cell shrink epsilon for geometry contact tests.
                       COLLISION_EPSILON: 0.001
@@ -127,27 +126,7 @@ public class ConfigManager {
                       # Whole-instance plate budget; faces overflow in emission order.
                       MAX_PLATES_PER_INSTANCE: 150
                       # Hard grid edge cap per face (max texels per axis pre-merge).
-                      MAX_GRID_EDGE: 64
-
-                    # Voxel rendering: adaptive strategy selection per model. When a
-                    # model is best represented as 1x1x1 voxel units (blocky, lattice-
-                    # snapped, texture-backed geometry), it is reconstructed voxel-by-
-                    # voxel — each voxel colored by sampling the real geometry/UV
-                    # mapping — instead of per-cube displays. All other models keep the
-                    # existing classic/face/texel pipeline unchanged. Per-model
-                    # overrides live in models/<key>.meta.json ("voxelMode": AUTO | ON |
-                    # OFF, "maxVoxelDisplays": 1024).
-                    VOXEL_RENDERING:
-                      # Global enable (false = adaptive selection never picks voxels).
-                      ENABLED: true
-                      # AUTO: voxelize only axis-aligned, lattice-snapped, texture-backed,
-                      # non-animated models inside the display budget (zero change for
-                      # existing content). ON: attempt voxelization for any non-animated
-                      # model (off-lattice geometry approximated). OFF: never voxelize.
-                      MODE: AUTO
-                      # Whole-model display budget after run merging; above it the model
-                      # falls back to the legacy pipeline.
-                      MAX_DISPLAYS: 1024
+                       MAX_GRID_EDGE: 64
 
                     # Display transport: packet-based streaming of the render pipeline's
                     # displays. Instead of spawning real entities (vanilla tracking), every

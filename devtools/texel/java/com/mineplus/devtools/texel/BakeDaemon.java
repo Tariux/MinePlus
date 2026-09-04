@@ -11,17 +11,12 @@ import com.mineplus.infrastructure.virtual.CubeFace;
 import com.mineplus.infrastructure.virtual.FaceUvAnalyzer;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualModel;
-import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelPalette;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
 import com.mineplus.infrastructure.virtual.texel.TextureImageStore;
-import com.mineplus.infrastructure.virtual.voxel.RenderStrategySelector;
-import com.mineplus.infrastructure.virtual.voxel.VoxelModelBake;
-import com.mineplus.infrastructure.virtual.voxel.VoxelRenderingSettings;
-import com.mineplus.infrastructure.virtual.voxel.VoxelSurfaceBaker;
 import com.mineplus.util.DebugLogger;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -39,9 +34,9 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 /**
- * Headless bake daemon for the Texel/Voxel hot-reload dev tool.
+ * Headless bake daemon for the Texel dev tool.
  *
- * <p>Runs the real, compiled pipeline classes (importer, analyzers, texel/voxel bakers,
+ * <p>Runs the real, compiled pipeline classes (importer, analyzers, texel baker,
  * strategy selector) with zero production-code modifications — render parity with the
  * server is structural, not maintained by discipline. Speaks line-delimited JSON over
  * stdin/stdout: one request object per line in, one response object per line out.
@@ -54,7 +49,7 @@ import java.util.logging.Logger;
  *  "overrides":{
  *    "texelEnabled":true,"texelMode":"AUTO","texelDetail":"FACE",
  *    "maxPlatesPerFace":96,"maxPlatesPerInstance":150,"maxGridEdge":64,
- *    "voxelEnabled":true,"voxelMode":"AUTO","maxVoxelDisplays":1024,
+ *    "maxPlatesPerFace":96,"maxPlatesPerInstance":150,"maxGridEdge":64,
  *    "perFaceRendering":true,"originMode":"AUTO",
  *    "meta":{"texelMode":"ON",...}        // explicit per-model overrides over the .meta.json
  *  }}
@@ -160,26 +155,12 @@ public final class BakeDaemon {
                 intg(o, "maxPlatesPerFace", 96),
                 intg(o, "maxPlatesPerInstance", 150),
                 intg(o, "maxGridEdge", 64));
-        VoxelRenderingSettings voxelSettings = new VoxelRenderingSettings(
-                bool(o, "voxelEnabled", true),
-                ModelMeta.VoxelMode.fromKey(str(o, "voxelMode", null), ModelMeta.VoxelMode.AUTO),
-                intg(o, "maxVoxelDisplays", 1024));
-        VirtualRenderingSettings defaults = VirtualRenderingSettings.defaults();
-        VirtualRenderingSettings renderingSettings = new VirtualRenderingSettings(
-                defaults.collisionMode(),
-                defaults.collisionEpsilon(),
-                defaults.collisionNonAirPolicy(),
-                defaults.rotationSnap(),
-                defaults.rotationSnapThresholdDegrees(),
-                bool(o, "perFaceRendering", defaults.perFaceRendering()),
-                defaults.originMode());
-
         ModelMeta.OriginMode originMode = resolveOriginMode(o, meta, model);
 
         TextureImageStore store = new TextureImageStore(textureRoot(request, modelFile));
 
         // Texture resolvability scan (also warms the shared raster cache), matching
-        // the voxel baker's own pre-scan.
+        // the texel baker's own pre-scan.
         Set<String> resolvedTextures = new HashSet<>();
         JsonArray texturesJson = new JsonArray();
         for (String textureName : model.textureNames()) {
@@ -201,9 +182,6 @@ public final class BakeDaemon {
 
         TexelBakeResult texelBake = TexelSurfaceBaker.bakeModel(
                 model, meta, modelFile, store, texelSettings);
-        VoxelModelBake voxelBake = VoxelSurfaceBaker.bakeModel(
-                model, meta, modelFile, store, voxelSettings, renderingSettings,
-                texelBake, originMode);
 
         JsonObject response = ok(request);
         response.addProperty("key", key);
@@ -222,7 +200,6 @@ public final class BakeDaemon {
         response.add("palette", paletteJson());
         response.add("cubes", cubesJson(model, texelSettings.effectiveMode(meta), resolvedTextures));
         response.add("texel", texelJson(texelBake));
-        response.add("voxel", voxelJson(voxelBake));
         return response;
     }
 
@@ -285,10 +262,7 @@ public final class BakeDaemon {
                         : base.texelDetail(),
                 overrideInt(overrides, "maxTexelPlatesPerFace", base.maxTexelPlatesPerFace()),
                 overrideInt(overrides, "maxTexelPlatesPerInstance", base.maxTexelPlatesPerInstance()),
-                overrideInt(overrides, "texelBrightness", base.texelBrightness()),
-                str(overrides, "voxelMode", null) != null
-                        ? ModelMeta.VoxelMode.fromKey(str(overrides, "voxelMode", null), null) : base.voxelMode(),
-                overrideInt(overrides, "maxVoxelDisplays", base.maxVoxelDisplays()));
+                overrideInt(overrides, "texelBrightness", base.texelBrightness()));
     }
 
     /**
@@ -337,12 +311,6 @@ public final class BakeDaemon {
         }
         if (meta.texelBrightness() != null) {
             json.addProperty("texelBrightness", meta.texelBrightness());
-        }
-        if (meta.voxelMode() != null) {
-            json.addProperty("voxelMode", meta.voxelMode().name());
-        }
-        if (meta.maxVoxelDisplays() != null) {
-            json.addProperty("maxVoxelDisplays", meta.maxVoxelDisplays());
         }
         return json;
     }
@@ -444,31 +412,6 @@ public final class BakeDaemon {
         }
         tj.add("cubePlans", plans);
         return tj;
-    }
-
-    private static JsonObject voxelJson(VoxelModelBake bake) {
-        JsonObject vj = new JsonObject();
-        vj.addProperty("strategy", bake.strategy().name());
-        vj.addProperty("rationale", bake.rationale());
-        vj.addProperty("occupiedVoxels", bake.occupiedVoxels());
-        vj.addProperty("surfaceVoxels", bake.surfaceVoxels());
-        vj.addProperty("culledInteriorVoxels", bake.culledInteriorVoxels());
-        vj.addProperty("bakeTimeMs", bake.bakeTimeNanos() / 1_000_000.0);
-        vj.add("paletteUsage", intMapJson(bake.paletteUsage()));
-        JsonArray runs = new JsonArray();
-        for (VoxelModelBake.VoxelRun run : bake.runs()) {
-            JsonArray rj = new JsonArray();
-            rj.add(finite(run.x()));
-            rj.add(finite(run.y()));
-            rj.add(finite(run.z()));
-            rj.add(run.lengthX());
-            rj.add(run.widthZ());
-            rj.add(run.paletteIndex());
-            rj.add(run.lightEmission());
-            runs.add(rj);
-        }
-        vj.add("runs", runs);
-        return vj;
     }
 
     private static JsonObject intMapJson(Map<? extends Object, Integer> map) {

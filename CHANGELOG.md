@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0]
+
+### Core engine (`Mineplus`) — voxel reconstruction removal
+
+#### Removed
+
+- **Voxel reconstruction pipeline** — the `infrastructure.virtual.voxel` package
+  (`RenderStrategy`, `RenderStrategySelector`, `VoxelModelBake`,
+  `VoxelRenderingSettings`, `VoxelSurfaceBaker`) is deleted in full. All
+  models now unconditionally render through the cube / per-face plate / texel
+  surface baking pipeline via `DisplayEmitter.emitCube(...)`; models that
+  previously qualified for voxel reconstruction (non-animated, axis-aligned,
+  lattice-snapped, texture-backed) keep the legacy pipeline unchanged.
+- **`VOXEL_RENDERING` config section** — deleted from `settings.mp.yml`
+  template and `ConfigManager`. The `voxelMode`/`maxVoxelDisplays` per-model
+  `.meta.json` keys are no longer parsed by `ModelMeta`.
+- **`RenderStrategy` / `RenderStrategySelector`** — removed from the `/mineplus
+  model info` output and the texel devtool's diagnostics panel.
+
+#### Renamed
+
+- **`VoxelOccupancyCalculator`** → **`GeometryOccupancyCalculator`** — the
+  collision cell rasterizer is unchanged in behavior (same `T(anchorOffset)·R·M`
+  transform, same per-cube SAT, same cache); only the name is updated to reflect
+  that it computes a collision occupancy grid, not a rendering voxel mesh.
+
 ## [1.3.0]
 
 Rendering pipeline deep-dive: the texel and voxel bakers rebuilt for resource
@@ -283,5 +309,6 @@ world injections. Everything in-game comes from your JSON or API calls.
 - `/juicer` and `/cannon` admin commands with tab completion.
 - `DEVELOPMENT_PROMPT.md` — the canonical module-building guide.
 
+[1.4.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.4.0
 [1.1.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Tariux/MinePlus/releases/tag/v1.0.0

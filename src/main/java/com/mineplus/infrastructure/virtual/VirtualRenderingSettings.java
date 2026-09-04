@@ -35,7 +35,7 @@ public record VirtualRenderingSettings(
     public static VirtualRenderingSettings defaults() {
         return new VirtualRenderingSettings(
                 ModelMeta.CollisionMode.GEOMETRY,
-                VoxelOccupancyCalculator.DEFAULT_EPSILON,
+                 GeometryOccupancyCalculator.DEFAULT_EPSILON,
                 NonAirPolicy.SKIP,
                 true,
                 RotationSnapper.DEFAULT_SNAP_THRESHOLD_DEGREES,

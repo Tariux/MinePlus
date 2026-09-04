@@ -6,10 +6,9 @@ import com.mineplus.infrastructure.virtual.VirtualModel;
 /**
  * Shared per-face texture sampler: the single bridge between a face's UV window
  * and the decoded PNG behind it. Both texel surface baking
- * ({@link TexelSurfaceBaker}) and voxel reconstruction sample through this class,
+ * ({@link TexelSurfaceBaker}) and the occupancy grid calculator sample through this class,
  * so the two paths can never disagree about window mapping, in-plane UV rotation,
  * clamping, or PNG resolution scaling.
- *
  * <p>Coordinates: {@code (fu, fv)} are display fractions over the face —
  * {@code fu = 0..1} along the face's U axis, {@code fv = 0..1} from the <i>top</i>
  * of the UV window down (matching how plates and texel grids position themselves:
