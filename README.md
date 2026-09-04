@@ -31,7 +31,7 @@ What does that mean for your server?
 | **Player client** | ✅ 100% vanilla | ❌ Often needs mods or resource packs |
 | **Extra downloads** | ✅ None. Ever. | ❌ Mod pack / texture pack |
 | **Model authoring** | ✅ Blockbench (free, visual) | ❌ Java code or flat item models |
-| **Collision** | ✅ Per-cube voxelized barriers | ⚠️ Usually one flat bounding box |
+| **Collision** | ✅ Per-cube cell-rasterized barriers | ⚠️ Usually one flat bounding box |
 | **Content policy** | ✅ Zero-content core — you decide everything | ⚠️ Opinionated defaults |
 
 **The core ships with zero gameplay content.** No surprise blocks, no test machines, no world edits. Everything in-game exists because *you* defined it — through JSON files, the module API, or both.
@@ -42,7 +42,7 @@ What does that mean for your server?
 
 - 🧱 **Virtual Blockbench rendering** — a single-pass streaming `.bbmodel` importer with negative-coordinate geometry, outliner pivot transforms, per-cube `light_emission`, and per-face UV analysis that maps textures onto vanilla block materials.
 - 🎞️ **Blockbench animations, playable in-game** — clips, bones, and keyframes ride inside the model file; the core samples them server-side and the vanilla client interpolates to its own frame rate. Autoplay via JSON, or drive parts from code with selector-based hooks (trigger `turret`, disable `wheel`, play `recoil`).
-- 🎯 **Geometry-aware collision** — per-cube SAT voxelization (`GEOMETRY` / `SURFACE` / `AABB` modes) places barrier blocks exactly where your model is solid. Hollow structures stay hollow; empty interiors stay walkable.
+- 🎯 **Geometry-aware collision** — per-cube SAT cell rasterization (`GEOMETRY` / `SURFACE` / `AABB` modes) places barrier blocks exactly where your model is solid. Hollow structures stay hollow; empty interiors stay walkable.
 - 🧭 **Rotation-perfect placement** — rotations snap to the 24 orientation-preserving axis permutations, so barriers and visuals *never* drift apart, even on rotated placements.
 - 🗂️ **Multiblock registry & lifecycle** — create / place / interact / upgrade / tick / break with a full hook and lifecycle-event system.
 - ⏱️ **Timed crafting processes** — restart-safe, chunk-aware processes (vanilla furnace parity: paused in unloaded chunks, resumed on load), scaled by per-level `speed` multipliers.

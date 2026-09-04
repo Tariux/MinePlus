@@ -128,12 +128,6 @@ export function plateMatrix(M, face, rect, gw, gh, cubeScale) {
     return mat4Mul(M, mat4Box(min, max));
 }
 
-/** World matrix for a voxel run [x, y, z, lengthX, widthZ, palette, emission]. */
-export function voxelRunMatrix(run) {
-    const [x, y, z, lx, wz] = run;
-    return mat4Box([x, y, z], [x + lx, y + 1, z + wz]);
-}
-
 /** CSS #rrggbb for a packed 0xRRGGBB palette rgb. */
 export function cssRgb(packed) {
     return '#' + packed.toString(16).padStart(6, '0');

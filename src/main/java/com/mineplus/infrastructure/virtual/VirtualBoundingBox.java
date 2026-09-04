@@ -8,8 +8,8 @@ import org.joml.Vector3f;
 /**
  * Whole-model AABB fill (legacy collision proxy).
  *
- * @deprecated for collision use — {@link VoxelOccupancyCalculator} replaces it with
- *     per-cube geometry-aware voxelization. Retained as a diagnostic utility and as the
+ * @deprecated for collision use — {@link GeometryOccupancyCalculator} replaces it with
+ *     per-cube geometry-aware cell rasterization. Retained as a diagnostic utility and as the
  *     AABB compat escape hatch ({@code collisionMode: AABB}).
  */
 @Deprecated

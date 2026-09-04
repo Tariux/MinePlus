@@ -12,7 +12,7 @@ import org.joml.Vector3f;
  * its base; a model point {@code p} (in pixels) sits at
  * {@code anchorCenter + R · (p/16 − (0, 1/2, 0))} where {@code R} is the
  * instance rotation. This is exactly the transform the display renderer and
- * the voxel occupancy calculator apply, so feature geometry (muzzle exits,
+ * the occupancy calculator apply, so feature geometry (muzzle exits,
  * seats, conveyor mounts) computed through this class can never drift from
  * the rendered model.
  */

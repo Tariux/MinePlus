@@ -6,10 +6,11 @@ import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-/**
- * Snaps an arbitrary placement rotation to the nearest of the 24 orientation-preserving
- * signed axis permutations (the rotational symmetry group of the cube). Only these map
- * the integer voxel lattice onto itself exactly, so the same snapped rotation transforms
+ /**
+  * Snaps an arbitrary placement rotation to the nearest of the 24 orientation-preserving
+  * signed axis permutations (the rotational symmetry group of the cube). Only these map
+  * the integer cell lattice onto itself exactly, so the same snapped rotation transforms
+  * both barrier-cell offsets and display translations with pure integer arithmetic —
  * both barrier-cell offsets and display translations with pure integer arithmetic —
  * zero rounding error, collision and visuals can never drift apart.
  */
@@ -53,7 +54,7 @@ public final class RotationSnapper {
             return index;
         }
 
-        /** Exact integer transform of a voxel offset: out[i] = signs[i] * v[axisMap[i]]. */
+         /** Exact integer transform of a cell offset: out[i] = signs[i] * v[axisMap[i]]. */
         public Vector3i transform(int x, int y, int z) {
             int[] v = {x, y, z};
             return new Vector3i(
@@ -64,7 +65,7 @@ public final class RotationSnapper {
         }
     }
 
-    /** Immutable integer 3-tuple used for exact voxel-offset math. */
+     /** Immutable integer 3-tuple used for exact cell-offset math. */
     public record Vector3i(int x, int y, int z) {
     }
 

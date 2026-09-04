@@ -22,8 +22,6 @@ const STANDARD_DEFAULTS = {
     maxPlatesPerFace: 96,
     maxPlatesPerInstance: 150,
     maxGridEdge: 64,
-    voxelMode: 'AUTO',
-    maxVoxelDisplays: 1024,
     originMode: 'AUTO',
 };
 
@@ -33,8 +31,6 @@ const META_KEY_BY_SETTING = {
     texelDetail: 'texelDetail',
     maxPlatesPerFace: 'maxTexelPlatesPerFace',
     maxPlatesPerInstance: 'maxTexelPlatesPerInstance',
-    voxelMode: 'voxelMode',
-    maxVoxelDisplays: 'maxVoxelDisplays',
     originMode: 'originMode',
 };
 
@@ -152,7 +148,7 @@ async function startBake() {
             viewer.render(result);
             renderTextures(result);
             renderDiagnostics(result);
-            setStatus(`${result.key} — ${result.texel.totalPlates} plates · strategy ${result.voxel.strategy} · `
+            setStatus(`${result.key} — ${result.texel.totalPlates} plates · `
                 + `texel ${result.texel.bakeTimeMs.toFixed(1)}ms`);
             setDot(els.dotDaemon, 'ok');
         }
@@ -210,8 +206,6 @@ function syncSettingsUi() {
     document.getElementById('s-maxPlatesPerFace').value = state.settings.maxPlatesPerFace;
     document.getElementById('s-maxPlatesPerInstance').value = state.settings.maxPlatesPerInstance;
     document.getElementById('s-maxGridEdge').value = state.settings.maxGridEdge;
-    document.getElementById('s-voxelMode').value = state.settings.voxelMode;
-    document.getElementById('s-maxVoxelDisplays').value = state.settings.maxVoxelDisplays;
     document.getElementById('s-originMode').value = state.settings.originMode;
 
     for (const label of els.settingsBox.querySelectorAll('label')) {
@@ -239,8 +233,6 @@ const SETTING_BY_CONTROL_ID = {
     's-maxPlatesPerFace': 'maxPlatesPerFace',
     's-maxPlatesPerInstance': 'maxPlatesPerInstance',
     's-maxGridEdge': 'maxGridEdge',
-    's-voxelMode': 'voxelMode',
-    's-maxVoxelDisplays': 'maxVoxelDisplays',
     's-originMode': 'originMode',
 };
 
@@ -279,13 +271,11 @@ function renderTextures(result) {
 
 function renderDiagnostics(result) {
     const t = result.texel;
-    const v = result.voxel;
     const rows = [
         ['model', `${escapeHtml(result.name)} · ${result.cubeCount} cubes · ${result.resolution.width}×${result.resolution.height}`
             + (result.animated ? ' · animated' : '')
             + (result.hasMetaFile ? ' · .meta.json' : '')],
         ['origin mode', result.originMode],
-        ['strategy', `<b>${v.strategy}</b>`],
         ['texel mode', `${t.mode} / ${t.detail}`],
         ['faces baked', `${t.facesBaked} / ${t.facesTotal}`],
         ['plates', `${t.totalPlates} (max on face ${t.maxPlatesOnFace}, avg ${(t.facesBaked ? t.totalPlates / t.facesBaked : 0).toFixed(1)})`],
@@ -294,11 +284,8 @@ function renderDiagnostics(result) {
                 ? ` — <span style="color:#e58a8a">${t.faceBudgetFallbacks + t.instanceBudgetFallbacks} fallback(s)!</span>` : '')],
         ['occluded cells', t.occludedCells],
         ['texel bake', `${t.bakeTimeMs.toFixed(1)} ms`],
-        ['voxel runs', v.runs.length],
-        ['voxels', `${v.surfaceVoxels} surface / ${v.occupiedVoxels} occupied / ${v.culledInteriorVoxels} culled`],
-        ['voxel bake', `${v.bakeTimeMs.toFixed(1)} ms`],
     ];
-    let html = `<p class="rationale">${escapeHtml(v.rationale)}</p>`;
+    let html = '';
     html += '<table>' + rows.map(([k, val]) => `<tr><td>${k}</td><td>${val}</td></tr>`).join('') + '</table>';
 
     // Grid histogram.
@@ -311,11 +298,8 @@ function renderDiagnostics(result) {
             + `<div class="bar-wrap"><div class="bar" style="width:${(100 * n / max).toFixed(0)}%;background:#5b8dc9"></div></div>`).join('');
     }
 
-    // Palette usage (combined texel + voxel).
-    const usage = {};
-    for (const [k, n] of Object.entries(t.paletteUsage ?? {})) usage[k] = (usage[k] ?? 0) + n;
-    for (const [k, n] of Object.entries(v.paletteUsage ?? {})) usage[k] = (usage[k] ?? 0) + n;
-    const entries = Object.entries(usage).sort((a, b) => b[1] - a[1]);
+    // Texel palette usage.
+    const entries = Object.entries(t.paletteUsage ?? {}).sort((a, b) => b[1] - a[1]);
     if (entries.length > 0) {
         const total = entries.reduce((sum, [, n]) => sum + n, 0);
         html += '<h2>Palette</h2>';

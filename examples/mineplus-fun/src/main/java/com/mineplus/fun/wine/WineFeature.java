@@ -24,7 +24,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  * occlusion culling. Geometry stays in vanilla {@code java_block} [0..16]
  * corner space, so the Core's AUTO origin detection anchors the bottles GRID
  * like any vanilla block model; the tall Stal bottle (18 pixels) simply
- * voxelize-occupies the block above its anchor.
+ * occupies the block above its anchor.
  *
  * <p>Each {@code <key>-wine.meta.json} opts its model in explicitly
  * ({@code "texelMode": "AUTO"}) and raises the per-instance plate budget above

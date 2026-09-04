@@ -1,8 +1,8 @@
-// Three.js viewport: reference (textured cubes) + texel plate + voxel run layers.
+// Three.js viewport: reference (textured cubes) + texel plate layers.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { cubeMatrix, plateMatrix, voxelRunMatrix, cssRgb, FACE_AXES } from './geom.js';
+import { cubeMatrix, plateMatrix, cssRgb, FACE_AXES } from './geom.js';
 
 // BoxGeometry face order: +x, -x, +y, -y, +z, -z  →  east, west, up, down, south, north
 const BOX_FACE_ORDER = ['east', 'west', 'up', 'down', 'south', 'north'];
@@ -40,13 +40,12 @@ export class Viewer {
         this.layers = {
             reference: new THREE.Group(),
             texel: new THREE.Group(),
-            voxel: new THREE.Group(),
         };
         for (const group of Object.values(this.layers)) this.scene.add(group);
         this.wireframes = [];
 
         this.textures = new Map(); // texture name -> THREE.Texture
-        // Centered unit box for mat4Box-style matrices (plates, voxel runs).
+        // Centered unit box for mat4Box-style matrices (plates).
         this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
         // Unit-space [0..1] box for cubeMatrix (T·R·S·R' maps [0..1]³, exactly
         // like OccluderSet/DisplayEmitter treat cube local space). Using the
@@ -107,7 +106,7 @@ export class Viewer {
     }
 
     /**
-     * Exclusive view mode: exactly one of reference/texel/voxel is visible.
+     * Exclusive view mode: exactly one of reference/texel is visible.
      * Rendering the textured reference and the palette reconstruction at the
      * same time reads as two blended/misaligned textures — the layers are
      * alternative views of the same model, not overlays.
@@ -158,12 +157,10 @@ export class Viewer {
     render(result) {
         this.clearGroup(this.layers.reference);
         this.clearGroup(this.layers.texel);
-        this.clearGroup(this.layers.voxel);
         this.wireframes = [];
 
         this.renderReference(result);
         this.renderTexel(result);
-        this.renderVoxel(result);
         this.focus(result);
         // Normalize to the exclusive view mode (initial state has all groups
         // visible; showView collapses that to exactly one).
@@ -272,14 +269,6 @@ export class Viewer {
             this.layers.texel.add(line);
             this.wireframes.push(line);
         }
-    }
-
-    renderVoxel(result) {
-        const entries = [];
-        for (const run of result.voxel.runs) {
-            entries.push({ matrix: voxelRunMatrix(run), paletteIndex: run[5] });
-        }
-        this.addInstanced(this.layers.voxel, entries, result.palette);
     }
 
     addInstanced(group, entries, palette) {

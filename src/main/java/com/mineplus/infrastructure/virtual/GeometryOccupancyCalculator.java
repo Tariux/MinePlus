@@ -11,7 +11,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
- * Geometry-aware collision voxelization: a barrier cell is occupied iff actual cube
+ * Geometry-aware collision: a barrier cell is occupied iff actual cube
  * geometry intersects it. Replaces the legacy whole-model-AABB fill (which made internal
  * voids and empty space between disconnected geometry solid).
  *
@@ -25,7 +25,7 @@ import org.joml.Vector3f;
  * permutation placement) reduces the SAT to three interval comparisons. Negative model
  * coordinates are fully supported.
  */
-public final class VoxelOccupancyCalculator {
+public final class GeometryOccupancyCalculator {
 
     /** Cell shrink epsilon so faces exactly touching a cell boundary do not count as overlap. */
     public static final float DEFAULT_EPSILON = 1.0f / 1024.0f;
@@ -34,7 +34,7 @@ public final class VoxelOccupancyCalculator {
 
     private final Map<CacheKey, int[]> cache = new HashMap<>();
 
-    public VoxelOccupancyCalculator() {
+    public GeometryOccupancyCalculator() {
     }
 
     public void clearCache() {
@@ -379,7 +379,7 @@ public final class VoxelOccupancyCalculator {
     /**
      * Packs a cell into a long: three 21-bit signed bitfields (x at 42, y at 21, z at 0).
      * All three fields are 21 bits — a 22-bit z field would overlap y's lowest bit.
-     * Shared with the voxel rendering baker, which works in the same cell lattice.
+     * Shared with the texel surface baker, which works in the same cell lattice.
      */
     public static long pack(int x, int y, int z) {
         return ((long) (x & 0x1F_FFFF) << 42)

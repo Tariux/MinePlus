@@ -17,9 +17,7 @@ import java.util.Locale;
  *   "texelDetail": "FACE",
  *   "maxTexelPlatesPerFace": 96,
  *   "maxTexelPlatesPerInstance": 150,
- *   "texelBrightness": 15,
- *   "voxelMode": "AUTO",
- *   "maxVoxelDisplays": 1024
+ *   "texelBrightness": 15
  * }
  * }</pre>
  * Any omitted field falls back to the global settings default.
@@ -32,9 +30,7 @@ public record ModelMeta(
         TexelDetail texelDetail,
         Integer maxTexelPlatesPerFace,
         Integer maxTexelPlatesPerInstance,
-        Integer texelBrightness,
-        VoxelMode voxelMode,
-        Integer maxVoxelDisplays
+        Integer texelBrightness
 ) {
 
     public ModelMeta {
@@ -44,22 +40,6 @@ public record ModelMeta(
                 ? null : Math.max(1, maxTexelPlatesPerInstance);
         texelBrightness = texelBrightness == null
                 ? null : Math.max(0, Math.min(15, texelBrightness));
-        maxVoxelDisplays = maxVoxelDisplays == null ? null : Math.max(1, maxVoxelDisplays);
-    }
-
-    /** Compatibility constructor predating the voxel rendering overrides. */
-    public ModelMeta(
-            OriginMode originMode,
-            CollisionMode collisionMode,
-            List<String> autoplay,
-            TexelMode texelMode,
-            TexelDetail texelDetail,
-            Integer maxTexelPlatesPerFace,
-            Integer maxTexelPlatesPerInstance,
-            Integer texelBrightness
-    ) {
-        this(originMode, collisionMode, autoplay, texelMode, texelDetail,
-                maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, null, null);
     }
 
     public enum OriginMode {
@@ -162,7 +142,7 @@ public record ModelMeta(
     public enum CollisionMode {
         /** Legacy full-model-AABB fill (compat escape hatch). */
         AABB,
-        /** Per-cube volumetric voxelization: solid parts solid, voids open. */
+        /** Per-cube geometry-aware collision: solid parts solid, voids open. */
         GEOMETRY,
         /** GEOMETRY plus interior hollowing: walk-in structures. */
         SURFACE;
@@ -231,42 +211,15 @@ public record ModelMeta(
         }
     }
 
-    /**
-     * Voxel reconstruction strategy for a model: rebuild the model as 1x1x1
-     * model-space voxels whose colors come from sampling the real geometry and
-     * UV mapping (see the {@code voxel} package). {@code AUTO} only activates for
-     * non-animated, axis-aligned, grid-snapped models with a resolvable PNG whose
-     * voxel reconstruction stays inside the display budget; {@code ON} attempts it
-     * for any non-animated model; {@code OFF} never voxelizes. Animated models
-     * always keep the legacy pipeline — animations bind displays to cube bones.
-     */
-    public enum VoxelMode {
-        AUTO,
-        ON,
-        OFF;
-
-        public static VoxelMode fromKey(String key, VoxelMode fallback) {
-            if (key == null || key.isBlank()) {
-                return fallback;
-            }
-            try {
-                return VoxelMode.valueOf(key.trim().toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException ignored) {
-                return fallback;
-            }
-        }
-    }
-
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
         return originMode == null && collisionMode == null && autoplay.isEmpty()
                 && texelMode == null && texelDetail == null
                 && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
-                && texelBrightness == null
-                && voxelMode == null && maxVoxelDisplays == null;
+                && texelBrightness == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -293,8 +246,6 @@ public record ModelMeta(
             Integer maxTexelPlatesPerFace = null;
             Integer maxTexelPlatesPerInstance = null;
             Integer texelBrightness = null;
-            VoxelMode voxelMode = null;
-            Integer maxVoxelDisplays = null;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -308,16 +259,13 @@ public record ModelMeta(
                     case "maxTexelPlatesPerFace" -> maxTexelPlatesPerFace = readPositiveInt(json);
                     case "maxTexelPlatesPerInstance" -> maxTexelPlatesPerInstance = readPositiveInt(json);
                     case "texelBrightness" -> texelBrightness = readBrightness(json);
-                    case "voxelMode" -> voxelMode = VoxelMode.fromKey(readString(json), null);
-                    case "maxVoxelDisplays" -> maxVoxelDisplays = readPositiveInt(json);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
             return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
-                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness,
-                    voxelMode, maxVoxelDisplays);
+                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());

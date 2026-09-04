@@ -283,8 +283,6 @@ public final class ModelSubCommand implements SubCommand {
 
         describeTexelBaking(sender, manager, modelKey);
 
-        describeVoxelRendering(sender, manager, modelKey);
-
         describeAnimations(sender, model, meta);
 
         int resolved = 0;
@@ -425,50 +423,6 @@ public final class ModelSubCommand implements SubCommand {
                         + " (" + bake.faceBudgetFallbacks() + " per-face, "
                         + bake.instanceBudgetFallbacks() + " instance)"
                         : ChatColor.GREEN + " -> ok"));
-
-        sender.sendMessage(ChatColor.YELLOW + "  Bake time: " + ChatColor.WHITE
-                + String.format(java.util.Locale.ROOT, "%.1f", bake.bakeTimeNanos() / 1_000_000.0) + " ms");
-    }
-
-    private void describeVoxelRendering(
-            CommandSender sender,
-            com.mineplus.infrastructure.virtual.VirtualBlockManager manager,
-            String modelKey
-    ) {
-        var bake = manager.getVoxelBake(modelKey);
-        if (bake == null) {
-            return;
-        }
-
-        sender.sendMessage(ChatColor.YELLOW + "Render strategy: "
-                + (bake.voxelRender() ? ChatColor.GREEN : ChatColor.WHITE) + bake.strategy()
-                + ChatColor.GRAY + " (" + bake.rationale() + ")");
-        if (!bake.voxelRender()) {
-            return;
-        }
-
-        sender.sendMessage(ChatColor.YELLOW + "  Voxels: " + ChatColor.WHITE + bake.surfaceVoxels()
-                + ChatColor.GRAY + " of " + bake.occupiedVoxels() + " occupied"
-                + (bake.culledInteriorVoxels() > 0
-                        ? ChatColor.GRAY + " (" + bake.culledInteriorVoxels() + " interior culled)"
-                        : ""));
-
-        var voxelSettings = manager.voxelSettings();
-        var meta = manager.getModelMeta(modelKey);
-        boolean budgetOverridden = meta.maxVoxelDisplays() != null;
-        sender.sendMessage(ChatColor.YELLOW + "  Display runs: " + ChatColor.WHITE + bake.runs().size()
-                + ChatColor.GRAY + "/" + voxelSettings.effectiveMaxDisplays(meta) + " budget"
-                + (budgetOverridden ? " (meta-overridden)" : ""));
-
-        if (!bake.paletteUsage().isEmpty()) {
-            String top = bake.paletteUsage().entrySet().stream()
-                    .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-                    .limit(8)
-                    .map(entry -> com.mineplus.infrastructure.virtual.texel.TexelPalette
-                            .materialName(entry.getKey()) + " " + entry.getValue())
-                    .collect(java.util.stream.Collectors.joining(ChatColor.GRAY + ", " + ChatColor.WHITE));
-            sender.sendMessage(ChatColor.YELLOW + "  Palette usage: " + ChatColor.WHITE + "top: " + top);
-        }
 
         sender.sendMessage(ChatColor.YELLOW + "  Bake time: " + ChatColor.WHITE
                 + String.format(java.util.Locale.ROOT, "%.1f", bake.bakeTimeNanos() / 1_000_000.0) + " ms");
