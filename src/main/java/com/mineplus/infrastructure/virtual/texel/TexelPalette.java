@@ -1,41 +1,14 @@
 package com.mineplus.infrastructure.virtual.texel;
 
+import com.mineplus.infrastructure.virtual.CubeFace;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 
 /**
- * The curated vanilla flat-block palette for texel surface baking, with perceptual
- * (redmean) color matching.
- *
- * <p><b>Flatness is a hard membership rule, not a preference.</b> A palette material
- * renders on plates of arbitrary size — a plate stretches the block's texture to its
- * own dimensions. Only materials whose texture noise averages to the perceived color
- * and never reads as a pattern under arbitrary scaling are admitted: stretching a
- * flat material is invisible (a solid color at any size), while stretching a
- * patterned block would distort the pattern and degrade the render. This enforces the
- * authoring rule "texture stretching is only permitted for flat (cement-family)
- * surfaces" by construction: patterned vanilla blocks simply never enter the palette,
- * so no plate can ever stretch a pattern. Colors are always the source texture's own
- * (sampled 1:1 per texel); only the block choice is a nearest-flat-color match.
- *
- * <p>Membership: 16 concretes (saturated backbone), 16 concrete powders (matte, hue
- * fillers), 16 terracottas (muted band; speckle ≤ ±5 RGB converges to the mean),
- * snow block (near-white), obsidian (dark indigo) and warped wart (dark teal) — the
- * two fill the otherwise-missing dark desaturated band so dark glass/shading art
- * quantizes to coherent dark tones instead of cliff-flipping between black and
- * saturated cyan. Glazed terracottas (directional pattern), stained glass
- * (transparency), wools (visible weave), glowstone/sea lantern (mottle/frame
- * patterns), smooth stone (border pattern) and grained materials (planks/logs) are
- * deliberately excluded.
- *
- * <p>Color profiles are the alpha-weighted average RGB of the actual client texture,
- * measured once from the vanilla resource pack — not nominal wiki values. Entries are
- * a fixed parallel table ({@code RGB} triples + {@link Material}s); the matcher is a
- * branch-free full-precision linear scan over the 51 entries with no allocation and
- * no intermediate quantization — source shades that differ by even one RGB unit can
- * resolve to different entries, so distinct texture properties are never merged into
- * one uniform match. The only mutable state is the lazily created shared
- * {@link BlockData} cache.
+ * Curated vanilla flat-block palette for virtual rendering, powered by
+ * perceptually-weighted Oklab color space, Minecraft directional shading compensation,
+ * and a strict stretchability classification (only pure flat concretes are stretchable).
  */
 public final class TexelPalette {
 
@@ -43,76 +16,89 @@ public final class TexelPalette {
     }
 
     /**
-     * Average RGB per entry (alpha-weighted, measured from vanilla 16x16 textures).
-     * Order must match {@link #MATERIALS} exactly; a comment per entry is the table.
+     * Average measured RGB per entry.
+     * Parallel with {@link #MATERIALS} and {@link #STRETCHABLE_FLAGS}.
      */
     private static final int[] RGB = {
-            // 16 concretes — saturated, flat, hue-complete backbone
+            // 16 concretes (Stretchable: pure flat texture)
             207, 213, 214, // WHITE_CONCRETE
-            224, 121, 52, // ORANGE_CONCRETE
-            189, 68, 179, // MAGENTA_CONCRETE
-            35, 137, 199, // LIGHT_BLUE_CONCRETE
-            249, 167, 24, // YELLOW_CONCRETE
-            93, 167, 26, // LIME_CONCRETE
+            224, 121, 52,  // ORANGE_CONCRETE
+            189, 68, 179,  // MAGENTA_CONCRETE
+            35, 137, 199,  // LIGHT_BLUE_CONCRETE
+            249, 167, 24,  // YELLOW_CONCRETE
+            93, 167, 26,   // LIME_CONCRETE
             213, 117, 140, // PINK_CONCRETE
-            62, 68, 71, // GRAY_CONCRETE
+            62, 68, 71,    // GRAY_CONCRETE
             125, 125, 115, // LIGHT_GRAY_CONCRETE
-            21, 119, 136, // CYAN_CONCRETE
-            99, 31, 155, // PURPLE_CONCRETE
-            45, 47, 143, // BLUE_CONCRETE
-            97, 60, 33, // BROWN_CONCRETE
-            57, 76, 41, // GREEN_CONCRETE
-            142, 32, 32, // RED_CONCRETE
-            8, 10, 15, // BLACK_CONCRETE
+            21, 119, 136,  // CYAN_CONCRETE
+            99, 31, 155,   // PURPLE_CONCRETE
+            45, 47, 143,   // BLUE_CONCRETE
+            97, 60, 33,    // BROWN_CONCRETE
+            57, 76, 41,    // GREEN_CONCRETE
+            142, 32, 32,   // RED_CONCRETE
+            8, 10, 15,     // BLACK_CONCRETE
 
-            // 16 concrete powders — same hues, matte granular finish; perceived colors
-            // sit slightly off the concrete equivalents and fill palette-hull holes
+            // 16 concrete powders (Stretchable: fine matte grain)
             221, 222, 222, // WHITE_CONCRETE_POWDER
-            237, 150, 85, // ORANGE_CONCRETE_POWDER
+            237, 150, 85,  // ORANGE_CONCRETE_POWDER
             213, 101, 202, // MAGENTA_CONCRETE_POWDER
             112, 179, 229, // LIGHT_BLUE_CONCRETE_POWDER
-            254, 216, 85, // YELLOW_CONCRETE_POWDER
-            157, 199, 78, // LIME_CONCRETE_POWDER
+            254, 216, 85,  // YELLOW_CONCRETE_POWDER
+            157, 199, 78,  // LIME_CONCRETE_POWDER
             236, 173, 189, // PINK_CONCRETE_POWDER
             126, 131, 133, // GRAY_CONCRETE_POWDER
             185, 187, 187, // LIGHT_GRAY_CONCRETE_POWDER
-            93, 160, 173, // CYAN_CONCRETE_POWDER
-            151, 94, 209, // PURPLE_CONCRETE_POWDER
-            92, 110, 196, // BLUE_CONCRETE_POWDER
-            135, 94, 65, // BROWN_CONCRETE_POWDER
-            112, 133, 75, // GREEN_CONCRETE_POWDER
-            196, 76, 65, // RED_CONCRETE_POWDER
-            35, 38, 43, // BLACK_CONCRETE_POWDER
+            93, 160, 173,  // CYAN_CONCRETE_POWDER
+            151, 94, 209,  // PURPLE_CONCRETE_POWDER
+            92, 110, 196,  // BLUE_CONCRETE_POWDER
+            135, 94, 65,   // BROWN_CONCRETE_POWDER
+            112, 133, 75,  // GREEN_CONCRETE_POWDER
+            196, 76, 65,   // RED_CONCRETE_POWDER
+            35, 38, 43,    // BLACK_CONCRETE_POWDER
 
-            // 16 terracottas — muted/desaturated band the concretes do not cover
+            // 16 terracottas (NON-stretchable: organic earthen mottled texture)
             209, 178, 161, // WHITE_TERRACOTTA
-            161, 83, 37, // ORANGE_TERRACOTTA
-            149, 88, 122, // MAGENTA_TERRACOTTA
+            161, 83, 37,   // ORANGE_TERRACOTTA
+            149, 88, 122,  // MAGENTA_TERRACOTTA
             143, 110, 120, // LIGHT_BLUE_TERRACOTTA
-            186, 133, 35, // YELLOW_TERRACOTTA
-            103, 121, 68, // LIME_TERRACOTTA
-            161, 91, 107, // PINK_TERRACOTTA
-            85, 71, 68, // GRAY_TERRACOTTA
+            186, 133, 35,  // YELLOW_TERRACOTTA
+            103, 121, 68,  // LIME_TERRACOTTA
+            161, 91, 107,  // PINK_TERRACOTTA
+            85, 71, 68,    // GRAY_TERRACOTTA
             134, 118, 105, // LIGHT_GRAY_TERRACOTTA
-            86, 91, 91, // CYAN_TERRACOTTA
-            119, 72, 87, // PURPLE_TERRACOTTA
-            79, 58, 50, // BLUE_TERRACOTTA
-            77, 51, 36, // BROWN_TERRACOTTA
-            71, 76, 44, // GREEN_TERRACOTTA
-            143, 61, 46, // RED_TERRACOTTA
-            39, 27, 24, // BLACK_TERRACOTTA
+            86, 91, 91,    // CYAN_TERRACOTTA
+            119, 72, 87,   // PURPLE_TERRACOTTA
+            79, 58, 50,    // BLUE_TERRACOTTA
+            77, 51, 36,    // BROWN_TERRACOTTA
+            71, 76, 44,    // GREEN_TERRACOTTA
+            143, 61, 46,   // RED_TERRACOTTA
+            39, 27, 24,    // BLACK_TERRACOTTA
 
-            // Gap fillers — near-white and the dark desaturated band: obsidian (dark
-            // indigo) and warped wart (dark teal) cover the otherwise-missing dark-blue
-            // range, so dark glass/shading art quantizes to coherent dark tones instead
-            // of cliff-flipping between black and the saturated cyan entries. All three
-            // are visually flat, so they stay stretch-safe.
+            // Flat pure snow (Stretchable)
             240, 251, 251, // SNOW_BLOCK
-            19, 14, 34, // OBSIDIAN
-            18, 62, 68 // WARPED_WART_BLOCK
+
+            // Detailed minerals & stones (NON-stretchable: 1x1 only)
+            19, 14, 34,    // OBSIDIAN
+            18, 62, 68,    // WARPED_WART_BLOCK
+            108, 109, 102, // TUFF
+            223, 224, 220, // CALCITE
+            134, 107, 95,  // DRIPSTONE_BLOCK
+            141, 104, 78,  // PACKED_MUD
+            59, 57, 59,    // MUD
+            51, 46, 54,    // POLISHED_BLACKSTONE
+            72, 72, 73,    // POLISHED_DEEPSLATE
+            158, 158, 158, // SMOOTH_STONE
+            160, 166, 179, // CLAY
+            154, 106, 89,  // POLISHED_GRANITE
+            132, 134, 133, // POLISHED_ANDESITE
+            192, 193, 194, // POLISHED_DIORITE
+            218, 207, 153, // CUT_SANDSTONE
+            190, 102, 33,  // CUT_RED_SANDSTONE
+            99, 156, 151,  // PRISMARINE
+            51, 91, 75,    // DARK_PRISMARINE
+            76, 56, 43     // SOUL_SOIL
     };
 
-    /** Parallel material table; index i corresponds to RGB triple at 3i..3i+2. */
     private static final Material[] MATERIALS = {
             Material.WHITE_CONCRETE,
             Material.ORANGE_CONCRETE,
@@ -166,52 +152,99 @@ public final class TexelPalette {
             Material.BLACK_TERRACOTTA,
 
             Material.SNOW_BLOCK,
+
             Material.OBSIDIAN,
-            Material.WARPED_WART_BLOCK
+            Material.WARPED_WART_BLOCK,
+            Material.TUFF,
+            Material.CALCITE,
+            Material.DRIPSTONE_BLOCK,
+            Material.PACKED_MUD,
+            Material.MUD,
+            Material.POLISHED_BLACKSTONE,
+            Material.POLISHED_DEEPSLATE,
+            Material.SMOOTH_STONE,
+            Material.CLAY,
+            Material.POLISHED_GRANITE,
+            Material.POLISHED_ANDESITE,
+            Material.POLISHED_DIORITE,
+            Material.CUT_SANDSTONE,
+            Material.CUT_RED_SANDSTONE,
+            Material.PRISMARINE,
+            Material.DARK_PRISMARINE,
+            Material.SOUL_SOIL
     };
 
-    /** Lazily created default block data per entry, shared across all plates. */
+    /**
+     * Strict classification: ONLY concretes, powders and snow block are stretchable.
+     * All detailed blocks (terracottas, minerals, stones) are strictly 1x1.
+     */
+    private static final boolean[] STRETCHABLE_FLAGS = new boolean[MATERIALS.length];
+
+    static {
+        // 0..15: Concretes (true)
+        for (int i = 0; i < 16; i++) STRETCHABLE_FLAGS[i] = true;
+        // 16..31: Concrete powders (true)
+        for (int i = 16; i < 32; i++) STRETCHABLE_FLAGS[i] = true;
+        // 32..47: Terracottas (false)
+        for (int i = 32; i < 48; i++) STRETCHABLE_FLAGS[i] = false;
+        // 48: Snow block (true)
+        STRETCHABLE_FLAGS[48] = true;
+        // 49..end: Detailed blocks (false - strictly 1x1)
+        for (int i = 49; i < MATERIALS.length; i++) STRETCHABLE_FLAGS[i] = false;
+    }
+
     private static final BlockData[] BLOCK_DATA = new BlockData[MATERIALS.length];
 
-    /**
-     * Palette index of the neutral surface: {@code WHITE_CONCRETE}, the same
-     * material {@code TextureMaterialResolver} falls back to for unresolvable
-     * texture names and {@code DisplayEmitter} renders untextured faces with.
-     * Consumers without any texture sample (an untextured face, a fully
-     * transparent voxel) quantize to this entry so the voxel reconstruction
-     * matches the legacy pipeline's neutral surface.
-     */
+    // Shading factors in vanilla client: UP=1.0, NORTH/SOUTH=0.8, EAST/WEST=0.6, DOWN=0.5
+    private static final float[] SHADE_FACTORS = { 1.0f, 0.8f, 0.6f, 0.5f };
+
+    private static final float[][] OKLAB_L = new float[4][MATERIALS.length];
+    private static final float[][] OKLAB_A = new float[4][MATERIALS.length];
+    private static final float[][] OKLAB_B = new float[4][MATERIALS.length];
+
     public static final int NEUTRAL_INDEX = 0;
 
-    /** Number of palette entries. */
+    private static final ConcurrentHashMap<Integer, Integer> MATCH_CACHE = new ConcurrentHashMap<>();
+    private static final int MATCH_CACHE_LIMIT = 1 << 16;
+    private static final float NEAR_MATCH_DISTANCE_SQ_OKLAB = 0.0028f;
+
+    static {
+        float[] lab = new float[3];
+        for (int shade = 0; shade < 4; shade++) {
+            float factor = SHADE_FACTORS[shade];
+            for (int i = 0; i < MATERIALS.length; i++) {
+                int r = Math.round(RGB[i * 3] * factor);
+                int g = Math.round(RGB[i * 3 + 1] * factor);
+                int b = Math.round(RGB[i * 3 + 2] * factor);
+                rgbToOklab(r, g, b, lab);
+                OKLAB_L[shade][i] = lab[0];
+                OKLAB_A[shade][i] = lab[1];
+                OKLAB_B[shade][i] = lab[2];
+            }
+        }
+    }
+
     public static int size() {
         return MATERIALS.length;
     }
 
-    /** Material for a palette index. */
     public static Material material(int index) {
         return MATERIALS[index];
     }
 
-    /** Material name for a palette index (diagnostics). */
     public static String materialName(int index) {
         return MATERIALS[index].name();
     }
 
-    /**
-     * Measured average RGB of a palette entry, packed {@code 0xRRGGBB} — the
-     * color consumers should use when they need a palette entry's tone without
-     * sampling a texture (e.g. the voxel baker's neutral-surface default).
-     */
+    public static boolean isStretchable(int index) {
+        if (index < 0 || index >= STRETCHABLE_FLAGS.length) return false;
+        return STRETCHABLE_FLAGS[index];
+    }
+
     public static int rgb(int index) {
         return (RGB[index * 3] << 16) | (RGB[index * 3 + 1] << 8) | RGB[index * 3 + 2];
     }
 
-    /**
-     * Shared default block data for a palette entry. Flat palette materials carry no
-     * meaningful orientation, so the default state is exact; the single instance is
-     * reused across all rectangles and models.
-     */
     public static BlockData blockData(int index) {
         BlockData data = BLOCK_DATA[index];
         if (data == null) {
@@ -221,120 +254,111 @@ public final class TexelPalette {
         return data;
     }
 
-    /**
-     * Packed-RGB match cache: {@code match} is a pure function of the clamped RGB
-     * triple, and bakers call it once per texel per supersample over source art
-     * that resolves to a few hundred unique colors at most. The cache collapses
-     * the 51-entry redmean scan to one array lookup for repeat colors. Bounded —
-     * pathological inputs (e.g. a gradient texture) trigger a full clear rather
-     * than unbounded growth; clearing is safe because the function is pure.
-     */
-    private static final java.util.concurrent.ConcurrentHashMap<Integer, Integer> MATCH_CACHE =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    private static final int MATCH_CACHE_LIMIT = 1 << 16;
-
-    /**
-     * Nearest palette entry for an RGB color, by redmean perceptual distance, at full
-     * 8-bit precision. A 51-entry scan per texel is trivially fast at load time, and
-     * skipping any intermediate quantization guarantees distinct source colors stay
-     * distinct.
-     */
     public static int match(int red, int green, int blue) {
+        return match(red, green, blue, null, -1, 1.0f);
+    }
+
+    public static int match(int red, int green, int blue, int preferredIndex, float tieTolerance) {
+        return match(red, green, blue, null, preferredIndex, tieTolerance);
+    }
+
+    public static int match(int red, int green, int blue, CubeFace face, int preferredIndex, float tieTolerance) {
         int r = clampChannel(red);
         int g = clampChannel(green);
         int b = clampChannel(blue);
-        int packed = (r << 16) | (g << 8) | b;
-        Integer cached = MATCH_CACHE.get(packed);
-        if (cached != null) {
-            return cached;
-        }
-        int result = nearest(r, g, b);
-        if (MATCH_CACHE.size() >= MATCH_CACHE_LIMIT) {
-            MATCH_CACHE.clear();
-        }
-        MATCH_CACHE.put(packed, result);
-        return result;
-    }
+        int shadeLevel = shadeLevelFor(face);
 
-    /**
-     * Nearest palette entry with <i>bounded</i> hysteresis: when the previously used
-     * entry is both within {@code tieTolerance} of the best entry's distance <b>and</b>
-     * inside the near-exact-match band ({@link #NEAR_MATCH_DISTANCE_SQ}), it is kept.
-     * Source art contains runs of near-identical shades jittered by a few RGB units;
-     * unbounded hysteresis would let a genuinely different color ride the current run
-     * whenever the two candidate distances happen to be close — merging distinct
-     * texture regions into one. The absolute cap confines hysteresis to genuine
-     * dither/jitter (≤ ~8 RGB units); anything farther always takes its own true
-     * nearest entry.
-     *
-     * @param preferredIndex the previous texel's palette entry, or {@code -1} for none
-     * @param tieTolerance   factor &gt; 1; a preferred distance within
-     *                       {@code best * tieTolerance} wins, inside the near band
-     */
-    public static int match(int red, int green, int blue, int preferredIndex, float tieTolerance) {
-        int best = match(red, green, blue);
+        int cacheKey = (r << 18) | (g << 10) | (b << 2) | shadeLevel;
+        Integer cached = MATCH_CACHE.get(cacheKey);
+        int best = cached != null ? cached : nearestOklab(r, g, b, shadeLevel);
+
+        if (cached == null) {
+            if (MATCH_CACHE.size() >= MATCH_CACHE_LIMIT) {
+                MATCH_CACHE.clear();
+            }
+            MATCH_CACHE.put(cacheKey, best);
+        }
+
         if (preferredIndex < 0 || preferredIndex >= MATERIALS.length || preferredIndex == best) {
             return best;
         }
-        int r = clampChannel(red);
-        int g = clampChannel(green);
-        int b = clampChannel(blue);
-        float bestDistance = distanceSq(r, g, b, best);
-        float preferredDistance = distanceSq(r, g, b, preferredIndex);
-        boolean nearExactMatch = preferredDistance <= NEAR_MATCH_DISTANCE_SQ;
-        return nearExactMatch && preferredDistance <= bestDistance * tieTolerance
-                ? preferredIndex : best;
+
+        float[] targetLab = new float[3];
+        rgbToOklab(r, g, b, targetLab);
+
+        float bestDistSq = weightedDistSqOklab(targetLab[0], targetLab[1], targetLab[2], shadeLevel, best);
+        float prefDistSq = weightedDistSqOklab(targetLab[0], targetLab[1], targetLab[2], shadeLevel, preferredIndex);
+
+        if (prefDistSq <= NEAR_MATCH_DISTANCE_SQ_OKLAB && prefDistSq <= bestDistSq * tieTolerance) {
+            return preferredIndex;
+        }
+        return best;
     }
 
-    /**
-     * Absolute redmean (squared) distance under which a color counts as a near-exact
-     * palette match — the only band where run-continuity hysteresis may engage.
-     * Corresponds to roughly 8 RGB units of jitter; genuinely different colors sit at
-     * distances in the thousands and never merge.
-     */
-    private static final float NEAR_MATCH_DISTANCE_SQ = 600.0f;
-
-    /** Redmean perceptual distance (squared) from an RGB color to a palette entry. */
-    private static float distanceSq(int r1, int g1, int b1, int index) {
-        int r2 = RGB[index * 3];
-        int g2 = RGB[index * 3 + 1];
-        int b2 = RGB[index * 3 + 2];
-        float rm = (r1 + r2) * 0.5f;
-        float dr = r1 - r2;
-        float dg = g1 - g2;
-        float db = b1 - b2;
-        return (2.0f + rm / 256.0f) * dr * dr
-                + 4.0f * dg * dg
-                + (2.0f + (255.0f - rm) / 256.0f) * db * db;
+    public static float oklabDistance(int indexA, int indexB) {
+        if (indexA == indexB) return 0.0f;
+        if (indexA < 0 || indexA >= MATERIALS.length || indexB < 0 || indexB >= MATERIALS.length) {
+            return Float.MAX_VALUE;
+        }
+        float dl = OKLAB_L[0][indexA] - OKLAB_L[0][indexB];
+        float da = OKLAB_A[0][indexA] - OKLAB_A[0][indexB];
+        float db = OKLAB_B[0][indexA] - OKLAB_B[0][indexB];
+        return (float) Math.sqrt(2.25f * dl * dl + da * da + db * db);
     }
 
-    /**
-     * Redmean distance scan over the palette:
-     * <pre>{@code
-     * r̄ = (r1+r2)/2
-     * dist² = (2 + r̄/256)·Δr² + 4·Δg² + (2 + (255−r̄)/256)·Δb²
-     * }</pre>
-     */
-    private static int nearest(int r1, int g1, int b1) {
+    private static int nearestOklab(int r, int g, int b, int shadeLevel) {
+        float[] target = new float[3];
+        rgbToOklab(r, g, b, target);
+
         int best = 0;
-        float bestDistance = Float.MAX_VALUE;
+        float bestDistSq = Float.MAX_VALUE;
         for (int i = 0; i < MATERIALS.length; i++) {
-            int r2 = RGB[i * 3];
-            int g2 = RGB[i * 3 + 1];
-            int b2 = RGB[i * 3 + 2];
-            float rm = (r1 + r2) * 0.5f;
-            float dr = r1 - r2;
-            float dg = g1 - g2;
-            float db = b1 - b2;
-            float distance = (2.0f + rm / 256.0f) * dr * dr
-                    + 4.0f * dg * dg
-                    + (2.0f + (255.0f - rm) / 256.0f) * db * db;
-            if (distance < bestDistance) {
-                bestDistance = distance;
+            float distSq = weightedDistSqOklab(target[0], target[1], target[2], shadeLevel, i);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
                 best = i;
             }
         }
         return best;
+    }
+
+    /**
+     * Highly perceptive Oklab metric: 2.25x weight on Lightness (L) prevents dark tones
+     * (like wood/dirt) from incorrectly resolving to bright saturated concrete blocks.
+     */
+    private static float weightedDistSqOklab(float l, float a, float b, int shadeLevel, int candidateIndex) {
+        float dl = l - OKLAB_L[shadeLevel][candidateIndex];
+        float da = a - OKLAB_A[shadeLevel][candidateIndex];
+        float db = b - OKLAB_B[shadeLevel][candidateIndex];
+        return 2.25f * dl * dl + da * da + db * db;
+    }
+
+    private static int shadeLevelFor(CubeFace face) {
+        if (face == null) return 0;
+        return switch (face) {
+            case UP -> 0;
+            case NORTH, SOUTH -> 1;
+            case EAST, WEST -> 2;
+            case DOWN -> 3;
+        };
+    }
+
+    public static void rgbToOklab(int r, int g, int b, float[] out) {
+        float rLin = sRgbToLinear(r / 255.0f);
+        float gLin = sRgbToLinear(g / 255.0f);
+        float bLin = sRgbToLinear(b / 255.0f);
+
+        float l = (float) Math.cbrt(0.4122214708f * rLin + 0.5363325363f * gLin + 0.0514459929f * bLin);
+        float m = (float) Math.cbrt(0.2119034982f * rLin + 0.6806995451f * gLin + 0.1073969566f * bLin);
+        float s = (float) Math.cbrt(0.0883024619f * rLin + 0.2817188376f * gLin + 0.6299787005f * bLin);
+
+        out[0] = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s;
+        out[1] = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s;
+        out[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
+    }
+
+    private static float sRgbToLinear(float c) {
+        return c <= 0.04045f ? c / 12.92f : (float) Math.pow((c + 0.055f) / 1.055f, 2.4);
     }
 
     private static int clampChannel(int value) {

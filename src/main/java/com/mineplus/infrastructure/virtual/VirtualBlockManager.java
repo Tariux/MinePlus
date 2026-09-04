@@ -1,4 +1,3 @@
-// Path: src/main/java/com/mineplus/infrastructure/virtual/VirtualBlockManager.java
 package com.mineplus.infrastructure.virtual;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
@@ -80,19 +79,12 @@ public class VirtualBlockManager implements Listener {
             List<AnimationBinding> animationBindings,
             Vector3f pivotCorrection
     ) {
-
         public ActiveVirtualBlock {
             animationBindings = animationBindings == null ? List.of() : List.copyOf(animationBindings);
             pivotCorrection = pivotCorrection == null ? new Vector3f() : new Vector3f(pivotCorrection);
         }
     }
 
-    /**
-     * Live view of every spawned virtual block, keyed by rendered model id.
-     * The animation runtime drives off this map: new spawns appear here (any
-     * placement path) and removals drop out, so animation controllers attach
-     * and clean up without lifecycle wiring.
-     */
     public Map<UUID, ActiveVirtualBlock> activeBlocksView() {
         return Collections.unmodifiableMap(activeBlocks);
     }
@@ -102,11 +94,6 @@ public class VirtualBlockManager implements Listener {
         loadModelDefinitions();
     }
 
-    /**
-     * Attaches the packet-based display transport. When present, spawns create
-     * pooled never-spawned displays streamed per viewer (bundled, LOD-gated);
-     * when {@code null}, the legacy spawned-entity path runs unchanged.
-     */
     public void setDisplayTransport(DisplayTransport transport) {
         this.displayTransport = transport;
     }
@@ -122,16 +109,9 @@ public class VirtualBlockManager implements Listener {
     public void updateSettings(VirtualRenderingSettings settings) {
         this.settings = settings == null ? VirtualRenderingSettings.defaults() : settings;
         occupancyCalculator.clearCache();
-        // The voxel lattice depends on the origin mode, so a settings change can
-        // invalidate cached voxel plans (barrier cells recompute per spawn).
         rebakeVoxelPlans();
     }
 
-    /**
-     * Applies global texel baking settings and re-bakes every loaded model with them
-     * (decoded PNGs are retained — only the plans depend on the settings). A full
-     * model reload re-bakes through {@link #registerModel} anyway.
-     */
     public void updateTexelSettings(TexelBakingSettings settings) {
         this.texelSettings = settings == null ? TexelBakingSettings.defaults() : settings;
         texelBakes.clear();
@@ -139,14 +119,9 @@ public class VirtualBlockManager implements Listener {
             bakeTexelSurfaces(entry.getKey(), entry.getValue(),
                     modelMeta.get(entry.getKey()), modelSourceFiles.get(entry.getKey()));
         }
-        // Texel bake results feed the voxel strategy selection's legacy reporting.
         rebakeVoxelPlans();
     }
 
-    /**
-     * Applies global voxel rendering settings and re-bakes every loaded model's
-     * voxel reconstruction with them.
-     */
     public void updateVoxelSettings(VoxelRenderingSettings settings) {
         this.voxelSettings = settings == null ? VoxelRenderingSettings.defaults() : settings;
         rebakeVoxelPlans();
@@ -181,58 +156,32 @@ public class VirtualBlockManager implements Listener {
     }
 
     public VirtualModel getModel(String name) {
-        if (name == null || name.isBlank()) {
-            return null;
-        }
+        if (name == null || name.isBlank()) return null;
         return loadedModels.get(name.toLowerCase(Locale.ROOT));
     }
 
     public ModelMeta getModelMeta(String name) {
-        if (name == null || name.isBlank()) {
-            return ModelMeta.empty();
-        }
+        if (name == null || name.isBlank()) return ModelMeta.empty();
         return modelMeta.getOrDefault(name.toLowerCase(Locale.ROOT), ModelMeta.empty());
     }
 
-    /** Deterministic per-model texture-resolution report (keyed by texture name). */
     public Map<String, TextureMaterialResolver.Resolution> getTextureReport(String name) {
-        if (name == null || name.isBlank()) {
-            return Map.of();
-        }
+        if (name == null || name.isBlank()) return Map.of();
         return textureReports.getOrDefault(name.toLowerCase(Locale.ROOT), Map.of());
     }
 
-    /**
-     * Texel surface bake result for a model (grid/plate/palette diagnostics and the
-     * per-face plans consumed at spawn time), or {@code null} when unknown.
-     */
     public TexelBakeResult getTexelBake(String name) {
-        if (name == null || name.isBlank()) {
-            return null;
-        }
+        if (name == null || name.isBlank()) return null;
         return texelBakes.get(name.toLowerCase(Locale.ROOT));
     }
 
-    /**
-     * Voxel reconstruction bake for a model (rendering strategy decision, merged
-     * display runs, and diagnostics), or {@code null} when unknown. A bake whose
-     * {@link VoxelModelBake#voxelRender()} is false keeps the legacy pipeline.
-     */
     public VoxelModelBake getVoxelBake(String name) {
-        if (name == null || name.isBlank()) {
-            return null;
-        }
+        if (name == null || name.isBlank()) return null;
         return voxelBakes.get(name.toLowerCase(Locale.ROOT));
     }
 
-    /**
-     * Whether a decodable PNG exists for a texture name used by a model — the
-     * load-bearing precondition for texel rendering fidelity on that face.
-     */
     public boolean hasTextureImage(String modelName, String textureName) {
-        if (textureName == null || textureName.isBlank()) {
-            return false;
-        }
+        if (textureName == null || textureName.isBlank()) return false;
         String key = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
         return imageStore().isResolvable(textureName, modelSourceFiles.get(key));
     }
@@ -246,9 +195,7 @@ public class VirtualBlockManager implements Listener {
     }
 
     public void registerModel(String name, VirtualModel model, ModelMeta meta, File modelFile) {
-        if (name == null || model == null) {
-            return;
-        }
+        if (name == null || model == null) return;
         String key = name.toLowerCase(Locale.ROOT);
         loadedModels.put(key, model);
         modelMeta.put(key, meta == null ? ModelMeta.empty() : meta);
@@ -269,39 +216,18 @@ public class VirtualBlockManager implements Listener {
         return spawnModel(model, placement, UUID.randomUUID());
     }
 
-    /** Result of a spawn-area inspection/clearing pass. */
     public enum SpawnAreaResult {
-        /** Every collision cell is air; nothing had to change. */
-        CLEAR,
-        /** Non-air blocks occupied cells and were removed. */
-        CLEARED,
-        /** Non-air blocks occupy cells and were left in place (standard-player policy). */
-        BLOCKED
+        CLEAR, CLEARED, BLOCKED
     }
 
-    /**
-     * Inspects (and optionally clears) the blocks occupying the prospective collision
-     * cells of a placement — the exact cells {@link #spawnModel} would fill with
-     * barriers. Used to guarantee a multi-block never spawns inside existing terrain.
-     *
-     * @param clear true to remove non-air occupants (creative/admin policy); false to
-     *              only report whether the area is free (standard-player policy)
-     */
-    public SpawnAreaResult prepareSpawnArea(VirtualModel model,
-                                            VirtualBlockPlacementHelper.PlacementData placement,
-                                            boolean clear) {
+    public SpawnAreaResult prepareSpawnArea(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement, boolean clear) {
         SpawnContext context = resolveSpawnContext(model, placement);
         boolean cleared = false;
         for (int i = 0; i + 2 < context.cells().length; i += 3) {
-            Location location = context.origin().clone().add(
-                    context.cells()[i], context.cells()[i + 1], context.cells()[i + 2]);
+            Location location = context.origin().clone().add(context.cells()[i], context.cells()[i + 1], context.cells()[i + 2]);
             Block block = location.getBlock();
-            if (block.getType().isAir()) {
-                continue;
-            }
-            if (!clear) {
-                return SpawnAreaResult.BLOCKED;
-            }
+            if (block.getType().isAir()) continue;
+            if (!clear) return SpawnAreaResult.BLOCKED;
             block.setType(Material.AIR);
             cleared = true;
         }
@@ -332,36 +258,24 @@ public class VirtualBlockManager implements Listener {
 
     public Set<Location> getBarrierLocations(UUID instanceId) {
         ActiveVirtualBlock activeBlock = activeBlocks.get(instanceId);
-        if (activeBlock == null) {
-            return Set.of();
-        }
-        return activeBlock.barrierBlocks();
+        return activeBlock == null ? Set.of() : activeBlock.barrierBlocks();
     }
 
     public ActiveVirtualBlock getVirtualBlockAt(Location location) {
-        if (location == null) {
-            return null;
-        }
+        if (location == null) return null;
         UUID instanceId = blockToModelMap.get(BlockCoordinate.from(location));
-        if (instanceId != null) {
-            return activeBlocks.get(instanceId);
-        }
-        return null;
+        return instanceId != null ? activeBlocks.get(instanceId) : null;
     }
 
     public UUID getInstanceIdAt(Location location) {
-        if (location == null) {
-            return null;
-        }
+        if (location == null) return null;
         return blockToModelMap.get(BlockCoordinate.from(location));
     }
 
     @EventHandler
     public void onBarrierBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (block.getType() != BARRIER_MATERIAL) {
-            return;
-        }
+        if (block.getType() != BARRIER_MATERIAL) return;
 
         UUID instanceId = blockToModelMap.get(BlockCoordinate.from(block.getLocation()));
         if (instanceId != null) {
@@ -387,9 +301,7 @@ public class VirtualBlockManager implements Listener {
             textureImageStore.clear();
         }
         occupancyCalculator.clearCache();
-        if (plugin == null) {
-            return;
-        }
+        if (plugin == null) return;
 
         loadExternalModelDefinitions(plugin.getDataFolder());
         DebugLogger.info("Virtual models ready: " + loadedModels.size());
@@ -408,14 +320,8 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    /**
-     * Bakes texel surface plans for a registered model using the current settings.
-     * Bake failures never break model load — faces without resolvable PNGs simply
-     * keep their legacy rendering tiers.
-     */
     private void bakeTexelSurfaces(String key, VirtualModel model, ModelMeta meta, File modelFile) {
-        TexelBakeResult result = TexelSurfaceBaker.bakeModel(
-                model, meta, modelFile, imageStore(), texelSettings);
+        TexelBakeResult result = TexelSurfaceBaker.bakeModel(model, meta, modelFile, imageStore(), texelSettings);
         texelBakes.put(key, result);
         if (result.enabled() && result.facesBaked() > 0) {
             DebugLogger.info("[TexelBaking] Model '" + key + "': baked " + result.facesBaked()
@@ -424,11 +330,6 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    /**
-     * Bakes the adaptive rendering strategy decision and, when the voxel strategy
-     * is selected, the merged voxel runs for a registered model. Bake failures
-     * never break model load — the legacy pipeline renders the model unchanged.
-     */
     private void bakeVoxelPlan(String key, VirtualModel model, ModelMeta meta, File modelFile) {
         VoxelModelBake result = VoxelSurfaceBaker.bakeModel(
                 model, meta, modelFile, imageStore(), voxelSettings, settings,
@@ -444,13 +345,6 @@ public class VirtualBlockManager implements Listener {
         return textureImageStore;
     }
 
-    /**
-     * Deterministic per-model texture-resolution report. Builds the same tiered
-     * {@link TextureMaterialResolver} diagnostics already used elsewhere, but in a
-     * {@link LinkedHashMap} so ordering is stable across reloads (mirrors the
-     * FMM determinism fix where non-deterministic key order rewrote the resource
-     * pack hash every restart).
-     */
     private Map<String, TextureMaterialResolver.Resolution> resolveTextureReport(VirtualModel model) {
         Map<String, TextureMaterialResolver.Resolution> report = new LinkedHashMap<>();
         for (String texture : model.textureNames()) {
@@ -462,9 +356,7 @@ public class VirtualBlockManager implements Listener {
     private String modelKeyFromFile(File baseFolder, File file) {
         String basePath = baseFolder.getAbsolutePath();
         String filePath = file.getAbsolutePath();
-        String relative = filePath.startsWith(basePath)
-                ? filePath.substring(basePath.length())
-                : file.getName();
+        String relative = filePath.startsWith(basePath) ? filePath.substring(basePath.length()) : file.getName();
         relative = relative.replace('\\', '/');
         if (relative.startsWith("/")) {
             relative = relative.substring(1);
@@ -479,17 +371,11 @@ public class VirtualBlockManager implements Listener {
             RotationSnapper.SnappedRotation snapped,
             Quaternionf globalRotation,
             int[] cells
-    ) {
-    }
+    ) {}
 
-    /** Resolves the effective modes, anchor, rotation, and collision cells for a spawn. */
-    private SpawnContext resolveSpawnContext(
-            VirtualModel model,
-            VirtualBlockPlacementHelper.PlacementData placement
-    ) {
+    private SpawnContext resolveSpawnContext(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
         ModelMeta meta = getModelMeta(model.name());
-        ModelMeta.CollisionMode collisionMode = meta.collisionMode() != null
-                ? meta.collisionMode() : settings.collisionMode();
+        ModelMeta.CollisionMode collisionMode = meta.collisionMode() != null ? meta.collisionMode() : settings.collisionMode();
         ModelMeta.OriginMode originMode = effectiveOriginMode(model);
 
         Location origin = new Location(
@@ -502,9 +388,7 @@ public class VirtualBlockManager implements Listener {
         RotationSnapper.SnappedRotation snapped = settings.rotationSnap()
                 ? RotationSnapper.snap(placement.globalRotation(), settings.rotationSnapThresholdDegrees())
                 : null;
-        Quaternionf globalRotation = snapped != null
-                ? snapped.quaternion()
-                : new Quaternionf(placement.globalRotation());
+        Quaternionf globalRotation = snapped != null ? snapped.quaternion() : new Quaternionf(placement.globalRotation());
 
         int[] cells = occupancyCalculator.compute(
                 model, snapped, placement.globalRotation(), collisionMode,
@@ -513,22 +397,14 @@ public class VirtualBlockManager implements Listener {
         return new SpawnContext(collisionMode, originMode, origin, snapped, globalRotation, cells);
     }
 
-    private UUID spawnModel(
-            VirtualModel model,
-            VirtualBlockPlacementHelper.PlacementData placement,
-            UUID instanceId
-    ) {
+    private UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement, UUID instanceId) {
         SpawnContext context = resolveSpawnContext(model, placement);
         ModelMeta.OriginMode originMode = context.originMode();
         Location origin = context.origin();
         Quaternionf globalRotation = context.globalRotation();
         int[] cells = context.cells();
 
-        // CENTER: pixel (0,0,0) = anchor block center at its base; centered models
-        // rotate about the block center. GRID: pixel (0,0,0) = block corner.
-        Location displayOrigin = originMode == ModelMeta.OriginMode.GRID
-                ? origin.clone()
-                : origin.clone().add(0.5, 0.0, 0.5);
+        Location displayOrigin = originMode == ModelMeta.OriginMode.GRID ? origin.clone() : origin.clone().add(0.5, 0.0, 0.5);
 
         List<UUID> spawnedEntities = new ArrayList<>();
         Set<Location> barrierBlocks = new HashSet<>();
@@ -542,15 +418,11 @@ public class VirtualBlockManager implements Listener {
                 blockToModelMap.put(BlockCoordinate.from(location), instanceId);
             } else if (settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
                 rollbackSpawn(barrierBlocks, spawnedEntities);
-                DebugLogger.warning("spawnModel: collision cell " + location + " is not air; "
-                        + "STRICT policy aborted the spawn of model '" + model.name() + "'.");
+                DebugLogger.warning("spawnModel: collision cell " + location + " is not air; STRICT policy aborted spawn of '" + model.name() + "'.");
                 return null;
             }
         }
 
-        // Pivot: rotations rotate the model about the anchor block's center (vanilla
-        // block behavior): t' = R·t + (C−DO) − R·(C−DO), where C = (0.5, 0.5, 0.5)
-        // and DO = display spawn offset — identical to the voxelization's placement.
         Vector3f pivotOffset = new Vector3f(
                 0.5f - (float) (displayOrigin.getX() - origin.getX()),
                 0.5f,
@@ -561,39 +433,21 @@ public class VirtualBlockManager implements Listener {
         boolean animated = model.hasAnimations();
         List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
         TexelBakeResult texelBake = texelBakes.get(model.name().toLowerCase(Locale.ROOT));
-        List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans =
-                texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
+        List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
         VoxelModelBake voxelBake = voxelBakes.get(model.name().toLowerCase(Locale.ROOT));
-        // The strategy selection already refuses animated models (voxel displays
-        // cannot bind to cube bones); the guard keeps a stale bake honest. A bake
-        // that selected VOXEL but produced zero runs (thin geometry whose cubes
-        // strictly overlap no lattice cell) must not render an invisible model —
-        // it falls back to the legacy cube pipeline below.
-        boolean voxelRender = voxelBake != null && voxelBake.voxelRender()
-                && !voxelBake.runs().isEmpty() && !animated;
-        // Readability floor for palette-quantized models (texel plates or voxel
-        // reconstruction): vanilla's directional face shading crushes near-black
-        // palette materials into one unreadable mass outside full daylight. A
-        // per-model meta override (texelBrightness, 0-15) keeps every display at
-        // a minimum light level so the palette art stays legible while the
-        // top/side/bottom shading still separates the faces.
+
+        boolean voxelRender = voxelBake != null && voxelBake.voxelRender() && !voxelBake.runs().isEmpty() && !animated;
         ModelMeta spawnMeta = getModelMeta(model.name());
-        int brightnessFloor = spawnMeta.texelBrightness() != null
-                && (voxelRender || texelCubePlans != null)
-                ? spawnMeta.texelBrightness() : 0;
+        int brightnessFloor = spawnMeta.texelBrightness() != null && (voxelRender || texelCubePlans != null) ? spawnMeta.texelBrightness() : 0;
 
         if (voxelRender) {
-            // Voxel reconstruction: one display per merged XZ rectangle of
-            // same-color, same-emission voxels. Run origins are model-space
-            // (lattice-shifted), so they compose through the identical
-            // rotation/pivot math as cube displays and can never drift from the
-            // barrier lattice.
+            // Full 3D Volumetric Meshing Application (scale matches lengthX, heightY, widthZ)
             for (VoxelModelBake.VoxelRun run : voxelBake.runs()) {
                 DisplayEmitter.EmittedDisplay item = new DisplayEmitter.EmittedDisplay(
                         TexelPalette.material(run.paletteIndex()),
                         new Vector3f(run.x(), run.y(), run.z()),
                         new Quaternionf(),
-                        new Vector3f(run.lengthX(), 1.0f, run.widthZ()),
+                        new Vector3f(run.lengthX(), run.heightY(), run.widthZ()),
                         new Quaternionf(),
                         run.lightEmission(),
                         () -> TexelPalette.blockData(run.paletteIndex())
@@ -605,14 +459,10 @@ public class VirtualBlockManager implements Listener {
         } else {
             int cubeIndex = 0;
             for (BakedCube cube : model.cubes()) {
-                Map<CubeFace, TexelSurfacePlan> facePlans =
-                        texelCubePlans != null && cubeIndex < texelCubePlans.size()
-                                ? texelCubePlans.get(cubeIndex)
-                                : null;
-                for (DisplayEmitter.EmittedDisplay item
-                        : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
-                    UUID displayId = spawnDisplayEntity(
-                            displayOrigin, instanceId, item, brightnessFloor,
+                Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
+                        ? texelCubePlans.get(cubeIndex) : null;
+                for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
+                    UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
                             globalRotation, pivotOffset, rotatedPivotOffset);
                     spawnedEntities.add(displayId);
 
@@ -646,15 +496,13 @@ public class VirtualBlockManager implements Listener {
                 animationBindings == null ? List.of() : animationBindings,
                 pivotCorrection
         ));
+
         if (displayTransport != null && displayTransport.isRunning()) {
-            // Registers the chunk index, attaches in-range viewers and drains the
-            // initial dirty state so the first animation delta carries only changes.
             displayTransport.finishInstance(instanceId, displayOrigin, animated);
         }
         return instanceId;
     }
 
-    /** Shared brightness instances per emission level (0-15); Bukkit allocates per call otherwise. */
     private static final Display.Brightness[] BRIGHTNESS_BY_LEVEL = new Display.Brightness[16];
 
     static {
@@ -663,28 +511,15 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    /**
-     * Spawns one {@code BlockDisplay} for an emitted display item at the shared
-     * display origin: block data, instance tag, brightness floor, and the
-     * rotation/pivot composition {@code t' = R·t + (C−DO) − R·(C−DO)} every
-     * rendering strategy (classic plates, texel plates, voxel runs) funnels
-     * through, so all strategies stay on one transform pipeline.
-     */
     private UUID spawnDisplayEntity(
-            Location displayOrigin,
-            UUID instanceId,
-            DisplayEmitter.EmittedDisplay item,
-            int brightnessFloor,
-            Quaternionf globalRotation,
-            Vector3f pivotOffset,
-            Vector3f rotatedPivotOffset
-    ) {
+            Location displayOrigin, UUID instanceId, DisplayEmitter.EmittedDisplay item, int brightnessFloor,
+            Quaternionf globalRotation, Vector3f pivotOffset, Vector3f rotatedPivotOffset) {
         if (displayTransport != null && displayTransport.isRunning()) {
-            return spawnPooledDisplayEntity(
-                    displayOrigin, instanceId, item, brightnessFloor,
+            return spawnPooledDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
                     globalRotation, pivotOffset, rotatedPivotOffset);
-        }        BlockDisplay display = (BlockDisplay) displayOrigin.getWorld().spawnEntity(
-                displayOrigin, EntityType.BLOCK_DISPLAY);
+        }
+
+        BlockDisplay display = (BlockDisplay) displayOrigin.getWorld().spawnEntity(displayOrigin, EntityType.BLOCK_DISPLAY);
         display.setBlock(item.blockData());
         display.addScoreboardTag(DISPLAY_TAG_PREFIX + instanceId);
         int emission = Math.max(item.lightEmission(), brightnessFloor);
@@ -705,20 +540,9 @@ public class VirtualBlockManager implements Listener {
         return display.getUniqueId();
     }
 
-    /**
-     * Transport path: the display is a pooled, never-spawned entity streamed to
-     * viewers per player with LOD tiers and bundle batching. The instance tag
-     * stays on the Bukkit entity so sweep logic can still identify strays.
-     */
     private UUID spawnPooledDisplayEntity(
-            Location displayOrigin,
-            UUID instanceId,
-            DisplayEmitter.EmittedDisplay item,
-            int brightnessFloor,
-            Quaternionf globalRotation,
-            Vector3f pivotOffset,
-            Vector3f rotatedPivotOffset
-    ) {
+            Location displayOrigin, UUID instanceId, DisplayEmitter.EmittedDisplay item, int brightnessFloor,
+            Quaternionf globalRotation, Vector3f pivotOffset, Vector3f rotatedPivotOffset) {
         PooledDisplay pooled = displayTransport.beginInstance(instanceId, displayOrigin::getWorld);
         BlockDisplay display = pooled.asBlockDisplay();
         display.setBlock(item.blockData());
@@ -732,8 +556,7 @@ public class VirtualBlockManager implements Listener {
         globalRotation.transform(translation);
         translation.add(pivotOffset).sub(rotatedPivotOffset);
 
-        pooled.moveTo(displayTransport.nms(),
-                displayOrigin.getX(), displayOrigin.getY(), displayOrigin.getZ(), 0f, 0f);
+        pooled.moveTo(displayTransport.nms(), displayOrigin.getX(), displayOrigin.getY(), displayOrigin.getZ(), 0f, 0f);
         pooled.setTransform(new Matrix4f()
                 .translate(translation)
                 .rotate(new Quaternionf(globalRotation).mul(item.leftRotation()))
@@ -742,15 +565,9 @@ public class VirtualBlockManager implements Listener {
         return display.getUniqueId();
     }
 
-    /**
-     * The model's effective origin mode — the single resolution used by both the
-     * spawn path and the voxel bake, so the voxel lattice can never disagree
-     * with the anchor the displays spawn from.
-     */
     private ModelMeta.OriginMode effectiveOriginMode(VirtualModel model) {
         ModelMeta meta = getModelMeta(model.name());
-        ModelMeta.OriginMode originMode = meta.originMode() != null
-                ? meta.originMode() : settings.originMode();
+        ModelMeta.OriginMode originMode = meta.originMode() != null ? meta.originMode() : settings.originMode();
         if (originMode == null || originMode == ModelMeta.OriginMode.AUTO) {
             originMode = ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes());
         }
@@ -783,21 +600,6 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    /**
-     * Sweeps every loaded chunk in every world for tagged display entities whose
-     * rendered-model id is no longer live, and removes them — the startup complement
-     * to {@link #onChunkLoad}. Chunks near players load during world startup, before
-     * this plugin's chunk listener registers, so entities persisted by a previous
-     * session in those chunks never see a {@code ChunkLoadEvent}; without this sweep
-     * they survive alongside the fresh displays that {@code restoreForState} spawns
-     * under new ids and z-fight them exactly in place (color flicker with camera
-     * movement). Semantics mirror the chunk-load handler: entities belonging to a
-     * live multiblock instance are kept (its model may legitimately not be restored
-     * yet — deferred world), everything else tagged with our prefix but absent from
-     * {@code activeBlocks} is a ghost.
-     *
-     * @return the number of ghost displays removed
-     */
     public int sweepGhostDisplays() {
         int removed = 0;
         for (World world : Bukkit.getWorlds()) {
@@ -809,31 +611,21 @@ public class VirtualBlockManager implements Listener {
                         break;
                     }
                 }
-                if (instanceTag == null) {
-                    continue;
-                }
+                if (instanceTag == null) continue;
                 try {
                     UUID instanceId = UUID.fromString(instanceTag.substring(DISPLAY_TAG_PREFIX.length()));
-                    if (activeBlocks.containsKey(instanceId)) {
-                        continue;
-                    }
-                    if (lifecycleManager != null
-                            && lifecycleManager.registry().getInstance(instanceId) != null) {
-                        continue;
-                    }
+                    if (activeBlocks.containsKey(instanceId)) continue;
+                    if (lifecycleManager != null && lifecycleManager.registry().getInstance(instanceId) != null) continue;
                     entity.remove();
                     removed++;
                 } catch (IllegalArgumentException ignored) {
-                    // Malformed tag — treat as a ghost too.
                     entity.remove();
                     removed++;
                 }
             }
         }
         if (removed > 0) {
-            DebugLogger.info("sweepGhostDisplays: removed " + removed
-                    + " stale display entit" + (removed == 1 ? "y" : "ies")
-                    + " from loaded chunks.");
+            DebugLogger.info("sweepGhostDisplays: removed " + removed + " stale display entities from loaded chunks.");
         }
         return removed;
     }
@@ -844,23 +636,16 @@ public class VirtualBlockManager implements Listener {
             displayTransport.handleChunkLoad(event.getChunk());
         }
         for (Entity entity : event.getChunk().getEntities()) {
-            if (!(entity instanceof BlockDisplay)) {
-                continue;
-            }
-
+            if (!(entity instanceof BlockDisplay)) continue;
             for (String tag : entity.getScoreboardTags()) {
                 if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
                     try {
                         UUID instanceId = UUID.fromString(tag.substring(DISPLAY_TAG_PREFIX.length()));
                         if (!activeBlocks.containsKey(instanceId)) {
-                            if (lifecycleManager != null && lifecycleManager.registry().getInstance(instanceId) != null) {
-                                continue;
-                            }
+                            if (lifecycleManager != null && lifecycleManager.registry().getInstance(instanceId) != null) continue;
                             entity.remove();
                         }
-                    } catch (IllegalArgumentException ignored) {
-                        // Malformed tag
-                    }
+                    } catch (IllegalArgumentException ignored) {}
                 }
             }
         }
@@ -875,9 +660,7 @@ public class VirtualBlockManager implements Listener {
 
     private void removeModelInternal(UUID instanceId) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
-        if (activeBlock == null) {
-            return;
-        }
+        if (activeBlock == null) return;
 
         for (Location loc : activeBlock.barrierBlocks()) {
             if (loc.getBlock().getType() == BARRIER_MATERIAL) {
@@ -887,10 +670,10 @@ public class VirtualBlockManager implements Listener {
         }
 
         if (displayTransport != null && displayTransport.isRunning()) {
-            // Despawns every pooled display for every viewer and returns them to the pool.
             displayTransport.removeInstance(instanceId);
             return;
         }
+
         for (UUID displayId : activeBlock.displayEntities()) {
             Entity display = Bukkit.getEntity(displayId);
             if (display != null) {
@@ -914,8 +697,7 @@ public class VirtualBlockManager implements Listener {
             return null;
         }
         Location origin = new Location(world, anchor.x(), anchor.y(), anchor.z());
-        VirtualBlockPlacementHelper.PlacementData placement =
-                new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
+        VirtualBlockPlacementHelper.PlacementData placement = new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
         UUID instanceId = spawnModel(model, placement, UUID.randomUUID());
         if (instanceId != null) {
             DebugLogger.info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
