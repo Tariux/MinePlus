@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.virtual.display.pool;
 
 import com.mineplus.infrastructure.virtual.display.nms.NmsAdapter;
 import com.mineplus.infrastructure.virtual.display.packet.PacketOptimizer;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -18,11 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Reusable-entity pattern for the display transport. Display entities are expensive
- * to (re)create client-side (new render state, new interpolation state, entity id
- * churn); the pool keeps them alive and only changes what they show.
- */
 public final class EntityPoolManager {
 
     private final NmsAdapter nms;
@@ -31,7 +27,7 @@ public final class EntityPoolManager {
 
     private final Map<UUID, Deque<PooledDisplay>> idleBlocks = new HashMap<>();
     private final Map<UUID, Deque<PooledDisplay>> idleItems  = new HashMap<>();
-    private final Map<Integer, PooledDisplay> byEntityId = new HashMap<>();
+    private final Int2ObjectOpenHashMap<PooledDisplay> byEntityId = new Int2ObjectOpenHashMap<>();
     private final Map<UUID, PooledDisplay> byUniqueId = new HashMap<>();
 
     private long created, reused, destroyed;
@@ -42,13 +38,10 @@ public final class EntityPoolManager {
         this.maxIdlePerWorld = maxIdlePerWorld;
     }
 
-    // ------------------------------------------------------------------ acquire
-
     public PooledDisplay acquireBlock(World world) {
         Deque<PooledDisplay> pool = idleBlocks.computeIfAbsent(world.getUID(), k -> new ArrayDeque<>());
         PooledDisplay d = pool.pollFirst();
         if (d == null) {
-            // Real entity object, real entity id, real SynchedEntityData - but never spawned or ticked.
             BlockDisplay entity = world.createEntity(new Location(world, 0, -512, 0), BlockDisplay.class);
             configureDefaults(entity);
             d = new PooledDisplay(entity);
@@ -66,7 +59,6 @@ public final class EntityPoolManager {
         Deque<PooledDisplay> pool = idleItems.computeIfAbsent(world.getUID(), k -> new ArrayDeque<>());
         PooledDisplay d = pool.pollFirst();
         if (d == null) {
-            // Real entity object, real entity id, real SynchedEntityData - but never spawned or ticked.
             ItemDisplay entity = world.createEntity(new Location(world, 0, -512, 0), ItemDisplay.class);
             configureDefaults(entity);
             d = new PooledDisplay(entity);
@@ -80,27 +72,20 @@ public final class EntityPoolManager {
         return d;
     }
 
-    private static void configureDefaults(org.bukkit.entity.Display e) {
+    private static void configureDefaults(Display e) {
         e.setPersistent(false);
-        e.setViewRange(1.0f);          // client culling distance factor; LOD is done server-side anyway
+        e.setViewRange(1.0f);
         e.setShadowRadius(0f);
-        e.setTeleportDuration(1);      // smooth 1-tick position/rotation blending
+        e.setTeleportDuration(1);
         e.setInterpolationDuration(0);
     }
 
-    // ------------------------------------------------------------------ release
-
-    /**
-     * Hands the display back. Clients that still know the id receive a metadata delta that
-     * turns it invisible (AIR / no item, identity transform) - NO remove packet, so the next
-     * acquire can reuse the id for those clients with a cheap teleport + metadata.
-     */
     public void release(PooledDisplay d) {
         if (!d.isInUse()) return;
         d.setInUse(false);
         d.reset();
 
-        Object invisible = nms.metadataPacket(d.entity(), true);   // dirty delta contains the AIR change
+        Object invisible = nms.metadataPacket(d.entity(), true);
         if (invisible != null) {
             for (UUID id : d.knownClients()) {
                 Player p = Bukkit.getPlayer(id);
@@ -111,13 +96,12 @@ public final class EntityPoolManager {
         Map<UUID, Deque<PooledDisplay>> pools = d.entity() instanceof BlockDisplay ? idleBlocks : idleItems;
         Deque<PooledDisplay> pool = pools.computeIfAbsent(d.entity().getWorld().getUID(), k -> new ArrayDeque<>());
         if (pool.size() >= maxIdlePerWorld) {
-            destroy(d);                // over budget: really remove it everywhere
+            destroy(d);
         } else {
-            pool.addFirst(d);          // LIFO: hot entity, still in the clients' memory
+            pool.addFirst(d);
         }
     }
 
-    /** Sends real remove packets for the display to every client that knows it. */
     public void destroy(PooledDisplay d) {
         Object remove = nms.removePacket(d.id());
         for (UUID id : new ArrayList<>(d.knownClients())) {
@@ -130,9 +114,6 @@ public final class EntityPoolManager {
         destroyed++;
     }
 
-    // ------------------------------------------------------------------ lifecycle
-
-    /** Player left: their client state is gone, drop them from every known-set (no packets). */
     public void forgetPlayer(UUID player) {
         for (PooledDisplay d : byEntityId.values()) d.forget(player);
     }
@@ -141,12 +122,10 @@ public final class EntityPoolManager {
         return byEntityId.get(id);
     }
 
-    /** UUID-keyed lookup: matches the entity ids the spawn path records in bindings. */
     public PooledDisplay byUniqueId(UUID entityUniqueId) {
         return byUniqueId.get(entityUniqueId);
     }
 
-    /** Removes every virtual entity from every client (plugin disable / reload). */
     public void shutdown() {
         List<PooledDisplay> all = new ArrayList<>(byEntityId.values());
         for (PooledDisplay d : all) destroy(d);

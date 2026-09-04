@@ -366,7 +366,7 @@ Verified facts / traps:
 ## 11. Verifying the API surface (stub jars)
 
 Modules compile against **stub jars** in `libs/` (paper-api-1.21.jar, spigot-api-1.21.1.jar,
-joml, gson, item-nbt-api, sqlite-jdbc) plus the built Core jar — these may lag the current
+joml, gson, item-nbt-api, sqlite-jdbc, HikariCP, fastutil) plus the built Core jar — these may lag the current
 Bukkit API. Before using any enum constant or method you have not seen in this codebase, check
 the stub:
 

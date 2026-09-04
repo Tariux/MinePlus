@@ -180,6 +180,8 @@ world = anchorBlock + (0.5, 0.5, 0.5) + R · (p_pixels / 16 − (0, 0.5, 0))
 
 Blockbench animations travel inside the `.bbmodel` file — the importer parses clips, bone animators, and keyframes in the same streaming pass as the geometry. The runtime samples the tracks server-side and pushes composed `BlockDisplay` transforms; the vanilla client interpolates between pushes, so motion renders at the client's own frame rate (the maximum a purely server-side renderer can achieve; the server cannot emit updates faster than its own tick loop).
 
+The tick loop is Folia-aware (Folia runs it on the global region scheduler; Paper/Spigot use the standard scheduler), culls instances nobody is looking at (a pose push is skipped when no player is within the transport's full-LOD range and facing the model), and reuses scratch matrices so a steady-state tick allocates nothing.
+
 **Two control interfaces:**
 
 1. **Internal data interface** — clips play straight from the model file. Declare autoplay per multiblock level (`"animations": ["rotate_gear"]` in the level JSON) or per raw model (`"autoplay"` in the model's `.meta.json`). JSON-declared autoplay wins over meta.
@@ -234,7 +236,7 @@ anim.getAnimationState(instance.id(), "recoil");  // playback snapshot or null
 
 ## Texel Surface Baking
 
-Pixel-accurate vanilla texturing, zero resource pack: when a texture PNG sits next to the model file (`plugins/Mineplus/models/<textureName>.png`), a load-time transformer decomposes each face's UV-mapped texture into per-pixel **texels**, quantizes each texel to the nearest visually-flat vanilla block (51-entry palette: concretes, concrete powders, terracottas, plus snow block/obsidian/warped wart — flat-only membership makes stretching safe by construction, full-precision redmean matching with bounded run-continuity hysteresis so distinct shades never merge), and emits one thin plate per merged run of same-color texels (greedy rectangle merging). Texels whose plate would land inside another cube's solid are occlusion-culled, so nested box-modeled geometry never spawns overlapping surface entities; texel plates sit at a dedicated 1/256-block offset so plate planes never z-fight the base display at grazing angles.
+Pixel-accurate vanilla texturing, zero resource pack: when a texture PNG sits next to the model file (`plugins/Mineplus/models/<textureName>.png`), a transformer decomposes each face's UV-mapped texture into per-pixel **texels**, quantizes each texel to the nearest visually-flat vanilla block (51-entry palette: concretes, concrete powders, terracottas, plus snow block/obsidian/warped wart — flat-only membership makes stretching safe by construction, full-precision redmean matching with bounded run-continuity hysteresis so distinct shades never merge), and emits one thin plate per merged run of same-color texels (greedy rectangle merging). Texels whose plate would land inside another cube's solid are occlusion-culled, so nested box-modeled geometry never spawns overlapping surface entities; texel plates sit at a dedicated 1/256-block offset so plate planes never z-fight the base display at grazing angles. Baking runs off the main thread (results land asynchronously; a reload or settings change discards in-flight bakes), so model registration and `/mineplus reload models` never stall on PNG decoding.
 
 - **Zero regression by default:** `MODE: AUTO` only upgrades faces that would otherwise render with the FULL strategy and have a resolvable PNG — models without adjacent PNGs render byte-identically. `TEXEL_BAKING.ENABLED: false` restores the pre-texel pipeline entirely.
 - **Entity count scales with geometry, not texture resolution:** the effective grid is the face's own pixel grid (16px face → 16×16 texels); a 4×4 texture upscales, a 32×32 downsamples.
@@ -295,10 +297,10 @@ What runs underneath your feature code:
 |---|---|
 | `MultiBlockLifecycleManager` | Drives create/place/interact/tick/upgrade/remove |
 | `ModelRenderingManager` | Maps machine level → `.bbmodel` rendering through `VirtualBlockManager` |
-| `ModelAnimationManager` | Animation runtime: samples clip keyframes, composes bone-hierarchy deltas, pushes display transforms (attached/cleaned automatically off the live render map) |
-| `VirtualBlockManager` | Session-local mapping + automatic cleanup of orphaned `BlockDisplay` "ghost" entities on chunk loads |
+| `ModelAnimationManager` | Animation runtime: samples clip keyframes, composes bone-hierarchy deltas, pushes display transforms (attached/cleaned automatically off the live render map; Folia-aware scheduling, viewer-culled, allocation-free ticks) |
+| `VirtualBlockManager` | Session-local mapping + automatic cleanup of orphaned `BlockDisplay` "ghost" entities on chunk loads; texel bakes run asynchronously off the main thread |
 | `MachineProcessManager` | Timed crafting processes; state in per-instance `stateData`, restart-safe |
-| `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`) via an asynchronous write-behind queue with **incremental writes**: hot paths (place/upgrade/remove, process advancement) stage single-instance upserts/deletes, so one mutation no longer rewrites every row; bulk paths (reload, shutdown) stage a full replace. A background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |
+| `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`, HikariCP-pooled single connection) via an asynchronous write-behind queue with **incremental writes**: hot paths (place/upgrade/remove, process advancement) stage single-instance upserts/deletes, so one mutation no longer rewrites every row; bulk paths (reload, shutdown) stage a full replace. A background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |
 | `HookBus` | Publishes lifecycle events to registered listeners |
 | `MultiBlockLinkingSystem` | Directed links and signal propagation |
 
