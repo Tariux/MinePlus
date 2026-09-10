@@ -10,6 +10,7 @@ import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,10 @@ public final class TexelSurfaceBaker {
     private static final int TRANSPARENT = -1;
     private static final int OCCLUDED = -2;
 
+    /** One face rejected by a plate budget; the emitter may tint it with the cube's dominant palette entry. */
+    private record BudgetFallbackFace(int cubeIndex, CubeFace face) {
+    }
+
     public static TexelBakeResult bakeModel(
             VirtualModel model,
             ModelMeta meta,
@@ -42,11 +47,14 @@ public final class TexelSurfaceBaker {
         }
         int maxPlatesPerFace = settings.effectiveMaxPlatesPerFace(meta);
         int maxPlatesPerInstance = settings.effectiveMaxPlatesPerInstance(meta);
+        int textureWidth = model.resolution().width();
+        int textureHeight = model.resolution().height();
 
         long startNanos = System.nanoTime();
         OccluderSet occluders = OccluderSet.build(model.cubes());
-        Map<BakedFace, TexelSampler> samplers = new java.util.HashMap<>();
+        Map<BakedFace, TexelSampler> samplers = new HashMap<>();
         List<Map<CubeFace, TexelSurfacePlan>> cubePlans = new ArrayList<>(model.cubes().size());
+        List<BudgetFallbackFace> budgetFallbackFaces = new ArrayList<>();
         int facesBaked = 0;
         int facesTotal = 0;
         int totalPlates = 0;
@@ -72,7 +80,8 @@ public final class TexelSurfaceBaker {
                 }
 
                 TextureImageStore.TextureRaster raster = imageStore.raster(face.textureName(), modelFile);
-                FaceUvAnalyzer.UvPlan plan = FaceUvAnalyzer.analyze(face, mode, raster != null);
+                FaceUvAnalyzer.UvPlan plan = FaceUvAnalyzer.analyze(
+                        face, mode, raster != null, textureWidth, textureHeight);
                 if (plan.strategy() != FaceUvAnalyzer.UvPlan.Strategy.TEXEL) {
                     continue;
                 }
@@ -83,10 +92,12 @@ public final class TexelSurfaceBaker {
                 occludedCells += baked.occludedCells();
                 if (baked.plateCount() > maxPlatesPerFace) {
                     faceBudgetFallbacks++;
+                    budgetFallbackFaces.add(new BudgetFallbackFace(cubeIndex, faceKey));
                     continue;
                 }
                 if (runningPlates + baked.plateCount() > maxPlatesPerInstance) {
                     instanceBudgetFallbacks++;
+                    budgetFallbackFaces.add(new BudgetFallbackFace(cubeIndex, faceKey));
                     continue;
                 }
 
@@ -104,12 +115,85 @@ public final class TexelSurfaceBaker {
             cubeIndex++;
         }
 
+        // Budget-fallback tints: a face that fell back from texel baking and whose
+        // texture resolves to no vanilla material is plated with its cube's dominant
+        // baked palette entry instead of the resolver's concrete-white fallback —
+        // partially baked models degrade to a flat local tone, never white.
+        List<Map<CubeFace, Integer>> cubeFallbackTints = computeFallbackTints(cubePlans, budgetFallbackFaces);
+
         long elapsedNanos = System.nanoTime() - startNanos;
         return new TexelBakeResult(
                 true, mode, detail, cubePlans, facesBaked, facesTotal, totalPlates,
                 maxPlatesOnFace, faceBudgetFallbacks, instanceBudgetFallbacks, elapsedNanos,
-                gridHistogram, paletteUsage, maxPlatesPerFace, maxPlatesPerInstance, occludedCells
+                gridHistogram, paletteUsage, maxPlatesPerFace, maxPlatesPerInstance, occludedCells,
+                cubeFallbackTints
         );
+    }
+
+    /**
+     * Assigns each budget-fallback face the dominant palette entry of its cube's
+     * successfully baked faces (total plate area, argmax). Faces of cubes with no
+     * baked faces keep the resolver's legacy behavior.
+     */
+    private static List<Map<CubeFace, Integer>> computeFallbackTints(
+            List<Map<CubeFace, TexelSurfacePlan>> cubePlans,
+            List<BudgetFallbackFace> budgetFallbackFaces
+    ) {
+        if (budgetFallbackFaces.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, Map<CubeFace, Integer>> tintsByCube = new HashMap<>();
+        for (BudgetFallbackFace fallback : budgetFallbackFaces) {
+            if (fallback.cubeIndex() >= cubePlans.size()) {
+                continue;
+            }
+            Map<CubeFace, TexelSurfacePlan> facePlans = cubePlans.get(fallback.cubeIndex());
+            if (facePlans.isEmpty()) {
+                continue; // nothing baked on this cube — no local tone available
+            }
+            int dominantIndex = dominantPaletteIndex(facePlans);
+            if (dominantIndex >= 0) {
+                tintsByCube
+                        .computeIfAbsent(fallback.cubeIndex(), k -> new EnumMap<>(CubeFace.class))
+                        .put(fallback.face(), dominantIndex);
+            }
+        }
+        if (tintsByCube.isEmpty()) {
+            return List.of();
+        }
+        List<Map<CubeFace, Integer>> result = new ArrayList<>(cubePlans.size());
+        for (int i = 0; i < cubePlans.size(); i++) {
+            Map<CubeFace, Integer> tints = tintsByCube.get(i);
+            result.add(tints == null ? Map.of() : Map.copyOf(tints));
+        }
+        return result;
+    }
+
+    private static int dominantPaletteIndex(Map<CubeFace, TexelSurfacePlan> facePlans) {
+        int[] areaByIndex = null;
+        for (TexelSurfacePlan plan : facePlans.values()) {
+            if (plan.plates().isEmpty()) {
+                continue;
+            }
+            if (areaByIndex == null) {
+                areaByIndex = new int[TexelPalette.size()];
+            }
+            for (TexelSurfacePlan.Rect rect : plan.plates()) {
+                areaByIndex[rect.paletteIndex()] += rect.width() * rect.height();
+            }
+        }
+        if (areaByIndex == null) {
+            return -1;
+        }
+        int dominantIndex = -1;
+        int dominantArea = 0;
+        for (int i = 0; i < areaByIndex.length; i++) {
+            if (areaByIndex[i] > dominantArea) {
+                dominantArea = areaByIndex[i];
+                dominantIndex = i;
+            }
+        }
+        return dominantIndex;
     }
 
     private static TexelSurfacePlan bakeFace(

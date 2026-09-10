@@ -8,8 +8,8 @@ package com.mineplus.infrastructure.virtual;
  * vanilla client offers no API to crop a texture to an arbitrary sub-window. Four tiers
  * are exactly reproducible:
  * <ol>
- *   <li><b>Tile</b> — wrapping windows (span &gt; 16px) render as a native-density grid,
- *       one display per texture repeat: zero stretching.</li>
+ *   <li><b>Tile</b> — wrapping windows (span &gt; the texture) render as a native-density
+ *       grid, one display per texture repeat: zero stretching.</li>
  *   <li><b>Crop half</b> — half-texture windows render via slab-type block states whose
  *       texture is literally that half of the parent block's map.</li>
  *   <li><b>Texel</b> — with a resolvable PNG next to the model, the window is decomposed
@@ -18,6 +18,10 @@ package com.mineplus.infrastructure.virtual;
  *   <li><b>Full</b> — every other window renders the complete texture (the honest
  *       fallback; sub-pixel cropping is impossible without a client resource pack).</li>
  * </ol>
+ *
+ * <p>All heuristics are resolution-aware: pass the model's bbmodel
+ * {@code resolution.width/height} so 32x32/64x64-authored models classify correctly.
+ * The parameterless overloads keep the vanilla 16x16 base for compatibility.</p>
  */
 public final class FaceUvAnalyzer {
 
@@ -57,42 +61,75 @@ public final class FaceUvAnalyzer {
         }
     }
 
-    /** Derives the render plan for one face's UV window. */
+    /** Derives the render plan for one face's UV window against a 16x16 texture. */
     public static UvPlan analyze(BakedFace face) {
+        return analyze(face, 16, 16);
+    }
+
+    /**
+     * Derives the render plan for one face's UV window against a texture of the
+     * given resolution.
+     *
+     * @param face          the face to analyze
+     * @param textureWidth  texture width in pixels the UV coordinates are expressed in
+     * @param textureHeight texture height in pixels
+     */
+    public static UvPlan analyze(BakedFace face, int textureWidth, int textureHeight) {
         if (face == null) {
             return new UvPlan(UvPlan.Strategy.FULL, UvPlan.Half.NONE, 0);
         }
 
         int rotation = face.rotation();
-        if (face.isWrapping()) {
+        if (face.isWrapping(textureWidth, textureHeight)) {
             return new UvPlan(UvPlan.Strategy.TILE, UvPlan.Half.NONE, rotation,
-                    face.uTiles(), face.vTiles());
+                    face.uTiles(textureWidth), face.vTiles(textureHeight));
         }
-        if (face.isHalfVertical()) {
-            UvPlan.Half half = face.vCenter() < 0.5f ? UvPlan.Half.TOP : UvPlan.Half.BOTTOM;
+        if (face.isHalfVertical(textureWidth, textureHeight)) {
+            UvPlan.Half half = face.vCenter(textureHeight) < 0.5f ? UvPlan.Half.TOP : UvPlan.Half.BOTTOM;
             return new UvPlan(UvPlan.Strategy.CROP_HALF, half, rotation);
         }
-        if (face.isHalfHorizontal()) {
-            UvPlan.Half half = face.uCenter() < 0.5f ? UvPlan.Half.LEFT : UvPlan.Half.RIGHT;
+        if (face.isHalfHorizontal(textureWidth, textureHeight)) {
+            UvPlan.Half half = face.uCenter(textureWidth) < 0.5f ? UvPlan.Half.LEFT : UvPlan.Half.RIGHT;
             return new UvPlan(UvPlan.Strategy.CROP_HALF, half, rotation);
         }
         return new UvPlan(UvPlan.Strategy.FULL, UvPlan.Half.NONE, rotation);
     }
 
     /**
-     * Derives the render plan for one face's UV window under a texel baking mode.
-     *
-     * <p>{@code OFF} (or an unresolvable texture image) keeps the legacy tiers.
-     * {@code ON} forces TEXEL for every face with a resolvable image. {@code AUTO}
-     * upgrades only {@link UvPlan.Strategy#FULL} faces — TILE and CROP_HALF are
-     * already exact vanilla renderings, so baking them would only add entities.
+     * Derives the render plan for one face's UV window under a texel baking mode
+     * against a 16x16 texture.
      *
      * @param face                   the face to analyze
      * @param texelMode              resolved texel mode (never {@code null})
      * @param textureImageResolvable whether a decodable PNG exists for the face's texture
      */
     public static UvPlan analyze(BakedFace face, ModelMeta.TexelMode texelMode, boolean textureImageResolvable) {
-        UvPlan existing = analyze(face);
+        return analyze(face, texelMode, textureImageResolvable, 16, 16);
+    }
+
+    /**
+     * Derives the render plan for one face's UV window under a texel baking mode and
+     * texture resolution.
+     *
+     * <p>{@code OFF} (or an unresolvable texture image) keeps the legacy tiers.
+     * {@code ON} forces TEXEL for every face with a resolvable image. {@code AUTO}
+     * upgrades only {@link UvPlan.Strategy#FULL} faces — TILE and CROP_HALF are
+     * already exact vanilla renderings, so baking them would only add entities.</p>
+     *
+     * @param face                   the face to analyze
+     * @param texelMode              resolved texel mode (never {@code null})
+     * @param textureImageResolvable whether a decodable PNG exists for the face's texture
+     * @param textureWidth           texture width in pixels the UV coordinates are expressed in
+     * @param textureHeight          texture height in pixels
+     */
+    public static UvPlan analyze(
+            BakedFace face,
+            ModelMeta.TexelMode texelMode,
+            boolean textureImageResolvable,
+            int textureWidth,
+            int textureHeight
+    ) {
+        UvPlan existing = analyze(face, textureWidth, textureHeight);
         if (texelMode == null || texelMode == ModelMeta.TexelMode.OFF || !textureImageResolvable) {
             return existing;
         }

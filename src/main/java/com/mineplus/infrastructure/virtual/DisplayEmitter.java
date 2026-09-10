@@ -17,7 +17,11 @@ import org.joml.Vector3f;
  *    perpendicular plates sharing a cube edge are geometrically disjoint, so
  *    they never interpenetrate no matter how thin the client renders them.
  * 2. Flush boundary alignment eliminates overlapping penetration and edge shadow lines.
- * 3. Strict hollowness preservation: absent/untextured faces emit zero geometry.
+ * 3. Strict hollowness preservation: absent/untextured faces — and faces whose texture
+ *    resolves to an AIR alias (destroy stages, particles, missingno) — emit zero geometry.
+ * 4. Budget-fallback tinting: a face that fell back from texel baking and whose texture
+ *    resolves to no vanilla material is plated with its cube's dominant baked palette
+ *    entry, so partially baked models degrade to a flat local tone instead of white.
  */
 public final class DisplayEmitter {
 
@@ -27,13 +31,6 @@ public final class DisplayEmitter {
      * plates at a shared cube edge exactly touch instead of crossing.
      */
     public static final float PLATE_THICKNESS = 1.0f / 1024.0f;
-
-    /** Outward anti-z-fight offset set to zero to keep boundary surfaces strictly flush. */
-    public static final float EPS_OUT = 0.0f;
-    public static final float TEXEL_EPS_OUT = 0.0f;
-
-    /** Zero seam closure prevents perpendicular meeting planes from penetrating each other and creating dark seam lines. */
-    public static final float CORNER_SEAM_CLOSURE = 0.0f;
 
     public record EmittedDisplay(
             Material material,
@@ -53,7 +50,7 @@ public final class DisplayEmitter {
     }
 
     public static List<EmittedDisplay> emitCube(BakedCube cube, boolean perFaceRendering) {
-        return emitCube(cube, perFaceRendering, null);
+        return emitCube(cube, perFaceRendering, null, null, null);
     }
 
     public static List<EmittedDisplay> emitCube(
@@ -61,6 +58,30 @@ public final class DisplayEmitter {
             boolean perFaceRendering,
             Map<CubeFace, TexelSurfacePlan> texelPlans
     ) {
+        return emitCube(cube, perFaceRendering, texelPlans, null, null);
+    }
+
+    /**
+     * Emits the displays rendering one baked cube.
+     *
+     * @param cube               the cube to emit
+     * @param perFaceRendering   false allows the single whole-block fast path
+     * @param texelPlans         baked texel plans per face (null = no texel baking)
+     * @param resolution         model texture resolution driving the UV-window heuristics;
+     *                           null assumes the vanilla 16x16 base
+     * @param budgetFallbackTints texel budget-fallback tints per face (palette indices);
+     *                           applied when the face's texture resolves to no material
+     */
+    public static List<EmittedDisplay> emitCube(
+            BakedCube cube,
+            boolean perFaceRendering,
+            Map<CubeFace, TexelSurfacePlan> texelPlans,
+            VirtualModel.Resolution resolution,
+            Map<CubeFace, Integer> budgetFallbackTints
+    ) {
+        int textureWidth = resolution == null ? 16 : resolution.width();
+        int textureHeight = resolution == null ? 16 : resolution.height();
+
         boolean allFacesPresent = true;
         for (CubeFace faceKey : CubeFace.values()) {
             BakedFace face = cube.faces().get(faceKey);
@@ -77,7 +98,11 @@ public final class DisplayEmitter {
         List<EmittedDisplay> output = new ArrayList<>();
 
         if (canUseBaseDisplay) {
-            return List.of(baseDisplay(cube, primaryMaterial(cube), dominantFace(cube)));
+            Material primary = primaryMaterial(cube);
+            if (primary == Material.AIR) {
+                return List.of(); // AIR alias texture: intentionally nothing
+            }
+            return List.of(baseDisplay(cube, primary, dominantFace(cube)));
         }
 
         EnumMap<CubeFace, Material> effective = effectiveMaterials(cube);
@@ -96,11 +121,18 @@ public final class DisplayEmitter {
             }
 
             Material faceMaterial = effective.get(faceKey);
-            if (faceMaterial == null) {
+            if (faceMaterial == null || faceMaterial == Material.AIR) {
                 continue;
             }
 
-            output.addAll(plateDisplay(cube, faceKey, faceMaterial));
+            if (faceMaterial == TextureMaterialResolver.fallback() && budgetFallbackTints != null) {
+                Integer tint = budgetFallbackTints.get(faceKey);
+                if (tint != null && TextureMaterialResolver.resolveDetailed(bakedFace.textureName()).isFallback()) {
+                    faceMaterial = TexelPalette.material(tint);
+                }
+            }
+
+            output.addAll(plateDisplay(cube, faceKey, faceMaterial, textureWidth, textureHeight));
         }
 
         return output;
@@ -119,7 +151,11 @@ public final class DisplayEmitter {
         for (CubeFace faceKey : CubeFace.values()) {
             BakedFace face = cube.faces().get(faceKey);
             if (face != null && face.textureName() != null && !face.textureName().isBlank()) {
-                effective.put(faceKey, TextureMaterialResolver.resolve(face.textureName()));
+                Material material = TextureMaterialResolver.resolve(face.textureName());
+                if (material == Material.AIR) {
+                    continue; // AIR alias (destroy stages, particles): no geometry
+                }
+                effective.put(faceKey, material);
             }
         }
         return effective;
@@ -154,9 +190,10 @@ public final class DisplayEmitter {
         );
     }
 
-    private static List<EmittedDisplay> plateDisplay(BakedCube cube, CubeFace face, Material material) {
+    private static List<EmittedDisplay> plateDisplay(
+            BakedCube cube, CubeFace face, Material material, int textureWidth, int textureHeight) {
         BakedFace bakedFace = cube.faces().get(face);
-        FaceUvAnalyzer.UvPlan plan = FaceUvAnalyzer.analyze(bakedFace);
+        FaceUvAnalyzer.UvPlan plan = FaceUvAnalyzer.analyze(bakedFace, textureWidth, textureHeight);
 
         if (plan.strategy() == FaceUvAnalyzer.UvPlan.Strategy.TILE) {
             return tileDisplays(cube, face, material, plan);

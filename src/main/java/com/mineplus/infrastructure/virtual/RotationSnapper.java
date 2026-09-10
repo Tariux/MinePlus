@@ -7,10 +7,9 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
  /**
-  * Snaps an arbitrary placement rotation to the nearest of the 24 orientation-preserving
-  * signed axis permutations (the rotational symmetry group of the cube). Only these map
-  * the integer cell lattice onto itself exactly, so the same snapped rotation transforms
-  * both barrier-cell offsets and display translations with pure integer arithmetic —
+ * Snaps an arbitrary placement rotation to the nearest of the 24 orientation-preserving
+ * signed axis permutations (the rotational symmetry group of the cube). Only these map
+ * the integer cell lattice onto itself exactly, so the same snapped rotation transforms
  * both barrier-cell offsets and display translations with pure integer arithmetic —
  * zero rounding error, collision and visuals can never drift apart.
  */

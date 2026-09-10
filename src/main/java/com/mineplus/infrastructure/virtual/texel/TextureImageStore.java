@@ -14,19 +14,25 @@ import javax.imageio.ImageIO;
  * the importer's texture-name resolution (last path segment, extension stripped).
  *
  * <p>Lookup order: a {@code <name>.png} next to the model file, then in the models
- * root folder. Missing or invalid images are remembered so repeated lookups are free;
- * bake failures must never break model load. Decoding goes through
- * {@code javax.imageio} (JDK, zero dependencies); images beyond 4096x4096 are
- * rejected as a sanity guard.
+ * root folder. Everything is cached per <i>(texture name, model file)</i> — the same
+ * texture name may resolve to different PNGs in different model folders, so a
+ * name-only cache would cross-contaminate bakes between models. Missing or invalid
+ * lookups are remembered so repeats are free; bake failures must never break model
+ * load. Decoding goes through {@code javax.imageio} (JDK, zero dependencies); images
+ * beyond 4096x4096 are rejected as a sanity guard.</p>
  */
 public final class TextureImageStore {
 
     private static final int MAX_DIMENSION = 4096;
 
+    /** Cache identity: a texture name resolved against one model file's lookup order. */
+    private record CacheKey(String name, String modelPath) {
+    }
+
     private final File rootFolder;
-    private final Map<String, BufferedImage> cache = new ConcurrentHashMap<>();
-    private final Set<String> missing = ConcurrentHashMap.newKeySet();
-    private final Map<String, TextureRaster> rasters = new ConcurrentHashMap<>();
+    private final Map<CacheKey, BufferedImage> cache = new ConcurrentHashMap<>();
+    private final Set<CacheKey> missing = ConcurrentHashMap.newKeySet();
+    private final Map<CacheKey, TextureRaster> rasters = new ConcurrentHashMap<>();
 
     /**
      * Bulk-extracted ARGB pixel array of a texture: one linear {@code getRGB} bulk
@@ -44,11 +50,11 @@ public final class TextureImageStore {
 
     /**
      * Bulk ARGB raster for a texture name, or {@code null} when unresolvable.
-     * Extracted once per texture and cached alongside the decoded image.
+     * Extracted once per (name, model file) and cached alongside the decoded image.
      */
     public TextureRaster raster(String name, File modelFile) {
-        String key = normalize(name);
-        if (key.isEmpty()) {
+        CacheKey key = cacheKey(name, modelFile);
+        if (key == null) {
             return null;
         }
         TextureRaster cached = rasters.get(key);
@@ -67,16 +73,16 @@ public final class TextureImageStore {
 
     /**
      * Decoded image for a texture name, or {@code null} when unresolvable. Results
-     * (including misses) are cached for the JVM lifetime of the model set; call
-     * {@link #clear()} on model reload.
+     * (including misses) are cached per (name, model file) for the JVM lifetime of
+     * the model set; call {@link #clear()} on model reload.
      *
      * @param name      texture name as carried by {@code BakedFace.textureName()}
      * @param modelFile the model file the texture belongs to (next-to-model lookup);
      *                  may be {@code null} for API-registered models
      */
     public BufferedImage texture(String name, File modelFile) {
-        String key = normalize(name);
-        if (key.isEmpty()) {
+        CacheKey key = cacheKey(name, modelFile);
+        if (key == null) {
             return null;
         }
         BufferedImage cached = cache.get(key);
@@ -86,7 +92,7 @@ public final class TextureImageStore {
         if (missing.contains(key)) {
             return null;
         }
-        BufferedImage image = load(key, modelFile);
+        BufferedImage image = load(key.name(), modelFile);
         if (image == null) {
             missing.add(key);
             return null;
@@ -120,6 +126,14 @@ public final class TextureImageStore {
 
     public int cachedImageCount() {
         return cache.size();
+    }
+
+    private static CacheKey cacheKey(String name, File modelFile) {
+        String normalized = normalize(name);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return new CacheKey(normalized, modelFile == null ? "" : modelFile.getAbsolutePath());
     }
 
     private BufferedImage load(String name, File modelFile) {

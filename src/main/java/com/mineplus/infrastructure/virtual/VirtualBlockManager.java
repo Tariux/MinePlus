@@ -25,8 +25,11 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -55,6 +58,8 @@ public class VirtualBlockManager implements Listener {
     private final Map<String, VirtualModel> loadedModels = new ConcurrentHashMap<>();
     private final Map<String, ModelMeta> modelMeta = new ConcurrentHashMap<>();
     private final Map<BlockCoordinate, UUID> blockToModelMap = new ConcurrentHashMap<>();
+    /** Anchor block -> active instance id; spawn-time record used to dedupe restores. */
+    private final Map<BlockCoordinate, UUID> anchorToInstance = new ConcurrentHashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new ConcurrentHashMap<>();
     private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
@@ -64,7 +69,14 @@ public class VirtualBlockManager implements Listener {
     /** Bumped whenever bake results are invalidated; async bakes only land if still current. */
     private final AtomicLong texelBakeGeneration = new AtomicLong();
     /** Upper bound for waiting on an in-flight bake when a spawn needs it. */
-    private static final long TEXEL_BAKE_JOIN_TIMEOUT_MS = 10_000L;
+    private static final long TEXEL_BAKE_JOIN_TIMEOUT_MS = 2_000L;
+
+    /**
+     * Dedicated bake pool: settings changes and reloads rebake every model, and PNG
+     * decode plus rasterization is heavy — running that on the ForkJoinPool commonPool
+     * would spike memory and starve parallel streams/completable stages server-wide.
+     */
+    private final ExecutorService texelBakeExecutor;
 
     private JavaPlugin plugin;
     private VirtualRenderingSettings settings = VirtualRenderingSettings.defaults();
@@ -72,6 +84,16 @@ public class VirtualBlockManager implements Listener {
     private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
     private DisplayTransport displayTransport;
+
+    public VirtualBlockManager() {
+        int threads = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2));
+        AtomicInteger bakeThreadCounter = new AtomicInteger();
+        this.texelBakeExecutor = Executors.newFixedThreadPool(threads, runnable -> {
+            Thread thread = new Thread(runnable, "mineplus-texel-bake-" + bakeThreadCounter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     public record ActiveVirtualBlock(
             String modelName,
@@ -194,6 +216,11 @@ public class VirtualBlockManager implements Listener {
     public void registerModel(String name, VirtualModel model, ModelMeta meta, File modelFile) {
         if (name == null || model == null) return;
         String key = name.toLowerCase(Locale.ROOT);
+        // The registry key is the single identity every auxiliary state keys on
+        // (meta overrides, texel bakes, occupancy cache, animation lookups);
+        // align the model's internal name with it so a lookup by model.name()
+        // can never miss on a name/key divergence.
+        model = model.withName(key);
         loadedModels.put(key, model);
         modelMeta.put(key, meta == null ? ModelMeta.empty() : meta);
         if (modelFile != null) {
@@ -224,6 +251,14 @@ public class VirtualBlockManager implements Listener {
             Block block = location.getBlock();
             if (block.getType().isAir()) continue;
             if (!clear) return SpawnAreaResult.BLOCKED;
+            // Another live virtual block's barrier: never break its collision
+            // lattice (that would strand a stale blockToModelMap entry and leave
+            // the owner model without collision). Skip the cell — the spawn
+            // itself tolerates occupied cells in the lenient policy.
+            UUID owner = blockToModelMap.get(BlockCoordinate.from(location));
+            if (owner != null && activeBlocks.containsKey(owner)) {
+                continue;
+            }
             block.setType(Material.AIR);
             cleared = true;
         }
@@ -246,6 +281,7 @@ public class VirtualBlockManager implements Listener {
             displayTransport.shutdown();
             displayTransport = null;
         }
+        texelBakeExecutor.shutdownNow();
     }
 
     public boolean exists(UUID instanceId) {
@@ -318,19 +354,28 @@ public class VirtualBlockManager implements Listener {
     }
 
     /**
-     * Bakes texel surfaces off the main thread. The result only lands if no
-     * reload/settings change invalidated bakes while it was running; spawn
-     * paths waiting on the future always receive their own result regardless.
+     * Bakes texel surfaces off the main thread on the dedicated bake pool. The
+     * result only lands if no reload/settings change invalidated bakes while it
+     * was running; spawn paths waiting on the future always receive their own
+     * result regardless. Completion handling runs {@code whenComplete} so an
+     * exceptional bake still drops its future — otherwise every later
+     * {@link #getTexelBake} would block on the join timeout forever.
      */
     private void bakeTexelSurfacesAsync(String key, VirtualModel model, ModelMeta meta, File modelFile) {
         TexelBakingSettings settingsSnapshot = texelSettings;
         TextureImageStore store = imageStore();
         long generation = texelBakeGeneration.get();
         CompletableFuture<TexelBakeResult> future = CompletableFuture.supplyAsync(
-                () -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot));
+                () -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot),
+                texelBakeExecutor);
         texelBakeFutures.put(key, future);
-        future.thenAccept(result -> {
+        future.whenComplete((result, error) -> {
             texelBakeFutures.remove(key, future);
+            if (error != null) {
+                DebugLogger.warning("[TexelBaking] Model '" + key + "' bake failed: "
+                        + (error.getMessage() != null ? error.getMessage() : error.getClass().getSimpleName()));
+                return;
+            }
             if (texelBakeGeneration.get() != generation) return; // superseded by a reload
             texelBakes.put(key, result);
             if (result.enabled() && result.facesBaked() > 0) {
@@ -421,7 +466,7 @@ public class VirtualBlockManager implements Listener {
                 barrierBlocks.add(location);
                 blockToModelMap.put(BlockCoordinate.from(location), instanceId);
             } else if (settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
-                rollbackSpawn(barrierBlocks, spawnedEntities);
+                rollbackSpawn(barrierBlocks);
                 DebugLogger.warning("spawnModel: collision cell " + location + " is not air; STRICT policy aborted spawn of '" + model.name() + "'.");
                 return null;
             }
@@ -445,7 +490,9 @@ public class VirtualBlockManager implements Listener {
         for (BakedCube cube : model.cubes()) {
             Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
                     ? texelCubePlans.get(cubeIndex) : null;
-            for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(cube, settings.perFaceRendering(), facePlans)) {
+            Map<CubeFace, Integer> fallbackTints = texelBake != null ? texelBake.fallbackTints(cubeIndex) : null;
+            for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(
+                    cube, settings.perFaceRendering(), facePlans, model.resolution(), fallbackTints)) {
                 UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
                         globalRotation, pivotOffset, rotatedPivotOffset);
                 spawnedEntities.add(displayId);
@@ -479,6 +526,7 @@ public class VirtualBlockManager implements Listener {
                 animationBindings == null ? List.of() : animationBindings,
                 pivotCorrection
         ));
+        anchorToInstance.put(BlockCoordinate.from(origin), instanceId);
 
         if (displayTransport != null && displayTransport.isRunning()) {
             displayTransport.finishInstance(instanceId, displayOrigin, animated);
@@ -557,18 +605,16 @@ public class VirtualBlockManager implements Listener {
         return originMode;
     }
 
-    private void rollbackSpawn(Set<Location> barrierBlocks, List<UUID> spawnedEntities) {
+    /**
+     * Reverts barriers placed by an aborted spawn. Displays never spawn before
+     * the barrier lattice passes its checks, so there is nothing else to undo.
+     */
+    private void rollbackSpawn(Set<Location> barrierBlocks) {
         for (Location loc : barrierBlocks) {
             if (loc.getBlock().getType() == BARRIER_MATERIAL) {
                 loc.getBlock().setType(Material.AIR);
             }
             blockToModelMap.remove(BlockCoordinate.from(loc));
-        }
-        for (UUID displayId : spawnedEntities) {
-            Entity display = Bukkit.getEntity(displayId);
-            if (display != null) {
-                display.remove();
-            }
         }
     }
 
@@ -645,6 +691,10 @@ public class VirtualBlockManager implements Listener {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
         if (activeBlock == null) return;
 
+        // Conditional remove: the spawn origin is the anchor key, and a newer
+        // render may already own the same anchor (remove + respawn swap).
+        anchorToInstance.remove(BlockCoordinate.from(activeBlock.origin()), instanceId);
+
         for (Location loc : activeBlock.barrierBlocks()) {
             if (loc.getBlock().getType() == BARRIER_MATERIAL) {
                 loc.getBlock().setType(Material.AIR);
@@ -666,8 +716,16 @@ public class VirtualBlockManager implements Listener {
     }
 
     public UUID restoreForState(BlockCoordinate anchor, String modelKey, Quaternionf rotation) {
-        if (blockToModelMap.containsKey(anchor)) {
-            return blockToModelMap.get(anchor);
+        // Dedupe against every active render, not just renders whose collision
+        // cells happen to cover the anchor: a model whose geometry does not
+        // include the anchor block would slip past the blockToModelMap check
+        // and render twice on repeated reconciles.
+        UUID alreadyRendered = anchorToInstance.get(anchor);
+        if (alreadyRendered == null) {
+            alreadyRendered = blockToModelMap.get(anchor);
+        }
+        if (alreadyRendered != null) {
+            return alreadyRendered;
         }
         VirtualModel model = getModel(modelKey);
         if (model == null) {

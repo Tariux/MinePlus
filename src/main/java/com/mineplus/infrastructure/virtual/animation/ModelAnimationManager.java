@@ -3,6 +3,8 @@ package com.mineplus.infrastructure.virtual.animation;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.infrastructure.virtual.display.DisplayTransport;
+import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
 import com.mineplus.util.DebugLogger;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -10,8 +12,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -45,13 +49,23 @@ public final class ModelAnimationManager {
     private AnimationInstanceBridge bridge;
     private BukkitTask tickTask;
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
-    private final Map<UUID, AnimatedInstance> instances = new HashMap<>();
+    /**
+     * Animated-instance state. Concurrent because hooks (play/stop/pause via
+     * {@code AnimationApi}) can arrive from any thread while the tick runs on the
+     * global scheduler (Folia) or the main thread; the map itself must never race.
+     */
+    private final Map<UUID, AnimatedInstance> instances = new ConcurrentHashMap<>();
 
     // JOML object reuse (zero allocation in the animation loop); grown on demand
     // for models with more bones than the initial capacity.
     private static final int SCRATCH_INITIAL_BONES = 256;
     private static final ThreadLocal<Matrix4f[]> SCRATCH_MATRICES = ThreadLocal.withInitial(() -> new Matrix4f[SCRATCH_INITIAL_BONES]);
     private static final ThreadLocal<AnimationEvaluator.BoneDelta[]> SCRATCH_DELTAS = ThreadLocal.withInitial(() -> new AnimationEvaluator.BoneDelta[SCRATCH_INITIAL_BONES]);
+    private static final ThreadLocal<Matrix4f> SCRATCH_OUT = ThreadLocal.withInitial(Matrix4f::new);
+
+    /** Immutable per-tick snapshot of one viewer: position plus normalized look direction. */
+    private record ViewerPos(double x, double y, double z, float lookX, float lookY, float lookZ) {
+    }
 
     private static final class AnimatedInstance {
         final String modelKey;
@@ -124,14 +138,27 @@ public final class ModelAnimationManager {
         Map<UUID, VirtualBlockManager.ActiveVirtualBlock> view = virtualBlockManager.activeBlocksView();
         instances.keySet().retainAll(view.keySet());
 
+        DisplayTransport transport = virtualBlockManager.displayTransport();
+        boolean transportRunning = transport != null && transport.isRunning();
+        // LOD gates only apply through the transport; the legacy spawned-entity
+        // path is ranged by vanilla tracking and always animates.
+        double maxDistSq = transportRunning ? transport.settings().lodFullRangeSq() : 0.0;
+        // Per-tick viewer snapshot, built lazily on the first animated instance:
+        // one position read per player per tick instead of one per player per instance.
+        Map<World, List<ViewerPos>> viewersByWorld = null;
+
         for (Map.Entry<UUID, VirtualBlockManager.ActiveVirtualBlock> entry : view.entrySet()) {
             VirtualBlockManager.ActiveVirtualBlock block = entry.getValue();
             if (block.animationBindings().isEmpty()) {
                 continue;
             }
 
-            // Frustum Culling / View check: Skip animating instances with no nearby players
-            if (!hasNearbyViewers(block.origin())) continue;
+            if (transportRunning) {
+                if (viewersByWorld == null) {
+                    viewersByWorld = snapshotViewers();
+                }
+                if (!hasNearbyViewers(block.origin(), viewersByWorld, maxDistSq)) continue;
+            }
 
             AnimatedInstance state = instances.computeIfAbsent(entry.getKey(), k -> createInstance(k, block));
             if (state != null) {
@@ -140,15 +167,56 @@ public final class ModelAnimationManager {
         }
     }
 
-    private boolean hasNearbyViewers(Location loc) {
-        if (virtualBlockManager.displayTransport() == null || !virtualBlockManager.displayTransport().isRunning()) return true; // Legacy fallback
-        double maxDistSq = virtualBlockManager.displayTransport().settings().lodFullRangeSq();
-        for (Player p : loc.getWorld().getPlayers()) {
-            if (p.getLocation().distanceSquared(loc) <= maxDistSq) {
-                // Dot Product Frustum Check (Is the player looking at it?)
-                Vector3f dirToObj = new Vector3f((float)(loc.getX() - p.getLocation().getX()), (float)(loc.getY() - p.getLocation().getY()), (float)(loc.getZ() - p.getLocation().getZ())).normalize();
-                Vector3f lookDir = new Vector3f((float)p.getLocation().getDirection().getX(), (float)p.getLocation().getDirection().getY(), (float)p.getLocation().getDirection().getZ());
-                if (lookDir.dot(dirToObj) > 0.3f) return true; // Within ~70 degree cone of vision
+    /** Snapshots every online viewer's position and look direction, grouped by world. */
+    private static Map<World, List<ViewerPos>> snapshotViewers() {
+        Map<World, List<ViewerPos>> viewersByWorld = new HashMap<>();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            Location location = player.getLocation();
+            double yawRad = Math.toRadians(location.getYaw());
+            double pitchRad = Math.toRadians(location.getPitch());
+            double cosPitch = Math.cos(pitchRad);
+            // Bukkit look direction: x = -cos(pitch)*sin(yaw), y = -sin(pitch), z = cos(pitch)*cos(yaw)
+            viewersByWorld
+                    .computeIfAbsent(location.getWorld(), k -> new ArrayList<>())
+                    .add(new ViewerPos(
+                            location.getX(), location.getY(), location.getZ(),
+                            (float) (-cosPitch * Math.sin(yawRad)),
+                            (float) (-Math.sin(pitchRad)),
+                            (float) (cosPitch * Math.cos(yawRad))));
+        }
+        return viewersByWorld;
+    }
+
+    /**
+     * Frustum/view check: an instance animates when at least one viewer is inside
+     * the transport's full-LOD range AND looking toward it (within the ~70° cone
+     * a dot product of 0.3 describes).
+     */
+    private static boolean hasNearbyViewers(
+            Location origin, Map<World, List<ViewerPos>> viewersByWorld, double maxDistSq) {
+        List<ViewerPos> viewers = viewersByWorld.get(origin.getWorld());
+        if (viewers == null || viewers.isEmpty()) {
+            return false;
+        }
+        double ox = origin.getX();
+        double oy = origin.getY();
+        double oz = origin.getZ();
+        for (ViewerPos viewer : viewers) {
+            double dx = ox - viewer.x();
+            double dy = oy - viewer.y();
+            double dz = oz - viewer.z();
+            double distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq > maxDistSq) {
+                continue;
+            }
+            double dist = Math.sqrt(distSq);
+            if (dist < 1.0e-4) {
+                return true; // viewer is inside the model
+            }
+            // dot(lookDir, dirToModel) > 0.3 -> inside the ~70 degree cone of vision
+            double dot = (viewer.lookX() * dx + viewer.lookY() * dy + viewer.lookZ() * dz) / dist;
+            if (dot > 0.3) {
+                return true;
             }
         }
         return false;
@@ -296,7 +364,7 @@ public final class ModelAnimationManager {
             applyInterpolation(state);
         }
 
-        Matrix4f out = new Matrix4f();
+        Matrix4f out = SCRATCH_OUT.get();
         for (AnimationBinding binding : state.bindings) {
             out.identity()
                     .translate(state.pivotCorrection)
@@ -309,6 +377,14 @@ public final class ModelAnimationManager {
             out.mul(binding.restLocal());
             applyPoseMatrix(renderedModelId, binding, out);
         }
+
+        // Ship what was just pushed: updateTransform only dirties the pooled
+        // displays for animated instances, so without this broadcast their pose
+        // deltas never reach any viewer.
+        DisplayTransport transport = virtualBlockManager.displayTransport();
+        if (transport != null && transport.isRunning()) {
+            transport.flushDeltas(renderedModelId);
+        }
     }
 
     /**
@@ -319,11 +395,9 @@ public final class ModelAnimationManager {
      * directly and vanilla tracking streams it.
      */
     private void applyPoseMatrix(UUID renderedModelId, AnimationBinding binding, Matrix4f matrix) {
-        com.mineplus.infrastructure.virtual.display.DisplayTransport transport =
-                virtualBlockManager.displayTransport();
+        DisplayTransport transport = virtualBlockManager.displayTransport();
         if (transport != null && transport.isRunning()) {
-            com.mineplus.infrastructure.virtual.display.pool.PooledDisplay pooled =
-                    transport.pool().byUniqueId(binding.entityId());
+            PooledDisplay pooled = transport.pool().byUniqueId(binding.entityId());
             if (pooled != null && pooled.isInUse()) {
                 transport.updateTransform(renderedModelId, pooled, matrix,
                         settings.effectiveInterpolationTicks());
@@ -348,11 +422,9 @@ public final class ModelAnimationManager {
 
     /** Display write helper routing through the transport pool or the legacy entity. */
     private void applyToDisplay(UUID displayId, java.util.function.Consumer<BlockDisplay> write) {
-        com.mineplus.infrastructure.virtual.display.DisplayTransport transport =
-                virtualBlockManager.displayTransport();
+        DisplayTransport transport = virtualBlockManager.displayTransport();
         if (transport != null && transport.isRunning()) {
-            com.mineplus.infrastructure.virtual.display.pool.PooledDisplay pooled =
-                    transport.pool().byUniqueId(displayId);
+            PooledDisplay pooled = transport.pool().byUniqueId(displayId);
             if (pooled != null && pooled.isInUse()) {
                 write.accept(pooled.asBlockDisplay());
                 return;

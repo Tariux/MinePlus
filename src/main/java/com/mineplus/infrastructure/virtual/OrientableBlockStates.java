@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.virtual;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
@@ -14,11 +15,17 @@ import org.bukkit.block.data.type.Slab;
  * <ul>
  *   <li>Directional blocks (furnace, observer...) — {@code facing} set so the front
  *       texture lands on the requested cube face.</li>
- *   <li>Orientable blocks (logs, pillars, quartz) — {@code axis} set so end-grain
+ *   <li>Orientable blocks (logs, pillar quartz) — {@code axis} set so end-grain
  *       (rings) vs side (bark/lines) textures land on the requested face.</li>
  *   <li>Slab blocks — {@code type=TOP/BOTTOM} for half-texture crops: a slab renders
  *       the top or bottom half of its parent block's textures.</li>
  * </ul>
+ *
+ * <p>Results are memoized per (material, face, rotation): every display of every
+ * spawn asks for the same small set of states, and block-state construction goes
+ * through the registry — a map lookup is dramatically cheaper on spawn-heavy paths.
+ * Cached instances are shared across displays, exactly like
+ * {@code TexelPalette.blockData(int)}; nothing mutates a state after construction.</p>
  */
 public final class OrientableBlockStates {
 
@@ -42,6 +49,18 @@ public final class OrientableBlockStates {
             Material.CRAFTER, Material.COPPER_BULB
     );
 
+    private record OrientedKey(Material material, CubeFace face, int rotationDegrees) {
+    }
+
+    private record HalfCropKey(Material material, FaceUvAnalyzer.UvPlan.Half half) {
+    }
+
+    /** Null sentinel for "this material has no usable slab" (maps cannot hold null values). */
+    private static final BlockData NO_SLAB = Material.BARRIER.createBlockData();
+
+    private static final Map<OrientedKey, BlockData> ORIENTED_CACHE = new ConcurrentHashMap<>();
+    private static final Map<HalfCropKey, BlockData> HALF_CROP_CACHE = new ConcurrentHashMap<>();
+
     /**
      * Builds a block state whose directional/orientable texture features align with the
      * requested cube face. Falls back to the material's default state when the material
@@ -52,6 +71,18 @@ public final class OrientableBlockStates {
      * @param rotationDegrees the face's UV rotation (rotates the facing around Y)
      */
     public static BlockData oriented(Material material, CubeFace face, int rotationDegrees) {
+        int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+        OrientedKey key = new OrientedKey(material, face, normalizedRotation);
+        BlockData cached = ORIENTED_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        BlockData data = buildOriented(material, face, normalizedRotation);
+        ORIENTED_CACHE.put(key, data);
+        return data;
+    }
+
+    private static BlockData buildOriented(Material material, CubeFace face, int rotationDegrees) {
         BlockData data = material.createBlockData();
 
         if (data instanceof Directional directional && DIRECTIONAL_TEXTURES.contains(material)) {
@@ -90,6 +121,20 @@ public final class OrientableBlockStates {
      * @return slab block data rendering that half, or null when the material has no slab
      */
     public static BlockData halfCrop(Material material, FaceUvAnalyzer.UvPlan.Half half) {
+        if (material == null || half == null || half == FaceUvAnalyzer.UvPlan.Half.NONE) {
+            return null;
+        }
+        HalfCropKey key = new HalfCropKey(material, half);
+        BlockData cached = HALF_CROP_CACHE.get(key);
+        if (cached != null) {
+            return cached == NO_SLAB ? null : cached;
+        }
+        BlockData built = buildHalfCrop(material, half);
+        HALF_CROP_CACHE.put(key, built == null ? NO_SLAB : built);
+        return built;
+    }
+
+    private static BlockData buildHalfCrop(Material material, FaceUvAnalyzer.UvPlan.Half half) {
         Material slabMaterial = slabFor(material);
         if (slabMaterial == null) {
             return null;
@@ -109,9 +154,6 @@ public final class OrientableBlockStates {
     }
 
     private static Material slabFor(Material material) {
-        if (material == null) {
-            return null;
-        }
         Material slab = Material.matchMaterial(material.name() + "_SLAB");
         return slab != null && slab.createBlockData() instanceof Slab ? slab : null;
     }
