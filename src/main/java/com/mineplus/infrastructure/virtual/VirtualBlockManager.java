@@ -458,6 +458,27 @@ public class VirtualBlockManager implements Listener {
     }
 
     private UUID spawnModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement, UUID instanceId) {
+        return spawnInternal(model, placement, instanceId, true);
+    }
+
+    /**
+     * Spawns the collision lattice for a model whose visuals render through
+     * another backend (the pack axis): barriers, occupancy, break handling,
+     * ghost cleanup and restore dedupe behave exactly like a full virtual
+     * spawn — only display entities are not emitted. The returned id owns the
+     * barrier map entries and the {@code ActiveVirtualBlock} record, so the
+     * calling backend keys its own visuals by it.
+     */
+    public UUID spawnCollisionModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
+        return spawnInternal(model, placement, UUID.randomUUID(), false);
+    }
+
+    private UUID spawnInternal(
+            VirtualModel model,
+            VirtualBlockPlacementHelper.PlacementData placement,
+            UUID instanceId,
+            boolean withDisplays
+    ) {
         SpawnContext context = resolveSpawnContext(model, placement);
         ModelMeta.OriginMode originMode = context.originMode();
         Location origin = context.origin();
@@ -483,49 +504,54 @@ public class VirtualBlockManager implements Listener {
             }
         }
 
-        Vector3f pivotOffset = new Vector3f(
-                0.5f - (float) (displayOrigin.getX() - origin.getX()),
-                0.5f,
-                0.5f - (float) (displayOrigin.getZ() - origin.getZ()));
-        Vector3f rotatedPivotOffset = new Vector3f(pivotOffset);
-        globalRotation.transform(rotatedPivotOffset);
-
-        boolean animated = model.hasAnimations();
-        List<AnimationBinding> animationBindings = animated ? new ArrayList<>() : null;
-        TexelBakeResult texelBake = getTexelBake(model.name());
-        List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
-        ModelMeta spawnMeta = getModelMeta(model.name());
-        int brightnessFloor = spawnMeta.texelBrightness() != null && texelCubePlans != null ? spawnMeta.texelBrightness() : 0;
-
-        int cubeIndex = 0;
-        for (BakedCube cube : model.cubes()) {
-            Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
-                    ? texelCubePlans.get(cubeIndex) : null;
-            Map<CubeFace, Integer> fallbackTints = texelBake != null ? texelBake.fallbackTints(cubeIndex) : null;
-            for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(
-                    cube, settings.perFaceRendering(), facePlans, model.resolution(), fallbackTints)) {
-                UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
-                        globalRotation, pivotOffset, rotatedPivotOffset);
-                spawnedEntities.add(displayId);
-
-                if (animated && cube.boneIndex() >= 0) {
-                    animationBindings.add(new AnimationBinding(
-                            cube.boneIndex(),
-                            displayId,
-                            new Matrix4f()
-                                    .translate(item.translation())
-                                    .rotate(item.leftRotation())
-                                    .scale(item.scale())
-                                    .rotate(item.rightRotation())
-                    ));
-                }
-            }
-            cubeIndex++;
-        }
-
+        boolean animated = false;
+        List<AnimationBinding> animationBindings = null;
         Vector3f pivotCorrection = null;
-        if (animated && !animationBindings.isEmpty()) {
-            pivotCorrection = new Vector3f(pivotOffset).sub(rotatedPivotOffset);
+
+        if (withDisplays) {
+            Vector3f pivotOffset = new Vector3f(
+                    0.5f - (float) (displayOrigin.getX() - origin.getX()),
+                    0.5f,
+                    0.5f - (float) (displayOrigin.getZ() - origin.getZ()));
+            Vector3f rotatedPivotOffset = new Vector3f(pivotOffset);
+            globalRotation.transform(rotatedPivotOffset);
+
+            animated = model.hasAnimations();
+            animationBindings = animated ? new ArrayList<>() : null;
+            TexelBakeResult texelBake = getTexelBake(model.name());
+            List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
+            ModelMeta spawnMeta = getModelMeta(model.name());
+            int brightnessFloor = spawnMeta.texelBrightness() != null && texelCubePlans != null ? spawnMeta.texelBrightness() : 0;
+
+            int cubeIndex = 0;
+            for (BakedCube cube : model.cubes()) {
+                Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
+                        ? texelCubePlans.get(cubeIndex) : null;
+                Map<CubeFace, Integer> fallbackTints = texelBake != null ? texelBake.fallbackTints(cubeIndex) : null;
+                for (DisplayEmitter.EmittedDisplay item : DisplayEmitter.emitCube(
+                        cube, settings.perFaceRendering(), facePlans, model.resolution(), fallbackTints)) {
+                    UUID displayId = spawnDisplayEntity(displayOrigin, instanceId, item, brightnessFloor,
+                            globalRotation, pivotOffset, rotatedPivotOffset);
+                    spawnedEntities.add(displayId);
+
+                    if (animated && cube.boneIndex() >= 0) {
+                        animationBindings.add(new AnimationBinding(
+                                cube.boneIndex(),
+                                displayId,
+                                new Matrix4f()
+                                        .translate(item.translation())
+                                        .rotate(item.leftRotation())
+                                        .scale(item.scale())
+                                        .rotate(item.rightRotation())
+                        ));
+                    }
+                }
+                cubeIndex++;
+            }
+
+            if (animated && !animationBindings.isEmpty()) {
+                pivotCorrection = new Vector3f(pivotOffset).sub(rotatedPivotOffset);
+            }
         }
 
         activeBlocks.put(instanceId, new ActiveVirtualBlock(
@@ -539,7 +565,7 @@ public class VirtualBlockManager implements Listener {
         ));
         anchorToInstance.put(BlockCoordinate.from(origin), instanceId);
 
-        if (displayTransport != null && displayTransport.isRunning()) {
+        if (withDisplays && displayTransport != null && displayTransport.isRunning()) {
             displayTransport.finishInstance(instanceId, displayOrigin, animated);
         }
         return instanceId;
@@ -632,7 +658,7 @@ public class VirtualBlockManager implements Listener {
     public void cleanupGhostEntities(UUID instanceId) {
         String tag = DISPLAY_TAG_PREFIX + instanceId;
         for (World world : Bukkit.getWorlds()) {
-            for (Entity entity : world.getEntitiesByClass(BlockDisplay.class)) {
+            for (Entity entity : world.getEntitiesByClass(Display.class)) {
                 if (entity.getScoreboardTags().contains(tag)) {
                     entity.remove();
                 }
@@ -643,7 +669,9 @@ public class VirtualBlockManager implements Listener {
     public int sweepGhostDisplays() {
         int removed = 0;
         for (World world : Bukkit.getWorlds()) {
-            for (Entity entity : world.getEntitiesByClass(BlockDisplay.class)) {
+            // Display (not BlockDisplay): the sweep is tag-driven, so it also
+            // covers any display type the render pipeline spawned.
+            for (Entity entity : world.getEntitiesByClass(Display.class)) {
                 String instanceTag = null;
                 for (String tag : entity.getScoreboardTags()) {
                     if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
@@ -676,7 +704,7 @@ public class VirtualBlockManager implements Listener {
             displayTransport.handleChunkLoad(event.getChunk());
         }
         for (Entity entity : event.getChunk().getEntities()) {
-            if (!(entity instanceof BlockDisplay)) continue;
+            if (!(entity instanceof Display)) continue;
             for (String tag : entity.getScoreboardTags()) {
                 if (tag.startsWith(DISPLAY_TAG_PREFIX)) {
                     try {
@@ -731,10 +759,7 @@ public class VirtualBlockManager implements Listener {
         // cells happen to cover the anchor: a model whose geometry does not
         // include the anchor block would slip past the blockToModelMap check
         // and render twice on repeated reconciles.
-        UUID alreadyRendered = anchorToInstance.get(anchor);
-        if (alreadyRendered == null) {
-            alreadyRendered = blockToModelMap.get(anchor);
-        }
+        UUID alreadyRendered = alreadyRenderedAt(anchor);
         if (alreadyRendered != null) {
             return alreadyRendered;
         }
@@ -755,6 +780,58 @@ public class VirtualBlockManager implements Listener {
             DebugLogger.info("restoreForState: Spawned virtual block for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
         }
         return instanceId;
+    }
+
+    /**
+     * Restore path for pack-rendered world objects: same dedupe and world
+     * guards as {@link #restoreForState}, but spawns only the collision
+     * lattice — the caller (backend selection in {@code ModelRenderingManager})
+     * attaches its own visuals to the returned id.
+     */
+    public UUID restoreCollisionForState(BlockCoordinate anchor, String modelKey, Quaternionf rotation) {
+        UUID alreadyRendered = alreadyRenderedAt(anchor);
+        if (alreadyRendered != null) {
+            return alreadyRendered;
+        }
+        VirtualModel model = getModel(modelKey);
+        if (model == null) {
+            DebugLogger.warning("Cannot restore collision: unknown model key '" + modelKey + "' at " + anchor + ".");
+            return null;
+        }
+        World world = Bukkit.getWorld(anchor.worldName());
+        if (world == null) {
+            DebugLogger.info("restoreCollisionForState: World '" + anchor.worldName() + "' not loaded for model key '" + modelKey + "'.");
+            return null;
+        }
+        Location origin = new Location(world, anchor.x(), anchor.y(), anchor.z());
+        VirtualBlockPlacementHelper.PlacementData placement = new VirtualBlockPlacementHelper.PlacementData(origin, BlockFace.UP, rotation);
+        UUID instanceId = spawnCollisionModel(model, placement);
+        if (instanceId != null) {
+            DebugLogger.info("restoreCollisionForState: Spawned collision lattice for model key '" + modelKey + "' at " + anchor + " (instanceId=" + instanceId + ").");
+        }
+        return instanceId;
+    }
+
+    private UUID alreadyRenderedAt(BlockCoordinate anchor) {
+        UUID alreadyRendered = anchorToInstance.get(anchor);
+        if (alreadyRendered == null) {
+            alreadyRendered = blockToModelMap.get(anchor);
+        }
+        return alreadyRendered;
+    }
+
+    /** Source file of a registered model (pack asset discovery), or null. */
+    public File getModelSourceFile(String name) {
+        return name == null ? null : modelSourceFiles.get(name.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Resolves the PNG file for one texture of a registered model through the
+     * shared image store (adjacent-then-root, the same resolution the texel
+     * baker uses), or null. Pure lookup — no decode.
+     */
+    public File resolveTextureFile(String modelKey, String textureName) {
+        return imageStore().resolveTextureFile(textureName, getModelSourceFile(modelKey));
     }
 
     private String stripExtension(String fileName) {

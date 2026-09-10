@@ -10,6 +10,10 @@ import com.mineplus.infrastructure.module.ModuleSupport;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
+import com.mineplus.pack.MineplusPackApi;
+import com.mineplus.pack.PackApi;
+import com.mineplus.pack.PackSettings;
+import com.mineplus.pack.PackSystem;
 
 public final class PluginContext {
 
@@ -22,6 +26,8 @@ public final class PluginContext {
     private final JsonInfrastructureApi jsonInfrastructureApi;
     private final AnimationApi animationApi;
     private final ModuleSupport moduleSupport;
+    private final PackSystem packSystem;
+    private final PackApi packApi;
 
     private PluginContext(
             MineplusPlugin plugin,
@@ -32,7 +38,9 @@ public final class PluginContext {
             BasicInfrastructureApi basicInfrastructureApi,
             JsonInfrastructureApi jsonInfrastructureApi,
             AnimationApi animationApi,
-            ModuleSupport moduleSupport
+            ModuleSupport moduleSupport,
+            PackSystem packSystem,
+            PackApi packApi
     ) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
@@ -43,6 +51,8 @@ public final class PluginContext {
         this.jsonInfrastructureApi = jsonInfrastructureApi;
         this.animationApi = animationApi;
         this.moduleSupport = moduleSupport;
+        this.packSystem = packSystem;
+        this.packApi = packApi;
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -54,9 +64,34 @@ public final class PluginContext {
             VirtualBlockManager virtualBlockManager,
             AnimationSettings animationSettings
     ) {
+        return bootstrap(plugin, virtualBlockManager, animationSettings, PackSettings.defaults());
+    }
+
+    /**
+     * @param packSettings pack subsystem settings; when enabled, the subsystem
+     *                     starts here (renderer injection happens before the
+     *                     engine's restore pass in {@link #finalizeSetup()})
+     */
+    public static PluginContext bootstrap(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            AnimationSettings animationSettings,
+            PackSettings packSettings
+    ) {
         ItemRegistry itemRegistry = new ItemRegistry(plugin);
         InfrastructureEngine infrastructureEngine = new InfrastructureEngine(
                 plugin, virtualBlockManager, itemRegistry, animationSettings);
+
+        PackSystem packSystem = null;
+        if (packSettings != null && packSettings.enabled()) {
+            // Start failures are isolated inside PackSystem; virtual rendering
+            // is never affected.
+            packSystem = PackSystem.start(plugin, virtualBlockManager, itemRegistry,
+                    infrastructureEngine.renderingManager(), packSettings);
+        }
+        PackApi packApi = packSystem != null && packSystem.isRunning()
+                ? new MineplusPackApi(packSystem)
+                : PackApi.disabled(itemRegistry);
 
         return new PluginContext(
                 plugin,
@@ -67,7 +102,9 @@ public final class PluginContext {
                 infrastructureEngine.basicApi(),
                 infrastructureEngine.jsonApi(),
                 infrastructureEngine.animationApi(),
-                new ModuleSupport(plugin, infrastructureEngine.registry(), virtualBlockManager)
+                new ModuleSupport(plugin, infrastructureEngine.registry(), virtualBlockManager),
+                packSystem,
+                packApi
         );
     }
 
@@ -106,6 +143,20 @@ public final class PluginContext {
     /** Selector-based animation control (play/stop/pause/trigger/enable by clip or bone). */
     public AnimationApi animationApi() {
         return animationApi;
+    }
+
+    /**
+     * Resource pack API — never null. When the subsystem is disabled this is
+     * a safe fallback: item identity still registers, presentation falls back
+     * to the vanilla backing material, nothing compiles or pushes.
+     */
+    public PackApi packApi() {
+        return packApi;
+    }
+
+    /** The running pack subsystem, or null when disabled/unavailable. */
+    public PackSystem packSystem() {
+        return packSystem;
     }
 
     /** Module toolkit: resource installation, looked-at resolution, command registration. */

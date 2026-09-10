@@ -40,6 +40,7 @@ public class ConfigManager {
                     MineplusConfig.parseAnimation(yamlConfig, com.mineplus.infrastructure.virtual.animation.AnimationSettings.defaults()),
                     MineplusConfig.parseTexelBaking(yamlConfig, com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults()),
                     MineplusConfig.parseDisplayTransport(yamlConfig, com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()),
+                    MineplusConfig.parsePack(yamlConfig, com.mineplus.pack.PackSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -187,6 +188,40 @@ public class ConfigManager {
                       # Packets per bundle; the client rejects bundles above 4096.
                       NETWORK:
                         BUNDLE_LIMIT: 4000
+
+                    # Resource pack system (Phase 2): compiles registered custom
+                    # content (custom items, models, textures) into a generated,
+                    # content-hash-named resource pack served to players. Fully
+                    # additive: vanilla items/blocks/entities without Mineplus
+                    # identity never change. When ENABLED is false the whole
+                    # subsystem is inert and the virtual rendering engine alone
+                    # renders everything exactly as before.
+                    PACK:
+                      # Master switch (false = nothing compiled, served, or pushed).
+                      ENABLED: false
+                      DELIVERY:
+                        # DISABLED: operators distribute the artifact manually.
+                        # LOCAL: the plugin serves the artifact over a small
+                        #   built-in HTTP endpoint (configure PUBLIC_URL when a
+                        #   reverse proxy or external IP is needed).
+                        # STATIC_URL: the artifact is hosted externally.
+                        MODE: DISABLED
+                        LOCAL_HOST: 0.0.0.0
+                        LOCAL_PORT: 8163
+                        # Blank = derive from the server IP + LOCAL_PORT.
+                        PUBLIC_URL: ''
+                        # Used by STATIC_URL mode; may contain {hash}.
+                        STATIC_URL: ''
+                        # Optional prompt text shown with the pack request.
+                        PROMPT_MESSAGE: ''
+                        # Ticks after join before the automatic prompt.
+                        PROMPT_DELAY_TICKS: 60
+                      CACHE:
+                        # Generated artifacts (mp-<hash>.zip) kept before pruning.
+                        MAX_ARTIFACTS: 8
+                      # Non-zero pins pack.mcmeta's pack_format when the
+                      # built-in version table lags a new Minecraft release.
+                      PACK_FORMAT_OVERRIDE: 0
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

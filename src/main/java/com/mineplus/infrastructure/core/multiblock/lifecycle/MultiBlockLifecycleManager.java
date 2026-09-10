@@ -161,10 +161,15 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
             }
 
             if (status == EntityStatus.ACTIVE) {
-                UUID modelId = renderingManager.virtualBlockManager().restoreForState(
-                        instance.coordinate(), instance.modelKey(), instance.rotation());
+                UUID modelId = null;
+                if (type != null) {
+                    modelId = renderingManager.restore(type, instance, plugin.getDataFolder());
+                } else {
+                    modelId = renderingManager.virtualBlockManager().restoreForState(
+                            instance.coordinate(), instance.modelKey(), instance.rotation());
+                }
                 if (modelId == null && type != null) {
-                    DebugLogger.warning("reconcile: restoreForState returned null for instance " + instance.id() + ", attempting render().");
+                    DebugLogger.warning("reconcile: restore returned null for instance " + instance.id() + ", attempting render().");
                     modelId = renderingManager.render(type, instance, plugin.getDataFolder());
                 }
                 if (modelId != null) {
@@ -185,7 +190,7 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         // never got the onChunkLoad cleanup) and z-fights the fresh displays exactly
         // in place. Deferred-world instances keep their entities — their chunks are
         // not loaded here, and the registry guard in the sweep preserves live ones.
-        int ghosts = renderingManager.virtualBlockManager().sweepGhostDisplays();
+        int ghosts = renderingManager.sweepGhostDisplays();
         if (ghosts > 0) {
             DebugLogger.info("reconcile: swept " + ghosts + " stale display entities left by a previous session.");
         }
