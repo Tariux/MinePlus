@@ -15,7 +15,11 @@ import java.util.Map;
  *
  * <p>Budgets are applied here, at bake time, in face emission order — faces earlier
  * in emission order keep their texel detail deterministically. Over-budget faces fall
- * back to the legacy per-face rendering for that face only.
+ * back to the legacy per-face rendering for that face only. Each such face also gets a
+ * <i>fallback tint</i> in {@link #cubeFallbackTints()}: the cube's dominant baked
+ * palette entry, applied by the emitter when the face's own texture resolves to no
+ * vanilla material — a partially baked model then degrades to a flat local tone
+ * instead of concrete white.</p>
  */
 public record TexelBakeResult(
         boolean enabled,
@@ -33,7 +37,8 @@ public record TexelBakeResult(
         Map<Integer, Integer> paletteUsage,
         int effectiveMaxPlatesPerFace,
         int effectiveMaxPlatesPerInstance,
-        int occludedCells
+        int occludedCells,
+        List<Map<CubeFace, Integer>> cubeFallbackTints
 ) {
 
     public TexelBakeResult {
@@ -42,6 +47,7 @@ public record TexelBakeResult(
                 ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(gridHistogram));
         paletteUsage = paletteUsage == null
                 ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(paletteUsage));
+        cubeFallbackTints = cubeFallbackTints == null ? List.of() : List.copyOf(cubeFallbackTints);
     }
 
     /** Faces that fell back due to either budget guard. */
@@ -52,6 +58,14 @@ public record TexelBakeResult(
     /** Average merged plates per baked face (0 when nothing baked). */
     public double averagePlatesPerFace() {
         return facesBaked == 0 ? 0.0 : (double) totalPlates / facesBaked;
+    }
+
+    /** Budget-fallback tints of one cube, or {@code null} when the cube has none. */
+    public Map<CubeFace, Integer> fallbackTints(int cubeIndex) {
+        if (cubeIndex < 0 || cubeIndex >= cubeFallbackTints.size()) {
+            return null;
+        }
+        return cubeFallbackTints.get(cubeIndex);
     }
 
     /** Empty disabled result for a model with {@code cubeCount} cubes. */
@@ -69,6 +83,7 @@ public record TexelBakeResult(
                 0, 0, 0, 0, 0, 0, 0L, Map.of(), Map.of(),
                 settings == null ? 0 : settings.maxPlatesPerFace(),
                 settings == null ? 0 : settings.maxPlatesPerInstance(),
-                0);
+                0,
+                List.of());
     }
 }
