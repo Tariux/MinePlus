@@ -45,7 +45,9 @@ public final class MineplusPlugin extends JavaPlugin {
         attachDisplayTransport();
         virtualBlockManager.loadModels(this);
 
-        context = PluginContext.bootstrap(this, virtualBlockManager, configManager.getConfig().getAnimation());
+        context = PluginContext.bootstrap(
+                this, virtualBlockManager, configManager.getConfig().getAnimation(),
+                configManager.getConfig().getPack());
         context.finalizeSetup();
 
         registerCommand();
@@ -56,6 +58,10 @@ public final class MineplusPlugin extends JavaPlugin {
     public void onDisable() {
         if (context != null) {
             context.infrastructureEngine().shutdown();
+        }
+
+        if (context != null && context.packSystem() != null) {
+            context.packSystem().shutdown();
         }
 
         if (virtualBlockManager != null) {
@@ -81,6 +87,7 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new StatusSubCommand(context));
         commandRouter.register(new ReloadSubCommand(context));
         commandRouter.register(new ModelSubCommand(context));
+        commandRouter.register(new com.mineplus.infrastructure.command.sub.PackSubCommand(context));
 
         command.setExecutor(commandRouter);
         command.setTabCompleter(commandRouter);
@@ -145,6 +152,12 @@ public final class MineplusPlugin extends JavaPlugin {
         if (context != null && configManager != null) {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
         }
+        // Pack mode changes apply after restart (delivery binding, listeners);
+        // a running subsystem still recompiles so freshly registered content
+        // ships with the current settings.
+        if (context != null && context.packSystem() != null) {
+            context.packSystem().onReload();
+        }
         // Transport enable/disable applies after a restart; log when the desired
         // state diverges from the running one so operators know why.
         if (configManager != null) {
@@ -171,5 +184,10 @@ public final class MineplusPlugin extends JavaPlugin {
 
     public com.mineplus.infrastructure.core.api.AnimationApi animationApi() {
         return context == null ? null : context.animationApi();
+    }
+
+    /** Resource pack API (safe fallback when the subsystem is disabled). */
+    public com.mineplus.pack.PackApi packApi() {
+        return context == null ? null : context.packApi();
     }
 }

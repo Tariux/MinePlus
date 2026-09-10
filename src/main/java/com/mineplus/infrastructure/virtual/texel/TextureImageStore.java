@@ -136,20 +136,22 @@ public final class TextureImageStore {
         return new CacheKey(normalized, modelFile == null ? "" : modelFile.getAbsolutePath());
     }
 
+    /**
+     * The PNG file this store would load for a texture name against a model
+     * file (adjacent-then-root resolution), or {@code null}. Pure path
+     * resolution — no decode, no caching. Pack asset discovery uses it to
+     * embed exactly the file the texel baker reads.
+     */
+    public File resolveTextureFile(String name, File modelFile) {
+        String normalized = normalize(name);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return resolveFile(normalized, modelFile);
+    }
+
     private BufferedImage load(String name, File modelFile) {
-        File file = null;
-        if (modelFile != null && modelFile.getParentFile() != null) {
-            File adjacent = new File(modelFile.getParentFile(), name + ".png");
-            if (adjacent.isFile()) {
-                file = adjacent;
-            }
-        }
-        if (file == null && rootFolder != null) {
-            File rooted = new File(rootFolder, name + ".png");
-            if (rooted.isFile()) {
-                file = rooted;
-            }
-        }
+        File file = resolveFile(name, modelFile);
         if (file == null) {
             return null;
         }
@@ -170,6 +172,23 @@ public final class TextureImageStore {
                     + ": " + exception.getMessage());
             return null;
         }
+    }
+
+    /** Adjacent-to-model first, then the models root folder; null when absent. */
+    private File resolveFile(String name, File modelFile) {
+        if (modelFile != null && modelFile.getParentFile() != null) {
+            File adjacent = new File(modelFile.getParentFile(), name + ".png");
+            if (adjacent.isFile()) {
+                return adjacent;
+            }
+        }
+        if (rootFolder != null) {
+            File rooted = new File(rootFolder, name + ".png");
+            if (rooted.isFile()) {
+                return rooted;
+            }
+        }
+        return null;
     }
 
     private static String normalize(String name) {

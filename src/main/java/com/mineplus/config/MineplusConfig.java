@@ -5,6 +5,7 @@ import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.pack.PackSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
@@ -14,6 +15,7 @@ public class MineplusConfig {
     private final AnimationSettings animation;
     private final TexelBakingSettings texelBaking;
     private final DisplayTransportSettings displayTransport;
+    private final PackSettings pack;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -23,7 +25,7 @@ public class MineplusConfig {
     public MineplusConfig(boolean additionalDebugLogs) {
         this(additionalDebugLogs, VirtualRenderingSettings.defaults(),
                 AnimationSettings.defaults(), TexelBakingSettings.defaults(),
-                DisplayTransportSettings.defaults(), 0);
+                DisplayTransportSettings.defaults(), PackSettings.defaults(), 0);
     }
 
     public MineplusConfig(boolean additionalDebugLogs, VirtualRenderingSettings virtualRendering) {
@@ -39,7 +41,7 @@ public class MineplusConfig {
     ) {
         this(additionalDebugLogs, virtualRendering,
                 AnimationSettings.defaults(), TexelBakingSettings.defaults(),
-                DisplayTransportSettings.defaults(), updateCheckResourceId);
+                DisplayTransportSettings.defaults(), PackSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -50,7 +52,7 @@ public class MineplusConfig {
     ) {
         this(additionalDebugLogs, virtualRendering, animation,
                 TexelBakingSettings.defaults(), DisplayTransportSettings.defaults(),
-                updateCheckResourceId);
+                PackSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -61,7 +63,7 @@ public class MineplusConfig {
             int updateCheckResourceId
     ) {
         this(additionalDebugLogs, virtualRendering, animation, texelBaking,
-                DisplayTransportSettings.defaults(), updateCheckResourceId);
+                DisplayTransportSettings.defaults(), PackSettings.defaults(), updateCheckResourceId);
     }
 
     public MineplusConfig(
@@ -72,6 +74,19 @@ public class MineplusConfig {
             DisplayTransportSettings displayTransport,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport,
+                PackSettings.defaults(), updateCheckResourceId);
+    }
+
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
@@ -80,6 +95,7 @@ public class MineplusConfig {
         this.texelBaking = texelBaking == null ? TexelBakingSettings.defaults() : texelBaking;
         this.displayTransport = displayTransport == null
                 ? DisplayTransportSettings.defaults() : displayTransport;
+        this.pack = pack == null ? PackSettings.defaults() : pack;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -101,6 +117,10 @@ public class MineplusConfig {
 
     public DisplayTransportSettings getDisplayTransport() {
         return displayTransport;
+    }
+
+    public PackSettings getPack() {
+        return pack;
     }
 
     public int getUpdateCheckResourceId() {
@@ -148,5 +168,9 @@ public class MineplusConfig {
     public static DisplayTransportSettings parseDisplayTransport(
             FileConfiguration yaml, DisplayTransportSettings fallback) {
         return DisplayTransportSettings.parse(yaml, fallback);
+    }
+
+    public static PackSettings parsePack(FileConfiguration yaml, PackSettings fallback) {
+        return PackSettings.parse(yaml, fallback);
     }
 }

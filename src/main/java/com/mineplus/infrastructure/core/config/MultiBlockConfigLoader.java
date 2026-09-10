@@ -69,7 +69,10 @@ public final class MultiBlockConfigLoader {
                 Map<String, Integer> upgradeCost = parseIntMap(levelJson.getAsJsonObject("upgradeCost"));
                 Map<String, String> guiOptions = parseStringMap(levelJson.getAsJsonObject("guiOptions"));
                 List<String> animations = parseStringList(levelJson.get("animations"));
-                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations));
+                com.mineplus.infrastructure.render.RenderBackend renderBackend =
+                        com.mineplus.infrastructure.render.RenderBackend.fromKey(
+                                levelJson.has("renderBackend") ? levelJson.get("renderBackend").getAsString() : null);
+                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations, renderBackend));
             }
 
             registry.registerType(new MultiBlockType(id, name, levels, new MultiBlockHook() {
