@@ -365,9 +365,20 @@ public class VirtualBlockManager implements Listener {
         TexelBakingSettings settingsSnapshot = texelSettings;
         TextureImageStore store = imageStore();
         long generation = texelBakeGeneration.get();
-        CompletableFuture<TexelBakeResult> future = CompletableFuture.supplyAsync(
-                () -> TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot),
-                texelBakeExecutor);
+        CompletableFuture<TexelBakeResult> future = CompletableFuture.supplyAsync(() -> {
+            // Skip superseded work before paying for PNG decode + rasterization:
+            // a reload or settings change has already scheduled a fresher bake
+            // for this key (and replaced the map entry waiters look at). The
+            // cheap disabled result only completes this stale future.
+            if (texelBakeGeneration.get() != generation) {
+                return TexelBakeResult.disabled(
+                        settingsSnapshot.effectiveMode(meta),
+                        settingsSnapshot.effectiveDetail(meta),
+                        settingsSnapshot,
+                        model == null ? 0 : model.cubes().size());
+            }
+            return TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot);
+        }, texelBakeExecutor);
         texelBakeFutures.put(key, future);
         future.whenComplete((result, error) -> {
             texelBakeFutures.remove(key, future);
