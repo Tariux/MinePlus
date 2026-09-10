@@ -100,6 +100,18 @@ public final class TextureImageStore {
         return texture(name, modelFile) != null;
     }
 
+    /**
+     * The PNG file this store would load for a normalized texture name from its
+     * root folder, or {@code null} when absent. Pure path resolution — no decode,
+     * no caching; used by dev tooling that needs the same file the baker reads.
+     */
+    public File rootFolderFile(String normalizedName) {
+        if (rootFolder == null || normalizedName == null || normalizedName.isEmpty()) {
+            return null;
+        }
+        return new File(rootFolder, normalizedName + ".png");
+    }
+
     public void clear() {
         cache.clear();
         missing.clear();
