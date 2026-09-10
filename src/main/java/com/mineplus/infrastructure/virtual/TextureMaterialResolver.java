@@ -15,7 +15,8 @@ import com.mineplus.util.DebugLogger;
  *   <li>exact texture map (370 curated entries)</li>
  *   <li>direct {@link Material#matchMaterial(String)} (block, non-air)</li>
  *   <li>suffix-strip ({@code _top}, {@code _side}, ... ) retrying tiers 1–2</li>
- *   <li>legacy/Blockbench alias table</li>
+ *   <li>legacy/Blockbench alias table (AIR aliases such as {@code destroy_stage_*}
+ *       mean "render nothing" — emitters skip faces whose material resolves to AIR)</li>
  *   <li>token fuzzy: underscore-insensitive contains-match against map keys</li>
  *   <li>fallback ({@code WHITE_CONCRETE}) + recorded in the per-model report</li>
  * </ol>
@@ -534,11 +535,41 @@ public final class TextureMaterialResolver {
         ALIASES = Collections.unmodifiableMap(a);
     }
 
+    /**
+     * Flat (underscore-stripped) views of the curated map for the fuzzy tier,
+     * precomputed once so first-time resolutions don't allocate one string per
+     * map entry on every uncached miss.
+     */
+    private static final String[] MAP_KEYS;
+    private static final String[] MAP_FLAT_KEYS;
+    private static final Material[] MAP_MATERIALS;
+
+    static {
+        String[] keys = new String[TEXTURE_MAP.size()];
+        String[] flatKeys = new String[TEXTURE_MAP.size()];
+        Material[] materials = new Material[TEXTURE_MAP.size()];
+        int index = 0;
+        for (Map.Entry<String, Material> entry : TEXTURE_MAP.entrySet()) {
+            keys[index] = entry.getKey();
+            flatKeys[index] = entry.getKey().replace("_", "");
+            materials[index] = entry.getValue();
+            index++;
+        }
+        MAP_KEYS = keys;
+        MAP_FLAT_KEYS = flatKeys;
+        MAP_MATERIALS = materials;
+    }
+
     /** Resolution outcome for diagnostics. */
     public record Resolution(String textureName, Material material, int tier) {
 
+        /**
+         * True when no tier could resolve the name and the fallback material was
+         * used. A curated/direct hit that happens to equal the fallback material
+         * (e.g. {@code concrete_white}) is NOT a fallback.
+         */
         public boolean isFallback() {
-            return material == FALLBACK;
+            return tier == 0;
         }
 
         public String tierName() {
@@ -595,7 +626,9 @@ public final class TextureMaterialResolver {
         }
 
         Material aliased = ALIASES.get(key);
-        if (aliased != null && aliased != Material.AIR) {
+        if (aliased != null) {
+            // AIR aliases (destroy stages, particles, missingno) are reachable on
+            // purpose: the emitter treats an AIR material as "emit no geometry".
             return new Resolution(textureName, aliased, 4);
         }
 
@@ -618,19 +651,15 @@ public final class TextureMaterialResolver {
         Material best = null;
         String bestKeyName = null;
         int bestRank = Integer.MAX_VALUE;
-        for (Map.Entry<String, Material> entry : TEXTURE_MAP.entrySet()) {
-            String mapKey = entry.getKey();
-            String flatMapKey = mapKey.replace("_", "");
-            boolean candidate = false;
-            int rank = Integer.MAX_VALUE;
+        for (int i = 0; i < MAP_FLAT_KEYS.length; i++) {
+            String flatMapKey = MAP_FLAT_KEYS[i];
             if (flatMapKey.contains(flatKey) || flatKey.contains(flatMapKey)) {
-                candidate = true;
-                rank = Math.abs(flatKey.length() - flatMapKey.length());
-            }
-            if (candidate && rank < bestRank) {
-                bestRank = rank;
-                best = entry.getValue();
-                bestKeyName = mapKey;
+                int rank = Math.abs(flatKey.length() - flatMapKey.length());
+                if (rank < bestRank) {
+                    bestRank = rank;
+                    best = MAP_MATERIALS[i];
+                    bestKeyName = MAP_KEYS[i];
+                }
             }
         }
         if (best == null) {

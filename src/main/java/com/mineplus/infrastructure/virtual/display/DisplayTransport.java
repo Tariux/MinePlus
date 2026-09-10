@@ -82,6 +82,7 @@ public final class DisplayTransport {
 
     private BukkitTask tickTask;
     private boolean running;
+    private long tickCounter;
 
     private DisplayTransport(JavaPlugin plugin, DisplayTransportSettings settings) {
         this.plugin = plugin;
@@ -173,10 +174,19 @@ public final class DisplayTransport {
     public void removeInstance(UUID instanceId) {
         RenderedInstance instance = instances.remove(instanceId);
         if (instance == null) return;
+        // One destroy packet per viewer (batched entity ids) instead of one per
+        // display per viewer: despawn() already batches, so group the displays
+        // by the clients that know them first.
+        Map<UUID, List<PooledDisplay>> displaysByViewer = new HashMap<>();
         for (PooledDisplay d : instance.displays()) {
-            for (UUID viewerId : new ArrayList<>(d.knownClients())) {
-                Player viewer = Bukkit.getPlayer(viewerId);
-                if (viewer != null) packets.despawn(viewer, List.of(d));
+            for (UUID viewerId : d.knownClients()) {
+                displaysByViewer.computeIfAbsent(viewerId, k -> new ArrayList<>()).add(d);
+            }
+        }
+        for (Map.Entry<UUID, List<PooledDisplay>> entry : displaysByViewer.entrySet()) {
+            Player viewer = Bukkit.getPlayer(entry.getKey());
+            if (viewer != null) {
+                packets.despawn(viewer, entry.getValue());
             }
         }
         for (PooledDisplay d : instance.displays()) {
@@ -191,14 +201,19 @@ public final class DisplayTransport {
     // ------------------------------------------------------------------ per-tick update hooks (driven by ModelAnimationManager)
 
     /**
-     * Pushes a new transform for one display of an instance; streamed to FULL-tier
-     * viewers on the next {@code flushDeltas}.
+     * Pushes a new transform for one display of an instance.
+     *
+     * <p>Animated instances only dirty the display here — their pose deltas are
+     * broadcast in one batched pass by the animation manager calling
+     * {@link #flushDeltas(UUID)} after pushing every binding (per-display flushing
+     * would rebuild each packet once per display). One-off transform changes on
+     * non-animated instances flush immediately.</p>
      */
     public void updateTransform(UUID instanceId, PooledDisplay display, org.joml.Matrix4fc matrix, int interpolationTicks) {
         RenderedInstance instance = instances.get(instanceId);
-        boolean streamed = instance == null || !instance.isAnimated();
+        boolean oneOff = instance == null || !instance.isAnimated();
         display.setTransform(matrix, interpolationTicks);
-        if (streamed) {
+        if (oneOff) {
             flushDeltas(instanceId);
         }
     }
@@ -270,8 +285,20 @@ public final class DisplayTransport {
                 }
             }
         }
+        // Only players close enough to possibly see an instance anchored in this
+        // chunk need a resync — a full pass over every world player is
+        // O(players x instances) per chunk load.
+        double centerX = (chunk.getX() << 4) + 8.0;
+        double centerZ = (chunk.getZ() << 4) + 8.0;
+        double radius = settings.lodStaticRange() + 16.0;
+        double radiusSq = radius * radius;
         for (Player p : chunk.getWorld().getPlayers()) {
-            pendingFullUpdate.add(p.getUniqueId());
+            Location loc = p.getLocation();
+            double dx = loc.getX() - centerX;
+            double dz = loc.getZ() - centerZ;
+            if (dx * dx + dz * dz <= radiusSq) {
+                pendingFullUpdate.add(p.getUniqueId());
+            }
         }
     }
 
@@ -293,6 +320,7 @@ public final class DisplayTransport {
     // ------------------------------------------------------------------ tick
 
     private void tick() {
+        tickCounter++;
         if (pendingLod.isEmpty() && pendingFullUpdate.isEmpty() && pendingLodDistance.isEmpty()) {
             // nothing to do this tick - animations flush their own deltas
             return;
@@ -306,7 +334,10 @@ public final class DisplayTransport {
         Set<UUID> movedPlayers = new HashSet<>(pendingLod.keySet());
         for (UUID playerId : movedPlayers) {
             Player player = Bukkit.getPlayer(playerId);
-            if (player == null) continue;
+            if (player == null) {
+                pendingLod.remove(playerId);
+                continue;
+            }
             if (tickCounter % Math.max(1, settings.lodCheckIntervalTicks()) == 0) {
                 refreshViewers(player, instances.values());
                 pendingLod.remove(playerId);
@@ -316,8 +347,6 @@ public final class DisplayTransport {
         pendingLodDistance.clear();
         flush();
     }
-
-    private long tickCounter;
 
     private void refreshViewers(Player player, Iterable<RenderedInstance> candidates) {
         for (RenderedInstance instance : candidates) {
