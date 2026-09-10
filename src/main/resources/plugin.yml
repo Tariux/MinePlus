@@ -12,7 +12,7 @@ libraries:
 commands:
   mineplus:
     description: Mineplus Core runtime administration command
-    usage: /mineplus <status|reload|model>
+    usage: /mineplus <status|reload|model|pack>
 
 permissions:
   mineplus.admin.status:
@@ -23,4 +23,7 @@ permissions:
     default: op
   mineplus.admin.model:
     description: Allows administrating active Mineplus Core model instances
+    default: op
+  mineplus.admin.pack:
+    description: Allows administrating the Mineplus resource pack subsystem
     default: op

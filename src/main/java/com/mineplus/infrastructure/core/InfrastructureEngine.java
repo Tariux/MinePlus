@@ -184,6 +184,11 @@ public final class InfrastructureEngine {
         return animationManager;
     }
 
+    /** The rendering choke point (backend selection for rendered instances). */
+    public ModelRenderingManager renderingManager() {
+        return renderingManager;
+    }
+
     /** Applies new global animation settings (config reload). */
     public void updateAnimationSettings(AnimationSettings settings) {
         animationManager.updateSettings(settings);
@@ -258,6 +263,9 @@ public final class InfrastructureEngine {
     public void reloadModelDefinitions() {
         renderingManager.virtualBlockManager().reloadModelDefinitions();
         lifecycleManager.reloadModels();
+        // Pack assets whose models just became available attach here, and the
+        // generated pack recompiles once for the whole reload.
+        renderingManager.onModelsReloaded();
     }
 
     public void reloadMultiBlocks() {

@@ -5,6 +5,7 @@ import com.mineplus.fun.cabinet.CabinetFeature;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
 import com.mineplus.fun.juicer.JuicerFeature;
+import com.mineplus.fun.packshowcase.PackShowcaseFeature;
 import com.mineplus.fun.wine.WineFeature;
 import com.mineplus.infrastructure.PluginContext;
 import java.util.ArrayList;
@@ -59,6 +60,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new GearFeature(this, context));
         features.add(new WineFeature(this, context));
         features.add(new CabinetFeature(this, context));
+        features.add(new PackShowcaseFeature(this, context));
 
         for (ModuleFeature feature : features) {
             feature.start();
@@ -73,7 +75,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine, Cabinet) enabled on top of Mineplus Core.");
+                + " features (Juicer, Cannon, Gear, Wine, Cabinet, PackShowcase) enabled on top of Mineplus Core.");
     }
 
     @Override
