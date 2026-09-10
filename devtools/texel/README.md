@@ -19,7 +19,8 @@ Optional flags:
   `examples/mineplus-fun/src/main/resources/defaults/models` and
   `plugins/Mineplus/models` (when present).
 
-Requirements: JDK 21 (`javac`/`java` on PATH), Node 18+. Zero npm dependencies;
+Requirements: JDK 21 (the server uses `JAVA_HOME`'s `javac`/`java` when present,
+falling back to PATH), Node 18+. Zero npm dependencies;
 the page pulls three.js from unpkg (internet required) — to run fully offline,
 drop `three.module.js` + the OrbitControls module into `app/vendor/` and adjust
 the import map in `app/index.html`. The daemon additionally needs a guava jar
@@ -34,17 +35,25 @@ server auto-stages one from the local Gradle cache, or you can drop
 2. **Per-model config loads automatically**: the model's `.meta.json` (reported
    by the daemon as `meta`, with a `meta` badge next to each affected setting)
    becomes the panel defaults; models without a meta file fall back to the
-   standard defaults (AUTO modes, 96/150 plate budgets).
-   Fields you edit afterwards are sent as explicit overrides and win over the
-   meta file for that model until you select another.
-3. **Tweak settings** (texel mode/detail, budgets, origin mode) —
+   standard defaults (AUTO modes, 96/150 plate budgets). Fields you edit
+   afterwards are sent as explicit overrides and win over the meta file for
+   that model until you select another. Texel brightness ("meta / off" = let
+   the meta file / default apply, 0–15 = explicit override) rides the same
+   mechanism.
+3. **Tweak settings** (texel mode/detail, budgets, brightness, origin mode) —
    every change re-bakes through the daemon in milliseconds.
 4. **Edit pipeline Java** (`src/main/java/com/mineplus/infrastructure/virtual/...`)
    and save — the server recompiles, restarts the daemon, and the page re-bakes
    automatically. Compile errors show up in the diagnostics panel instead of a
    silent stale build.
 5. **Edit assets** (`.bbmodel`, `.png`, `.meta.json`) in a watched model root —
-   the page re-bakes on save.
+   the page re-bakes on save, and the model list refreshes itself (added/
+   renamed/deleted `.bbmodel` files appear without a page reload).
+
+**Frame** re-centers the camera on the current model. The **history panel**
+records each successful bake (model, plate count, bake time, effective
+settings); clicking an entry restores its settings and re-bakes — handy for
+comparing budget/brightness variations.
 
 Bakes are generation-guarded: selecting a new model while a bake is running
 queues the latest request and drops superseded responses, so rapid switching can
@@ -53,7 +62,7 @@ never render one model's bake under another's settings.
 Layers: **Reference** shows the source-textured cubes (the goal), **Texel
 plates** shows the merged palette-quantized plate reconstruction (what the
 server would spawn). The diagnostics panel mirrors `/mineplus model info`
-(strategy, plate counts vs. budgets, grid histogram, palette usage).
+(strategy counts, plate counts vs. budgets, grid histogram, palette usage).
 
 **View** (right panel) is exclusive: Reference / Texel plates are
 alternative views of the same model — radios, not checkboxes, because showing

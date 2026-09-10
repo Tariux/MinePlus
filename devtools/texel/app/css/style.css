@@ -90,7 +90,7 @@ h2:first-child { margin-top: 0; }
 
 ul { list-style: none; margin: 0; padding: 0; }
 
-#model-list li, #texture-list li {
+#model-list li, #texture-list li, #history-list li {
     padding: 5px 8px;
     border-radius: 5px;
     cursor: pointer;
@@ -98,9 +98,11 @@ ul { list-style: none; margin: 0; padding: 0; }
     justify-content: space-between;
     gap: 6px;
 }
-#model-list li:hover { background: #242832; }
+#model-list li:hover, #history-list li:hover { background: #242832; }
 #model-list li.selected { background: #2c4a6e; color: #cfe4ff; }
 #texture-list li { cursor: default; }
+#history-list li { cursor: pointer; }
+#history-list li .badge { cursor: pointer; }
 #texture-list li img { width: 22px; height: 22px; image-rendering: pixelated; border-radius: 3px; }
 .badge {
     font-size: 10px;

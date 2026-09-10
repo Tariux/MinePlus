@@ -54,6 +54,10 @@ export class Viewer {
         this.unitGeo = new THREE.BoxGeometry(1, 1, 1);
         this.unitGeo.translate(0.5, 0.5, 0.5);
         this.plateMaterial = new THREE.MeshLambertMaterial({ vertexColors: false });
+        // One shared wireframe material + edges geometry for all plates: the
+        // per-bake loop used to allocate both per plate (hundreds of
+        // materials/geometry buffers per bake for nothing).
+        this.wireMaterial = new THREE.LineBasicMaterial({ color: 0x66d9ef, transparent: true, opacity: 0.5 });
         this.wireframeWanted = false;
 
         this.animate();
@@ -78,21 +82,23 @@ export class Viewer {
     clearGroup(group) {
         for (const child of [...group.children]) {
             group.remove(child);
-            // Dispose geometry unless it is the shared unit box. A throwing
-            // dispose here would abort the whole render and leave stale layers
-            // from the previous model behind (the "secondary model" artifact),
-            // so every step is individually guarded.
-            if (child.geometry && child.geometry !== this.boxGeo) {
+            // Dispose geometry unless it is shared (unit box or the shared
+            // plate edges). A throwing dispose here would abort the whole
+            // render and leave stale layers from the previous model behind
+            // (the "secondary model" artifact), so every step is guarded.
+            if (child.geometry && child.geometry !== this.boxGeo
+                && child.geometry !== this.plateEdges) {
                 try { child.geometry.dispose(); } catch { /* already disposed */ }
             }
             // Material may be a single material, an array (multi-face meshes),
-            // or absent (LineSegments share their own material). Arrays have no
-            // .dispose — flatten first; a raw array call used to crash with
-            // "child.material.dispose is not a function".
+            // or absent. Arrays have no .dispose — flatten first; a raw array
+            // call used to crash with "child.material.dispose is not a
+            // function". Shared materials (plates, wireframes) are skipped.
             const materials = Array.isArray(child.material) ? child.material
                 : (child.material ? [child.material] : []);
             for (const material of materials) {
-                if (!material || material === this.plateMaterial) continue;
+                if (!material || material === this.plateMaterial
+                    || material === this.wireMaterial) continue;
                 try { material.dispose(); } catch { /* already disposed */ }
             }
         }
@@ -158,6 +164,10 @@ export class Viewer {
         this.clearGroup(this.layers.reference);
         this.clearGroup(this.layers.texel);
         this.wireframes = [];
+        if (this.plateEdges) {
+            try { this.plateEdges.dispose(); } catch { /* already disposed */ }
+            this.plateEdges = null;
+        }
 
         this.renderReference(result);
         this.renderTexel(result);
@@ -262,13 +272,14 @@ export class Viewer {
         // Wireframe overlay for plate inspection.
         const edges = new THREE.EdgesGeometry(this.boxGeo);
         for (const entry of entries) {
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x66d9ef, transparent: true, opacity: 0.5 }));
+            const line = new THREE.LineSegments(edges, this.wireMaterial);
             line.matrixAutoUpdate = false;
             line.matrix.fromArray(entry.matrix);
             line.visible = false;
             this.layers.texel.add(line);
             this.wireframes.push(line);
         }
+        this.plateEdges = edges;
     }
 
     addInstanced(group, entries, palette) {

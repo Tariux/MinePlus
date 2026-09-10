@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Texel devtool (`devtools/texel`)
+
+#### Added
+
+- **Texel brightness control** — an explicit `texelBrightness` override (0–15,
+  or "meta / off" to let the model's `.meta.json` apply) in the settings panel;
+  rides the same user-override-wins-over-meta mechanism as the other fields.
+- **Bake history panel** — each successful bake is recorded (model, plate
+  count, bake time, effective settings); clicking an entry restores its
+  settings and re-bakes, making budget/brightness comparisons one click.
+- **Per-face strategy counts in diagnostics** — FULL / CROP_HALF / TILE / TEXEL
+  face tallies, mirroring `/mineplus model info`'s strategy reporting.
+- **Frame camera button** — re-centers the viewport on the current model.
+- **Model list auto-refresh** — added/renamed/deleted `.bbmodel` files in a
+  watched root appear in the list without a page reload.
+
+#### Fixed
+
+- **Texture list parity with the bake** — the daemon's texture-path lookup now
+  mirrors `TextureImageStore`'s resolution (root-folder lookup, `.mcmeta` and
+  namespace stripping) instead of adjacent-only, so a texture that bakes via
+  the root folder no longer shows "not found" in the reference viewer.
+  `TextureImageStore` gained a read-only `rootFolderFile` accessor for this.
+
+#### Performance
+
+- **Shared wireframe material/geometry** — plate wireframes share one
+  `LineBasicMaterial` + one `EdgesGeometry` per bake instead of allocating both
+  per plate (hundreds of GPU-side allocations per bake on plate-heavy models).
+
 ### Core engine (`Mineplus`) — performance & runtime hardening
 
 #### Added
