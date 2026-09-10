@@ -16,6 +16,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | Build a **full machine framework** | [Developer API](developer-api.md) → [Advanced Workflow](extension-workflows.md#c-advanced-framework-developers) |
 | See a **complete working module** | [MineplusFun (Juicer + Cannon)](../examples/mineplus-fun/README.md) |
 | Tune the **rendering engine** | [Configuration Reference → settings.mp.yml](config-reference.md#settingsmpyml-rendering-engine) |
+| See the **future resource pack plan** | [Phase 2 Roadmap](resource-pack-roadmap.md) |
 | Just **administer a server** | [Command Reference](config-reference.md#admin-command-reference) |
 
 ---
@@ -30,6 +31,9 @@ The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed
 
 ### [Extension Workflows](extension-workflows.md)
 The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced framework) plus runtime administration and model-debugging tips.
+
+### [Resource Pack System — Phase 2 Roadmap](resource-pack-roadmap.md)
+The planned next phase: an independent, resource pack–based rendering system (custom items, custom blocks, pack-driven animations) that coexists with the packless virtual engine. Includes the coexistence contract, industry analysis targets, architecture blueprint, and the kickoff prompt.
 
 ---
 

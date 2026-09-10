@@ -10,6 +10,12 @@ import org.bukkit.block.data.BlockData;
  * perceptually-weighted Oklab color space, Minecraft directional shading compensation,
  * and a strict stretchability classification: only pure flat concretes (and snow)
  * may merge into stretched rectangles; powders, terracottas and stones stay 1x1.
+ *
+ * <p>Color math is linear-light correct end to end. The vanilla client applies
+ * directional diffuse shading in its fragment shader on <i>linearized</i> texture
+ * samples, so the per-face shade compensation here multiplies palette entries in
+ * linear space (never gamma-space channels) — a plate's shaded appearance then
+ * matches the original texel perceptually, not just approximately.</p>
  */
 public final class TexelPalette {
 
@@ -206,15 +212,23 @@ public final class TexelPalette {
     private static final int MATCH_CACHE_LIMIT = 1 << 16;
     private static final float NEAR_MATCH_DISTANCE_SQ_OKLAB = 0.0028f;
 
+    /** Per-thread L/a/b scratch: the match path runs per texel inside async bakes. */
+    private static final ThreadLocal<float[]> SCRATCH_LAB = ThreadLocal.withInitial(() -> new float[3]);
+
     static {
         float[] lab = new float[3];
         for (int shade = 0; shade < 4; shade++) {
             float factor = SHADE_FACTORS[shade];
             for (int i = 0; i < MATERIALS.length; i++) {
-                int r = Math.round(RGB[i * 3] * factor);
-                int g = Math.round(RGB[i * 3 + 1] * factor);
-                int b = Math.round(RGB[i * 3 + 2] * factor);
-                rgbToOklab(r, g, b, lab);
+                // Shade in LINEAR light: the client's fragment shader multiplies
+                // linearized texture samples by the shade factor, then gamma-encodes
+                // on output. Multiplying gamma channels instead under-corrects the
+                // bright end of every palette entry and skews matching on shaded faces.
+                oklabFromLinear(
+                        sRgbToLinear(RGB[i * 3] / 255.0f) * factor,
+                        sRgbToLinear(RGB[i * 3 + 1] / 255.0f) * factor,
+                        sRgbToLinear(RGB[i * 3 + 2] / 255.0f) * factor,
+                        lab);
                 OKLAB_L[shade][i] = lab[0];
                 OKLAB_A[shade][i] = lab[1];
                 OKLAB_B[shade][i] = lab[2];
@@ -281,7 +295,7 @@ public final class TexelPalette {
             return best;
         }
 
-        float[] targetLab = new float[3];
+        float[] targetLab = SCRATCH_LAB.get();
         rgbToOklab(r, g, b, targetLab);
 
         float bestDistSq = weightedDistSqOklab(targetLab[0], targetLab[1], targetLab[2], shadeLevel, best);
@@ -305,7 +319,7 @@ public final class TexelPalette {
     }
 
     private static int nearestOklab(int r, int g, int b, int shadeLevel) {
-        float[] target = new float[3];
+        float[] target = SCRATCH_LAB.get();
         rgbToOklab(r, g, b, target);
 
         int best = 0;
@@ -341,11 +355,17 @@ public final class TexelPalette {
         };
     }
 
+    /** sRGB 0..255 -> Oklab L/a/b. Delegates through linear light. */
     public static void rgbToOklab(int r, int g, int b, float[] out) {
-        float rLin = sRgbToLinear(r / 255.0f);
-        float gLin = sRgbToLinear(g / 255.0f);
-        float bLin = sRgbToLinear(b / 255.0f);
+        oklabFromLinear(
+                sRgbToLinear(r / 255.0f),
+                sRgbToLinear(g / 255.0f),
+                sRgbToLinear(b / 255.0f),
+                out);
+    }
 
+    /** Linear-light RGB (each 0..1, may exceed 1) -> Oklab L/a/b. */
+    public static void oklabFromLinear(float rLin, float gLin, float bLin, float[] out) {
         float l = (float) Math.cbrt(0.4122214708f * rLin + 0.5363325363f * gLin + 0.0514459929f * bLin);
         float m = (float) Math.cbrt(0.2119034982f * rLin + 0.6806995451f * gLin + 0.1073969566f * bLin);
         float s = (float) Math.cbrt(0.0883024619f * rLin + 0.2817188376f * gLin + 0.6299787005f * bLin);
@@ -355,8 +375,18 @@ public final class TexelPalette {
         out[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
     }
 
-    private static float sRgbToLinear(float c) {
+    /** sRGB electro-optical transfer: normalized sRGB value -> linear light. */
+    public static float sRgbToLinear(float c) {
         return c <= 0.04045f ? c / 12.92f : (float) Math.pow((c + 0.055f) / 1.055f, 2.4);
+    }
+
+    /** Inverse transfer: linear light (clamped 0..1) -> 8-bit sRGB channel. */
+    public static int srgbChannelFromLinear(float linear) {
+        float clamped = Math.max(0.0f, Math.min(1.0f, linear));
+        float srgb = clamped <= 0.0031308f
+                ? clamped * 12.92f
+                : 1.055f * (float) Math.pow(clamped, 1.0f / 2.4f) - 0.055f;
+        return Math.round(Math.max(0.0f, Math.min(1.0f, srgb)) * 255.0f);
     }
 
     private static int clampChannel(int value) {

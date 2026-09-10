@@ -81,6 +81,9 @@ public final class PooledDisplay {
      */
     public boolean setTransform(Matrix4fc matrix, int interpolationTicks) {
         if (!dirty.updateTransform(matrix)) return false;
+        // transform already holds our own copy; CraftBukkit converts the matrix
+        // into NMS entity data immediately (no reference retained), so the
+        // per-tick animation path needs no fresh allocation here.
         transform.set(matrix);
         if (interpolationTicks > 0) {
             entity.setInterpolationDuration(interpolationTicks);
@@ -91,7 +94,7 @@ public final class PooledDisplay {
         } else {
             entity.setInterpolationDuration(0);
         }
-        entity.setTransformationMatrix(new Matrix4f(matrix));
+        entity.setTransformationMatrix(transform);
         return true;
     }
 
