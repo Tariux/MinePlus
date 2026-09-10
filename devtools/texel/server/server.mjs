@@ -61,6 +61,25 @@ function sseSend(event) {
   for (const res of sseClients) res.write(payload);
 }
 
+// ---------------------------------------------------------------- JDK resolution
+
+// Prefer the JDK from JAVA_HOME over whatever `javac`/`java` the PATH resolves
+// to: vendor shims (e.g. Oracle's Common Files\Java\javapath) can front a newer
+// JDK whose javac crashes outright on this source set (exit 4, "1 error",
+// "printing javac parameters to: ..." and no diagnostic). The project targets
+// JDK 21, which JAVA_HOME normally points at on dev machines.
+const javaExe = process.platform === 'win32' ? '.exe' : '';
+const javaHomeBin = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin') : null;
+function resolveTool(name) {
+  if (javaHomeBin) {
+    const candidate = path.join(javaHomeBin, name + javaExe);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return name;
+}
+const javacCmd = resolveTool('javac');
+const javaCmd = resolveTool('java');
+
 // ---------------------------------------------------------------- guava discovery
 
 // The vendored paper-api jar needs guava + kyori examination at *runtime* for
@@ -115,7 +134,7 @@ async function listJavaFiles(dir) {
 
 function runJavac(args, cwd) {
   return new Promise((resolve) => {
-    const child = spawn('javac', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(javacCmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', d => { stdout += d; });
     child.stderr.on('data', d => { stderr += d; });
@@ -128,7 +147,7 @@ let compileSeq = 0;
 async function compileAll(reason) {
   const seq = ++compileSeq;
   sseSend({ type: 'code', status: 'compiling', reason });
-  log('compiling pipeline (' + reason + ')...');
+  log('compiling pipeline...', reason);
   const t0 = Date.now();
 
   await fsp.mkdir(mainOut, { recursive: true });
@@ -153,6 +172,8 @@ async function compileAll(reason) {
   return true;
 
   function fail(stage, output, seq2) {
+    console.log({stage, output, seq2});
+    
     log('COMPILE FAILED (' + stage + '):\n' + output);
     sseSend({ type: 'code', status: 'error', stage, output: output.slice(0, 20000) });
     return false;
@@ -183,7 +204,7 @@ async function startDaemon() {
     log('WARNING: guava not found — daemon may fail to load Material.',
       'Place a guava jar at', path.join(vendorDir, 'guava.jar'), 'if baking errors.');
   }
-  daemon = spawn('java', ['-cp', cp, 'com.mineplus.devtools.texel.BakeDaemon'], { cwd: root });
+  daemon = spawn(javaCmd, ['-cp', cp, 'com.mineplus.devtools.texel.BakeDaemon'], { cwd: root });
   daemonStarting = false;
   log('daemon started (pid ' + daemon.pid + ')');
   sseSend({ type: 'daemon', status: 'up' });
@@ -432,6 +453,7 @@ const server = http.createServer(async (req, res) => {
 
 // ---------------------------------------------------------------- startup
 
+log('javac:', javacCmd);
 await compileAll('startup');
 if (!fs.existsSync(appDir)) {
   log('WARNING: app dir missing:', appDir);
