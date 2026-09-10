@@ -375,7 +375,11 @@ public final class TexelSurfaceBaker {
     }
 
     private static int sampleTexel(SamplingContext context, int column, int row, int previousIndex, CubeFace faceKey) {
-        double redSum = 0, greenSum = 0, blueSum = 0, weightSum = 0;
+        // Accumulate in LINEAR light with alpha coverage as weight: this is how
+        // the client composites what it actually sees, so the palette match runs
+        // against the perceptually-correct average instead of a gamma-space mean
+        // (which over-weights dark samples and muddies half-covered texels).
+        double redLinearSum = 0, greenLinearSum = 0, blueLinearSum = 0, weightSum = 0;
         int coveredSamples = 0;
         int totalSamples = context.samples() * context.samples();
 
@@ -387,9 +391,9 @@ public final class TexelSurfaceBaker {
                 int argb = context.sampler().sample(fu, fv);
                 if (argb != 0) {
                     float weight = ((argb >>> 24) & 0xFF) / 255.0f;
-                    redSum += ((argb >>> 16) & 0xFF) * (double) weight;
-                    greenSum += ((argb >>> 8) & 0xFF) * (double) weight;
-                    blueSum += (argb & 0xFF) * (double) weight;
+                    redLinearSum += TexelPalette.sRgbToLinear(((argb >>> 16) & 0xFF) / 255.0f) * weight;
+                    greenLinearSum += TexelPalette.sRgbToLinear(((argb >>> 8) & 0xFF) / 255.0f) * weight;
+                    blueLinearSum += TexelPalette.sRgbToLinear((argb & 0xFF) / 255.0f) * weight;
                     weightSum += weight;
                     coveredSamples++;
                 }
@@ -401,9 +405,9 @@ public final class TexelSurfaceBaker {
         }
 
         return TexelPalette.match(
-                (int) Math.round(redSum / weightSum),
-                (int) Math.round(greenSum / weightSum),
-                (int) Math.round(blueSum / weightSum),
+                TexelPalette.srgbChannelFromLinear((float) (redLinearSum / weightSum)),
+                TexelPalette.srgbChannelFromLinear((float) (greenLinearSum / weightSum)),
+                TexelPalette.srgbChannelFromLinear((float) (blueLinearSum / weightSum)),
                 faceKey,
                 previousIndex,
                 1.15f
