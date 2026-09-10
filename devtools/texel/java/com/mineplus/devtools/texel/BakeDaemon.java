@@ -49,7 +49,6 @@ import java.util.logging.Logger;
  *  "overrides":{
  *    "texelEnabled":true,"texelMode":"AUTO","texelDetail":"FACE",
  *    "maxPlatesPerFace":96,"maxPlatesPerInstance":150,"maxGridEdge":64,
- *    "maxPlatesPerFace":96,"maxPlatesPerInstance":150,"maxGridEdge":64,
  *    "perFaceRendering":true,"originMode":"AUTO",
  *    "meta":{"texelMode":"ON",...}        // explicit per-model overrides over the .meta.json
  *  }}
@@ -175,7 +174,7 @@ public final class BakeDaemon {
             if (resolved) {
                 tj.addProperty("width", raster.width());
                 tj.addProperty("height", raster.height());
-                tj.addProperty("path", texturePath(store, textureName, modelFile));
+                tj.addProperty("path", resolvedTexturePath(store, textureName, modelFile));
             }
             texturesJson.add(tj);
         }
@@ -228,20 +227,49 @@ public final class BakeDaemon {
         return modelFile.getParentFile();
     }
 
-    private static String texturePath(TextureImageStore store, String name, File modelFile) {
-        String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT).replace('\\', '/');
-        int slash = normalized.lastIndexOf('/');
-        if (slash >= 0) {
-            normalized = normalized.substring(slash + 1);
+    /**
+     * Same-name lookup for the reference viewer's texture list: resolves to the
+     * PNG the store itself found, wherever it found it (next to the model or in
+     * the root folder) — a texture can bake fine via the root lookup while the
+     * old adjacent-only check reported "not found" to the UI.
+     */
+    private static String resolvedTexturePath(TextureImageStore store, String name, File modelFile) {
+        String normalized = normalizeTextureName(name);
+        if (normalized.isEmpty()) {
+            return null;
         }
-        if (normalized.endsWith(".png")) {
-            normalized = normalized.substring(0, normalized.length() - 4);
+        if (modelFile.getParentFile() != null) {
+            File adjacent = new File(modelFile.getParentFile(), normalized + ".png");
+            if (adjacent.isFile()) {
+                return adjacent.getAbsolutePath();
+            }
         }
-        File adjacent = new File(modelFile.getParentFile(), normalized + ".png");
-        if (adjacent.isFile()) {
-            return adjacent.getAbsolutePath();
+        File rooted = store.rootFolderFile(normalized);
+        if (rooted != null && rooted.isFile()) {
+            return rooted.getAbsolutePath();
         }
         return null;
+    }
+
+    /** Mirrors {@code TextureImageStore.normalize}: basename, extensions and namespace stripped. */
+    private static String normalizeTextureName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String key = name.trim().toLowerCase(Locale.ROOT).replace('\\', '/');
+        if (key.endsWith(".png")) {
+            key = key.substring(0, key.length() - 4);
+        }
+        if (key.endsWith(".mcmeta")) {
+            key = key.substring(0, key.length() - 7);
+        }
+        if (key.contains(":")) {
+            key = key.substring(key.lastIndexOf(':') + 1);
+        }
+        if (key.contains("/")) {
+            key = key.substring(key.lastIndexOf('/') + 1);
+        }
+        return key;
     }
 
     private static ModelMeta mergeMeta(ModelMeta base, JsonObject overrides) {

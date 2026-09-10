@@ -22,6 +22,7 @@ const STANDARD_DEFAULTS = {
     maxPlatesPerFace: 96,
     maxPlatesPerInstance: 150,
     maxGridEdge: 64,
+    texelBrightness: '',   // '' = no explicit brightness (meta / off)
     originMode: 'AUTO',
 };
 
@@ -31,6 +32,7 @@ const META_KEY_BY_SETTING = {
     texelDetail: 'texelDetail',
     maxPlatesPerFace: 'maxTexelPlatesPerFace',
     maxPlatesPerInstance: 'maxTexelPlatesPerInstance',
+    texelBrightness: 'texelBrightness',
     originMode: 'originMode',
 };
 
@@ -53,6 +55,7 @@ const els = {
     textureList: document.getElementById('texture-list'),
     diagnostics: document.getElementById('diagnostics'),
     settingsBox: document.getElementById('settings'),
+    historyList: document.getElementById('history-list'),
 };
 
 // ---------------------------------------------------------------- status
@@ -92,6 +95,36 @@ async function loadModels() {
     if (first) first.click();
 }
 
+/**
+ * Refreshes the model list after asset changes (new/renamed/deleted .bbmodel
+ * files) while preserving the current selection.
+ */
+async function refreshModelList() {
+    const selected = state.modelFile;
+    const data = await fetchModels().catch(() => null);
+    if (!data) return;
+    els.modelList.innerHTML = '';
+    for (const root of data.roots) {
+        for (const model of root.models) {
+            const li = document.createElement('li');
+            const label = document.createElement('span');
+            label.textContent = model.key;
+            li.appendChild(label);
+            li.title = model.file + (model.hasMeta ? ' (has .meta.json)' : '');
+            if (model.hasMeta) {
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.textContent = 'meta';
+                li.appendChild(badge);
+            }
+            li.dataset.file = model.file;
+            li.addEventListener('click', () => selectModel(model, li));
+            els.modelList.appendChild(li);
+            if (model.file === selected) li.classList.add('selected');
+        }
+    }
+}
+
 function selectModel(model, li) {
     for (const other of els.modelList.children) other.classList.remove('selected');
     li.classList.add('selected');
@@ -125,13 +158,16 @@ async function startBake() {
         const overrides = { ...state.settings };
         // User-edited fields are sent as explicit meta overrides so they win
         // over the model's .meta.json; everything else stays a global default.
+        // texelBrightness '' means "no explicit choice" — omit it so a meta
+        // file value keeps applying instead of being overridden by nothing.
         const meta = {};
         for (const [setting, metaKey] of Object.entries(META_KEY_BY_SETTING)) {
-            if (state.userOverrides[setting] !== undefined) {
-                meta[metaKey] = state.settings[setting];
-            }
+            if (state.userOverrides[setting] === undefined) continue;
+            if (setting === 'texelBrightness' && state.settings[setting] === '') continue;
+            meta[metaKey] = state.settings[setting];
         }
         if (Object.keys(meta).length > 0) overrides.meta = meta;
+        const metaSnapshot = { ...meta };
 
         const result = await bake(state.modelFile, overrides);
         if (generation !== state.bakeGeneration) {
@@ -148,6 +184,7 @@ async function startBake() {
             viewer.render(result);
             renderTextures(result);
             renderDiagnostics(result);
+            pushHistory(result, metaSnapshot);
             setStatus(`${result.key} — ${result.texel.totalPlates} plates · `
                 + `texel ${result.texel.bakeTimeMs.toFixed(1)}ms`);
             setDot(els.dotDaemon, 'ok');
@@ -206,6 +243,11 @@ function syncSettingsUi() {
     document.getElementById('s-maxPlatesPerFace').value = state.settings.maxPlatesPerFace;
     document.getElementById('s-maxPlatesPerInstance').value = state.settings.maxPlatesPerInstance;
     document.getElementById('s-maxGridEdge').value = state.settings.maxGridEdge;
+    // Brightness may be a meta number or '' (no explicit value); normalize so
+    // the select always finds its option.
+    document.getElementById('s-texelBrightness').value =
+        state.settings.texelBrightness === '' || state.settings.texelBrightness === null
+            ? '' : String(state.settings.texelBrightness);
     document.getElementById('s-originMode').value = state.settings.originMode;
 
     for (const label of els.settingsBox.querySelectorAll('label')) {
@@ -233,6 +275,7 @@ const SETTING_BY_CONTROL_ID = {
     's-maxPlatesPerFace': 'maxPlatesPerFace',
     's-maxPlatesPerInstance': 'maxPlatesPerInstance',
     's-maxGridEdge': 'maxGridEdge',
+    's-texelBrightness': 'texelBrightness',
     's-originMode': 'originMode',
 };
 
@@ -285,6 +328,17 @@ function renderDiagnostics(result) {
         ['occluded cells', t.occludedCells],
         ['texel bake', `${t.bakeTimeMs.toFixed(1)} ms`],
     ];
+
+    // Per-face render strategy counts (FULL / CROP_HALF / TILE / TEXEL) —
+    // mirrors `/mineplus model info`'s strategy table.
+    const strategies = strategyCounts(result);
+    if (strategies.size > 0) {
+        rows.push(['strategies', [...strategies.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, n]) => `${name} <span style="color:#8b93a3">×${n}</span>`)
+            .join(' · ')]);
+    }
+
     let html = '';
     html += '<table>' + rows.map(([k, val]) => `<tr><td>${k}</td><td>${val}</td></tr>`).join('') + '</table>';
 
@@ -318,16 +372,98 @@ function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** Per-face render strategy counts from the daemon's per-face `strategy` fields. */
+function strategyCounts(result) {
+    const counts = new Map();
+    for (const cube of result.cubes ?? []) {
+        for (const face of Object.values(cube.faces ?? {})) {
+            if (face.strategy === undefined) continue;
+            counts.set(face.strategy, (counts.get(face.strategy) ?? 0) + 1);
+        }
+    }
+    return counts;
+}
+
+// ---------------------------------------------------------------- history
+
+const HISTORY_LIMIT = 30;
+const history = [];
+
+/**
+ * Records one successful bake: model + plate count + the meta overrides that
+ * produced it. Clicking an entry restores those overrides and re-bakes, so
+ * settings comparisons survive model switching.
+ */
+function pushHistory(result, metaSnapshot) {
+    const entry = {
+        key: result.key,
+        modelFile: state.modelFile,
+        plates: result.texel.totalPlates,
+        bakeTimeMs: result.texel.bakeTimeMs,
+        meta: { ...metaSnapshot },
+    };
+    history.unshift(entry);
+    if (history.length > HISTORY_LIMIT) history.pop();
+    renderHistory();
+}
+
+function renderHistory() {
+    els.historyList.innerHTML = '';
+    history.forEach((entry, i) => {
+        const li = document.createElement('li');
+        li.title = entry.modelFile;
+        const label = document.createElement('span');
+        label.textContent = entry.key;
+        li.appendChild(label);
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = `${entry.plates}p · ${entry.bakeTimeMs.toFixed(0)}ms`;
+        li.appendChild(badge);
+        li.addEventListener('click', () => restoreHistory(i));
+        els.historyList.appendChild(li);
+    });
+}
+
+function restoreHistory(i) {
+    const entry = history[i];
+    if (!entry) return;
+    // Select the recorded model if it differs (selectModel resets overrides).
+    if (entry.modelFile !== state.modelFile) {
+        for (const li of els.modelList.children) {
+            if (li.dataset.file === entry.modelFile) {
+                li.click();
+                break;
+            }
+        }
+    }
+    state.userOverrides = {};
+    for (const [metaKey, value] of Object.entries(entry.meta)) {
+        for (const [setting, key] of Object.entries(META_KEY_BY_SETTING)) {
+            if (key === metaKey) state.userOverrides[setting] = value;
+        }
+    }
+    syncSettingsUi();
+    requestBake();
+}
+
 // ---------------------------------------------------------------- settings + layers
 
 for (const id of Object.keys(SETTING_BY_CONTROL_ID)) {
     const setting = SETTING_BY_CONTROL_ID[id];
     const control = document.getElementById(id);
     const handler = () => {
-        const value = control.tagName === 'SELECT'
-            ? control.value
-            : Number(control.value);
-        if (control.tagName !== 'SELECT' && (!Number.isFinite(value) || value < 1)) return;
+        let value;
+        if (setting === 'texelBrightness') {
+            // '' is a valid explicit choice (no brightness override); the daemon
+            // only receives the key when a number is set.
+            value = control.value === '' ? '' : Number(control.value);
+            if (control.value !== '' && (!Number.isFinite(value) || value < 0 || value > 15)) return;
+        } else if (control.tagName === 'SELECT') {
+            value = control.value;
+        } else {
+            value = Number(control.value);
+            if (!Number.isFinite(value) || value < 1) return;
+        }
         state.settings[setting] = value;
         state.userOverrides[setting] = value; // user edit wins over the meta file
         syncSettingsUi();
@@ -353,6 +489,9 @@ document.getElementById('layer-wireframe').addEventListener('change', e => {
 });
 
 document.getElementById('btn-bake').addEventListener('click', requestBake);
+document.getElementById('btn-frame').addEventListener('click', () => {
+    if (state.result) viewer.focus(state.result);
+});
 document.getElementById('btn-recompile').addEventListener('click', async () => {
     setStatus('recompiling…');
     setDot(els.dotCode, 'warn');
@@ -385,6 +524,7 @@ subscribeEvents(event => {
             break;
         case 'assets':
             setStatus('assets changed — re-baking');
+            refreshModelList();
             requestBake();
             break;
         case 'daemon-log':
