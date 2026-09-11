@@ -14,6 +14,13 @@ import java.util.List;
  * {@code custom_model_data} predicate overrides in the shipped
  * {@code models/item/bow.json} / {@code models/item/crossbow.json} (vanilla
  * replicas plus the gun entries, so unset vanilla items stay vanilla).
+ *
+ * <p>The tree deliberately does <b>not</b> override any vanilla sound or
+ * texture: {@code sounds.json} only registers the additive
+ * {@code minecraft:gun.fire} event (the plugin plays it explicitly), and no
+ * vanilla {@code .ogg} or projectile texture is shipped — a vanilla bow
+ * sounds and looks exactly like a vanilla bow unless the player holds a
+ * stamped test-rig gun.</p>
  */
 public final class GunsmithKeys {
 
@@ -30,11 +37,23 @@ public final class GunsmithKeys {
      */
     public static final int LEGACY_CUSTOM_MODEL_DATA = 1;
 
+    /** The pack-registered sound the plugin plays on every gun shot. */
+    public static final String FIRE_SOUND = "minecraft:gun.fire";
+
+    /** PDC key (byte 1) marking a gunsmith test-rig gun (bow or crossbow). */
+    public static final String PDC_GUN = "gunsmith-gun";
+
+    /** PDC key (integer) holding the gun's remaining rounds. */
+    public static final String PDC_AMMO = "gunsmith-ammo";
+
+    /** Rounds a fresh gun from {@code /gunsmith give} holds. */
+    public static final int MAGAZINE = 12;
+
     /** Vanilla items the overlay affects (status reporting). */
     public static final List<String> AFFECTED_ITEMS = List.of(
             "minecraft:bow -> pistol (draw frames via using_item/use_duration; legacy: pulling/pull + CMD 1)",
             "minecraft:crossbow -> rifle (pull frames via crossbow/pull + charge_type; legacy: charged/pull + CMD 1)",
-            "entity.arrow.shoot sound -> sounds/custom/gun_bow.ogg"
+            "minecraft:gun.fire -> sounds/custom/gun_bow.ogg (additive event, played by the plugin only)"
     );
 
     public static final List<String> MANIFEST = List.of(
@@ -59,28 +78,6 @@ public final class GunsmithKeys {
             "models/item/rifle/rifle_primed.json",
             "sounds.json",
             "sounds/custom/gun_bow.ogg",
-            "sounds/item/crossbow/loading_end.ogg",
-            "sounds/item/crossbow/loading_middle1.ogg",
-            "sounds/item/crossbow/loading_middle2.ogg",
-            "sounds/item/crossbow/loading_middle3.ogg",
-            "sounds/item/crossbow/loading_middle4.ogg",
-            "sounds/item/crossbow/loading_start.ogg",
-            "sounds/item/crossbow/quick_charge/quick1_1.ogg",
-            "sounds/item/crossbow/quick_charge/quick1_2.ogg",
-            "sounds/item/crossbow/quick_charge/quick1_3.ogg",
-            "sounds/item/crossbow/quick_charge/quick2_1.ogg",
-            "sounds/item/crossbow/quick_charge/quick2_2.ogg",
-            "sounds/item/crossbow/quick_charge/quick2_3.ogg",
-            "sounds/item/crossbow/quick_charge/quick3_1.ogg",
-            "sounds/item/crossbow/quick_charge/quick3_2.ogg",
-            "sounds/item/crossbow/quick_charge/quick3_3.ogg",
-            "sounds/item/crossbow/shoot1.ogg",
-            "sounds/item/crossbow/shoot2.ogg",
-            "sounds/item/crossbow/shoot3.ogg",
-            "sounds/item/crossbow/shoot4.ogg",
-            "textures/entity/projectiles/arrow.png",
-            "textures/entity/projectiles/spectral_arrow.png",
-            "textures/entity/projectiles/tipped_arrow.png",
             "textures/item/pistol.png",
             "textures/item/rifle.png"
     );

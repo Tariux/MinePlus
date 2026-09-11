@@ -437,9 +437,9 @@ pack.recompile();                                           // explicit recompil
   serialize as their AABB (warned in the log); wrapping UV windows clamp to 0..16.
   bbmodel `resolution` ≠ 16 (e.g. 32×32) is handled — UVs scale by `16/resolution`.
 - **Texture resolution rule (from the importer, applies unchanged)**: a texture
-  named `Alchemy_Texture.png` with `relative_path "Common/Blocks/Alchemy_Texture.png"`
-  resolves to the last path segment **lowercased** → the PNG installed next to the
-  bbmodel must be named `alchemy_texture.png`, not the download's original name.
+  whose `relative_path` is `"Common/Blocks/My_Texture.png"` resolves to the
+  last path segment **lowercased** → the PNG installed next to the bbmodel
+  must be named `my_texture.png`, not the download's original name.
 - **Player states**: `UNKNOWN → REQUESTED → ACCEPTED/DECLINED/FAILED → APPLIED`;
   join prompts are automatic when delivery is on. Gate pack-only presentation on
   `playerPackState(...).hasPack()`; everything else works regardless.
@@ -546,26 +546,24 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   already-installed assets, demonstrating that the pack pipeline consumes the
   same bbmodel/PNG pairs as the texel baker. `/packshowcase [status]` gives the
   item and reports subsystem/artifact/player state. The canonical §10b consumer.
-- **alchemy** (`com.mineplus.fun.alchemy`): the Phase 2 block-axis field test —
-  one Hytale `alchemy-table.bbmodel` (CENTER anchor, 32x32 resolution, 15
-  axis-aligned cubes, ~4x4x2 blocks; the side `"groups"` authoring-rotation
-  array is dead data the importer skips) rendered through **both** backends of a
-  single multiblock type: level 1 virtual (texel bake with meta-raised budgets
-  512/2048 — the 128x96 hand-painted texture greedy-merges past the defaults),
-  level 2 `"renderBackend": "pack"` rendering the `fun:alchemy_table` pack item
-  (backing `BREWING_STAND`). `/alchemy place [virtual|pack]|remove|clear|status`;
-  `place pack` places level 1 then `lifecycleManager().setLevel(id, 2)` (the
-  Cabinet mechanism), so both levels share one collision lattice. The texture
-  ships renamed to `alchemy_texture.png` — the last `relative_path` segment
-  lowercased, the name both the texel baker and the pack texture asset resolve.
 - **gunsmith** (`com.mineplus.fun.gunsmith`): the Phase 2 item/texture/animation
-  axis field test — a pre-authored native 1.21.4+ pack tree shipped verbatim
-  under `defaults/pack/gun/**`, staged with `installDefault` into `pack-src/gun/`
+  axis field test — a pre-authored pack tree shipped verbatim under
+  `defaults/pack/gun/**`, staged with `installDefault` into `pack-src/gun/`
   and registered verbatim under the **`minecraft` namespace** (`registerRawAsset`,
   a deliberate vanilla overlay: bow → pistol, crossbow → rifle, draw frames via
-  client-side `items/*.json` predicates, gun sound via `sounds.json` redirect).
-  `/gunsmith give|status` (give = vanilla bow + crossbow + arrows test rig).
-  Caveats: `items/*.json` needs a 1.21.4+ client (older clients silently keep
-  vanilla looks); every effect requires the generated pack applied.
+  client-side `items/*.json` predicates on 1.21.4+ and `custom_model_data`
+  predicate overrides in vanilla-replica `models/item/bow.json` +
+  `models/item/crossbow.json` host files on 1.21–1.21.3 — value 1, stamped by
+  `/gunsmith give`). The overlay changes looks only: `sounds.json` registers
+  the additive `minecraft:gun.fire` event (no vanilla sound/texture is
+  overridden), and `GunsmithGunListener` is a hitscan firing runtime — the
+  vanilla launch is always cancelled (no arrow entity, no vanilla bow sound,
+  no spent ammunition arrow; the crossbow's charged projectile is drained and
+  its arrow refunded), then one ray trace per shot draws the tracer, chips the
+  impact point and damages the entity under the crosshair. Rounds live in a
+  PDC counter on the gun (`GunsmithKeys.PDC_AMMO`, magazine 12). `/gunsmith
+  give|status`. Every *visual* requires the generated pack applied; firing
+  works without it. `npm run pack` in the repository builds the same tree
+  into a ready-to-use manual zip.
 
 Copy the reference whose interaction model matches your feature.
