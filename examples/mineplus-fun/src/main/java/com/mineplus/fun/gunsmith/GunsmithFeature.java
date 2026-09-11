@@ -6,7 +6,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * The Phase 2 <b>item/texture/animation axis</b> field test: a pre-authored
- * native resource pack tree registered through the raw-asset route.
+ * native resource pack tree registered through the raw-asset route, plus the
+ * hitscan gun runtime that turns the overlaid bow/crossbow into actual guns.
  *
  * <p>The tree (shipped verbatim under {@code defaults/pack/gun/}) is a
  * <b>deliberate vanilla overlay</b> under the {@code minecraft} namespace —
@@ -16,9 +17,15 @@ import org.bukkit.plugin.java.JavaPlugin;
  * ({@code condition(using_item)} + {@code range_dispatch(use_duration} /
  * {@code crossbow/pull} + {@code charge_type)} predicates) — the client
  * animates with <b>zero plugin code</b> while the player uses the item.
- * {@code sounds.json} redirects {@code entity.arrow.shoot} to the gun
- * sound. Registering under a foreign namespace is exactly what the
- * raw-asset route exists for, and this feature does it on purpose.
+ * Registering under a foreign namespace is exactly what the raw-asset route
+ * exists for, and this feature does it on purpose.
+ *
+ * <p><b>No vanilla content is overridden except the two overlaid items'
+ * looks</b>: {@code sounds.json} only registers the additive
+ * {@code minecraft:gun.fire} event (played by {@link GunsmithGunListener}),
+ * and the tree ships no vanilla {@code .ogg} replacement and no projectile
+ * textures — a vanilla bow sounds and looks exactly vanilla for players
+ * without a stamped rig.</p>
  *
  * <p>Server/client coverage: {@code items/*.json} item definitions only work
  * on clients <b>1.21.4+</b>. The tree additionally ships vanilla-replica
@@ -27,16 +34,22 @@ import org.bukkit.plugin.java.JavaPlugin;
  * {@link GunsmithKeys#LEGACY_CUSTOM_MODEL_DATA}), so legacy clients
  * (1.21–1.21.3) also get the pistol/rifle models and draw frames — but only
  * for items stamped with that value ({@code /gunsmith give} does it); unset
- * vanilla items stay perfectly vanilla on every version. Sound overrides
- * apply on all client versions. Players must also have the generated pack
- * applied (player pack state {@code APPLIED}) to see any of it.</p>
+ * vanilla items stay perfectly vanilla on every version.</p>
  *
- * <p>No multiblock, hook, GUI, or listeners: {@code /gunsmith give|status}
- * hands out the test rig and reports subsystem state. With
- * {@code PACK.ENABLED: false} the registrations become no-ops and the game
- * stays byte-identical to vanilla behavior.
+ * <p>The firing runtime is a pure hitscan (see {@link GunsmithGunListener}):
+ * the vanilla arrow launch is always cancelled — no projectile entity, no
+ * vanilla bow sound, no ammunition loss — and one ray trace per shot draws
+ * the tracer, chips the impact point and damages the entity under the
+ * crosshair. Rounds live in a PDC counter on the gun.</p>
+ *
+ * <p>No multiblock, hook, or GUI: {@code /gunsmith give|status} hands out
+ * the rig and reports subsystem state. With {@code PACK.ENABLED: false} the
+ * registrations become no-ops and the guns degrade to vanilla bows.</p>
  */
 public final class GunsmithFeature extends ModuleFeature {
+
+    private GunsmithRig rig;
+    private GunsmithGunListener guns;
 
     public GunsmithFeature(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
         super(plugin, context);
@@ -83,10 +96,26 @@ public final class GunsmithFeature extends ModuleFeature {
                     + " overlay assets staged under '" + GunsmithKeys.INSTALL_ROOT
                     + "' but not compiled; enable the subsystem to ship them.");
         }
+
+        // The firing runtime works with or without the pack: without it the
+        // rig degrades to a vanilla bow/crossbow look but still fires the
+        // hitscan (identity is PDC, not presentation).
+        this.rig = new GunsmithRig(plugin);
+        this.guns = new GunsmithGunListener(rig);
+        org.bukkit.Bukkit.getPluginManager().registerEvents(guns, plugin);
+    }
+
+    @Override
+    protected void onDisable() {
+        if (guns != null) {
+            guns.clearSessions();
+            guns = null;
+        }
+        rig = null;
     }
 
     @Override
     protected com.mineplus.infrastructure.command.SubCommand command() {
-        return new GunsmithSubCommand(context);
+        return new GunsmithSubCommand(context, rig);
     }
 }

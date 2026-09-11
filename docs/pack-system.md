@@ -183,7 +183,16 @@ Multiblock levels select their backend in JSON:
 /mineplus pack status            # subsystem, artifact, asset + player state summary
 /mineplus pack recompile         # explicit recompile (async, reports the artifact)
 /mineplus pack push <player>     # deliver the current pack to one player
+npm run pack                     # (repository) build the manual gun-overlay pack zip
 ```
+
+`npm run pack` assembles `examples/mineplus-fun`'s `defaults/pack/gun/` tree
+into `dist/mineplus-resource-pack.zip` — a ready-to-use, deterministic pack
+for hand distribution when the LOCAL endpoint is unreachable (firewalled
+hosts, proxies). `--format <n>` pins `pack_format` (default 34 = 1.21.1;
+the `supported_formats` ceiling keeps newer clients accepting it). Drop the
+zip into a client's `resourcepacks` folder or host it and point
+`resource-pack=` at it.
 
 ## Honest limitations (current boundaries)
 
@@ -198,11 +207,17 @@ Multiblock levels select their backend in JSON:
 - **Pack-format table** lags new Minecraft releases; the emitted
   `supported_formats` range keeps newer clients accepting the pack anyway, and
   `PACK_FORMAT_OVERRIDE` pins the exact `pack_format` when needed.
-- **Vanilla overlay raw assets** (the Gunsmith tree) rely on client-side
-  `items/*.json` definitions: clients older than 1.21.4 ignore them entirely
-  — the overlaid items stay vanilla while sound overrides (version-agnostic)
-  still apply. That "sounds work, models don't" split on an older client is
-  the documented safe degradation, not a pack defect.
+- **Vanilla overlay raw assets** (the Gunsmith tree) re-skin the overlaid
+  items' *looks only*. Modern clients (1.21.4+) resolve the overlay through
+  the tree's `items/*.json` definitions; older clients (1.21–1.21.3)
+  resolve the same pistol/rifle models through `custom_model_data`
+  predicate overrides in the shipped vanilla-replica
+  `models/item/bow.json` / `models/item/crossbow.json` host files (value 1,
+  stamped on the test rig by `/gunsmith give` — unset vanilla items stay
+  vanilla on every version). No vanilla sound or projectile texture is
+  overridden: the tree's `sounds.json` registers only the additive
+  `minecraft:gun.fire` event, played explicitly by the Gunsmith firing
+  runtime (a hitscan — no arrow is ever launched).
 - **Pack-driven animation**: pack world objects reuse the existing animation
   architecture's pose pipeline where bindings apply, but client-side
   predicate/item-model animation (ModelEngine-style rigs) is future work — the

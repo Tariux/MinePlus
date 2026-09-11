@@ -11,33 +11,34 @@ import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.util.StringUtil;
 
 /**
- * {@code /gunsmith <give|status>} — hand out the gun test rig and report
- * the overlay's state.
+ * {@code /gunsmith <give|status>} — hand out the gun rig and report the
+ * overlay's state.
  *
- * <p>{@code give} hands a bow, crossbow and arrows stamped with the overlay's
- * legacy {@code custom_model_data} value: on 1.21.4+ clients the pack's
- * {@code items/*.json} definitions drive the presentation for every bow and
- * crossbow, while on legacy clients (1.21–1.21.3) the predicate overrides in
- * the shipped {@code models/item/bow.json} / {@code models/item/crossbow.json}
- * select the pistol/rifle frames for exactly these stamped items — unset
- * vanilla items stay vanilla. Drawing the bow plays the pistol frame
- * sequence and firing plays the gun sound; the crossbow does the rifle with
- * pull-charge frames. {@code status} reports the pack subsystem/artifact
- * state, the applied-pack caveat, and which vanilla items the overlay
- * affects.
+ * <p>{@code give} hands the Pistol (bow) and Rifle (crossbow), both stamped
+ * with the overlay's legacy {@code custom_model_data} value and loaded with
+ * {@link GunsmithKeys#MAGAZINE} hitscan rounds, plus one arrow — the vanilla
+ * draw/charge needs an arrow to exist in the inventory, and the shot itself
+ * never spends it. On 1.21.4+ clients the pack's {@code items/*.json}
+ * definitions drive the presentation; on legacy clients (1.21–1.21.3) the
+ * predicate overrides in the shipped {@code models/item/bow.json} /
+ * {@code models/item/crossbow.json} host files select the same frames for
+ * exactly these stamped items — unset vanilla items stay vanilla.
+ * {@code status} reports the pack subsystem/artifact state and which vanilla
+ * items the overlay affects.
  */
 public final class GunsmithSubCommand implements SubCommand {
 
-    private static final int ARROW_COUNT = 64;
+    private static final int ARROW_COUNT = 1;
 
     private final PluginContext context;
+    private final GunsmithRig rig;
 
-    public GunsmithSubCommand(PluginContext context) {
+    public GunsmithSubCommand(PluginContext context, GunsmithRig rig) {
         this.context = context;
+        this.rig = rig;
     }
 
     @Override
@@ -65,6 +66,10 @@ public final class GunsmithSubCommand implements SubCommand {
         if (args.length < 1) {
             return false;
         }
+        if (rig == null) {
+            sender.sendMessage(ChatColor.RED + "Gunsmith failed to enable this session; see the startup log.");
+            return true;
+        }
 
         String action = args[0].toLowerCase(Locale.ROOT);
         switch (action) {
@@ -82,39 +87,23 @@ public final class GunsmithSubCommand implements SubCommand {
 
     private boolean giveRig(CommandSender sender) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(ChatColor.RED + "Only players can receive the test rig; use /gunsmith status.");
+            sender.sendMessage(ChatColor.RED + "Only players can receive the gun rig; use /gunsmith status.");
             return true;
         }
-        player.getInventory().addItem(gunItem(Material.BOW)).values()
+        player.getInventory().addItem(rig.create(Material.BOW)).values()
                 .forEach(overflow -> player.getWorld().dropItemNaturally(player.getLocation(), overflow));
-        player.getInventory().addItem(gunItem(Material.CROSSBOW)).values()
+        player.getInventory().addItem(rig.create(Material.CROSSBOW)).values()
                 .forEach(overflow -> player.getWorld().dropItemNaturally(player.getLocation(), overflow));
         player.getInventory().addItem(new ItemStack(Material.ARROW, ARROW_COUNT)).values()
                 .forEach(overflow -> player.getWorld().dropItemNaturally(player.getLocation(), overflow));
-        player.sendMessage(ChatColor.GREEN + "Gave you the gun test rig: pistol bow, rifle crossbow and "
-                + ARROW_COUNT + " arrows.");
-        player.sendMessage(ChatColor.GRAY + "With the pack applied, drawing the bow plays the pistol frame"
-                + " sequence and firing plays the gun sound; the crossbow does the rifle with pull-charge"
-                + " frames. On 1.21.4+ clients the overlay applies to the vanilla items; on older clients"
-                + " (1.21 to 1.21.3) the rig's custom model data (" + GunsmithKeys.LEGACY_CUSTOM_MODEL_DATA
-                + ") selects the gun models. Without the pack, everything stays perfectly vanilla.");
+        player.sendMessage(ChatColor.GREEN + "Gave you the gun rig: Pistol (draw and release),"
+                + " Rifle (hold right-click to charge, release to fire), each loaded with "
+                + GunsmithKeys.MAGAZINE + " hitscan rounds, plus one arrow to prime the draw.");
+        player.sendMessage(ChatColor.GRAY + "Shots trace a line to the impact point and damage what is"
+                + " under the crosshair - no projectiles. On 1.21.4+ clients the gun skins apply to"
+                + " the vanilla items; on older clients (1.21 to 1.21.3) the rig's custom model data ("
+                + GunsmithKeys.LEGACY_CUSTOM_MODEL_DATA + ") selects the gun models.");
         return true;
-    }
-
-    /**
-     * The test rig's bow/crossbow: stamped with the overlay's legacy
-     * {@code custom_model_data} value so pre-1.21.4 clients (whose item
-     * definitions do not exist) still resolve the gun models through the
-     * shipped host-file predicate overrides.
-     */
-    private ItemStack gunItem(Material material) {
-        ItemStack stack = new ItemStack(material);
-        ItemMeta meta = stack.getItemMeta();
-        if (meta != null) {
-            meta.setCustomModelData(GunsmithKeys.LEGACY_CUSTOM_MODEL_DATA);
-            stack.setItemMeta(meta);
-        }
-        return stack;
     }
 
     private boolean printStatus(CommandSender sender) {
@@ -137,12 +126,15 @@ public final class GunsmithSubCommand implements SubCommand {
         for (String affected : GunsmithKeys.AFFECTED_ITEMS) {
             sender.sendMessage(ChatColor.WHITE + "- " + affected);
         }
-        sender.sendMessage(ChatColor.YELLOW + "Caveats: every effect requires the generated pack applied"
-                + " (player state APPLIED). On 1.21.4+ clients the items/*.json definitions drive the"
-                + " overlay; older clients (1.21 to 1.21.3) resolve the gun models through custom model"
-                + " data " + GunsmithKeys.LEGACY_CUSTOM_MODEL_DATA + " (stamped by /gunsmith give) and the"
-                + " shipped models/item/bow.json + models/item/crossbow.json host files. Sound overrides"
-                + " (sounds.json + .ogg paths) apply on every client version.");
+        sender.sendMessage(ChatColor.GRAY + "Manual pack build: run " + ChatColor.WHITE + "npm run pack"
+                + ChatColor.GRAY + " in the repository for a ready-to-use zip.");
+        sender.sendMessage(ChatColor.YELLOW + "Caveats: every visual requires the generated pack applied"
+                + " (player state APPLIED); the hitscan firing works with or without it. On 1.21.4+"
+                + " clients the items/*.json definitions drive the overlay; older clients (1.21 to"
+                + " 1.21.3) resolve the gun models through custom model data "
+                + GunsmithKeys.LEGACY_CUSTOM_MODEL_DATA + " (stamped by /gunsmith give). No vanilla"
+                + " sound or projectile texture is overridden — the gunshot is the additive"
+                + " minecraft:gun.fire event.");
         if (sender instanceof Player player) {
             sender.sendMessage(ChatColor.GRAY + "Your pack state: " + ChatColor.WHITE
                     + pack.playerPackState(player.getUniqueId()));
