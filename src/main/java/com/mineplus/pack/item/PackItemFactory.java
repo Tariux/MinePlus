@@ -119,10 +119,11 @@ public final class PackItemFactory {
      * Legacy predicate value, stable per item id (matches
      * {@link ItemModelAsset#customModelData()}): never zero — zero would match
      * every vanilla item — and deterministic across restarts so issued items
-     * keep rendering.
+     * keep rendering. {@code floorMod} avoids the {@code Math.abs(Integer#MIN_VALUE)}
+     * overflow that would produce an invalid negative predicate.
      */
     static int stableCustomModelData(PackItemDefinition definition) {
         int hash = (definition.namespace() + ":" + definition.id()).hashCode();
-        return 1000 + (Math.abs(hash) % 900_000);
+        return 1000 + Math.floorMod(hash, 900_000);
     }
 }

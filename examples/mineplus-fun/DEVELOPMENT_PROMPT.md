@@ -48,6 +48,9 @@ the Core is absent.
 - `jsonInfrastructureApi()` — `reloadAll()`, `reloadModelDefinitions()`,
   `reloadMultiBlocks()`, `reloadRecipes()`.
 - `animationApi()` — selector-based animation control (`AnimationApi`, see §10a).
+- `packApi()` — resource pack subsystem: custom items, pack-backed multiblocks, raw
+  pack assets, delivery/player state (`PackApi`, see §10b; full contract in the
+  Core's `docs/pack-system.md`).
 - `moduleSupport()` — the module toolkit (`ModuleSupport`, see §7a).
 
 Supporting Core utilities every module should use instead of hand-rolling:
@@ -363,6 +366,90 @@ Verified facts / traps:
   pushes are one `setTransformationMatrix` per bound display per tick with
   client-side interpolation (`ANIMATION.TICK_INTERVAL_TICKS: 1` default).
 
+## 10b. Resource pack system (Phase 2 — the second rendering axis)
+
+The Core now has **two peer rendering axes**: the packless virtual engine (default,
+unchanged) and the resource pack subsystem (`com.mineplus.pack`). Both run side by
+side; the pack subsystem never touches the virtual engine's internals. Full contract:
+Core's `docs/pack-system.md`.
+
+### Backends (`renderBackend` in multiblock level JSON)
+
+```json
+"levels": { "1": { "model": "models/x.bbmodel", "renderBackend": "pack" } }
+```
+
+| Backend | Collision | Pack player sees | Packless player sees |
+|---|---|---|---|
+| `virtual` (default) | virtual engine | virtual render | virtual render — identical |
+| `pack` | virtual engine (collision-only spawn) | pack item model, full fidelity | backing vanilla item |
+| `virtual+pack` | virtual engine | virtual render **+** pack display | virtual render |
+
+Degradation is centralized: pack subsystem disabled → both pack backends render
+virtual; model has no registered pack item → `pack` falls back to a full virtual
+render. A packless player never sees a broken model.
+
+### The `PackApi` surface (`context.packApi()`)
+
+```java
+PackApi pack = context.packApi();
+
+// Custom item from a bbmodel + its PNG (the Core model/texture pipeline — no
+// second loader). Identity flows through the existing ItemRegistry (PDC).
+pack.registerItem(PackItemDefinition.builder(
+                "fun",                    // namespace -> fun:strad_wine
+                "strad_wine",             // item id (also the model path item/strad_wine)
+                Material.GLASS_BOTTLE,    // backing vanilla item
+                "strad-wine")             // registered virtual model key
+        .displayName("Strad Wine Bottle")
+        .category(ItemCategory.UTILITY)
+        .build());
+
+ItemStack item = pack.createItem("fun", "strad_wine");      // presentation + identity
+PlayerPackState st = pack.playerPackState(player.getUniqueId()); // UNKNOWN..APPLIED
+pack.deliverPack(player);                                   // manual push
+pack.recompile();                                           // explicit recompile
+```
+
+- `registerItem` auto-registers the geometry (`assets/<ns>/models/item/<id>.json`,
+  serialized from the imported `VirtualModel`) and the model's texture PNGs (the
+  same files the texel baker reads). Registration is order-insensitive: items
+  registered before the coordinated `reloadAll()` attach assets during it.
+- `registerModel(ns, path, modelKey)` / `registerTexture(ns, path, file)` /
+  `registerRawAsset(ns, path, file)` — manual asset registration. Raw assets are
+  copied verbatim (sounds, lang, sounds.json, **pre-authored native pack trees**).
+
+### Verified facts / traps
+
+- **Enabling**: `PACK.ENABLED: true` in the Core's `settings.mp.yml` + a delivery
+  mode (`LOCAL` serves from a built-in HTTP endpoint; `STATIC_URL` external hosting;
+  `DISABLED` = manual distribution). `PACK.ENABLED: false` (default) leaves the
+  whole plugin byte-identical to pre-pack behavior — `packApi()` calls stay safe
+  (item identity still registers, visuals fall back to the backing vanilla item).
+- **Modern vs legacy items**: 1.21.4+ uses the additive `item_model` component
+  (vanilla items never change). Older servers use per-item stable
+  `custom_model_data` predicates — which regenerate the *vanilla* item model host
+  file (predicate-gated, never matches unset vanilla items).
+- **Raw asset namespaces are real**: `registerRawAsset("minecraft", "items/bow.json",
+  file)` writes `assets/minecraft/items/bow.json` — a deliberate vanilla overlay
+  (exactly what pre-authored gun packs do). Only do this on purpose.
+- **Model→pack conversion fidelity**: axis-aligned cubes are exact. Rotated cubes
+  serialize as their AABB (warned in the log); wrapping UV windows clamp to 0..16.
+  bbmodel `resolution` ≠ 16 (e.g. 32×32) is handled — UVs scale by `16/resolution`.
+- **Texture resolution rule (from the importer, applies unchanged)**: a texture
+  named `Alchemy_Texture.png` with `relative_path "Common/Blocks/Alchemy_Texture.png"`
+  resolves to the last path segment **lowercased** → the PNG installed next to the
+  bbmodel must be named `alchemy_texture.png`, not the download's original name.
+- **Player states**: `UNKNOWN → REQUESTED → ACCEPTED/DECLINED/FAILED → APPLIED`;
+  join prompts are automatic when delivery is on. Gate pack-only presentation on
+  `playerPackState(...).hasPack()`; everything else works regardless.
+- **Commands** (Core, perm `mineplus.admin.pack`): `/mineplus pack status`,
+  `/mineplus pack recompile`, `/mineplus pack push <player>`.
+- **No second animation system**: pack *world* objects ride the existing
+  `AnimationApi` bindings where applicable; client-side predicate animation
+  (frame-model swaps like `using_item`/`use_duration`) is authored in the pack's
+  `items/*.json` — the Core does not script it.
+
 ## 11. Verifying the API surface (stub jars)
 
 Modules compile against **stub jars** in `libs/` (paper-api-1.21.jar, spigot-api-1.21.1.jar,
@@ -453,5 +540,32 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   (60+ distinct colors per 16x16) and greedy-merges past the default 96-plate
   per-face ceiling, which makes faces silently fall back to white concrete —
   see the texture-gradient trap in §6.
+- **packshowcase** (`com.mineplus.fun.packshowcase`): the Phase 2 pack-system
+  reference — registers `fun:strad_wine` (backing `GLASS_BOTTLE`, model key
+  `strad-wine`) through `packApi().registerItem(...)` from the Wine feature's
+  already-installed assets, demonstrating that the pack pipeline consumes the
+  same bbmodel/PNG pairs as the texel baker. `/packshowcase [status]` gives the
+  item and reports subsystem/artifact/player state. The canonical §10b consumer.
+- **alchemy** (`com.mineplus.fun.alchemy`): the Phase 2 block-axis field test —
+  one Hytale `alchemy-table.bbmodel` (CENTER anchor, 32x32 resolution, 15
+  axis-aligned cubes, ~4x4x2 blocks; the side `"groups"` authoring-rotation
+  array is dead data the importer skips) rendered through **both** backends of a
+  single multiblock type: level 1 virtual (texel bake with meta-raised budgets
+  512/2048 — the 128x96 hand-painted texture greedy-merges past the defaults),
+  level 2 `"renderBackend": "pack"` rendering the `fun:alchemy_table` pack item
+  (backing `BREWING_STAND`). `/alchemy place [virtual|pack]|remove|clear|status`;
+  `place pack` places level 1 then `lifecycleManager().setLevel(id, 2)` (the
+  Cabinet mechanism), so both levels share one collision lattice. The texture
+  ships renamed to `alchemy_texture.png` — the last `relative_path` segment
+  lowercased, the name both the texel baker and the pack texture asset resolve.
+- **gunsmith** (`com.mineplus.fun.gunsmith`): the Phase 2 item/texture/animation
+  axis field test — a pre-authored native 1.21.4+ pack tree shipped verbatim
+  under `defaults/pack/gun/**`, staged with `installDefault` into `pack-src/gun/`
+  and registered verbatim under the **`minecraft` namespace** (`registerRawAsset`,
+  a deliberate vanilla overlay: bow → pistol, crossbow → rifle, draw frames via
+  client-side `items/*.json` predicates, gun sound via `sounds.json` redirect).
+  `/gunsmith give|status` (give = vanilla bow + crossbow + arrows test rig).
+  Caveats: `items/*.json` needs a 1.21.4+ client (older clients silently keep
+  vanilla looks); every effect requires the generated pack applied.
 
 Copy the reference whose interaction model matches your feature.

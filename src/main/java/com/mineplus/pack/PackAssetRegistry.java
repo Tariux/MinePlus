@@ -13,9 +13,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of every asset that goes into the generated resource pack, keyed by
- * namespaced identity ({@code namespace:path}). Assets are owned by their
- * registering module; conflicting declarations are rejected loudly instead of
- * silently overwriting another module's asset.
+ * the asset's {@link PackAsset#zipEntryPath() pack entry path} — the file it
+ * writes inside the zip. That is the real collision domain: an item definition
+ * ({@code assets/<ns>/items/<id>.json}) and its geometry model
+ * ({@code assets/<ns>/models/item/<id>.json}) legitimately share the asset id
+ * {@code <ns>:item/<id>} but must coexist, while two assets writing the same
+ * entry are a genuine conflict, rejected loudly instead of silently
+ * overwriting another module's file.
  *
  * <p>The registry is concurrent (registration from any thread) but compiles
  * against an immutable, deterministically ordered snapshot, so identical
@@ -30,21 +34,24 @@ public final class PackAssetRegistry {
     /**
      * Registers an asset.
      *
-     * @throws IllegalArgumentException on a namespace/path collision with a
-     *                                  different asset (same identity re-registered
-     *                                  with identical content is a no-op)
+     * @throws IllegalArgumentException on an entry-path collision with a
+     *                                  different asset (the same entry
+     *                                  re-registered with identical content is
+     *                                  a no-op)
      */
     public void register(PackAsset asset) {
-        String id = asset.id();
-        PackAsset existing = assets.putIfAbsent(id, asset);
+        String entryPath = asset.zipEntryPath();
+        PackAsset existing = assets.putIfAbsent(entryPath, asset);
         if (existing != null && isIdentical(existing, asset)) {
             return; // identical re-registration (reload)
         }
         if (existing != null) {
-            throw new IllegalArgumentException("Pack asset conflict on '" + id + "': registered by '"
-                    + existing.owner() + "', re-registered by '" + asset.owner() + "'.");
+            throw new IllegalArgumentException("Pack asset conflict on '" + entryPath + "': registered by '"
+                    + existing.owner() + "' (" + existing.id() + "), re-registered by '"
+                    + asset.owner() + "' (" + asset.id() + ").");
         }
-        DebugLogger.info("[Pack] Registered asset '" + id + "' (owner '" + asset.owner() + "').");
+        DebugLogger.info("[Pack] Registered asset '" + asset.id() + "' -> " + entryPath
+                + " (owner '" + asset.owner() + "').");
     }
 
     private boolean isIdentical(PackAsset existing, PackAsset asset) {
@@ -73,8 +80,9 @@ public final class PackAssetRegistry {
         return itemsByModelKey.get(modelKey.trim().toLowerCase(Locale.ROOT));
     }
 
-    public PackAsset get(String id) {
-        return assets.get(id);
+    /** The asset writing the given pack entry path, or {@code null}. */
+    public PackAsset get(String entryPath) {
+        return assets.get(entryPath);
     }
 
     public int size() {

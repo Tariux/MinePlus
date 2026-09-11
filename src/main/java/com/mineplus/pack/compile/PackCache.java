@@ -41,13 +41,37 @@ public final class PackCache {
         return Optional.of(readArtifact(file, graphHash));
     }
 
-    /** Recovers artifact metadata (sha1, size) from the file on disk. */
+    /** Recovers artifact metadata (sha1, size, format, asset count) from the file on disk. */
     public PackArtifact readArtifact(File file, String graphHash) {
         try {
             byte[] sha1 = sha1(file);
-            return new PackArtifact(file, graphHash, hex(sha1), 0,
+            int packFormat = 0;
+            int assetCount = 0;
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file)) {
+                java.util.zip.ZipEntry meta = zip.getEntry("pack.mcmeta");
+                if (meta != null) {
+                    String mcmeta = new String(zip.getInputStream(meta).readAllBytes(),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    try {
+                        packFormat = com.google.gson.JsonParser.parseString(mcmeta)
+                                .getAsJsonObject().getAsJsonObject("pack")
+                                .get("pack_format").getAsInt();
+                    } catch (RuntimeException unreadable) {
+                        // Leave 0; the artifact's own compile log had the value.
+                    }
+                    assetCount = -1; // pack.mcmeta is metadata, not an asset
+                }
+                java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    entries.nextElement();
+                    assetCount++;
+                }
+            } catch (IOException unreadableZip) {
+                // Metadata recovery is best-effort; counts stay at zero.
+            }
+            return new PackArtifact(file, graphHash, hex(sha1), packFormat,
                     com.mineplus.pack.PackFormat.ItemRepresentation.MODERN_ITEM_MODEL,
-                    0, file.length(), 0L);
+                    Math.max(0, assetCount), file.length(), 0L);
         } catch (IOException exception) {
             DebugLogger.warning("[PackCache] Failed to hash artifact " + file.getName() + ": "
                     + exception.getMessage());

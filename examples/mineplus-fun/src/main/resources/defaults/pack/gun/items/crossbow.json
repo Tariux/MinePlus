@@ -1,0 +1,89 @@
+{
+  "model": {
+    "type": "minecraft:condition",
+    "on_false": {
+      "type": "minecraft:select",
+      "cases": [
+        {
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_primed"
+          },
+          "when": "arrow"
+        },
+        {
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_primed"
+          },
+          "when": "rocket"
+        }
+      ],
+      "fallback": {
+        "type": "minecraft:model",
+        "model": "minecraft:item/rifle/rifle_idle"
+      },
+      "property": "minecraft:charge_type"
+    },
+    "on_true": {
+      "type": "minecraft:range_dispatch",
+      "entries": [
+        {
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_0"
+          },
+          "threshold": 0.15
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_1"
+          },
+          "threshold": 0.3
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_2"
+          },
+          "threshold": 0.45
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_3"
+          },
+          "threshold": 0.6
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_4"
+          },
+          "threshold": 0.75
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_loading_5"
+          },
+          "threshold": 0.9
+        },
+	{
+          "model": {
+            "type": "minecraft:model",
+            "model": "minecraft:item/rifle/rifle_primed"
+          },
+          "threshold": 1
+        }
+      ],
+      "fallback": {
+        "type": "minecraft:model",
+        "model": "minecraft:item/rifle/rifle_idle"
+      },
+      "property": "minecraft:crossbow/pull"
+    },
+    "property": "minecraft:using_item"
+  }
+}

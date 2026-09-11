@@ -118,7 +118,12 @@ public final class PackSystem {
             renderingManager.setPackRenderer(modelRenderer);
             scheduleRecompile();
             plugin.getLogger().info("[Pack] Resource pack subsystem active (delivery="
-                    + settings.deliveryMode() + ").");
+                    + settings.deliveryMode()
+                    + (delivery.localPort() > 0
+                    ? ", endpoint port " + delivery.localPort()
+                    + (delivery.localPortDrifted() ? " (configured port was busy)" : "")
+                    : "")
+                    + ").");
         } catch (Throwable failure) {
             running = false;
             plugin.getLogger().warning("[Pack] Subsystem failed to start; virtual rendering unaffected: "
@@ -215,7 +220,10 @@ public final class PackSystem {
     /**
      * Idempotently attaches the geometry + texture assets for one item when
      * its model is loaded. Texture discovery reuses the existing model/texture
-     * system: PNGs resolved exactly like the texel baker resolves them.
+     * system: PNGs resolved exactly like the texel baker resolves them, and
+     * registered under the same canonical path the serialized model
+     * references (last-segment normalization shared with
+     * {@code TextureAsset.normalizePath}).
      */
     private void ensureModelAssets(PackItemDefinition definition) {
         VirtualModel model = virtualBlockManager.getModel(definition.modelKey());
@@ -234,10 +242,14 @@ public final class PackSystem {
             if (textureName == null || textureName.isBlank()) {
                 continue;
             }
+            String texturePath = TextureAsset.normalizePath(textureName);
+            if (texturePath.isEmpty()) {
+                continue;
+            }
             try {
                 File textureFile = virtualBlockManager.resolveTextureFile(definition.modelKey(), textureName);
                 if (textureFile != null) {
-                    assetRegistry.register(new TextureAsset(namespace, textureName, namespace, textureFile));
+                    assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, textureFile));
                 }
             } catch (IllegalArgumentException conflict) {
                 // Same texture id registered with different bytes — a real
@@ -294,7 +306,16 @@ public final class PackSystem {
             PackArtifact artifact = compiler.compile(snapshot);
             if (artifact != null) {
                 currentArtifact = artifact;
-                delivery.publish(artifact);
+                boolean contentChanged = delivery.publish(artifact);
+                if (contentChanged) {
+                    plugin.getLogger().info("[Pack] Artifact " + artifact.artifactName() + " ("
+                            + artifact.assetCount() + " assets, " + artifact.byteSize() + " bytes) is current"
+                            + describeDeliverySuffix() + ".");
+                    // Players online before this compile finished (or holding a
+                    // previous artifact) get the new pack without a rejoin.
+                    // Unchanged recompiles never re-prompt anyone.
+                    autoPushToOnlinePlayers();
+                }
             }
             return artifact;
         } catch (Throwable failure) {
@@ -302,6 +323,40 @@ public final class PackSystem {
                     + failure.getMessage());
             return null;
         }
+    }
+
+    /** Delivery context for the compile log line (endpoint port / static URL). */
+    private String describeDeliverySuffix() {
+        return switch (settings.deliveryMode()) {
+            case LOCAL -> delivery.localPort() > 0
+                    ? "; served on port " + delivery.localPort()
+                    + (delivery.localPortDrifted() ? " (configured port was busy)" : "")
+                    : "; local endpoint unavailable";
+            case STATIC_URL -> "; static URL delivery";
+            case DISABLED -> "; manual distribution (delivery disabled)";
+        };
+    }
+
+    /**
+     * Pushes the current artifact to online players who have not been
+     * prompted yet (join before the first compile) or already accepted a
+     * previous pack (artifact changed under them). Declined players are
+     * respected; the push runs on the main thread (region-aware).
+     */
+    private void autoPushToOnlinePlayers() {
+        PackScheduling.scheduleNow(plugin, () -> {
+            if (!running || currentArtifact == null || !delivery.isDeliverable()) {
+                return;
+            }
+            for (Player player : plugin.getServer().getOnlinePlayers()) {
+                PlayerPackState state = delivery.state(player.getUniqueId());
+                if (state == PlayerPackState.UNKNOWN
+                        || state == PlayerPackState.ACCEPTED
+                        || state == PlayerPackState.APPLIED) {
+                    delivery.deliver(player);
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -330,6 +385,16 @@ public final class PackSystem {
 
     public boolean deliverPack(Player player) {
         return delivery.deliver(player);
+    }
+
+    /**
+     * The URL one player's client would use to download the current pack
+     * (per-player host resolution), or null when nothing is deliverable.
+     * Diagnostics surface — never gameplay state.
+     */
+    public String deliveryUrlFor(Player player) {
+        PackArtifact artifact = currentArtifact;
+        return artifact == null ? null : delivery.urlFor(artifact, player);
     }
 
     public PlayerPackState playerPackState(UUID playerId) {

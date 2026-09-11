@@ -198,29 +198,44 @@ public class ConfigManager {
                     # renders everything exactly as before.
                     PACK:
                       # Master switch (false = nothing compiled, served, or pushed).
-                      ENABLED: false
+                      # Default ON: the pack axis works out of the box.
+                      ENABLED: true
                       DELIVERY:
                         # DISABLED: operators distribute the artifact manually.
-                        # LOCAL: the plugin serves the artifact over a small
-                        #   built-in HTTP endpoint (configure PUBLIC_URL when a
-                        #   reverse proxy or external IP is needed).
+                        # LOCAL (default): the plugin serves the artifact over a
+                        #   small built-in HTTP endpoint. The download URL is
+                        #   resolved per player — loopback for clients on the
+                        #   server machine, the server IP / connect hostname /
+                        #   LAN address otherwise — so single-player LAN testing
+                        #   and remote dedicated servers both work without extra
+                        #   setup. Set PUBLIC_URL when a reverse proxy or CDN
+                        #   fronts the endpoint.
                         # STATIC_URL: the artifact is hosted externally.
-                        MODE: DISABLED
+                        MODE: LOCAL
+                        # Bind address of the built-in endpoint.
                         LOCAL_HOST: 0.0.0.0
+                        # Bind port; when busy, the next free port is probed
+                        # automatically (the served URL always uses the bound one).
                         LOCAL_PORT: 8163
-                        # Blank = derive from the server IP + LOCAL_PORT.
+                        # Blank = per-player resolution (recommended). Set to the
+                        # externally reachable prefix (e.g. http://packs.example.com)
+                        # when a reverse proxy / external IP fronts LOCAL.
                         PUBLIC_URL: ''
                         # Used by STATIC_URL mode; may contain {hash}.
                         STATIC_URL: ''
                         # Optional prompt text shown with the pack request.
                         PROMPT_MESSAGE: ''
-                        # Ticks after join before the automatic prompt.
+                        # Ticks after join before the automatic prompt. Players
+                        # already online when a new artifact compiles are pushed
+                        # automatically — no rejoin needed.
                         PROMPT_DELAY_TICKS: 60
                       CACHE:
                         # Generated artifacts (mp-<hash>.zip) kept before pruning.
                         MAX_ARTIFACTS: 8
                       # Non-zero pins pack.mcmeta's pack_format when the
                       # built-in version table lags a new Minecraft release.
+                      # The pack also declares a generous supported_formats
+                      # range, so newer clients accept it by default.
                       PACK_FORMAT_OVERRIDE: 0
                     """;
             try {

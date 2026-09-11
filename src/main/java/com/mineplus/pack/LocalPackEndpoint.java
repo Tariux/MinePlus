@@ -20,14 +20,21 @@ import java.util.regex.Pattern;
  * mode). One handler, two request threads, streamed file bodies (artifacts
  * are never held in memory), strict path validation, no application logic —
  * compilation and player state live elsewhere.
+ *
+ * <p>Port auto-probing: when the configured port is busy, the next few ports
+ * are tried so a default-configured server still gets a working endpoint
+ * without operator intervention; {@link #port()} reports the port actually
+ * bound (URLs must use it, not the configured value).</p>
  */
 final class LocalPackEndpoint {
 
     private static final Pattern ARTIFACT_NAME = Pattern.compile("mp-[a-f0-9]{1,12}\\.zip");
+    /** How many consecutive ports to try when the configured one cannot be bound. */
+    private static final int PORT_PROBE_COUNT = 10;
 
     private final PackCache cache;
     private final String host;
-    private final int port;
+    private final int configuredPort;
     private final ExecutorService workers = Executors.newFixedThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "mineplus-pack-http");
         thread.setDaemon(true);
@@ -35,30 +42,40 @@ final class LocalPackEndpoint {
     });
     private HttpServer server;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private volatile int boundPort = -1;
 
     LocalPackEndpoint(PackCache cache, String host, int port) {
         this.cache = cache;
         this.host = host;
-        this.port = port;
+        this.configuredPort = port;
     }
 
     boolean start() {
         if (running.get()) {
             return true;
         }
-        try {
-            server = HttpServer.create(new InetSocketAddress(host, port), 0);
+        String lastFailure = "unknown";
+        for (int probe = 0; probe < PORT_PROBE_COUNT; probe++) {
+            int candidate = configuredPort + probe;
+            try {
+                server = HttpServer.create(new InetSocketAddress(host, candidate), 0);
+            } catch (IOException blocked) {
+                lastFailure = blocked.getMessage();
+                server = null;
+                continue;
+            }
             server.setExecutor(workers);
             server.createContext("/", this::serve);
             server.start();
             running.set(true);
+            boundPort = candidate;
             return true;
-        } catch (IOException exception) {
-            DebugLogger.warning("[PackDelivery] Local endpoint failed to bind " + host + ":" + port
-                    + ": " + exception.getMessage());
-            server = null;
-            return false;
         }
+        DebugLogger.warning("[PackDelivery] Local endpoint could not bind " + host
+                + ":" + configuredPort + " (tried " + PORT_PROBE_COUNT
+                + " consecutive ports; last error: " + lastFailure + ").");
+        server = null;
+        return false;
     }
 
     void stop() {
@@ -66,7 +83,23 @@ final class LocalPackEndpoint {
             server.stop(0);
             server = null;
         }
+        boundPort = -1;
         workers.shutdownNow();
+    }
+
+    /** True while the HTTP endpoint accepts downloads (URL building gate). */
+    boolean isRunning() {
+        return running.get();
+    }
+
+    /** The port actually bound, or -1 when not running. */
+    int port() {
+        return running.get() ? boundPort : -1;
+    }
+
+    /** True when the endpoint had to fall back to a port above the configured one. */
+    boolean portDrifted() {
+        return running.get() && boundPort != configuredPort;
     }
 
     private void serve(HttpExchange exchange) throws IOException {
