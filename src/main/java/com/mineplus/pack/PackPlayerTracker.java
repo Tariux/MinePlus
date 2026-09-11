@@ -31,7 +31,11 @@ final class PackPlayerTracker implements Listener {
         PackScheduling.schedulePlayer(system.plugin(), player,
                 delivery.settings().promptDelayTicks(),
                 () -> {
-                    if (player.isOnline() && delivery.isDeliverable()) {
+                    // UNKNOWN guards against double prompts: the post-compile
+                    // auto-push may already have delivered the pack while the
+                    // join prompt was pending.
+                    if (player.isOnline() && delivery.isDeliverable()
+                            && delivery.state(player.getUniqueId()) == PlayerPackState.UNKNOWN) {
                         delivery.deliver(player);
                     }
                 });

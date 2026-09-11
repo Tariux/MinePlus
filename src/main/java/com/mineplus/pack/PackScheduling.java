@@ -39,4 +39,27 @@ final class PackScheduling {
         }
         Bukkit.getScheduler().runTaskLater(plugin, action, delayTicks);
     }
+
+    /**
+     * Runs a server-scoped action on the main thread (or the global region on
+     * Folia) as soon as possible — used for post-compile pushes to online
+     * players. Shutdown races are swallowed: a missed auto-push only delays
+     * delivery to the player's next join prompt.
+     */
+    static void scheduleNow(Plugin plugin, Runnable action) {
+        if (FOLIA) {
+            try {
+                Bukkit.getGlobalRegionScheduler().run(plugin, task -> action.run());
+            } catch (Throwable ignored) {
+                // Shutdown race; a missed auto-push is safe.
+            }
+            return;
+        }
+        try {
+            Bukkit.getScheduler().runTask(plugin, action);
+        } catch (RuntimeException shutdownRace) {
+            // Plugin disabling while a compile finishes (IllegalPluginAccessException
+            // et al.); the join prompt covers the player next session.
+        }
+    }
 }

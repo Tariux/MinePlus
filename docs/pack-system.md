@@ -75,13 +75,13 @@ surface; prefer modern servers).
 
 ```yaml
 PACK:
-  ENABLED: false            # master switch; false = subsystem fully inert
+  ENABLED: true            # master switch; false = subsystem fully inert
   DELIVERY:
-    MODE: DISABLED          # DISABLED | LOCAL | STATIC_URL
+    MODE: LOCAL            # LOCAL (default) | STATIC_URL | DISABLED
     LOCAL_HOST: 0.0.0.0
-    LOCAL_PORT: 8163
-    PUBLIC_URL: ''          # reverse proxy / external IP in front of LOCAL
-    STATIC_URL: ''          # externally hosted artifact URL; {hash} placeholder
+    LOCAL_PORT: 8163       # busy ports auto-probe upward
+    PUBLIC_URL: ''         # blank = per-player URL resolution (recommended)
+    STATIC_URL: ''         # externally hosted artifact URL; {hash} placeholder
     PROMPT_MESSAGE: ''
     PROMPT_DELAY_TICKS: 60
   CACHE:
@@ -89,8 +89,27 @@ PACK:
   PACK_FORMAT_OVERRIDE: 0   # pin pack_format when the version table lags
 ```
 
-With `ENABLED: false` the plugin behaves byte-identically to a pre-pack build:
-no compilation, no endpoint, no prompts — and `PackApi` degrades to a safe
+These are the **optimal defaults**: the subsystem is enabled with LOCAL
+delivery and works without any URL setup. The download URL is resolved per
+player — loopback (`http://127.0.0.1:<port>`) for clients on the server
+machine (single-player/LAN testing), then the operator-configured server IP,
+then the hostname the player used to connect (Paper's handshake host), then
+the machine's LAN address — so remote dedicated servers work as long as the
+port is reachable. `PUBLIC_URL` is the override for reverse-proxied or CDN
+fronted setups; `STATIC_URL` defers to fully external hosting.
+
+When the configured port is busy, the endpoint binds the next free port
+automatically (up to ten consecutive ports are probed); the served URL always
+uses the port actually bound, and `/mineplus pack status` shows it. A URL is
+never handed to clients for an endpoint that is not listening — that failure
+mode surfaces as a client-side "failed to apply resource pack" with nothing
+to download.
+
+Players who joined before the first compile completes (or who already applied
+a previous artifact when a new one compiles) are pushed the pack
+automatically; players who declined are never re-prompted by this path. With
+`ENABLED: false` the plugin behaves byte-identically to a pre-pack build: no
+compilation, no endpoint, no prompts — and `PackApi` degrades to a safe
 fallback where item identity still registers (gameplay intact, vanilla
 visuals).
 
@@ -133,18 +152,27 @@ Multiblock levels select their backend in JSON:
 - **Deterministic**: fixed entry order, timestamps and compression; identical
   registrations produce byte-identical artifacts. Artifact identity = SHA-256
   over the ordered asset graph **plus** the compile context (pack format,
-  item representation).
+  item representation). `pack.mcmeta` also declares a generous
+  `supported_formats` range (detected format → latest known), so a client
+  whose format drifted above the detected value accepts the pack instead of
+  rejecting it after download.
 - **Incremental**: per-asset content hashes memoize serialization (unchanged
   assets never re-serialize); a graph-hash cache hit skips compilation and
-  client re-downloads entirely.
+  client re-downloads entirely. Model texture references and registered
+  texture entries share one canonical path normalization (last-segment, the
+  same semantics as the Core texture resolver), so a model and its textures
+  can never disagree inside the artifact.
 - **Failure isolation**: a failing asset is skipped with a warning; a failed
   compile keeps the previous artifact; a pack subsystem failure never affects
   virtual rendering.
 - **Delivery**: compilation and delivery are separate concerns. LOCAL mode
   serves artifact bytes from a two-thread JDK HTTP endpoint (streamed, never
-  in-memory); STATIC_URL defers to operator hosting; DISABLED expects manual
+  in-memory) with per-player URL resolution and automatic port probing;
+  STATIC_URL defers to operator hosting; DISABLED expects manual
   distribution. Player states (`UNKNOWN → REQUESTED → ACCEPTED/DECLINED/FAILED
-  → APPLIED`) drive the fallback contract.
+  → APPLIED`) drive the fallback contract. Failed pushes keep every overload
+  that still carries the SHA-1 integrity hash; `/mineplus pack status` prints
+  the resolved URL and SHA-1 for client-side verification.
 - **Scheduling**: pack work runs on its own bounded executors, never the main
   thread, the texel bake pool, or virtual rendering workers. Player-scoped
   pushes are Folia-aware (`PackScheduling`).
@@ -167,8 +195,14 @@ Multiblock levels select their backend in JSON:
 - **Legacy `CustomModelData` mode** regenerates vanilla item model host files
   (predicate-gated; the era-typical conflict surface). Modern servers
   (1.21.4+) use the strictly additive `item_model` component.
-- **Pack-format table** lags new Minecraft releases; pin
-  `PACK_FORMAT_OVERRIDE` until it catches up.
+- **Pack-format table** lags new Minecraft releases; the emitted
+  `supported_formats` range keeps newer clients accepting the pack anyway, and
+  `PACK_FORMAT_OVERRIDE` pins the exact `pack_format` when needed.
+- **Vanilla overlay raw assets** (the Gunsmith tree) rely on client-side
+  `items/*.json` definitions: clients older than 1.21.4 ignore them entirely
+  — the overlaid items stay vanilla while sound overrides (version-agnostic)
+  still apply. That "sounds work, models don't" split on an older client is
+  the documented safe degradation, not a pack defect.
 - **Pack-driven animation**: pack world objects reuse the existing animation
   architecture's pose pipeline where bindings apply, but client-side
   predicate/item-model animation (ModelEngine-style rigs) is future work — the

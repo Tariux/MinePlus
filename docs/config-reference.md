@@ -392,6 +392,16 @@ TEXEL_BAKING:
 | `TEXEL_BAKING.MAX_PLATES_PER_FACE` | plates ≥ 1 | Merged-plate ceiling per face (default 96); above it the face falls back to the single-material plate |
 | `TEXEL_BAKING.MAX_PLATES_PER_INSTANCE` | plates ≥ 1 | Whole-instance texel plate budget (default 150); faces overflow in emission order |
 | `TEXEL_BAKING.MAX_GRID_EDGE` | cells ≥ 1 | Hard grid edge cap per face (default 64) — entity count scales with geometry, never with texture resolution |
+| `PACK.ENABLED` | `true` / `false` | Resource pack subsystem master switch (default `true` — the optimal out-of-the-box state); `false` makes the whole subsystem inert |
+| `PACK.DELIVERY.MODE` | `LOCAL` / `STATIC_URL` / `DISABLED` | How artifacts reach players; `LOCAL` (default) serves from the built-in HTTP endpoint with per-player URL resolution, unknown values also fall back to `LOCAL` |
+| `PACK.DELIVERY.LOCAL_HOST` | bind address | Address the built-in endpoint listens on (default `0.0.0.0`) |
+| `PACK.DELIVERY.LOCAL_PORT` | port 1-65535 | Port the endpoint tries first (default 8163); when busy, the next free port is probed automatically and the served URL uses the bound one |
+| `PACK.DELIVERY.PUBLIC_URL` | URL prefix | Blank (default) = per-player resolution: loopback for same-machine clients, then the configured server IP, the connect hostname (Paper), then the LAN address. Set when a reverse proxy/CDN fronts the endpoint |
+| `PACK.DELIVERY.STATIC_URL` | URL | Externally hosted artifact URL (`STATIC_URL` mode); may contain `{hash}` |
+| `PACK.DELIVERY.PROMPT_MESSAGE` | text | Optional prompt shown with the pack request; blank = vanilla prompt |
+| `PACK.DELIVERY.PROMPT_DELAY_TICKS` | ticks ≥ 0 | Delay between join and the automatic prompt (default 60); players already online when a new artifact compiles are pushed automatically — no rejoin needed |
+| `PACK.CACHE.MAX_ARTIFACTS` | artifacts ≥ 1 | Generated `mp-<hash>.zip` artifacts kept before pruning (default 8; the current one is always pinned) |
+| `PACK.PACK_FORMAT_OVERRIDE` | format ≥ 1 | Non-zero pins `pack.mcmeta`'s `pack_format` when the built-in table lags a new release; the pack also declares a generous `supported_formats` range so newer clients accept it by default |
 
 ---
 
@@ -426,8 +436,11 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 | `/mineplus model models` | List all loaded model keys |
 | `/mineplus model debugspawn <modelKey>` | Spawn a raw model on the looked-at face |
 | `/mineplus model cleanup` | Sweep loaded chunks for ghost `BlockDisplay` entities (stale renders from a previous session or crashed swap) and remove them; also runs automatically on startup after instance reconcile |
+| `/mineplus pack status` | Resource pack subsystem: artifact (name, assets, pack_format), the resolved download URL + SHA-1 for diagnostics, registered asset count, player pack states |
+| `/mineplus pack recompile` | Explicit artifact recompile (async, reports the result) |
+| `/mineplus pack push <player>` | Deliver the current pack to one player |
 
-**Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model` — all default to op.
+**Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model`, `mineplus.admin.pack` — all default to op.
 
 ---
 

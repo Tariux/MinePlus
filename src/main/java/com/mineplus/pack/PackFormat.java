@@ -54,10 +54,16 @@ public final class PackFormat {
         }
         int minor = version[1];
         int patch = version[2];
-        if (minor < 21) {
-            return 34;
+        if (minor < 20) {
+            return 15; // pre-1.20 servers: closest supported era
         }
         return switch (minor) {
+            case 20 -> switch (patch) {
+                case 0, 1 -> 15;
+                case 2 -> 18;
+                case 3, 4 -> 22;
+                default -> 32; // 1.20.5+
+            };
             case 21 -> switch (patch) {
                 case 0, 1 -> 34;
                 case 2, 3 -> 42;
@@ -68,6 +74,16 @@ public final class PackFormat {
             };
             default -> 64; // future minors: latest known format until the table catches up
         };
+    }
+
+    /**
+     * The newest {@code pack_format} this plugin's table knows. Used as the
+     * {@code supported_formats} ceiling in {@code pack.mcmeta} so newer
+     * clients (whose format drifted above the detected value) still accept
+     * the pack instead of rejecting it as incompatible.
+     */
+    public static int latestKnownPackFormat() {
+        return 64;
     }
 
     /** True when the server supports the modern {@code item_model} component (1.21.4+). */

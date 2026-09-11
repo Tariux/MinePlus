@@ -71,6 +71,15 @@ public interface PackApi {
     /** Pushes the current pack to a player; false when undeliverable. */
     boolean deliverPack(Player player);
 
+    /**
+     * The URL one player's client would use to download the current pack
+     * (per-player host resolution in LOCAL mode), or null when nothing is
+     * deliverable. Diagnostics surface for status commands — not gameplay.
+     */
+    default String deliveryUrl(Player player) {
+        return null;
+    }
+
     /** Explicit recompile; completes with the artifact, or null when nothing compiled. */
     CompletableFuture<PackArtifact> recompile();
 

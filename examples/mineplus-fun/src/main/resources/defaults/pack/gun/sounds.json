@@ -1,0 +1,6 @@
+{
+  "entity.arrow.shoot": {
+    "replace": true,
+    "sounds": ["custom/gun_bow"]
+  }
+}
