@@ -70,6 +70,13 @@ public final class PackSubCommand implements SubCommand {
                             + ChatColor.GRAY + " (" + artifact.assetCount() + " assets, "
                             + artifact.byteSize() + " bytes, pack_format " + artifact.packFormat()
                             + ", " + artifact.itemRepresentation() + ")");
+                    String url = api.deliveryUrl(sender instanceof Player player ? player : null);
+                    sender.sendMessage(ChatColor.GRAY + " Download URL: " + ChatColor.WHITE
+                            + (url == null ? "unavailable (delivery mode, endpoint, or URL settings)"
+                            : url));
+                    if (url != null && artifact.sha1() != null && artifact.sha1().length() == 40) {
+                        sender.sendMessage(ChatColor.GRAY + " SHA-1: " + ChatColor.WHITE + artifact.sha1());
+                    }
                 }
                 sender.sendMessage(ChatColor.GRAY + " Registered assets: "
                         + context.packSystem().assetRegistry().size());

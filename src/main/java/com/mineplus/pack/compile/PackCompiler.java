@@ -151,7 +151,13 @@ public final class PackCompiler {
                 return null;
             }
 
-            partial.renameTo(target);
+            if (!partial.renameTo(target)) {
+                // Windows/FS edge: renameTo fails silently — surface it instead
+                // of serving an artifact that was never published.
+                partial.delete();
+                throw new IOException("Could not publish artifact " + target.getName()
+                        + " (rename of the partial file failed)");
+            }
             PackArtifact artifact = new PackArtifact(
                     target, hash, java.util.HexFormat.of().formatHex(PackCache.sha1(target)),
                     packFormat, representation,
@@ -235,6 +241,18 @@ public final class PackCompiler {
     private static String packMetaJson(int packFormat) {
         JsonObject pack = new JsonObject();
         pack.addProperty("pack_format", packFormat);
+        // 1.20.2+ clients accept any pack whose format lies inside the
+        // declared supported range; without it, a client whose format drifted
+        // above the detected value rejects the pack after download ("failed
+        // to apply resource pack"). The generous ceiling is safe: the pack's
+        // content (models, textures, sounds, item definitions) is forward
+        // compatible in practice, and pre-1.20.2 clients simply ignore the
+        // field and use pack_format.
+        int ceiling = Math.max(packFormat, PackFormat.latestKnownPackFormat());
+        JsonObject supportedFormats = new JsonObject();
+        supportedFormats.addProperty("min_inclusive", packFormat);
+        supportedFormats.addProperty("max_inclusive", ceiling);
+        pack.add("supported_formats", supportedFormats);
         pack.addProperty("description", "Mineplus generated content pack");
         JsonObject root = new JsonObject();
         root.add("pack", pack);

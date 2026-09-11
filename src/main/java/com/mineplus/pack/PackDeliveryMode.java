@@ -15,15 +15,19 @@ public enum PackDeliveryMode {
     /** The operator hosts the artifact externally; only a static URL is used. */
     STATIC_URL;
 
-    /** Parses a config value; unknown or blank values fall back to {@link #DISABLED}. */
+    /** Parses a config value; unknown or blank values fall back to {@link #LOCAL}. */
     public static PackDeliveryMode fromKey(String key) {
         if (key == null || key.isBlank()) {
-            return DISABLED;
+            return LOCAL;
         }
         return switch (key.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_')) {
+            case "DISABLED", "OFF", "MANUAL", "NONE" -> DISABLED;
             case "LOCAL", "LOCAL_BYTE_ENDPOINT", "LOCAL_ENDPOINT" -> LOCAL;
             case "STATIC_URL", "STATIC", "URL" -> STATIC_URL;
-            default -> DISABLED;
+            // An unrecognized value must not silently disable delivery: the
+            // optimal default keeps the automatic endpoint alive and the
+            // misconfigured key surfaces through /mineplus pack status.
+            default -> LOCAL;
         };
     }
 }

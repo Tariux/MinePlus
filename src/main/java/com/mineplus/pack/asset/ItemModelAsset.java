@@ -65,10 +65,13 @@ public final class ItemModelAsset extends PackAsset {
      * Stable legacy {@code custom_model_data} predicate value derived from the
      * item id — deterministic across restarts so previously issued items keep
      * rendering, never zero (zero would match every vanilla item).
+     * {@code floorMod} avoids the {@code Math.abs(Integer#MIN_VALUE)} overflow
+     * that would produce an invalid negative predicate. Must stay in sync with
+     * {@code PackItemFactory.stableCustomModelData}.
      */
     public int customModelData() {
         int hash = (namespace() + ":" + itemId()).hashCode();
-        return 1000 + (Math.abs(hash) % 900_000);
+        return 1000 + Math.floorMod(hash, 900_000);
     }
 
     /** Modern representation entry: {@code assets/<ns>/items/<id>.json}. */

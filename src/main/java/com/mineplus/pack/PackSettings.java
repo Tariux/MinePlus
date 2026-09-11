@@ -6,15 +6,19 @@ import org.bukkit.configuration.file.FileConfiguration;
  * Resource pack system settings (the {@code PACK} section of
  * {@code settings.mp.yml}).
  *
- * <p>Defaults keep the plugin byte-identical to a pre-pack build:
- * {@code enabled=false} compiles nothing, serves nothing, and pushes nothing.
- * Every other default is inert until {@code enabled=true}.</p>
+ * <p>Defaults are the optimal out-of-the-box state: the subsystem enabled
+ * with LOCAL delivery, serving artifacts from a small built-in HTTP endpoint
+ * whose URL is resolved per player (loopback for same-machine clients, the
+ * server IP / connect hostname / LAN address otherwise). Both single-player
+ * LAN testing and remote dedicated servers work without manual URL setup;
+ * {@code enabled=false} opts out completely and keeps the plugin
+ * byte-identical to a pre-pack build.</p>
  *
  * @param enabled            master switch; false = the whole subsystem is inert
  * @param deliveryMode       how artifacts reach players
  * @param localHost          bind address of the local byte endpoint (LOCAL mode)
- * @param localPort          bind port of the local byte endpoint (LOCAL mode)
- * @param publicUrl          external URL prefix override (reverse proxy in front of LOCAL); blank = derive from host:port
+ * @param localPort          bind port of the local byte endpoint (LOCAL mode); busy ports auto-probe upward
+ * @param publicUrl          external URL prefix override (reverse proxy in front of LOCAL); blank = derive per player
  * @param staticUrl          the externally hosted artifact URL (STATIC_URL mode); may contain {@code {hash}}
  * @param promptMessage      optional prompt shown with the pack request; blank = vanilla prompt
  * @param promptDelayTicks   delay between join and the automatic pack prompt
@@ -46,7 +50,7 @@ public record PackSettings(
     }
 
     public static PackSettings defaults() {
-        return new PackSettings(false, PackDeliveryMode.DISABLED, "0.0.0.0", 8163,
+        return new PackSettings(true, PackDeliveryMode.LOCAL, "0.0.0.0", 8163,
                 "", "", "", 60, 8, 0);
     }
 

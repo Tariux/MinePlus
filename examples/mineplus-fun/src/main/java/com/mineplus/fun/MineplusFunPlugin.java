@@ -4,6 +4,7 @@ import com.mineplus.MineplusPlugin;
 import com.mineplus.fun.cabinet.CabinetFeature;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
+import com.mineplus.fun.gunsmith.GunsmithFeature;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.packshowcase.PackShowcaseFeature;
 import com.mineplus.fun.wine.WineFeature;
@@ -15,7 +16,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * Example "module" plugin that turns the Mineplus Core engine into Juicer,
- * Cannon, Gear, Wine, and Cabinet game features.
+ * Cannon, Gear, Wine, Gunsmith, and Cabinet game features plus the
+ * pack-system showcase.
  *
  * <p>This plugin is intentionally a <em>separate</em> artifact from the Core. It depends on
  * the Core at runtime (see {@code plugin.yml -> depend: [Mineplus]}) and obtains the Core
@@ -59,6 +61,11 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new CannonFeature(this, context));
         features.add(new GearFeature(this, context));
         features.add(new WineFeature(this, context));
+        // Pack-axis field tests after wine: their pack registrations land before
+        // the coordinated reload, so model/texture/raw assets attach during the
+        // reload-driven pack recompile (order-insensitive, but kept after wine
+        // for a deterministic bootstrap sequence).
+        features.add(new GunsmithFeature(this, context));
         features.add(new CabinetFeature(this, context));
         features.add(new PackShowcaseFeature(this, context));
 
@@ -75,7 +82,8 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine, Cabinet, PackShowcase) enabled on top of Mineplus Core.");
+                + " features (Juicer, Cannon, Gear, Wine, Gunsmith, Cabinet, PackShowcase)"
+                + " enabled on top of Mineplus Core.");
     }
 
     @Override

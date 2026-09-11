@@ -61,6 +61,11 @@ public final class MineplusPackApi implements PackApi {
     }
 
     @Override
+    public String deliveryUrl(Player player) {
+        return system.deliveryUrlFor(player);
+    }
+
+    @Override
     public CompletableFuture<PackArtifact> recompile() {
         return system.recompile();
     }

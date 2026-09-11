@@ -3,10 +3,14 @@ package com.mineplus.fun.cannon;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.util.ModelPoints;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.Random;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
@@ -15,6 +19,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityShootBowEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 import org.joml.Vector3f;
 
@@ -71,10 +76,33 @@ public final class CannonAimListener implements Listener {
     private final CannonMountManager mounts;
     private final Random random;
 
+    /**
+     * The shot's ammunition item, resolved reflectively: the accessor lives in
+     * different API generations under different names (Paper's
+     * {@code getArrowItem}, Spigot 1.21.3+'s {@code getConsumable}) and does
+     * not exist at all on Spigot 1.21.1 and older — a direct call compiled
+     * against the stub jars crashes there with {@code NoSuchMethodError} on
+     * every bow shot. Resolved once; {@code null} means this server exposes
+     * no accessor and the match check falls back to an inventory heuristic.
+     */
+    private static final MethodHandle AMMUNITION_ITEM = resolveAmmunitionAccessor();
+
     public CannonAimListener(PluginContext context, CannonMountManager mounts) {
         this.context = context;
         this.mounts = mounts;
         this.random = new Random();
+    }
+
+    private static MethodHandle resolveAmmunitionAccessor() {
+        for (String name : new String[]{"getArrowItem", "getConsumable"}) {
+            try {
+                return MethodHandles.lookup().findVirtual(
+                        EntityShootBowEvent.class, name, MethodType.methodType(ItemStack.class));
+            } catch (ReflectiveOperationException absentOnThisApi) {
+                // try the next name
+            }
+        }
+        return null;
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -89,10 +117,51 @@ public final class CannonAimListener implements Listener {
             return;
         }
 
-        if (mounts.isMatch(event.getArrowItem())) {
+        ItemStack ammunition = ammunitionItem(event);
+        if (ammunition != null ? mounts.isMatch(ammunition) : matchIsOnlyAmmunition(player)) {
             event.setCancelled(true);
             player.sendMessage(ChatColor.GRAY + "The cannon match only primes the Cannon Lanyard.");
         }
+    }
+
+    private ItemStack ammunitionItem(EntityShootBowEvent event) {
+        if (AMMUNITION_ITEM == null) {
+            return null;
+        }
+        try {
+            return (ItemStack) AMMUNITION_ITEM.invoke(event);
+        } catch (Throwable unavailable) {
+            return null;
+        }
+    }
+
+    /**
+     * Pre-1.21.2 servers expose no ammunition accessor, so approximate the
+     * vanilla bow ammo selection: when the shooter carries a cannon match and
+     * no other bow/crossbow ammunition (arrows, fireworks), the match is the
+     * item the bow will consume — cancel before it is wasted. Players without
+     * a match are never touched.
+     */
+    private boolean matchIsOnlyAmmunition(Player player) {
+        boolean hasMatch = false;
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (item == null || item.getType().isAir()) {
+                continue;
+            }
+            if (mounts.isMatch(item)) {
+                hasMatch = true;
+            } else if (isVanillaAmmunition(item.getType())) {
+                return false;
+            }
+        }
+        return hasMatch;
+    }
+
+    private boolean isVanillaAmmunition(Material material) {
+        return material == Material.ARROW
+                || material == Material.SPECTRAL_ARROW
+                || material == Material.TIPPED_ARROW
+                || material == Material.FIREWORK_ROCKET;
     }
 
     private void fireFromSeat(Player player, float force) {
