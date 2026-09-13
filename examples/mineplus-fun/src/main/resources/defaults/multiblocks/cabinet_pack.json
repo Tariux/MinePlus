@@ -1,0 +1,22 @@
+{
+  "id": "cabinet_pack",
+  "name": "Acacia Cabinet (resource pack)",
+  "levels": {
+    "1": {
+      "model": "models/acacia_cabinet_top_closed.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "renderBackend": "pack",
+      "renderKind": "block"
+    },
+    "2": {
+      "model": "models/acacia_cabinet_open.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "renderBackend": "pack",
+      "renderKind": "block"
+    }
+  }
+}

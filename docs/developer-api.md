@@ -249,6 +249,46 @@ Best content: pixel art with flat regions (lettering, stripes, emblems). Noise/c
 
 ---
 
+## Resource Pack API (PackApi)
+
+`context.packApi()` is the peer developer surface for the generated resource pack (the client-assisted rendering axis). It is never null: when the subsystem is disabled, identity registration still works and presentation falls back to the vanilla backing. See [the pack system contract](pack-system.md) for delivery, compilation and the full carrier design.
+
+| Method | Description |
+|---|---|
+| `registerItem(PackItemDefinition)` | Custom item: PDC identity + auto model/texture assets + modern `item_model`/legacy `CustomModelData` presentation |
+| `registerBlock(PackBlockDefinition)` | Custom block rendering: allocates a carrier state (`PackBlockCarrier.NOTE_BLOCK`) and attaches block-space geometry + textures |
+| `registerModel(ns, path, modelKey)` | Standalone model asset from a loaded virtual model |
+| `registerTexture(ns, path, file)` / `registerRawAsset(ns, path, file)` | Verbatim PNG / pack file assets |
+| `createItem(ns, id)` | The registered item's `ItemStack` |
+| `playerPackState(uuid)` / `deliverPack(player)` / `deliveryUrl(player)` | Delivery state and diagnostics |
+| `recompile()` / `currentArtifact()` | Explicit compile / the current artifact |
+
+```java
+// Item (see mineplus-fun's PackShowcaseFeature)
+context.packApi().registerItem(PackItemDefinition.builder(
+        "fun", "strad_wine", Material.GLASS_BOTTLE, "strad-wine")
+        .displayName("Strad Wine Bottle").build());
+
+// Block (see mineplus-fun's AlchemyFeature): model key = <typeId>_lvl_<level>,
+// geometry key = the model file's stem in models/ (what assets attach to)
+context.packApi().registerBlock(PackBlockDefinition.builder(
+        "fun", "alchemy_table", "alchemy_table_lvl_1")
+        .geometryModelKey("alchemy-table")
+        .displayName("Alchemy Table")
+        .carrier(PackBlockCarrier.NOTE_BLOCK)
+        .build());
+```
+
+A pack block is placed, collision-owned and persisted by the ordinary multiblock lifecycle (`createMultiBlock` / `placeMultiBlock` / `removeBlock`). Its multiblock JSON level selects the rendering:
+
+```json
+"1": { "model": "models/alchemy-table.bbmodel", "renderBackend": "pack", "renderKind": "block" }
+```
+
+`renderBackend` (`virtual` | `pack` | `virtual+pack`) and `renderKind` (`model` | `block`) are resolved in one place (`MultiBlockLevel` + `ModelRenderingManager`); when the pack subsystem is off, `pack` degrades to `virtual` automatically. Registration is order-insensitive — assets attach during the coordinated reload-driven recompile.
+
+---
+
 ## Timed Crafting Processes
 
 `startProcess(instanceId, recipeId)` runs a recipe as a timed process on an ACTIVE machine:

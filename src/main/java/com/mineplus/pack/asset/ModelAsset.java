@@ -19,10 +19,17 @@ import java.util.Objects;
  * model never invalidates the compiled artifact, while serialization itself
  * is memoized by the compiler through that hash.</p>
  */
-public final class ModelAsset extends PackAsset {
+public class ModelAsset extends PackAsset {
 
     private final String modelKey;
     private final File sourceFile;
+    /**
+     * The imported model captured at registration time. The model registry is
+     * reloaded (cleared + repopulated) around compiles, so resolving by key at
+     * compile time can race to null; capturing the immutable model here makes
+     * serialization deterministic.
+     */
+    private final VirtualModel capturedModel;
 
     /**
      * @param namespace asset namespace (e.g. {@code fun})
@@ -33,9 +40,26 @@ public final class ModelAsset extends PackAsset {
      *                  API-built models, which hash over the model key)
      */
     public ModelAsset(String namespace, String path, String owner, String modelKey, File sourceFile) {
+        this(namespace, path, owner, modelKey, sourceFile, null);
+    }
+
+    /**
+     * @param capturedModel the already-imported model to serialize (avoids the
+     *                      compile-time registry lookup race); may be null to
+     *                      resolve by {@link #modelKey()} at compile time
+     */
+    public ModelAsset(
+            String namespace,
+            String path,
+            String owner,
+            String modelKey,
+            File sourceFile,
+            VirtualModel capturedModel
+    ) {
         super(namespace, path, owner);
         this.modelKey = Objects.requireNonNull(modelKey, "modelKey").trim().toLowerCase(Locale.ROOT);
         this.sourceFile = sourceFile;
+        this.capturedModel = capturedModel;
     }
 
     public String modelKey() {
@@ -44,6 +68,11 @@ public final class ModelAsset extends PackAsset {
 
     public File sourceFile() {
         return sourceFile;
+    }
+
+    /** The model captured at registration, or null to resolve by key at compile time. */
+    public VirtualModel capturedModel() {
+        return capturedModel;
     }
 
     @Override
