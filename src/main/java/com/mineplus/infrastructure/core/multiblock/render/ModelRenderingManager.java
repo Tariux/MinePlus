@@ -4,11 +4,13 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.render.RenderBackend;
+import com.mineplus.infrastructure.render.RenderKind;
 import com.mineplus.infrastructure.virtual.BbModelImporter;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.pack.render.PackBlockRenderer;
 import com.mineplus.pack.render.PackModelRenderer;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
@@ -34,6 +36,7 @@ public final class ModelRenderingManager {
 
     private final VirtualBlockManager virtualBlockManager;
     private volatile PackModelRenderer packRenderer;
+    private volatile PackBlockRenderer packBlockRenderer;
 
     public ModelRenderingManager(VirtualBlockManager virtualBlockManager) {
         this.virtualBlockManager = virtualBlockManager;
@@ -42,6 +45,11 @@ public final class ModelRenderingManager {
     /** Injected by the pack subsystem on start; null when the subsystem is disabled. */
     public void setPackRenderer(PackModelRenderer packRenderer) {
         this.packRenderer = packRenderer;
+    }
+
+    /** Injected alongside {@link #setPackRenderer}: the pack block axis. */
+    public void setPackBlockRenderer(PackBlockRenderer packBlockRenderer) {
+        this.packBlockRenderer = packBlockRenderer;
     }
 
     /** True when the pack renderer is available for backend selection. */
@@ -78,18 +86,20 @@ public final class ModelRenderingManager {
         RenderBackend backend = effectiveBackend(resolved.level());
         switch (backend) {
             case PACK -> {
-                UUID id = renderPack(resolved);
+                UUID id = resolved.level().renderKind() == RenderKind.BLOCK
+                        ? renderPackBlock(resolved)
+                        : renderPack(resolved);
                 if (id != null) {
                     return id;
                 }
-                // Pack render unavailable (model without a pack item, spawn
-                // failure): the virtual engine is the declared fallback.
+                // Pack render unavailable (model without a pack item/block,
+                // spawn failure): the virtual engine is the declared fallback.
                 return virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
             }
             case VIRTUAL_PLUS_PACK -> {
                 UUID id = virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
                 if (id != null) {
-                    attachPackDisplay(id, resolved);
+                    attachPackVisual(id, resolved);
                 }
                 return id;
             }
@@ -100,7 +110,7 @@ public final class ModelRenderingManager {
     }
 
     /**
-     * Pack-backend render: feasibility first (a registered pack item must
+     * Pack-backend item render: feasibility first (a registered pack item must
      * render the model), then the shared collision lattice, then the pack
      * display keyed by the collision instance id.
      */
@@ -113,19 +123,62 @@ public final class ModelRenderingManager {
         if (instanceId == null) {
             return null;
         }
-        attachPackDisplay(instanceId, resolved);
+        if (!attachPackVisual(instanceId, resolved)) {
+            // Never leave a collision-only ghost: release it so the caller
+            // falls back to a full virtual render.
+            virtualBlockManager.removeModel(instanceId);
+            return null;
+        }
         return instanceId;
     }
 
-    private void attachPackDisplay(UUID instanceId, Resolved resolved) {
+    /**
+     * Pack-backend block render: feasibility first (a registered pack block
+     * must render the model), then the shared collision lattice, then one
+     * {@code BlockDisplay} carrying the allocated carrier state.
+     */
+    private UUID renderPackBlock(Resolved resolved) {
+        PackBlockRenderer renderer = packBlockRenderer;
+        if (renderer == null || !renderer.hasBlockForModel(resolved.model().name())) {
+            return null;
+        }
+        UUID instanceId = virtualBlockManager.spawnCollisionModel(resolved.model(), resolved.placement());
+        if (instanceId == null) {
+            return null;
+        }
+        if (!attachPackVisual(instanceId, resolved)) {
+            // Never leave a collision-only ghost: release it so the caller
+            // falls back to a full virtual render.
+            virtualBlockManager.removeModel(instanceId);
+            return null;
+        }
+        return instanceId;
+    }
+
+    /** Attaches the pack visual the level's kind selects; true when a display spawned. */
+    private boolean attachPackVisual(UUID instanceId, Resolved resolved) {
+        if (resolved.level().renderKind() == RenderKind.BLOCK) {
+            PackBlockRenderer renderer = packBlockRenderer;
+            if (renderer == null) {
+                return false;
+            }
+            if (renderer.attach(instanceId, resolved.model(), resolved.placement())) {
+                return true;
+            }
+            DebugLogger.warning("render: pack block display attach failed for instance " + instanceId
+                    + "; falling back to virtual rendering.");
+            return false;
+        }
         PackModelRenderer renderer = packRenderer;
         if (renderer == null) {
-            return;
+            return false;
         }
-        if (!renderer.attach(instanceId, resolved.model(), resolved.placement())) {
-            DebugLogger.warning("render: pack display attach failed for instance " + instanceId
-                    + "; virtual rendering carries the visual.");
+        if (renderer.attach(instanceId, resolved.model(), resolved.placement())) {
+            return true;
         }
+        DebugLogger.warning("render: pack display attach failed for instance " + instanceId
+                + "; falling back to virtual rendering.");
+        return false;
     }
 
     /** Backend with subsystem availability applied, in this one place. */
@@ -166,6 +219,10 @@ public final class ModelRenderingManager {
         if (renderer != null) {
             renderer.remove(renderedModelId);
         }
+        PackBlockRenderer blockRenderer = packBlockRenderer;
+        if (blockRenderer != null) {
+            blockRenderer.remove(renderedModelId);
+        }
         virtualBlockManager.removeModel(renderedModelId);
     }
 
@@ -191,8 +248,12 @@ public final class ModelRenderingManager {
             UUID id = virtualBlockManager.restoreCollisionForState(
                     instance.coordinate(), instance.modelKey(), instance.rotation());
             if (id != null) {
-                attachPackDisplay(id, resolved);
-                return id;
+                if (attachPackVisual(id, resolved)) {
+                    return id;
+                }
+                // Pack visual unavailable: release the collision-only restore
+                // so the caller falls back to a full virtual render.
+                virtualBlockManager.removeModel(id);
             }
             return null;
         }
@@ -206,6 +267,10 @@ public final class ModelRenderingManager {
         PackModelRenderer renderer = packRenderer;
         if (renderer != null) {
             swept += renderer.sweepGhosts();
+        }
+        PackBlockRenderer blockRenderer = packBlockRenderer;
+        if (blockRenderer != null) {
+            swept += blockRenderer.sweepGhosts();
         }
         return swept;
     }

@@ -60,10 +60,47 @@ public final class ModelJsonWriter {
             String outNamespace,
             List<String> warnings
     ) {
+        return writeInternal(model, originMode, outNamespace, warnings, false);
+    }
+
+    /**
+     * Serializes the model as a vanilla <em>block</em> element model — the pack
+     * block axis. Identical to {@link #write} except for the coordinate
+     * convention: a center-authored model is shifted by {@code +8} on x/z so
+     * pixel (0,0,0) (block center) becomes the block corner the client's
+     * {@code BlockDisplay} is anchored at, and no item {@code display}
+     * transforms are emitted (block models carry their own vanilla defaults).
+     */
+    public static String writeBlock(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace) {
+        List<String> warnings = new ArrayList<>();
+        String json = writeBlock(model, originMode, outNamespace, warnings);
+        for (String warning : warnings) {
+            com.mineplus.util.DebugLogger.warning("[PackCompiler] Block model '" + model.name() + "': " + warning);
+        }
+        return json;
+    }
+
+    /** Same as {@link #writeBlock(VirtualModel, ModelMeta.OriginMode, String)} with a warning sink. */
+    public static String writeBlock(
+            VirtualModel model,
+            ModelMeta.OriginMode originMode,
+            String outNamespace,
+            List<String> warnings
+    ) {
+        return writeInternal(model, originMode, outNamespace, warnings, true);
+    }
+
+    private static String writeInternal(
+            VirtualModel model,
+            ModelMeta.OriginMode originMode,
+            String outNamespace,
+            List<String> warnings,
+            boolean block
+    ) {
         Map<String, String> textureIndex = new LinkedHashMap<>();
         JsonArray elements = new JsonArray();
         for (BakedCube cube : model.cubes()) {
-            JsonObject element = element(cube, model, originMode, textureIndex, warnings);
+            JsonObject element = element(cube, model, originMode, textureIndex, warnings, block);
             if (element != null) {
                 elements.add(element);
             }
@@ -81,7 +118,12 @@ public final class ModelJsonWriter {
         root.addProperty("ambientocclusion", false);
         root.add("textures", textures);
         root.add("elements", elements);
-        root.add("display", vanillaDisplayTransforms());
+        if (!block) {
+            // Item models need held/gui/ground transforms; block models are
+            // placed in the world through BlockDisplay and must not inherit
+            // item display settings.
+            root.add("display", vanillaDisplayTransforms());
+        }
         return GSON.toJson(root);
     }
 
@@ -90,16 +132,18 @@ public final class ModelJsonWriter {
             VirtualModel model,
             ModelMeta.OriginMode originMode,
             Map<String, String> textureIndex,
-            List<String> warnings
+            List<String> warnings,
+            boolean block
     ) {
         if (!cube.isAxisAligned()) {
             warnings.add("cube '" + cube.name() + "' carries a rotation; emitted as its axis-aligned "
                     + "bounding box (vanilla elements support at most one ±45° axis rotation).");
         }
 
-        float originShiftX = originMode == ModelMeta.OriginMode.CENTER ? -8.0f : 0.0f;
+        float centerShift = originMode == ModelMeta.OriginMode.CENTER ? (block ? 8.0f : -8.0f) : 0.0f;
+        float originShiftX = centerShift;
         float originShiftY = 0.0f;
-        float originShiftZ = originMode == ModelMeta.OriginMode.CENTER ? -8.0f : 0.0f;
+        float originShiftZ = centerShift;
 
         float fromX = cube.translation().x * 16.0f + originShiftX;
         float fromY = cube.translation().y * 16.0f + originShiftY;
@@ -109,7 +153,6 @@ public final class ModelJsonWriter {
         float toZ = fromZ + cube.scale().z * 16.0f;
 
         JsonObject element = new JsonObject();
-        element.addProperty("name", cube.name());
         element.add("from", vec3(round(fromX), round(fromY), round(fromZ)));
         element.add("to", vec3(round(toX), round(toY), round(toZ)));
         element.addProperty("shade", false);
@@ -122,8 +165,13 @@ public final class ModelJsonWriter {
             }
             // Normalized once here: the reference written into the model and
             // the texture asset's zip entry both use the same canonical path.
-            String texturePath = com.mineplus.pack.asset.TextureAsset.normalizePath(face.textureName());
-            if (texturePath.isEmpty()) {
+            // The folder prefix matters: the client's block/item atlases only
+            // stitch textures under textures/block and textures/item, so a
+            // model referencing textures/<name> directly resolves to a missing
+            // sprite (the purple/black checkerboard).
+            String texturePath = (block ? "block/" : "item/")
+                    + com.mineplus.pack.asset.TextureAsset.normalizePath(face.textureName());
+            if (texturePath.endsWith("/")) {
                 continue;
             }
             faces.add(faceKey.name().toLowerCase(java.util.Locale.ROOT),
@@ -162,8 +210,11 @@ public final class ModelJsonWriter {
             v2 = swap;
         }
 
+        // Standard vanilla texture-variable naming: the textures map declares
+        // "0", faces reference "#0". (Using the reference itself as the map key
+        // leaves the client unable to resolve the variable.)
         String index = textureIndex.computeIfAbsent(texturePath,
-                name -> "#" + textureIndex.size());
+                name -> String.valueOf(textureIndex.size()));
 
         JsonObject json = new JsonObject();
         JsonArray uv = new JsonArray();
@@ -172,7 +223,7 @@ public final class ModelJsonWriter {
         uv.add(round(u2));
         uv.add(round(v2));
         json.add("uv", uv);
-        json.addProperty("texture", index);
+        json.addProperty("texture", "#" + index);
         int rotation = ((face.rotation() % 360) + 360) % 360;
         if (rotation != 0) {
             json.addProperty("rotation", rotation);

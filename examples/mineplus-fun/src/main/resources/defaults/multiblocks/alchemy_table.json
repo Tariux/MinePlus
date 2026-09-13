@@ -1,0 +1,14 @@
+{
+  "id": "alchemy_table",
+  "name": "Alchemy Table",
+  "levels": {
+    "1": {
+      "model": "models/alchemy-table.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "renderBackend": "pack",
+      "renderKind": "block"
+    }
+  }
+}

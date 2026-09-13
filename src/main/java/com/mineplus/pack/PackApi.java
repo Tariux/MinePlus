@@ -1,6 +1,7 @@
 package com.mineplus.pack;
 
 import com.mineplus.pack.compile.PackArtifact;
+import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.util.UUID;
@@ -43,6 +44,18 @@ public interface PackApi {
      * @param modelKey  key of the registered virtual model
      */
     void registerModel(String namespace, String path, String modelKey);
+
+    /**
+     * Registers a custom block: the model that supplies its geometry and the
+     * carrier state its {@code BlockDisplay} renders through. The block is
+     * placed and collision-owned by the ordinary multiblock lifecycle
+     * ({@code createMultiBlock}/{@code placeMultiBlock}/{@code removeBlock});
+     * this call only declares the pack rendering. The multiblock level selects
+     * it with {@code "renderBackend": "pack"} and {@code "renderKind": "block"}.
+     *
+     * @param definition the block definition
+     */
+    void registerBlock(PackBlockDefinition definition);
 
     /**
      * Registers a texture PNG asset.
@@ -119,6 +132,10 @@ final class DisabledPackApi implements PackApi {
 
     @Override
     public void registerModel(String namespace, String path, String modelKey) {
+    }
+
+    @Override
+    public void registerBlock(PackBlockDefinition definition) {
     }
 
     @Override

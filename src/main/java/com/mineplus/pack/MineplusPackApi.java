@@ -1,6 +1,7 @@
 package com.mineplus.pack;
 
 import com.mineplus.pack.compile.PackArtifact;
+import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.util.UUID;
@@ -33,6 +34,11 @@ public final class MineplusPackApi implements PackApi {
     @Override
     public void registerModel(String namespace, String path, String modelKey) {
         system.registerModel(namespace, path, modelKey);
+    }
+
+    @Override
+    public void registerBlock(PackBlockDefinition definition) {
+        system.registerBlock(definition);
     }
 
     @Override

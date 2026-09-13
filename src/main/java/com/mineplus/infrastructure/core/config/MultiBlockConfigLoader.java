@@ -72,7 +72,11 @@ public final class MultiBlockConfigLoader {
                 com.mineplus.infrastructure.render.RenderBackend renderBackend =
                         com.mineplus.infrastructure.render.RenderBackend.fromKey(
                                 levelJson.has("renderBackend") ? levelJson.get("renderBackend").getAsString() : null);
-                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations, renderBackend));
+                com.mineplus.infrastructure.render.RenderKind renderKind =
+                        com.mineplus.infrastructure.render.RenderKind.fromKey(
+                                levelJson.has("renderKind") ? levelJson.get("renderKind").getAsString() : null);
+                levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations,
+                        renderBackend, renderKind));
             }
 
             registry.registerType(new MultiBlockType(id, name, levels, new MultiBlockHook() {

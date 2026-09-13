@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.core.multiblock;
 
 import com.mineplus.infrastructure.render.RenderBackend;
+import com.mineplus.infrastructure.render.RenderKind;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,7 +15,8 @@ public record MultiBlockLevel(
         Map<String, Integer> upgradeCost,
         Map<String, String> guiOptions,
         List<String> animations,
-        RenderBackend renderBackend
+        RenderBackend renderBackend,
+        RenderKind renderKind
 ) {
 
     public MultiBlockLevel {
@@ -22,6 +24,7 @@ public record MultiBlockLevel(
         guiOptions = Collections.unmodifiableMap(new LinkedHashMap<>(guiOptions));
         animations = animations == null ? List.of() : List.copyOf(animations);
         renderBackend = renderBackend == null ? RenderBackend.VIRTUAL : renderBackend;
+        renderKind = renderKind == null ? RenderKind.MODEL : renderKind;
     }
 
     public MultiBlockLevel(
@@ -45,6 +48,20 @@ public record MultiBlockLevel(
             List<String> animations
     ) {
         this(level, modelPath, speedMultiplier, durability, upgradeCost, guiOptions, animations, RenderBackend.VIRTUAL);
+    }
+
+    public MultiBlockLevel(
+            int level,
+            String modelPath,
+            double speedMultiplier,
+            double durability,
+            Map<String, Integer> upgradeCost,
+            Map<String, String> guiOptions,
+            List<String> animations,
+            RenderBackend renderBackend
+    ) {
+        this(level, modelPath, speedMultiplier, durability, upgradeCost, guiOptions, animations, renderBackend,
+                RenderKind.MODEL);
     }
 
     /**

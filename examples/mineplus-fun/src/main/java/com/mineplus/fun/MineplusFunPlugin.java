@@ -1,6 +1,7 @@
 package com.mineplus.fun;
 
 import com.mineplus.MineplusPlugin;
+import com.mineplus.fun.alchemy.AlchemyFeature;
 import com.mineplus.fun.cabinet.CabinetFeature;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
@@ -68,6 +69,9 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new GunsmithFeature(this, context));
         features.add(new CabinetFeature(this, context));
         features.add(new PackShowcaseFeature(this, context));
+        // Pack block axis: an alchemy table multiblock whose level renders as a
+        // pack BlockDisplay (renderKind: block) instead of an item display.
+        features.add(new AlchemyFeature(this, context));
 
         for (ModuleFeature feature : features) {
             feature.start();
@@ -82,7 +86,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine, Gunsmith, Cabinet, PackShowcase)"
+                + " features (Juicer, Cannon, Gear, Wine, Gunsmith, Cabinet, PackShowcase, Alchemy)"
                 + " enabled on top of Mineplus Core.");
     }
 
