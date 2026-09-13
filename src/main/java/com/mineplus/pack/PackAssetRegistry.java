@@ -2,6 +2,7 @@ package com.mineplus.pack;
 
 import com.mineplus.pack.asset.ItemModelAsset;
 import com.mineplus.pack.asset.PackAsset;
+import com.mineplus.pack.asset.PackBlockAsset;
 import com.mineplus.util.DebugLogger;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,6 +31,8 @@ public final class PackAssetRegistry {
     private final Map<String, PackAsset> assets = new ConcurrentHashMap<>();
     /** modelKey -> ModelAsset, so world renders can resolve an item by model. */
     private final Map<String, ItemModelAsset> itemsByModelKey = new ConcurrentHashMap<>();
+    /** modelKey -> carrier binding, so world renders can resolve a pack block by model. */
+    private final Map<String, PackBlockAsset> blocksByModelKey = new ConcurrentHashMap<>();
 
     /**
      * Registers an asset.
@@ -80,6 +83,22 @@ public final class PackAssetRegistry {
         return itemsByModelKey.get(modelKey.trim().toLowerCase(Locale.ROOT));
     }
 
+    /** Binds a pack block carrier state to a virtual model key (world rendering lookup). */
+    public void bindBlockToModel(String modelKey, PackBlockAsset block) {
+        if (modelKey == null || modelKey.isBlank() || block == null) {
+            return;
+        }
+        blocksByModelKey.put(modelKey.trim().toLowerCase(Locale.ROOT), block);
+    }
+
+    /** The pack block rendering the given virtual model key, or {@code null}. */
+    public PackBlockAsset blockForModel(String modelKey) {
+        if (modelKey == null || modelKey.isBlank()) {
+            return null;
+        }
+        return blocksByModelKey.get(modelKey.trim().toLowerCase(Locale.ROOT));
+    }
+
     /** The asset writing the given pack entry path, or {@code null}. */
     public PackAsset get(String entryPath) {
         return assets.get(entryPath);
@@ -100,5 +119,6 @@ public final class PackAssetRegistry {
     public void clear() {
         assets.clear();
         itemsByModelKey.clear();
+        blocksByModelKey.clear();
     }
 }

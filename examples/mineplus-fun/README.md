@@ -197,6 +197,31 @@ Five vinery wine bottles — **Strad, Stal, Red, Chenet, Solaris** — each reco
 
 ---
 
+## 🧪 The Alchemy Table (pack blocks)
+
+The **pack block axis**: a multiblock that is placed, collision-owned and persisted by the ordinary lifecycle, but rendered through the generated resource pack as **one `BlockDisplay`** carrying an allocated carrier state — the exact model in one entity, not a vanilla-block mosaic.
+
+**Command:** `/alchemy <place|remove|clear|status>`
+
+| Action | Effect |
+|---|---|
+| `place` | Place an Alchemy Table where you are looking (multiblock `createMultiBlock` + `placeMultiBlock`) |
+| `remove` | Remove the looked-at Alchemy Table |
+| `clear` | Remove every alchemy table within 24 blocks |
+| `status` | List placed tables and report the pack subsystem state |
+
+**How the rendering differs from the virtual axis:**
+
+- The feature registers `fun:alchemy_table` through `packApi().registerBlock(...)` with render key `alchemy_table_lvl_1` (the engine's derived `<typeId>_lvl_<level>`) and geometry key `alchemy-table` (the model file's stem, which the assets attach to at reload).
+- Its level JSON sets `"renderBackend": "pack"` and `"renderKind": "block"`. `ModelRenderingManager` (the one backend choke point) still spawns collision through the virtual manager's collision-only path; only the visual primitive changes.
+- The geometry is serialized as a **block-space** element model (`ModelJsonWriter.writeBlock`), and `BlockStateWriter` emits `assets/minecraft/blockstates/note_block.json` — every vanilla note-block state preserved, the allocated one redirected to the model. The carrier is `PackBlockCarrier.NOTE_BLOCK`: note blocks share one uniform model and use the client's `MODEL` render type, so a `BlockDisplay` can draw the override, and allocated states come only from rare mob-head-note states (a packless player or an unallocated note block sees a normal note block).
+- No texel baking, no per-cube display meshing: the block axis and the texel/virtual axis are separate pipelines that share the same model/texture assets and the same collision lattice.
+- With the pack disabled, the level degrades to the virtual render in one place — the table still appears.
+
+**Implementation highlights:** model + PNG installed from `defaults/models/` (a converted Hytale-format prop), multiblock JSON from `defaults/multiblocks/alchemy_table.json`, and a `ModuleFeature` that does nothing but install resources and call `registerBlock` — the minimal pack-block shape to copy.
+
+---
+
 ## 🔌 How the module talks to the Core
 
 The Core exposes its API through `PluginContext`, obtained from the Core plugin instance:

@@ -8,13 +8,18 @@ import com.mineplus.MineplusPlugin;
 import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.compile.PackCache;
 import com.mineplus.pack.compile.PackCompiler;
+import com.mineplus.pack.asset.BlockModelAsset;
 import com.mineplus.pack.asset.ItemModelAsset;
 import com.mineplus.pack.asset.ModelAsset;
 import com.mineplus.pack.asset.PackAsset;
+import com.mineplus.pack.asset.PackBlockAsset;
 import com.mineplus.pack.asset.RawAsset;
 import com.mineplus.pack.asset.TextureAsset;
+import com.mineplus.pack.block.PackBlockCarrier;
+import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.item.PackItemDefinition;
 import com.mineplus.pack.item.PackItemFactory;
+import com.mineplus.pack.render.PackBlockRenderer;
 import com.mineplus.pack.render.PackModelRenderer;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
@@ -56,8 +61,14 @@ public final class PackSystem {
     private final PackCompiler compiler;
     private final PackItemFactory itemFactory;
     private final PackModelRenderer modelRenderer;
+    private final PackBlockRenderer blockRenderer;
     private final PackDeliveryService delivery;
     private final List<PackItemDefinition> registeredItems = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<PackBlockDefinition> registeredBlocks = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** {@code namespace:id} -> carrier binding, so reloads re-attach geometry idempotently. */
+    private final java.util.Map<String, PackBlockAsset> blockAssetsByKey = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Allocated slots per carrier; a pack block owns one state per its carrier. */
+    private final java.util.Map<PackBlockCarrier, java.util.BitSet> carrierSlots = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final ExecutorService compileExecutor;
     private final AtomicBoolean pendingCompile = new AtomicBoolean(false);
@@ -80,6 +91,7 @@ public final class PackSystem {
                 PackFormat.itemRepresentation(org.bukkit.Bukkit.getBukkitVersion()));
         this.modelRenderer = new PackModelRenderer(assetRegistry, itemFactory);
         this.modelRenderer.bindModelsReloadedHook(this::onReload);
+        this.blockRenderer = new PackBlockRenderer(assetRegistry, plugin.getLogger());
         this.delivery = new PackDeliveryService(settings, cache);
         this.compileExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mineplus-pack-compile");
@@ -108,6 +120,9 @@ public final class PackSystem {
     private void startInternal(ModelRenderingManager renderingManager) {
         try {
             running = true;
+            // Enumerate carrier block states from the live registry now, on the
+            // main thread; the async compiler then reads only cached strings.
+            PackBlockCarrier.warmUp();
             if (!delivery.start()) {
                 plugin.getLogger().warning("[Pack] Local delivery endpoint unavailable; "
                         + "STATIC_URL/DISABLED modes still work.");
@@ -115,7 +130,9 @@ public final class PackSystem {
             plugin.getServer().getPluginManager().registerEvents(
                     new PackPlayerTracker(this), plugin);
             plugin.getServer().getPluginManager().registerEvents(modelRenderer, plugin);
+            plugin.getServer().getPluginManager().registerEvents(blockRenderer, plugin);
             renderingManager.setPackRenderer(modelRenderer);
+            renderingManager.setPackBlockRenderer(blockRenderer);
             scheduleRecompile();
             plugin.getLogger().info("[Pack] Resource pack subsystem active (delivery="
                     + settings.deliveryMode()
@@ -176,11 +193,69 @@ public final class PackSystem {
         }
         try {
             assetRegistry.register(new ModelAsset(namespace, path, namespace,
-                    modelKey, virtualBlockManager.getModelSourceFile(modelKey)));
+                    modelKey, virtualBlockManager.getModelSourceFile(modelKey), model));
             scheduleRecompile();
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
         }
+    }
+
+    /**
+     * Registers a custom block: Mineplus identity, the virtual model that
+     * supplies its geometry, and the carrier pool its rendered
+     * {@code BlockDisplay} state is allocated from. The block is placed and
+     * collision-owned by the ordinary multiblock lifecycle; this registration
+     * only declares its pack rendering. Assets attach on the next reload once
+     * the model loads (order-insensitive, exactly like {@link #registerItem}).
+     *
+     * <p>Idempotent per {@code namespace:id}: re-registration reuses the
+     * allocated carrier state and just re-attaches assets.</p>
+     */
+    public void registerBlock(PackBlockDefinition definition) {
+        if (definition == null) {
+            return;
+        }
+        try {
+            String key = definition.namespace() + ":" + definition.id();
+            PackBlockAsset existing = blockAssetsByKey.get(key);
+            if (existing != null) {
+                ensureBlockModelAssets(definition);
+                scheduleRecompile();
+                return;
+            }
+            int slot = allocateCarrierSlot(definition.carrier());
+            if (slot < 0) {
+                plugin.getLogger().warning("[Pack] No free " + definition.carrier()
+                        + " carrier state for pack block '" + key + "'; block not registered ("
+                        + definition.carrier().stateCount() + " slots in use).");
+                return;
+            }
+            PackBlockAsset binding = new PackBlockAsset(
+                    definition.namespace(), definition.id(), definition.namespace(),
+                    definition.modelKey(), definition.carrier(), slot);
+            assetRegistry.register(binding);
+            assetRegistry.bindBlockToModel(definition.modelKey(), binding);
+            blockAssetsByKey.put(key, binding);
+            registeredBlocks.add(definition);
+            plugin.getLogger().info("[Pack] Registered block '" + key + "' -> "
+                    + binding.carrier().materialKey() + "[" + binding.stateString() + "]"
+                    + " (model key '" + definition.modelKey() + "')");
+            ensureBlockModelAssets(definition);
+            scheduleRecompile();
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+        }
+    }
+
+    /** First free carrier slot, or -1 when the carrier is exhausted. */
+    private synchronized int allocateCarrierSlot(PackBlockCarrier carrier) {
+        java.util.BitSet used = carrierSlots.computeIfAbsent(carrier, ignored -> new java.util.BitSet());
+        int slot = used.nextClearBit(0);
+        if (slot >= carrier.stateCount()) {
+            return -1;
+        }
+        used.set(slot);
+        return slot;
     }
 
     /** Registers a texture file asset. */
@@ -205,7 +280,7 @@ public final class PackSystem {
 
     /**
      * After the coordinated model reload: attach model/texture assets for
-     * items whose models just became available, then recompile once.
+     * items and blocks whose models just became available, then recompile once.
      */
     public void onReload() {
         if (!running) {
@@ -213,6 +288,9 @@ public final class PackSystem {
         }
         for (PackItemDefinition definition : registeredItems) {
             ensureModelAssets(definition);
+        }
+        for (PackBlockDefinition definition : registeredBlocks) {
+            ensureBlockModelAssets(definition);
         }
         scheduleRecompile();
     }
@@ -233,21 +311,66 @@ public final class PackSystem {
         String namespace = definition.namespace();
         try {
             assetRegistry.register(new ModelAsset(namespace, "item/" + definition.id(), namespace,
-                    definition.modelKey(), virtualBlockManager.getModelSourceFile(definition.modelKey())));
+                    definition.modelKey(), virtualBlockManager.getModelSourceFile(definition.modelKey()), model));
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
             return;
         }
+        registerModelTextures(namespace, definition.modelKey(), model, "item");
+    }
+
+    /**
+     * Idempotently attaches the geometry + texture assets for one registered
+     * pack block when its model is loaded. The block geometry is serialized in
+     * block space ({@link BlockModelAsset}); textures use the same
+     * last-segment resolution as every other pack model.
+     */
+    private void ensureBlockModelAssets(PackBlockDefinition definition) {
+        PackBlockAsset binding = blockAssetsByKey.get(definition.namespace() + ":" + definition.id());
+        if (binding == null) {
+            return;
+        }
+        // The geometry attaches under the loaded model key (the model file's
+        // stem), not the derived render-time multiblock key — the latter only
+        // exists after the first render and would leave the pack artifact
+        // without the block model.
+        String geometryKey = definition.geometryModelKey();
+        VirtualModel model = virtualBlockManager.getModel(geometryKey);
+        if (model == null) {
+            return;
+        }
+        String namespace = definition.namespace();
+        try {
+            assetRegistry.register(new BlockModelAsset(namespace, definition.id(), namespace,
+                    geometryKey, virtualBlockManager.getModelSourceFile(geometryKey), model));
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+            return;
+        }
+        registerModelTextures(namespace, geometryKey, model, "block");
+    }
+
+    /**
+     * Registers the PNG assets of one loaded model under the canonical paths
+     * its serialized texture references use. Shared by the item and block axes
+     * — the texture pipeline is one pipeline.
+     *
+     * @param folder {@code item} or {@code block}: the client's atlases only
+     *               stitch textures under those directories, so the asset and
+     *               the model reference must agree on the prefix
+     */
+    private void registerModelTextures(String namespace, String modelKey, VirtualModel model, String folder) {
         for (String textureName : model.textureNames()) {
             if (textureName == null || textureName.isBlank()) {
                 continue;
             }
-            String texturePath = TextureAsset.normalizePath(textureName);
-            if (texturePath.isEmpty()) {
+            String normalized = TextureAsset.normalizePath(textureName);
+            if (normalized.isEmpty()) {
                 continue;
             }
+            String texturePath = folder + "/" + normalized;
             try {
-                File textureFile = virtualBlockManager.resolveTextureFile(definition.modelKey(), textureName);
+                File textureFile = virtualBlockManager.resolveTextureFile(modelKey, textureName);
                 if (textureFile != null) {
                     assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, textureFile));
                 }
@@ -297,6 +420,9 @@ public final class PackSystem {
             // models have become available since the last pass (idempotent).
             for (PackItemDefinition definition : registeredItems) {
                 ensureModelAssets(definition);
+            }
+            for (PackBlockDefinition definition : registeredBlocks) {
+                ensureBlockModelAssets(definition);
             }
             List<PackAsset> snapshot = assetRegistry.snapshot();
             if (snapshot.isEmpty()) {
@@ -373,6 +499,10 @@ public final class PackSystem {
 
     public PackModelRenderer modelRenderer() {
         return modelRenderer;
+    }
+
+    public PackBlockRenderer blockRenderer() {
+        return blockRenderer;
     }
 
     public PackItemFactory itemFactory() {

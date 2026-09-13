@@ -539,7 +539,11 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   `maxTexelPlatesPerInstance: 2048`): the vinery wood sprite is gradient-heavy
   (60+ distinct colors per 16x16) and greedy-merges past the default 96-plate
   per-face ceiling, which makes faces silently fall back to white concrete —
-  see the texture-gradient trap in §6.
+  see the texture-gradient trap in §6. The command exposes both render axes for
+  A/B testing: `/cabinet place texel` places the virtual/texel `cabinet`,
+  `/cabinet place resourcepack` places the pack-block twin `cabinet_pack`
+  (same models, `renderBackend: pack` + `renderKind: block`); both share the
+  same GUI/hook and appear in `/cabinet status` tagged as `texel`/`pack`.
 - **packshowcase** (`com.mineplus.fun.packshowcase`): the Phase 2 pack-system
   reference — registers `fun:strad_wine` (backing `GLASS_BOTTLE`, model key
   `strad-wine`) through `packApi().registerItem(...)` from the Wine feature's
@@ -565,5 +569,24 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   give|status`. Every *visual* requires the generated pack applied; firing
   works without it. `npm run pack` in the repository builds the same tree
   into a ready-to-use manual zip.
+- **alchemy** (`com.mineplus.fun.alchemy`): the pack **block** axis. An
+  `alchemy_table` multiblock whose level declares `renderBackend: pack` +
+  `renderKind: block`, rendered as one `BlockDisplay` carrying an allocated
+  `PackBlockCarrier.NOTE_BLOCK` state. Note blocks share one uniform model and
+  use the client's `MODEL` render type (required — `INVISIBLE`-render-type
+  blocks like light/structure_void/barrier can never carry a display), and the
+  allocated states are drawn only from rare mob-head-note states, so vanilla
+  note blocks and packless players see a normal note block. The feature
+  installs the bbmodel + PNG + multiblock JSON and calls
+  `packApi().registerBlock(PackBlockDefinition.builder("fun", "alchemy_table",
+  "alchemy_table_lvl_1").geometryModelKey("alchemy-table")...)` — `modelKey`
+  must be the engine's derived `<typeId>_lvl_<level>` (the render lookup), and
+  `geometryModelKey` the model file's stem in `models/` (what the assets attach
+  to at reload; the derived key only exists after the first render). Geometry
+  serializes in block space (`ModelJsonWriter.writeBlock`) and
+  `BlockStateWriter` regenerates the carrier's complete vanilla blockstate
+  table. Placement, collision, breaking and persistence are the ordinary
+  multiblock lifecycle — the pack subsystem only declares the visual, so it
+  never touches texel/virtual internals. `/alchemy place|remove|clear|status`.
 
 Copy the reference whose interaction model matches your feature.

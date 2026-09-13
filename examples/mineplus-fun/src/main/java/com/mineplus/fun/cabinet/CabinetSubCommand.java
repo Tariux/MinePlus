@@ -36,7 +36,7 @@ public final class CabinetSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/cabinet <place|remove|clear|status>";
+        return "/cabinet <place [texel|resourcepack]|remove|clear|status>";
     }
 
     @Override
@@ -58,7 +58,8 @@ public final class CabinetSubCommand implements SubCommand {
         String action = args[0].toLowerCase(Locale.ROOT);
         switch (action) {
             case "place" -> {
-                return placeSingle(player);
+                String mode = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "texel";
+                return placeSingle(player, mode);
             }
             case "remove" -> {
                 return removeLooked(player);
@@ -75,7 +76,23 @@ public final class CabinetSubCommand implements SubCommand {
         }
     }
 
-    private boolean placeSingle(Player player) {
+    /**
+     * Places the cabinet with the requested render backend.
+     *
+     * @param mode {@code texel} (default) uses the virtual/texel multiblock
+     *             {@code cabinet}; {@code resourcepack} (aliases {@code pack},
+     *             {@code rp}) uses the pack-block twin {@code cabinet_pack}
+     */
+    private boolean placeSingle(Player player, String mode) {
+        boolean pack = mode.equals("resourcepack") || mode.equals("pack") || mode.equals("rp")
+                || mode.equals("block");
+        if (!pack && !mode.equals("texel") && !mode.equals("virtual")) {
+            player.sendMessage(ChatColor.RED + "Unknown mode '" + mode
+                    + "'. Use 'texel' or 'resourcepack'.");
+            return true;
+        }
+        String typeId = pack ? CabinetKeys.PACK_MACHINE_ID : CabinetKeys.MACHINE_ID;
+
         var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
         if (placement == null) {
             player.sendMessage(ChatColor.RED + "Look at a nearby block face to place the cabinet.");
@@ -83,7 +100,7 @@ public final class CabinetSubCommand implements SubCommand {
         }
 
         MultiBlockInstance created = context.infrastructureApi().createMultiBlock(
-                CabinetKeys.MACHINE_ID,
+                typeId,
                 placement.location(),
                 player.getUniqueId(),
                 player.getUniqueId(),
@@ -98,12 +115,16 @@ public final class CabinetSubCommand implements SubCommand {
             return true;
         }
         player.sendMessage(ChatColor.GREEN + "Acacia Cabinet placed with id " + created.id()
-                + ChatColor.GRAY + " — right-click to open its storage.");
+                + ChatColor.GRAY + " — " + (pack ? "resource-pack block" : "texel/virtual")
+                + " render; right-click to open its storage.");
         return true;
     }
 
     private boolean removeLooked(Player player) {
         MultiBlockInstance looked = context.moduleSupport().resolveLooked(player, 6, CabinetKeys.MACHINE_ID);
+        if (looked == null) {
+            looked = context.moduleSupport().resolveLooked(player, 6, CabinetKeys.PACK_MACHINE_ID);
+        }
         if (looked == null) {
             player.sendMessage(ChatColor.RED + "Look at a Cabinet to remove it.");
             return true;
@@ -120,7 +141,7 @@ public final class CabinetSubCommand implements SubCommand {
         List<MultiBlockInstance> targets = new ArrayList<>();
         for (MultiBlockInstance instance : List.copyOf(
                 context.basicInfrastructureApi().getLoadedInstances())) {
-            if (!instance.typeId().equals(CabinetKeys.MACHINE_ID)) {
+            if (!CabinetKeys.isCabinet(instance.typeId())) {
                 continue;
             }
             double dx = instance.coordinate().x() - origin.getX();
@@ -151,18 +172,21 @@ public final class CabinetSubCommand implements SubCommand {
         player.sendMessage(ChatColor.GOLD + "Cabinets:");
         boolean any = false;
         for (MultiBlockInstance instance : context.basicInfrastructureApi().getLoadedInstances()) {
-            if (!instance.typeId().equals(CabinetKeys.MACHINE_ID)) {
+            if (!CabinetKeys.isCabinet(instance.typeId())) {
                 continue;
             }
             any = true;
             String state = instance.level() >= CabinetKeys.LEVEL_OPEN
                     ? ChatColor.YELLOW + "open" : ChatColor.GREEN + "closed";
+            String backend = instance.typeId().equals(CabinetKeys.PACK_MACHINE_ID)
+                    ? ChatColor.LIGHT_PURPLE + "pack" : ChatColor.AQUA + "texel";
             player.sendMessage(ChatColor.GRAY + "- " + instance.id()
                     + ChatColor.DARK_GRAY + " @" + instance.coordinate().x()
                     + "," + instance.coordinate().y()
                     + "," + instance.coordinate().z()
                     + ChatColor.GRAY + " " + state
-                    + " " + CabinetStore.countItems(instance) + " slot(s) used");
+                    + " " + backend
+                    + ChatColor.GRAY + " " + CabinetStore.countItems(instance) + " slot(s) used");
         }
         if (!any) {
             player.sendMessage(ChatColor.GRAY + "- none placed");
@@ -176,6 +200,13 @@ public final class CabinetSubCommand implements SubCommand {
             List<String> completions = new ArrayList<>();
             StringUtil.copyPartialMatches(args[0],
                     List.of("place", "remove", "clear", "status"), completions);
+            Collections.sort(completions);
+            return completions;
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("place")) {
+            List<String> completions = new ArrayList<>();
+            StringUtil.copyPartialMatches(args[1],
+                    List.of("texel", "resourcepack"), completions);
             Collections.sort(completions);
             return completions;
         }

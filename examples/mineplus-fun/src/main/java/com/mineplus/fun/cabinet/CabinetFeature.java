@@ -2,6 +2,8 @@ package com.mineplus.fun.cabinet;
 
 import com.mineplus.fun.ModuleFeature;
 import com.mineplus.fun.cabinet.gui.CabinetGui;
+import com.mineplus.pack.block.PackBlockCarrier;
+import com.mineplus.pack.block.PackBlockDefinition;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -36,6 +38,22 @@ public final class CabinetFeature extends ModuleFeature {
         support.installDefault(plugin, "defaults/models/acacia_cabinet_top_closed.meta.json", "models/acacia_cabinet_top_closed.meta.json", true);
         support.installDefault(plugin, "defaults/models/acacia_cabinet_open.meta.json", "models/acacia_cabinet_open.meta.json", true);
         support.installDefault(plugin, "defaults/multiblocks/cabinet.json", "multiblocks/cabinet.json", false);
+        // Pack-block twin: same models, but rendered as a single BlockDisplay
+        // through a generated resource pack (renderBackend: pack, renderKind: block).
+        support.installDefault(plugin, "defaults/multiblocks/cabinet_pack.json", "multiblocks/cabinet_pack.json", false);
+
+        context.packApi().registerBlock(PackBlockDefinition.builder(
+                        "fun", CabinetKeys.PACK_BLOCK_CLOSED_ID, "cabinet_pack_lvl_1")
+                .geometryModelKey("acacia_cabinet_top_closed")
+                .displayName("Acacia Cabinet")
+                .carrier(PackBlockCarrier.NOTE_BLOCK)
+                .build());
+        context.packApi().registerBlock(PackBlockDefinition.builder(
+                        "fun", CabinetKeys.PACK_BLOCK_OPEN_ID, "cabinet_pack_lvl_2")
+                .geometryModelKey("acacia_cabinet_open")
+                .displayName("Acacia Cabinet (open)")
+                .carrier(PackBlockCarrier.NOTE_BLOCK)
+                .build());
 
         context.infrastructureApi().registerGui(
                 CabinetKeys.GUI_KEY,
@@ -49,6 +67,10 @@ public final class CabinetFeature extends ModuleFeature {
 
         context.infrastructureApi().registerHook(
                 CabinetKeys.MACHINE_ID,
+                new CabinetHook(context, context.infrastructureEngine().lifecycleManager())
+        );
+        context.infrastructureApi().registerHook(
+                CabinetKeys.PACK_MACHINE_ID,
                 new CabinetHook(context, context.infrastructureEngine().lifecycleManager())
         );
     }

@@ -22,7 +22,9 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 | `PackCompiler` / `PackCache` | deterministic, dependency-aware compilation into hash-named `packs/mp-<hash>.zip` artifacts |
 | `PackDeliveryService` | LOCAL byte endpoint / STATIC_URL / DISABLED; per-player state tracking |
 | `PackItemFactory` | `ContentDefinition → ItemStack` (modern `item_model` component, legacy `CustomModelData` fallback) |
-| `PackModelRenderer` | pack-axis world rendering (ItemDisplay entities) |
+| `PackModelRenderer` | pack item-axis world rendering (ItemDisplay entities) |
+| `PackBlockRenderer` | pack block-axis world rendering (one BlockDisplay per instance, carrying an allocated carrier state) |
+| `BlockStateWriter` | generates the carrier `blockstates/<carrier>.json` host files (vanilla states preserved, allocated states redirected) |
 | `ModelRenderingManager` | the **backend choke point** — the only place a render decision becomes a backend call |
 
 **Coexistence contract** (enforced structurally):
@@ -33,20 +35,24 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
   public collision-only spawn API — barriers, break handling, occupancy and
   restore dedupe behave identically for both backends.
 - Backend selection lives in multiblock level definitions
-  (`"renderBackend": "virtual" | "pack" | "virtual+pack"`), default `virtual`.
+  (`"renderBackend": "virtual" | "pack" | "virtual+pack"`, default `virtual`);
+  the pack representation within that backend is selected by
+  `"renderKind": "model" | "block"` (default `model`).
 
 ## Backend semantics
 
 | Backend | Collision | Visual (pack player) | Visual (packless player) |
 |---|---|---|---|
 | `virtual` (default) | virtual engine | virtual render (texel/block displays) | virtual render — identical |
-| `pack` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
+| `pack` + `model` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
+| `pack` + `block` | virtual engine (collision-only) | pack block model (one BlockDisplay) | the carrier block (a note block) |
 | `virtual+pack` | virtual engine | virtual render **+** pack display | virtual render |
 
 Fallbacks, in one place (`MultiBlockLevel.effectiveBackend`): when the pack
 subsystem is disabled, `pack` and `virtual+pack` degrade to `virtual`. When a
-model has no registered pack item, the pack render falls back to a full
-virtual render. A player without the pack always sees *something* valid.
+model has no registered pack item/block, the pack render falls back to a full
+virtual render. A player without the pack always sees a valid mesh through
+`virtual+pack`, or the carrier block through `pack`.
 
 ## Content model
 
@@ -57,7 +63,7 @@ ItemRegistry identity (PDC — the same recognition every Mineplus item uses)
         + auto-registered ModelAsset + TextureAssets (from the model + its PNGs)
         ↓ compile
 assets/<ns>/models/item/<id>.json   ← serialized from the imported VirtualModel
-assets/<ns>/textures/<name>.png     ← the same PNGs the texel baker reads
+assets/<ns>/textures/item/<name>.png ← the same PNGs the texel baker reads (atlas-stitched)
 assets/<ns>/items/<id>.json         ← modern item model definition (1.21.4+)
         ↓ deliver
 Player applies pack → full-fidelity custom item
@@ -70,6 +76,61 @@ legacy `CustomModelData` path only redirects items carrying the item's stable
 predicate value (never unset vanilla items — but note it *does* regenerate the
 vanilla item model host file, the classic pre-1.21.4 cross-plugin conflict
 surface; prefer modern servers).
+
+## Block rendering (pack blocks)
+
+Items have the additive `item_model` component; blocks have no per-entity model
+dispatch — a `BlockDisplay` renders whatever the client's `blockstates` file
+says its block state is. Pack blocks solve this with a **carrier state**:
+
+```
+PackBlockDefinition (namespace:id, model key, geometry key, carrier pool)
+        ↓ PackApi.registerBlock
+carrier slot allocation (one vanilla state per block)
+        + auto-registered BlockModelAsset + TextureAssets (same model + PNGs)
+        ↓ compile
+assets/<ns>/models/block/<id>.json          ← block-space element model from the VirtualModel
+assets/<ns>/textures/block/<name>.png       ← the same PNGs the texel baker reads (atlas-stitched)
+assets/minecraft/blockstates/<carrier>.json ← host file: every vanilla state preserved,
+                                              the allocated state(s) redirected to the block model
+        ↓ deliver + place
+multiblock lifecycle (create/place/remove, barriers, persistence)
+        → one BlockDisplay carrying the allocated carrier state
+```
+
+The shipped carrier is **note_block** (`minecraft:note_block`). Every note-block
+state renders the same `minecraft:block/note_block` model and the block uses the
+client's `MODEL` render type, so a `BlockDisplay` actually draws the override.
+The carrier's complete vanilla state table is enumerated at runtime from the
+server's own block data (exact property names/values per version), allocated
+states are drawn only from the **rare mob-head instruments** (zombie, skeleton,
+creeper, dragon, wither_skeleton, piglin, custom_head at `powered=false`), and
+every other state stays vanilla. A naturally placed note block therefore almost
+never lands on an allocated state — and if it does, or if a player has not
+applied the pack, it renders a normal note block rather than nothing.
+
+**Atlas rule:** a model's texture reference must resolve to a sprite the client
+actually stitches. The generated models reference `ns:block/<name>` (blocks) and
+`ns:item/<name>` (items), and the matching PNGs are written under
+`assets/<ns>/textures/block/` and `assets/<ns>/textures/item/`. The vanilla
+`blocks` atlas only scans those two directories, so a model pointing at
+`textures/<name>` directly resolves to a missing sprite — the purple/black
+checkerboard.
+
+**Carrier contract:** a carrier must render with the client's `MODEL` render
+type. Blocks whose render type is `INVISIBLE` — light, structure_void, barrier —
+draw nothing from a `BlockDisplay` no matter what their blockstate file says, so
+they can never carry a pack block. Adding a carrier means providing its
+complete vanilla state table and the subset it is willing to allocate
+(`PackBlockCarrier`).
+
+Pack blocks are placed and collision-owned by the **ordinary multiblock
+lifecycle** — `createMultiBlock` / `placeMultiBlock` / `removeBlock`, barrier
+collision, break handling and persistence are identical to every other
+machine. The pack subsystem only declares the rendering; it does not touch
+texel baking, the virtual display transport, or the multiblock engine's
+internals. If a pack block can't attach its display, the collision-only owner
+is released and the level falls back to a full virtual render.
 
 ## Configuration (`settings.mp.yml`)
 
@@ -136,13 +197,36 @@ Registration is order-insensitive: the item registers immediately; its
 model/texture assets attach during the coordinated reload-driven recompile
 (items registered before their models load are the normal module flow).
 
-Multiblock levels select their backend in JSON:
+Pack blocks use the same pattern and the same assets. A multiblock pack block has
+**two keys**: the render-time key the engine derives (`<typeId>_lvl_<level>`)
+and the geometry key the model file loads under (its stem in `models/`). The
+latter is what the assets attach to at reload; the former only exists after the
+first render.
+
+```java
+// see mineplus-fun's AlchemyFeature
+context.packApi().registerBlock(PackBlockDefinition.builder(
+                "fun",                      // namespace
+                "alchemy_table",            // block id -> fun:alchemy_table
+                "alchemy_table_lvl_1")      // derived multiblock model key (render lookup)
+        .geometryModelKey("alchemy-table")  // models/alchemy-table.bbmodel stem (asset attach)
+        .displayName("Alchemy Table")
+        .carrier(PackBlockCarrier.NOTE_BLOCK) // uniform model + MODEL render type
+        .build());
+```
+
+Multiblock levels select their backend and representation in JSON:
 
 ```json
 "levels": {
   "1": {
     "model": "models/strad-wine.bbmodel",
     "renderBackend": "pack"
+  },
+  "2": {
+    "model": "models/alchemy-table.bbmodel",
+    "renderBackend": "pack",
+    "renderKind": "block"
   }
 }
 ```
@@ -201,9 +285,22 @@ zip into a client's `resourcepacks` folder or host it and point
   their AABB (warned per model). Axis-aligned geometry — machines, furniture,
   items — is exact.
 - **Wrapping UV windows** are clamped to the 0..16 UV window (warned).
+- **Pack block carrier capacity**: the shipped `note_block` carrier allocates
+  from the rare mob-head instruments (7 × 25 = 175 slots). Additional carriers
+  can be added to `PackBlockCarrier` with their own complete vanilla state
+  table and allocatable subset; a carrier must render with the `MODEL` render
+  type and reproduce vanilla faithfully for every unallocated state.
+- **Packless fallback for blocks**: a `pack` + `block` level renders the
+  allocated carrier state to players without the pack — a normal note block
+  (visible). Use `virtual+pack` when a mixed population must see the exact
+  minecraft-visible mesh rather than the carrier approximation.
 - **Legacy `CustomModelData` mode** regenerates vanilla item model host files
   (predicate-gated; the era-typical conflict surface). Modern servers
-  (1.21.4+) use the strictly additive `item_model` component.
+  (1.21.4+) use the strictly additive `item_model` component. Block host files
+  are representation-independent — a `BlockDisplay` has no per-entity model
+  dispatch on any client version — but they necessarily own the carrier's
+  blockstate file and must reproduce every vanilla state (which the generator
+  does).
 - **Pack-format table** lags new Minecraft releases; the emitted
   `supported_formats` range keeps newer clients accepting the pack anyway, and
   `PACK_FORMAT_OVERRIDE` pins the exact `pack_format` when needed.
