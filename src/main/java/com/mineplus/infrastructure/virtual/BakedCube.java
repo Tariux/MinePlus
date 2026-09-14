@@ -14,7 +14,8 @@ public record BakedCube(
         Map<CubeFace, BakedFace> faces,
         String primaryTexture,
         int lightEmission,
-        int boneIndex
+        int boneIndex,
+        ElementGeometry geometry
 ) {
 
     public BakedCube(
@@ -26,7 +27,7 @@ public record BakedCube(
             Map<CubeFace, BakedFace> faces,
             String primaryTexture
     ) {
-        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, 0, -1);
+        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, 0, -1, null);
     }
 
     public BakedCube(
@@ -39,7 +40,7 @@ public record BakedCube(
             String primaryTexture,
             int lightEmission
     ) {
-        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, lightEmission, -1);
+        this(name, translation, leftRotation, scale, rightRotation, faces, primaryTexture, lightEmission, -1, null);
     }
 
     public BakedCube {

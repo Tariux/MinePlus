@@ -30,7 +30,9 @@ public record ModelMeta(
         TexelDetail texelDetail,
         Integer maxTexelPlatesPerFace,
         Integer maxTexelPlatesPerInstance,
-        Integer texelBrightness
+        Integer texelBrightness,
+        ModelDisplay display,
+        String itemParent
 ) {
 
     public ModelMeta {
@@ -40,6 +42,8 @@ public record ModelMeta(
                 ? null : Math.max(1, maxTexelPlatesPerInstance);
         texelBrightness = texelBrightness == null
                 ? null : Math.max(0, Math.min(15, texelBrightness));
+        display = display == null ? ModelDisplay.EMPTY : display;
+        itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
     }
 
     public enum OriginMode {
@@ -212,14 +216,14 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
         return originMode == null && collisionMode == null && autoplay.isEmpty()
                 && texelMode == null && texelDetail == null
                 && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
-                && texelBrightness == null;
+                && texelBrightness == null && display.isEmpty() && itemParent == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -246,6 +250,8 @@ public record ModelMeta(
             Integer maxTexelPlatesPerFace = null;
             Integer maxTexelPlatesPerInstance = null;
             Integer texelBrightness = null;
+            ModelDisplay display = ModelDisplay.EMPTY;
+            String itemParent = null;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -259,13 +265,15 @@ public record ModelMeta(
                     case "maxTexelPlatesPerFace" -> maxTexelPlatesPerFace = readPositiveInt(json);
                     case "maxTexelPlatesPerInstance" -> maxTexelPlatesPerInstance = readPositiveInt(json);
                     case "texelBrightness" -> texelBrightness = readBrightness(json);
+                    case "display" -> display = ModelDisplay.fromJson(json);
+                    case "itemParent" -> itemParent = readString(json);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
             return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
-                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness);
+                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());

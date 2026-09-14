@@ -1,0 +1,8 @@
+# Weapon assets are local-only authoring binaries (large .bbmodel/.png/.ogg
+# files), not source. They live in the author's library and are installed into
+# this resource tree for local builds; a fresh clone ships the placeholders
+# below instead. See PLACEHOLDER.md in each asset folder.
+src/main/resources/defaults/models/gun/*.bbmodel
+src/main/resources/defaults/models/gun/*.png
+src/main/resources/defaults/models/gun/*.meta.json
+src/main/resources/defaults/sounds/mineplusgun/*.ogg

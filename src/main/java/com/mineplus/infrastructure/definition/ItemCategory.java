@@ -5,5 +5,9 @@ public enum ItemCategory {
     TOOL,
     BLOCK_ITEM,
     MACHINE_COMPONENT,
-    CATALYST
+    CATALYST,
+    /** Additive: firearms, melee and thrown weapons. */
+    WEAPON,
+    /** Additive: ammunition items. */
+    AMMO
 }

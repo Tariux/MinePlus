@@ -5,6 +5,7 @@ import com.mineplus.util.DebugLogger;
 import com.mineplus.util.UpdateChecker;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.CommandRouter;
+import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.command.sub.ModelSubCommand;
 import com.mineplus.infrastructure.command.sub.ReloadSubCommand;
 import com.mineplus.infrastructure.command.sub.StatusSubCommand;
@@ -139,6 +140,24 @@ public final class MineplusPlugin extends JavaPlugin {
      */
     public PluginContext getPluginContext() {
         return context;
+    }
+
+    /**
+     * Registers a module-provided {@link SubCommand} under the Core's
+     * {@code /mineplus} router. The router enforces the subcommand's
+     * {@link SubCommand#permission()} and lists it in {@code /mineplus} help.
+     * Additive: existing Core subcommands are untouched.
+     *
+     * @param subCommand the subcommand to add
+     * @return {@code true} when it was registered; {@code false} when the Core
+     *         router is not ready (called before the Core enabled)
+     */
+    public boolean registerCoreSubCommand(SubCommand subCommand) {
+        if (commandRouter == null || subCommand == null) {
+            return false;
+        }
+        commandRouter.register(subCommand);
+        return true;
     }
 
     /** Re-reads settings.mp.yml and applies virtual-rendering settings before a model reload. */
