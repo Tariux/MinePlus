@@ -2,6 +2,8 @@ package com.mineplus.infrastructure.core.multiblock;
 
 import com.mineplus.infrastructure.render.RenderBackend;
 import com.mineplus.infrastructure.render.RenderKind;
+import com.mineplus.infrastructure.render.RenderMode;
+import com.mineplus.infrastructure.render.RenderPlan;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -76,5 +78,22 @@ public record MultiBlockLevel(
             return renderBackend;
         }
         return RenderBackend.VIRTUAL;
+    }
+
+    /**
+     * The canonical unified {@link RenderMode} this level declares. Derived from
+     * the legacy {@code renderBackend}/{@code renderKind} pair so existing
+     * definitions keep working unchanged.
+     */
+    public RenderMode renderMode() {
+        return RenderMode.of(renderBackend, renderKind);
+    }
+
+    /**
+     * The level's declarative render intent for the {@code RenderRouter}, tagged
+     * with its provenance (e.g. {@code "json"} for config-loaded levels).
+     */
+    public RenderPlan renderPlan(String source) {
+        return new RenderPlan(renderMode(), null, source);
     }
 }

@@ -69,14 +69,16 @@ public final class MultiBlockConfigLoader {
                 Map<String, Integer> upgradeCost = parseIntMap(levelJson.getAsJsonObject("upgradeCost"));
                 Map<String, String> guiOptions = parseStringMap(levelJson.getAsJsonObject("guiOptions"));
                 List<String> animations = parseStringList(levelJson.get("animations"));
-                com.mineplus.infrastructure.render.RenderBackend renderBackend =
-                        com.mineplus.infrastructure.render.RenderBackend.fromKey(
-                                levelJson.has("renderBackend") ? levelJson.get("renderBackend").getAsString() : null);
-                com.mineplus.infrastructure.render.RenderKind renderKind =
-                        com.mineplus.infrastructure.render.RenderKind.fromKey(
-                                levelJson.has("renderKind") ? levelJson.get("renderKind").getAsString() : null);
+                com.mineplus.infrastructure.render.RenderMode renderMode =
+                        levelJson.has("renderMode")
+                                ? com.mineplus.infrastructure.render.RenderMode.fromKey(levelJson.get("renderMode").getAsString())
+                                : com.mineplus.infrastructure.render.RenderMode.of(
+                                        com.mineplus.infrastructure.render.RenderBackend.fromKey(
+                                                levelJson.has("renderBackend") ? levelJson.get("renderBackend").getAsString() : null),
+                                        com.mineplus.infrastructure.render.RenderKind.fromKey(
+                                                levelJson.has("renderKind") ? levelJson.get("renderKind").getAsString() : null));
                 levels.put(level, new MultiBlockLevel(level, model, speed, durability, upgradeCost, guiOptions, animations,
-                        renderBackend, renderKind));
+                        renderMode.backend(), renderMode.kind()));
             }
 
             registry.registerType(new MultiBlockType(id, name, levels, new MultiBlockHook() {

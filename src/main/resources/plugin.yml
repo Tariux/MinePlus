@@ -12,7 +12,7 @@ libraries:
 commands:
   mineplus:
     description: Mineplus Core runtime administration command
-    usage: /mineplus <status|reload|model|pack>
+    usage: /mineplus <status|reload|model|pack|render>
 
 permissions:
   mineplus.admin.status:
@@ -26,4 +26,7 @@ permissions:
     default: op
   mineplus.admin.pack:
     description: Allows administrating the Mineplus resource pack subsystem
+    default: op
+  mineplus.admin.render:
+    description: Allows reading the unified render engine routing statistics
     default: op

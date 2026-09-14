@@ -47,6 +47,11 @@ Reload everything from game with `/mineplus reload all`.
 | `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
 | `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
 | `animations` | `[]` | Clip names to auto-play on this level's rendered model (see [Animation Engine](developer-api.md#animation-engine)) |
+| `renderMode` | `virtual` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item`, `pack_block`, `hybrid_item` (`hybrid`), `hybrid_block`. Takes precedence over `renderBackend`/`renderKind`. |
+| `renderBackend` | `virtual` | Legacy backend axis: `virtual` \| `pack` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
+| `renderKind` | `model` | Legacy primitive axis: `model` \| `block`. Still fully supported; prefer `renderMode`. |
+
+> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-rendering-engine) and [Render Modes](developer-api.md#render-modes).
 
 ### Example
 
@@ -71,6 +76,17 @@ Reload everything from game with `/mineplus reload all`.
       "upgradeCost": { "core_plate": 16 },
       "animations": ["crush_loop", "steam_hiss"]
     }
+  }
+}
+```
+
+A pack-rendered level selects its mode in one field:
+
+```json
+{
+  "id": "alchemy_table",
+  "levels": {
+    "1": { "model": "models/alchemy-table.bbmodel", "renderMode": "pack_block" }
   }
 }
 ```
@@ -324,6 +340,21 @@ ADDITIONAL_DEBUG_LOGS: false
 UPDATE_CHECKER:
   RESOURCE_ID: 0
 
+# Unified render engine routing: content declares a renderMode
+# (or the legacy renderBackend/renderKind pair); the policy decides
+# how the router behaves when a pack request cannot be served.
+RENDERING:
+  POLICY:
+    # When a pack/hybrid level cannot be served (pack subsystem
+    # unavailable, or the pack display fails to attach), fall back to
+    # the virtual engine. false leaves it unrendered.
+    ALLOW_DEGRADE_TO_VIRTUAL: true
+    # Log each routing decision (downgrades, unavailable routes).
+    # Requires ADDITIONAL_DEBUG_LOGS: true.
+    LOG_ROUTING: false
+    # Maintain the route counters shown by /mineplus render stats.
+    TRACK_TELEMETRY: true
+
 VIRTUAL_RENDERING:
   # Collision proxy cell lattice: GEOMETRY | SURFACE | AABB
   # (AABB is a compatibility alias — it resolves through the same
@@ -368,6 +399,24 @@ TEXEL_BAKING:
   MAX_PLATES_PER_INSTANCE: 150
   # Hard grid edge cap per face (max texels per axis pre-merge).
   MAX_GRID_EDGE: 64
+  # Collapse large flat color regions into one stretched plate.
+  UNIFORM_AREA_DETECTION: true
+  # Minimum region area (in texels) to coalesce.
+  UNIFORM_AREA_MIN_SIZE: 8
+  # Perceptual (Oklab) tolerance when coalescing stretchable regions.
+  UNIFORM_AREA_OKLAB_THRESHOLD: 0.05
+  # Scale the per-face plate ceiling with face texel area.
+  ADAPTIVE_BUDGETING: true
+  # Over-budget face -> one dominant-color plate instead of legacy render.
+  BUDGET_FALLBACK_TO_SIMPLE_COLOR: true
+  # Memoize identical (texture + UV + orientation) face sampling passes.
+  REUSE_SYMMETRIC_FACES: true
+
+PACK:
+  ENABLED: true
+  # ... delivery/cache settings omitted here (see the table below) ...
+  # How pack display entities are lit: AUTO | NATURAL | EMISSIVE | FULLBRIGHT
+  LIGHTING: AUTO
 
 ```
 
@@ -375,6 +424,9 @@ TEXEL_BAKING:
 |---|---|---|
 | `ADDITIONAL_DEBUG_LOGS` | `true` / `false` | Verbose lifecycle, rendering, persistence, and linking logs. Off by default; persistence errors are always logged regardless |
 | `UPDATE_CHECKER.RESOURCE_ID` | numeric | SpigotMC resource id for the optional version check on startup; `0` (default) disables it |
+| `RENDERING.POLICY.ALLOW_DEGRADE_TO_VIRTUAL` | `true` / `false` | When a pack/hybrid request cannot be served (pack subsystem unavailable, pack display attach failure), fall back to the virtual engine. `false` leaves the content unrendered instead |
+| `RENDERING.POLICY.LOG_ROUTING` | `true` / `false` | Log each routing decision (downgrades, unavailable routes) via `DebugLogger`; requires `ADDITIONAL_DEBUG_LOGS: true` |
+| `RENDERING.POLICY.TRACK_TELEMETRY` | `true` / `false` | Maintain the route counters shown by `/mineplus render stats` |
 | `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier cell rasterization: per-cube SAT (default), interior hollowing for walk-in structures, or `AABB` — a compatibility alias resolved through the same geometry path |
 | `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
 | `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |
@@ -392,6 +444,12 @@ TEXEL_BAKING:
 | `TEXEL_BAKING.MAX_PLATES_PER_FACE` | plates ≥ 1 | Merged-plate ceiling per face (default 96); above it the face falls back to the single-material plate |
 | `TEXEL_BAKING.MAX_PLATES_PER_INSTANCE` | plates ≥ 1 | Whole-instance texel plate budget (default 150); faces overflow in emission order |
 | `TEXEL_BAKING.MAX_GRID_EDGE` | cells ≥ 1 | Hard grid edge cap per face (default 64) — entity count scales with geometry, never with texture resolution |
+| `TEXEL_BAKING.UNIFORM_AREA_DETECTION` | `true` / `false` | Collapse large flat color regions into one stretched plate instead of many 1×1 plates (default `true`). Near-identical stretchable colors merge within the Oklab threshold; exactly-equal grained colors merge exactly |
+| `TEXEL_BAKING.UNIFORM_AREA_MIN_SIZE` | texels ≥ 4 | Minimum region area to coalesce (default 8); smaller regions are left to the standard greedy merge |
+| `TEXEL_BAKING.UNIFORM_AREA_OKLAB_THRESHOLD` | float ≥ 0 | Perceptual tolerance for coalescing stretchable regions (default 0.05). `0` = exact matches only |
+| `TEXEL_BAKING.ADAPTIVE_BUDGETING` | `true` / `false` | Scale the default per-face plate ceiling with the face's texel area so large faces keep proportional detail and small faces stay cheap (default `true`). The hard `MAX_PLATES_PER_FACE` ceiling still applies, and an explicit per-model `maxTexelPlatesPerFace` opt-in is never reduced by adaptive budgeting |
+| `TEXEL_BAKING.BUDGET_FALLBACK_TO_SIMPLE_COLOR` | `true` / `false` | Degrade an over-budget face to a single dominant-color plate instead of dropping it to the legacy per-face render (default `true`). Faces with genuine cutout holes keep the legacy fallback |
+| `TEXEL_BAKING.REUSE_SYMMETRIC_FACES` | `true` / `false` | Memoize identical (texture + UV window + orientation) face sampling passes within one model bake (default `true`) |
 | `PACK.ENABLED` | `true` / `false` | Resource pack subsystem master switch (default `true` — the optimal out-of-the-box state); `false` makes the whole subsystem inert |
 | `PACK.DELIVERY.MODE` | `LOCAL` / `STATIC_URL` / `DISABLED` | How artifacts reach players; `LOCAL` (default) serves from the built-in HTTP endpoint with per-player URL resolution, unknown values also fall back to `LOCAL` |
 | `PACK.DELIVERY.LOCAL_HOST` | bind address | Address the built-in endpoint listens on (default `0.0.0.0`) |
@@ -402,6 +460,7 @@ TEXEL_BAKING:
 | `PACK.DELIVERY.PROMPT_DELAY_TICKS` | ticks ≥ 0 | Delay between join and the automatic prompt (default 60); players already online when a new artifact compiles are pushed automatically — no rejoin needed |
 | `PACK.CACHE.MAX_ARTIFACTS` | artifacts ≥ 1 | Generated `mp-<hash>.zip` artifacts kept before pruning (default 8; the current one is always pinned) |
 | `PACK.PACK_FORMAT_OVERRIDE` | format ≥ 1 | Non-zero pins `pack.mcmeta`'s `pack_format` when the built-in table lags a new release; the pack also declares a generous `supported_formats` range so newer clients accept it by default |
+| `PACK.LIGHTING` | `AUTO` / `NATURAL` / `EMISSIVE` / `FULLBRIGHT` | How pack display entities are lit (default `AUTO`): non-emissive models use natural world light; emissive models get block light = their max `light_emission` and sky 15. `NATURAL` never overrides (dark in caves), `EMISSIVE` always applies the model's emission, `FULLBRIGHT` is the legacy `(15, 15)` glow. Applies after restart |
 
 ---
 
@@ -410,7 +469,8 @@ TEXEL_BAKING:
 Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla blocks** (16 concretes, 16 concrete powders, 16 terracottas, snow, and 18 flat stones/minerals — polished granite is deliberately excluded as too conspicuous; 66 entries, all visually flat): each texel's color is matched to the nearest palette entry by Oklab perceptual distance, and adjacent same-color texels merge into single thin `BlockDisplay` plates (greedy rectangle merging, like vanilla chunk meshing).
 
 - **Opt-in gesture:** place the texture PNG next to the model file (`models/<textureName>.png`) — models without adjacent PNGs render byte-identically to before. Baking runs asynchronously off the main thread (results land moments after load; a reload or settings change discards in-flight bakes, and spawns wait — bounded — for a model's bake in flight), so model registration and `/mineplus reload models` never stall on PNG decoding. Bake never fails model load; unresolvable faces keep their legacy tier.
-- **Stretch safety by construction:** every palette entry is a visually flat block, so plates of any size render as a solid color — a stretched patterned block can never appear, because patterned blocks (wool weave, glazed terracotta, glowstone mottle, grained wood…) are excluded from the palette outright. **Only pure-flat concretes and snow merge into stretched rectangles**; concrete powders, terracottas and stones stay 1×1 texels so their grain never smears. Colors are always the source texture's own, sampled 1:1 per texel; only the block choice is a nearest-flat-color match.
+- **Stretch safety by construction:** every palette entry is a visually flat block, so plates of any size render as a solid color — a stretched patterned block can never appear, because patterned blocks (wool weave, glazed terracotta, glowstone mottle, grained wood…) are excluded from the palette outright. **Only pure-flat concretes and snow merge into stretched rectangles** during the standard greedy merge; concrete powders, terracottas and stones stay 1×1 texels so their grain never smears. Colors are always the source texture's own, sampled 1:1 per texel; only the block choice is a nearest-flat-color match.
+- **Plate-count optimizations (all default-on):** large **uniform areas** collapse into a single stretched plate (`UNIFORM_AREA_DETECTION`) — near-identical stretchable colors coalesce within `UNIFORM_AREA_OKLAB_THRESHOLD`, and a region of exactly-equal grained color (e.g. a solid terracotta panel) coalesces to one plate of that same block, so the color never changes and only the grain's tiling is dropped. **Adaptive budgeting** scales the per-face ceiling with the face's texel area, and an over-budget face degrades to **one dominant-color plate** rather than dropping to the legacy render (`BUDGET_FALLBACK_TO_SIMPLE_COLOR`) — faces with genuine cutout holes keep the legacy fallback so holes never get z-blocked. **Identical faces** (same texture, UV window, and orientation — common in symmetric models) share one sampling pass (`REUSE_SYMMETRIC_FACES`). Occlusion tests are pre-filtered by a per-cube bounding-box quick reject before the precise oriented-box test, and cells buried inside other cubes emit no plate at all.
 - **Plates are razor-thin and corner-disjoint:** texel plates are 1/1024 block thick and inset in-plane by one plate thickness at every face edge, so perpendicular plates at a shared cube edge exactly touch instead of crossing — no visible overlap, dark seam, or z-fighting at surface intersections, however the client quantizes ultra-thin geometry.
 - **Occlusion culling (no overlapping entities):** texels whose plate would sit inside another cube's solid — the buried midsection of a band-wrapped body, a cork's hidden base — emit no plate. Every rendered plate occupies its own distinct, visible space; box-modeled nested geometry no longer produces layered surface artifacts. Culled-cell counts show in `/mineplus model info`.
 - **Effective grid:** the face's own pixel grid (a 16px face yields a 16×16 grid regardless of PNG resolution) — a 4×4 texture upscales to ≤16 plates, a 32×32 texture downsamples.
@@ -439,8 +499,10 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 | `/mineplus pack status` | Resource pack subsystem: artifact (name, assets, pack_format), the resolved download URL + SHA-1 for diagnostics, registered asset count, player pack states |
 | `/mineplus pack recompile` | Explicit artifact recompile (async, reports the result) |
 | `/mineplus pack push <player>` | Deliver the current pack to one player |
+| `/mineplus render stats` | Unified render engine telemetry: route counts per render mode, degraded/unavailable routes, pack attach failures, and the active `RENDERING.POLICY` |
+| `/mineplus render reset` | Zero the routing counters |
 
-**Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model`, `mineplus.admin.pack` — all default to op.
+**Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model`, `mineplus.admin.pack`, `mineplus.admin.render` — all default to op.
 
 ---
 

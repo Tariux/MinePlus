@@ -25,12 +25,39 @@ public final class TexelSurfaceBaker {
     private static final float PLATE_SURFACE_OFFSET_BLOCKS = 1.0f / 256.0f;
     private static final float OCCLUSION_SHRINK_BLOCKS = 0.01f / 16.0f;
     private static final float CORNER_PROBE_INSET = 0.05f;
+    private static final float MERGE_OKLAB_TOLERANCE = 0.04f;
+    private static final int SAMPLE_GRID_CACHE_MAX = 512;
 
     private static final int TRANSPARENT = -1;
     private static final int OCCLUDED = -2;
 
     /** One face rejected by a plate budget; the emitter may tint it with the cube's dominant palette entry. */
     private record BudgetFallbackFace(int cubeIndex, CubeFace face) {
+    }
+
+    /** One face's baked plan plus whether its sampling pass was served from the reuse cache. */
+    private record BakeOutcome(TexelSurfacePlan plan, boolean reused) {
+    }
+
+    /**
+     * Position-independent identity of a face's sampling pass: two faces that
+     * agree on texture, UV window, in-plane rotation, grid size and sample count
+     * sample identical pixels, so their grids can be shared. Occlusion is
+     * deliberately excluded — it depends on world position and is applied per
+     * face after the cached grid is copied.
+     */
+    private record FaceSignature(
+            String texture,
+            CubeFace face,
+            float u1,
+            float u2,
+            float v1,
+            float v2,
+            float rotation,
+            int gridWidth,
+            int gridHeight,
+            int samples
+    ) {
     }
 
     public static TexelBakeResult bakeModel(
@@ -53,6 +80,7 @@ public final class TexelSurfaceBaker {
         long startNanos = System.nanoTime();
         OccluderSet occluders = OccluderSet.build(model.cubes());
         Map<BakedFace, TexelSampler> samplers = new HashMap<>();
+        Map<FaceSignature, int[]> sampleGridCache = settings.reuseSymmetricFaces() ? new HashMap<>() : null;
         List<Map<CubeFace, TexelSurfacePlan>> cubePlans = new ArrayList<>(model.cubes().size());
         List<BudgetFallbackFace> budgetFallbackFaces = new ArrayList<>();
         int facesBaked = 0;
@@ -61,6 +89,8 @@ public final class TexelSurfaceBaker {
         int maxPlatesOnFace = 0;
         int faceBudgetFallbacks = 0;
         int instanceBudgetFallbacks = 0;
+        int simplifiedFallbacks = 0;
+        int reusedFaceBakes = 0;
         int occludedCells = 0;
         int runningPlates = 0;
         Map<String, Integer> gridHistogram = new LinkedHashMap<>();
@@ -86,25 +116,52 @@ public final class TexelSurfaceBaker {
                     continue;
                 }
 
-                TexelSurfacePlan baked = bakeFace(
+                BakeOutcome outcome = bakeFace(
                         face, faceKey, cube, model, raster, detail, settings, occluders,
-                        cubeIndex, samplers, modelFile, imageStore);
-                occludedCells += baked.occludedCells();
-                if (baked.plateCount() > maxPlatesPerFace) {
-                    faceBudgetFallbacks++;
-                    budgetFallbackFaces.add(new BudgetFallbackFace(cubeIndex, faceKey));
-                    continue;
+                        cubeIndex, samplers, modelFile, imageStore, sampleGridCache);
+                TexelSurfacePlan baked = outcome.plan();
+                if (outcome.reused()) {
+                    reusedFaceBakes++;
                 }
-                if (runningPlates + baked.plateCount() > maxPlatesPerInstance) {
-                    instanceBudgetFallbacks++;
-                    budgetFallbackFaces.add(new BudgetFallbackFace(cubeIndex, faceKey));
-                    continue;
+                occludedCells += baked.occludedCells();
+
+                // Adaptive budgeting only tightens the *default* ceiling; an explicit
+                // per-model maxTexelPlatesPerFace is an opt-in and is never reduced.
+                boolean metaFaceOverride = meta != null && meta.maxTexelPlatesPerFace() != null;
+                int faceCeiling = metaFaceOverride
+                        ? maxPlatesPerFace
+                        : settings.effectiveFaceCeiling(baked.gridWidth(), baked.gridHeight(), maxPlatesPerFace);
+                int plates = baked.plateCount();
+                boolean faceOver = plates > faceCeiling;
+                boolean instanceOver = !faceOver && runningPlates + plates > maxPlatesPerInstance;
+
+                if (faceOver || instanceOver) {
+                    TexelSurfacePlan simplified = settings.budgetFallbackToSimpleColor()
+                            ? simplifyToDominant(baked) : null;
+                    if (simplified != null) {
+                        if (faceOver) {
+                            faceBudgetFallbacks++;
+                        } else {
+                            instanceBudgetFallbacks++;
+                        }
+                        simplifiedFallbacks++;
+                        baked = simplified;
+                        plates = 1;
+                    } else {
+                        if (faceOver) {
+                            faceBudgetFallbacks++;
+                        } else {
+                            instanceBudgetFallbacks++;
+                        }
+                        budgetFallbackFaces.add(new BudgetFallbackFace(cubeIndex, faceKey));
+                        continue;
+                    }
                 }
 
-                runningPlates += baked.plateCount();
+                runningPlates += plates;
                 facesBaked++;
-                totalPlates += baked.plateCount();
-                maxPlatesOnFace = Math.max(maxPlatesOnFace, baked.plateCount());
+                totalPlates += plates;
+                maxPlatesOnFace = Math.max(maxPlatesOnFace, plates);
                 gridHistogram.merge(baked.gridWidth() + "x" + baked.gridHeight(), 1, Integer::sum);
                 for (TexelSurfacePlan.Rect rect : baked.plates()) {
                     paletteUsage.merge(rect.paletteIndex(), rect.width() * rect.height(), Integer::sum);
@@ -121,13 +178,35 @@ public final class TexelSurfaceBaker {
         // partially baked models degrade to a flat local tone, never white.
         List<Map<CubeFace, Integer>> cubeFallbackTints = computeFallbackTints(cubePlans, budgetFallbackFaces);
 
+        if (simplifiedFallbacks > 0 || reusedFaceBakes > 0) {
+            DebugLogger.debug("texel: " + model.name() + " simplified " + simplifiedFallbacks
+                    + " over-budget face(s), reused " + reusedFaceBakes + " identical face bake(s).");
+        }
+
         long elapsedNanos = System.nanoTime() - startNanos;
         return new TexelBakeResult(
                 true, mode, detail, cubePlans, facesBaked, facesTotal, totalPlates,
-                maxPlatesOnFace, faceBudgetFallbacks, instanceBudgetFallbacks, elapsedNanos,
+                maxPlatesOnFace, faceBudgetFallbacks, instanceBudgetFallbacks, simplifiedFallbacks,
+                reusedFaceBakes, elapsedNanos,
                 gridHistogram, paletteUsage, maxPlatesPerFace, maxPlatesPerInstance, occludedCells,
                 cubeFallbackTints
         );
+    }
+
+    /**
+     * Degrades an over-budget face to a single dominant-color plate covering the
+     * whole face. Refused (returns null, preserving the legacy per-face fallback)
+     * when the face has no baked color or has genuine cutout holes — a full-face
+     * plate would z-block the see-through content behind them.
+     */
+    private static TexelSurfacePlan simplifyToDominant(TexelSurfacePlan plan) {
+        if (plan.dominantPaletteIndex() < 0 || plan.dominantArea() <= 0 || plan.cutoutCells() > 0) {
+            return null;
+        }
+        List<TexelSurfacePlan.Rect> single = List.of(new TexelSurfacePlan.Rect(
+                0, 0, plan.gridWidth(), plan.gridHeight(), plan.dominantPaletteIndex()));
+        return new TexelSurfacePlan(plan.gridWidth(), plan.gridHeight(), single,
+                plan.dominantPaletteIndex(), plan.dominantArea(), plan.occludedCells(), 0);
     }
 
     /**
@@ -196,7 +275,7 @@ public final class TexelSurfaceBaker {
         return dominantIndex;
     }
 
-    private static TexelSurfacePlan bakeFace(
+    private static BakeOutcome bakeFace(
             BakedFace face,
             CubeFace faceKey,
             BakedCube cube,
@@ -208,46 +287,79 @@ public final class TexelSurfaceBaker {
             int cubeIndex,
             Map<BakedFace, TexelSampler> samplers,
             File modelFile,
-            TextureImageStore imageStore
+            TextureImageStore imageStore,
+            Map<FaceSignature, int[]> sampleGridCache
     ) {
         float[] pixelSize = FaceUvAnalyzer.facePixelSize(faceKey, cube);
         int gridWidth = clampAxis(Math.round(pixelSize[0]), settings.maxGridEdge());
         int gridHeight = clampAxis(Math.round(pixelSize[1]), settings.maxGridEdge());
 
-        SamplingContext context = new SamplingContext(
-                new TexelSampler(face, raster, model.resolution()),
-                gridWidth,
-                gridHeight,
-                detail.sampleCount()
-        );
-        Matrix4f ownMatrix = occluders.matrix(cubeIndex);
-
-        int[] grid = new int[gridWidth * gridHeight];
+        // Position-dependent occlusion mask, computed once and applied after
+        // sampling so the sampling grid stays shareable between identical faces.
+        boolean[] occludedMask = null;
         int occludedCells = 0;
-        Vector3f unit = new Vector3f();
-        Vector3f world = new Vector3f();
-        Vector3f local = new Vector3f();
-
-        for (int row = 0; row < gridHeight; row++) {
-            int previous = -1;
-            for (int column = 0; column < gridWidth; column++) {
-                if (cellOccluded(occluders, ownMatrix, cubeIndex, faceKey, cube,
-                        column, row, gridWidth, gridHeight, unit, world, local,
-                        samplers, model, modelFile, imageStore)) {
-                    grid[row * gridWidth + column] = OCCLUDED;
-                    occludedCells++;
-                    continue;
-                }
-                int index = sampleTexel(context, column, row, previous, faceKey);
-                grid[row * gridWidth + column] = index;
-                if (index >= 0) {
-                    previous = index;
+        if (occluders.hasOccluders()) {
+            occludedMask = new boolean[gridWidth * gridHeight];
+            Matrix4f ownMatrix = occluders.matrix(cubeIndex);
+            Vector3f unit = new Vector3f();
+            Vector3f world = new Vector3f();
+            Vector3f local = new Vector3f();
+            for (int row = 0; row < gridHeight; row++) {
+                for (int column = 0; column < gridWidth; column++) {
+                    if (cellOccluded(occluders, ownMatrix, cubeIndex, faceKey, cube,
+                            column, row, gridWidth, gridHeight, unit, world, local,
+                            samplers, model, modelFile, imageStore)) {
+                        occludedMask[row * gridWidth + column] = true;
+                        occludedCells++;
+                    }
                 }
             }
         }
 
-        // Only infill single stray isolated pixels. Cutout grates, slats and intentional holes are preserved!
-        cleanStraySinglePixelsOnly(grid, gridWidth, gridHeight);
+        FaceSignature signature = new FaceSignature(
+                face.textureName(), faceKey, face.u1(), face.u2(), face.v1(), face.v2(),
+                face.rotation(), gridWidth, gridHeight, detail.sampleCount());
+        int[] cached = sampleGridCache != null ? sampleGridCache.get(signature) : null;
+        boolean reused = cached != null;
+
+        int[] grid;
+        if (reused) {
+            grid = cached.clone();
+        } else {
+            SamplingContext context = new SamplingContext(
+                    new TexelSampler(face, raster, model.resolution()),
+                    gridWidth,
+                    gridHeight,
+                    detail.sampleCount()
+            );
+            grid = new int[gridWidth * gridHeight];
+            for (int row = 0; row < gridHeight; row++) {
+                int previous = -1;
+                for (int column = 0; column < gridWidth; column++) {
+                    int index = sampleTexel(context, column, row, previous, faceKey);
+                    grid[row * gridWidth + column] = index;
+                    if (index >= 0) {
+                        previous = index;
+                    }
+                }
+            }
+            // Only infill single stray isolated pixels. Cutout grates, slats and intentional holes are preserved!
+            cleanStraySinglePixelsOnly(grid, gridWidth, gridHeight);
+            if (sampleGridCache != null) {
+                if (sampleGridCache.size() >= SAMPLE_GRID_CACHE_MAX) {
+                    sampleGridCache.clear();
+                }
+                sampleGridCache.put(signature, grid.clone());
+            }
+        }
+
+        if (occludedMask != null) {
+            for (int i = 0; i < grid.length; i++) {
+                if (occludedMask[i]) {
+                    grid[i] = OCCLUDED;
+                }
+            }
+        }
 
         int cutoutCells = 0;
         for (int value : grid) {
@@ -256,7 +368,12 @@ public final class TexelSurfaceBaker {
             }
         }
 
-        List<TexelSurfacePlan.Rect> rects = TexelMerge.merge(grid, gridWidth, gridHeight, 0.04f); // 0.04 Oklab tolerance
+        List<TexelSurfacePlan.Rect> rects = settings.uniformAreaDetection()
+                ? TexelUniformCoalescer.mergeWithUniformAreas(
+                        grid, gridWidth, gridHeight,
+                        settings.uniformAreaMinSize(), settings.uniformAreaOklabThreshold(), MERGE_OKLAB_TOLERANCE)
+                : TexelMerge.merge(grid, gridWidth, gridHeight, MERGE_OKLAB_TOLERANCE);
+
         int[] areaByIndex = paletteAreas(rects);
         int dominantIndex = -1;
         int dominantArea = 0;
@@ -266,7 +383,8 @@ public final class TexelSurfaceBaker {
                 dominantIndex = i;
             }
         }
-        return new TexelSurfacePlan(gridWidth, gridHeight, rects, dominantIndex, dominantArea, occludedCells, cutoutCells);
+        return new BakeOutcome(new TexelSurfacePlan(
+                gridWidth, gridHeight, rects, dominantIndex, dominantArea, occludedCells, cutoutCells), reused);
     }
 
     private static boolean cellOccluded(
@@ -307,6 +425,9 @@ public final class TexelSurfaceBaker {
 
         for (int i = 0; i < occluders.count(); i++) {
             if (i == ownIndex || !occluders.usable(i)) continue;
+            // Cheap world-space bounding-box reject before the inverse transform:
+            // a point outside an occluder's AABB cannot be inside its oriented box.
+            if (occluders.aabbRejects(i, world)) continue;
             occluders.inverse(i).transformPosition(world, local);
             Vector3f shrink = occluders.shrink(i);
             if (local.x > shrink.x && local.x < 1.0f - shrink.x
@@ -420,15 +541,21 @@ public final class TexelSurfaceBaker {
         private final Matrix4f[] inverses;
         private final Vector3f[] shrinks;
         private final boolean[] usable;
+        /** Flattened model-space AABBs: {@code [i*3 + axis]} — cheap pre-filter for the OBB test. */
+        private final float[] aabbMin;
+        private final float[] aabbMax;
         private final boolean hasOccluders;
 
         private OccluderSet(BakedCube[] cubes, Matrix4f[] matrices, Matrix4f[] inverses,
-                            Vector3f[] shrinks, boolean[] usable, boolean hasOccluders) {
+                            Vector3f[] shrinks, boolean[] usable, float[] aabbMin, float[] aabbMax,
+                            boolean hasOccluders) {
             this.cubes = cubes;
             this.matrices = matrices;
             this.inverses = inverses;
             this.shrinks = shrinks;
             this.usable = usable;
+            this.aabbMin = aabbMin;
+            this.aabbMax = aabbMax;
             this.hasOccluders = hasOccluders;
         }
 
@@ -439,7 +566,10 @@ public final class TexelSurfaceBaker {
             Matrix4f[] inverses = new Matrix4f[count];
             Vector3f[] shrinks = new Vector3f[count];
             boolean[] usable = new boolean[count];
+            float[] aabbMin = new float[count * 3];
+            float[] aabbMax = new float[count * 3];
             boolean anyUsable = false;
+            Vector3f corner = new Vector3f();
 
             for (int i = 0; i < count; i++) {
                 BakedCube cube = cubes.get(i);
@@ -458,8 +588,20 @@ public final class TexelSurfaceBaker {
                         OCCLUSION_SHRINK_BLOCKS / Math.max(Math.abs(scale.x), 1.0e-6f),
                         OCCLUSION_SHRINK_BLOCKS / Math.max(Math.abs(scale.y), 1.0e-6f),
                         OCCLUSION_SHRINK_BLOCKS / Math.max(Math.abs(scale.z), 1.0e-6f));
+
+                float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
+                float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+                for (int c = 0; c < 8; c++) {
+                    corner.set((c & 1) == 0 ? 0.0f : 1.0f, (c & 2) == 0 ? 0.0f : 1.0f, (c & 4) == 0 ? 0.0f : 1.0f);
+                    matrix.transformPosition(corner);
+                    minX = Math.min(minX, corner.x); minY = Math.min(minY, corner.y); minZ = Math.min(minZ, corner.z);
+                    maxX = Math.max(maxX, corner.x); maxY = Math.max(maxY, corner.y); maxZ = Math.max(maxZ, corner.z);
+                }
+                aabbMin[i * 3] = minX; aabbMin[i * 3 + 1] = minY; aabbMin[i * 3 + 2] = minZ;
+                aabbMax[i * 3] = maxX; aabbMax[i * 3 + 1] = maxY; aabbMax[i * 3 + 2] = maxZ;
             }
-            return new OccluderSet(cubeArray, matrices, inverses, shrinks, usable, anyUsable && count > 1);
+            return new OccluderSet(cubeArray, matrices, inverses, shrinks, usable, aabbMin, aabbMax,
+                    anyUsable && count > 1);
         }
 
         boolean hasOccluders() { return hasOccluders; }
@@ -469,6 +611,14 @@ public final class TexelSurfaceBaker {
         Matrix4f inverse(int index) { return inverses[index]; }
         Vector3f shrink(int index) { return shrinks[index]; }
         boolean usable(int index) { return usable[index]; }
+
+        /** True when {@code point} is outside occluder {@code index}'s model-space AABB. */
+        boolean aabbRejects(int index, Vector3f point) {
+            int base = index * 3;
+            return point.x <= aabbMin[base] || point.x >= aabbMax[base]
+                    || point.y <= aabbMin[base + 1] || point.y >= aabbMax[base + 1]
+                    || point.z <= aabbMin[base + 2] || point.z >= aabbMax[base + 2];
+        }
     }
 
     private record SamplingContext(TexelSampler sampler, int gridWidth, int gridHeight, int samples) {}

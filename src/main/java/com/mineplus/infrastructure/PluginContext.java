@@ -146,6 +146,15 @@ public final class PluginContext {
     }
 
     /**
+     * The unified render engine's routing choke point: resolves a {@code RenderPlan}
+     * to an effective backend/kind and exposes telemetry for
+     * {@code /mineplus render stats}. Never null.
+     */
+    public com.mineplus.infrastructure.render.RenderRouter renderRouter() {
+        return infrastructureEngine.renderingManager().renderRouter();
+    }
+
+    /**
      * Resource pack API — never null. When the subsystem is disabled this is
      * a safe fallback: item identity still registers, presentation falls back
      * to the vanilla backing material, nothing compiles or pushes.

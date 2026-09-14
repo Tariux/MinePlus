@@ -153,7 +153,13 @@ public final class BakeDaemon {
                 ModelMeta.TexelDetail.fromKey(str(o, "texelDetail", null), ModelMeta.TexelDetail.FACE),
                 intg(o, "maxPlatesPerFace", 96),
                 intg(o, "maxPlatesPerInstance", 150),
-                intg(o, "maxGridEdge", 64));
+                intg(o, "maxGridEdge", 64),
+                bool(o, "uniformAreaDetection", TexelBakingSettings.defaults().uniformAreaDetection()),
+                intg(o, "uniformAreaMinSize", TexelBakingSettings.defaults().uniformAreaMinSize()),
+                (float) dbl(o, "uniformAreaOklabThreshold", TexelBakingSettings.defaults().uniformAreaOklabThreshold()),
+                bool(o, "adaptiveBudgeting", TexelBakingSettings.defaults().adaptiveBudgeting()),
+                bool(o, "budgetFallbackToSimpleColor", TexelBakingSettings.defaults().budgetFallbackToSimpleColor()),
+                bool(o, "reuseSymmetricFaces", TexelBakingSettings.defaults().reuseSymmetricFaces()));
         ModelMeta.OriginMode originMode = resolveOriginMode(o, meta, model);
 
         TextureImageStore store = new TextureImageStore(textureRoot(request, modelFile));
@@ -510,6 +516,17 @@ public final class BakeDaemon {
         }
         try {
             return o.get(name).getAsInt();
+        } catch (Exception malformed) {
+            return fallback;
+        }
+    }
+
+    private static double dbl(JsonObject o, String name, double fallback) {
+        if (!has(o, name)) {
+            return fallback;
+        }
+        try {
+            return o.get(name).getAsDouble();
         } catch (Exception malformed) {
             return fallback;
         }

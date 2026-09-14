@@ -4,6 +4,7 @@ import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.pack.PackAssetRegistry;
+import com.mineplus.pack.PackLighting;
 import com.mineplus.pack.item.PackItemFactory;
 import com.mineplus.pack.asset.ItemModelAsset;
 import com.mineplus.util.DebugLogger;
@@ -54,13 +55,24 @@ public final class PackModelRenderer implements Listener {
 
     private final PackAssetRegistry registry;
     private final PackItemFactory itemFactory;
+    private volatile PackLighting lighting = PackLighting.AUTO;
     private final Map<UUID, UUID> displaysByInstance = new ConcurrentHashMap<>();
     /** Set by the owning PackSystem: re-attaches pending assets after model reloads. */
     private volatile Runnable modelsReloadedHook;
 
     public PackModelRenderer(PackAssetRegistry registry, PackItemFactory itemFactory) {
+        this(registry, itemFactory, PackLighting.AUTO);
+    }
+
+    public PackModelRenderer(PackAssetRegistry registry, PackItemFactory itemFactory, PackLighting lighting) {
         this.registry = registry;
         this.itemFactory = itemFactory;
+        this.lighting = lighting == null ? PackLighting.AUTO : lighting;
+    }
+
+    /** Applies a new lighting policy (reload path); existing displays keep their spawned brightness. */
+    public void setLighting(PackLighting lighting) {
+        this.lighting = lighting == null ? PackLighting.AUTO : lighting;
     }
 
     /** Binds the post-reload hook (model/texture assets re-attach, then recompile). */
@@ -110,11 +122,20 @@ public final class PackModelRenderer implements Listener {
                 ? anchor.clone()
                 : anchor.clone().add(0.5, 0.0, 0.5);
 
+        PackLighting lightingPolicy = lighting;
+        int emission = PackLighting.maxEmission(model);
+        boolean overrideLight = lightingPolicy.applies(emission);
+        int blockLight = lightingPolicy.blockLight(emission);
+        int skyLight = lightingPolicy.skyLight();
+
         ItemDisplay display = world.spawn(entityLocation, ItemDisplay.class, spawned -> {
             spawned.setItemStack(stack);
             spawned.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
             spawned.addScoreboardTag(PACK_TAG_PREFIX + instanceId);
             spawned.setPersistent(true);
+            if (overrideLight) {
+                spawned.setBrightness(new org.bukkit.entity.Display.Brightness(blockLight, skyLight));
+            }
             spawned.setTransformation(transformationFor(placement, originMode));
         });
 

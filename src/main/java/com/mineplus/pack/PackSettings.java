@@ -24,6 +24,7 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param promptDelayTicks   delay between join and the automatic pack prompt
  * @param maxCachedArtifacts how many {@code mp-<hash>.zip} artifacts to keep before pruning
  * @param packFormatOverride non-zero overrides the detected {@code pack.mcmeta} pack_format
+ * @param lighting           how pack display entities are lit (see {@link PackLighting})
  */
 public record PackSettings(
         boolean enabled,
@@ -35,7 +36,8 @@ public record PackSettings(
         String promptMessage,
         int promptDelayTicks,
         int maxCachedArtifacts,
-        int packFormatOverride
+        int packFormatOverride,
+        PackLighting lighting
 ) {
 
     public PackSettings {
@@ -47,11 +49,12 @@ public record PackSettings(
         promptDelayTicks = Math.max(0, promptDelayTicks);
         maxCachedArtifacts = Math.max(1, maxCachedArtifacts);
         packFormatOverride = Math.max(0, packFormatOverride);
+        lighting = lighting == null ? PackLighting.AUTO : lighting;
     }
 
     public static PackSettings defaults() {
         return new PackSettings(true, PackDeliveryMode.LOCAL, "0.0.0.0", 8163,
-                "", "", "", 60, 8, 0);
+                "", "", "", 60, 8, 0, PackLighting.AUTO);
     }
 
     public static PackSettings parse(FileConfiguration yaml, PackSettings fallback) {
@@ -74,7 +77,8 @@ public record PackSettings(
                 delivery == null ? defaults.promptMessage() : delivery.getString("PROMPT_MESSAGE", defaults.promptMessage()),
                 delivery == null ? defaults.promptDelayTicks() : delivery.getInt("PROMPT_DELAY_TICKS", defaults.promptDelayTicks()),
                 cache == null ? defaults.maxCachedArtifacts() : cache.getInt("MAX_ARTIFACTS", defaults.maxCachedArtifacts()),
-                root.getInt("PACK_FORMAT_OVERRIDE", defaults.packFormatOverride())
+                root.getInt("PACK_FORMAT_OVERRIDE", defaults.packFormatOverride()),
+                PackLighting.fromKey(root.getString("LIGHTING"), defaults.lighting())
         );
     }
 }

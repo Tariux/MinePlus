@@ -89,9 +89,9 @@ public final class PackSystem {
         this.compiler = new PackCompiler(virtualBlockManager, cache, settings);
         this.itemFactory = new PackItemFactory(
                 PackFormat.itemRepresentation(org.bukkit.Bukkit.getBukkitVersion()));
-        this.modelRenderer = new PackModelRenderer(assetRegistry, itemFactory);
+        this.modelRenderer = new PackModelRenderer(assetRegistry, itemFactory, settings.lighting());
         this.modelRenderer.bindModelsReloadedHook(this::onReload);
-        this.blockRenderer = new PackBlockRenderer(assetRegistry, plugin.getLogger());
+        this.blockRenderer = new PackBlockRenderer(assetRegistry, plugin.getLogger(), settings.lighting());
         this.delivery = new PackDeliveryService(settings, cache);
         this.compileExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mineplus-pack-compile");
