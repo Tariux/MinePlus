@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Core engine (`Mineplus`) — Unified Rendering Engine
+
+#### Added
+
+- **Unified render vocabulary and router** — `RenderMode` (`virtual`,
+  `pack_item`, `pack_block`, `hybrid_item`, `hybrid_block`) names both the
+  subsystem and the primitive in one value; `RenderPlan`, `RenderPolicy`, and
+  `RenderRouter` make routing a single choke point. `RenderMode.of(...)` maps the
+  existing `RenderBackend` + `RenderKind` pair (still fully supported), and
+  multiblock JSON accepts a `renderMode` key. Access the router (policy +
+  telemetry) through the new `PluginContext.renderRouter()`.
+- **`/mineplus render stats` / `render reset`** — per-mode route counts, degraded
+  and unavailable route counts, pack attach failures, and the active policy.
+  New `RENDERING.POLICY` config section (`ALLOW_DEGRADE_TO_VIRTUAL`,
+  `LOG_ROUTING`, `TRACK_TELEMETRY`).
+- **Texel plate-count reductions** — uniform-area coalescing
+  (`UNIFORM_AREA_DETECTION`, `UNIFORM_AREA_MIN_SIZE`,
+  `UNIFORM_AREA_OKLAB_THRESHOLD`), area-scaled adaptive budgeting
+  (`ADAPTIVE_BUDGETING`), single-dominant-color degradation for over-budget faces
+  (`BUDGET_FALLBACK_TO_SIMPLE_COLOR`), and identical-face bake reuse
+  (`REUSE_SYMMETRIC_FACES`). `/mineplus model info` reports `simplifiedFallbacks`
+  and `reusedFaceBakes`.
+- **`PACK.LIGHTING`** — `AUTO` (default) lights non-emissive pack models with
+  natural world light and applies the model's maximum `light_emission` only to
+  emissive models; `NATURAL` / `EMISSIVE` / `FULLBRIGHT` select the other
+  behaviors.
+
+#### Changed
+
+- **Pack model lighting** — pack display entities no longer force full
+  brightness `(15, 15)`. Under the default `AUTO` policy, non-emissive pack
+  models are lit by the world (previously they glowed everywhere); set
+  `PACK.LIGHTING: FULLBRIGHT` to restore the old look.
+- **Occlusion tests** in texel baking gain a per-cube bounding-box pre-filter
+  before the oriented-box test; results are unchanged, only faster.
+
 ### Texel devtool (`devtools/texel`)
 
 #### Added

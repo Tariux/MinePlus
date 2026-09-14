@@ -32,6 +32,8 @@ public record TexelBakeResult(
         int maxPlatesOnFace,
         int faceBudgetFallbacks,
         int instanceBudgetFallbacks,
+        int simplifiedFallbacks,
+        int reusedFaceBakes,
         long bakeTimeNanos,
         Map<String, Integer> gridHistogram,
         Map<Integer, Integer> paletteUsage,
@@ -80,7 +82,7 @@ public record TexelBakeResult(
             empty.add(Map.of());
         }
         return new TexelBakeResult(false, mode, detail, empty,
-                0, 0, 0, 0, 0, 0, 0L, Map.of(), Map.of(),
+                0, 0, 0, 0, 0, 0, 0, 0, 0L, Map.of(), Map.of(),
                 settings == null ? 0 : settings.maxPlatesPerFace(),
                 settings == null ? 0 : settings.maxPlatesPerInstance(),
                 0,

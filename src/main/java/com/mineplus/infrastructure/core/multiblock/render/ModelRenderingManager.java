@@ -5,6 +5,8 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
 import com.mineplus.infrastructure.render.RenderBackend;
 import com.mineplus.infrastructure.render.RenderKind;
+import com.mineplus.infrastructure.render.RenderPlan;
+import com.mineplus.infrastructure.render.RenderRouter;
 import com.mineplus.infrastructure.virtual.BbModelImporter;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
@@ -35,11 +37,17 @@ import org.joml.Quaternionf;
 public final class ModelRenderingManager {
 
     private final VirtualBlockManager virtualBlockManager;
+    private final RenderRouter renderRouter = new RenderRouter();
     private volatile PackModelRenderer packRenderer;
     private volatile PackBlockRenderer packBlockRenderer;
 
     public ModelRenderingManager(VirtualBlockManager virtualBlockManager) {
         this.virtualBlockManager = virtualBlockManager;
+    }
+
+    /** The single routing choke point: plan + availability + policy -> effective backend/kind. */
+    public RenderRouter renderRouter() {
+        return renderRouter;
     }
 
     /** Injected by the pack subsystem on start; null when the subsystem is disabled. */
@@ -83,14 +91,25 @@ public final class ModelRenderingManager {
     }
 
     private UUID renderResolved(Resolved resolved) {
-        RenderBackend backend = effectiveBackend(resolved.level());
-        switch (backend) {
+        RenderPlan plan = resolved.level().renderPlan("level");
+        RenderRouter.ResolvedRoute route = renderRouter.route(plan, packRendererActive());
+        if (!route.available()) {
+            DebugLogger.warning("render: no backend available for mode " + plan.mode()
+                    + " (pack unavailable and degradation disabled).");
+            return null;
+        }
+        switch (route.backend()) {
             case PACK -> {
                 UUID id = resolved.level().renderKind() == RenderKind.BLOCK
                         ? renderPackBlock(resolved)
                         : renderPack(resolved);
                 if (id != null) {
                     return id;
+                }
+                if (!degradeAllowed()) {
+                    DebugLogger.warning("render: pack backend unavailable for " + plan.mode()
+                            + " and degradation is disabled; leaving instance unrendered.");
+                    return null;
                 }
                 // Pack render unavailable (model without a pack item/block,
                 // spawn failure): the virtual engine is the declared fallback.
@@ -107,6 +126,11 @@ public final class ModelRenderingManager {
                 return virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
             }
         }
+    }
+
+    /** Whether the active policy permits falling back to the virtual engine. */
+    private boolean degradeAllowed() {
+        return renderRouter.policy().allowDegradeToVirtual();
     }
 
     /**
@@ -165,6 +189,7 @@ public final class ModelRenderingManager {
             if (renderer.attach(instanceId, resolved.model(), resolved.placement())) {
                 return true;
             }
+            renderRouter.recordAttachFailure();
             DebugLogger.warning("render: pack block display attach failed for instance " + instanceId
                     + "; falling back to virtual rendering.");
             return false;
@@ -176,14 +201,10 @@ public final class ModelRenderingManager {
         if (renderer.attach(instanceId, resolved.model(), resolved.placement())) {
             return true;
         }
+        renderRouter.recordAttachFailure();
         DebugLogger.warning("render: pack display attach failed for instance " + instanceId
                 + "; falling back to virtual rendering.");
         return false;
-    }
-
-    /** Backend with subsystem availability applied, in this one place. */
-    private RenderBackend effectiveBackend(MultiBlockLevel level) {
-        return level.effectiveBackend(packRendererActive());
     }
 
     /**
@@ -243,8 +264,11 @@ public final class ModelRenderingManager {
         if (resolved == null) {
             return null;
         }
-        RenderBackend backend = effectiveBackend(resolved.level());
-        if (backend == RenderBackend.PACK) {
+        RenderRouter.ResolvedRoute route = renderRouter.route(resolved.level().renderPlan("level"), packRendererActive());
+        if (!route.available()) {
+            return null;
+        }
+        if (route.backend() == RenderBackend.PACK) {
             UUID id = virtualBlockManager.restoreCollisionForState(
                     instance.coordinate(), instance.modelKey(), instance.rotation());
             if (id != null) {

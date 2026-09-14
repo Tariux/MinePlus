@@ -424,6 +424,12 @@ public final class ModelSubCommand implements SubCommand {
                         + bake.instanceBudgetFallbacks() + " instance)"
                         : ChatColor.GREEN + " -> ok"));
 
+        if (bake.simplifiedFallbacks() > 0 || bake.reusedFaceBakes() > 0) {
+            sender.sendMessage(ChatColor.YELLOW + "  Reductions: " + ChatColor.WHITE
+                    + bake.simplifiedFallbacks() + " face(s) simplified to a flat tone"
+                    + ChatColor.GRAY + ", " + bake.reusedFaceBakes() + " face bake(s) reused");
+        }
+
         sender.sendMessage(ChatColor.YELLOW + "  Bake time: " + ChatColor.WHITE
                 + String.format(java.util.Locale.ROOT, "%.1f", bake.bakeTimeNanos() / 1_000_000.0) + " ms");
     }

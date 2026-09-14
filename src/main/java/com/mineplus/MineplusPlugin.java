@@ -48,6 +48,7 @@ public final class MineplusPlugin extends JavaPlugin {
         context = PluginContext.bootstrap(
                 this, virtualBlockManager, configManager.getConfig().getAnimation(),
                 configManager.getConfig().getPack());
+        context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
         context.finalizeSetup();
 
         registerCommand();
@@ -88,6 +89,7 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new ReloadSubCommand(context));
         commandRouter.register(new ModelSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.PackSubCommand(context));
+        commandRouter.register(new com.mineplus.infrastructure.command.sub.RenderSubCommand(context));
 
         command.setExecutor(commandRouter);
         command.setTabCompleter(commandRouter);
@@ -151,6 +153,7 @@ public final class MineplusPlugin extends JavaPlugin {
         }
         if (context != null && configManager != null) {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
+            context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
         }
         // Pack mode changes apply after restart (delivery binding, listeners);
         // a running subsystem still recompiles so freshly registered content

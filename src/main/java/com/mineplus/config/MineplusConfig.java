@@ -5,6 +5,7 @@ import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.render.RenderPolicy;
 import com.mineplus.pack.PackSettings;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -16,6 +17,7 @@ public class MineplusConfig {
     private final TexelBakingSettings texelBaking;
     private final DisplayTransportSettings displayTransport;
     private final PackSettings pack;
+    private final RenderPolicy renderPolicy;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -87,6 +89,20 @@ public class MineplusConfig {
             PackSettings pack,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                RenderPolicy.defaults(), updateCheckResourceId);
+    }
+
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
@@ -96,6 +112,7 @@ public class MineplusConfig {
         this.displayTransport = displayTransport == null
                 ? DisplayTransportSettings.defaults() : displayTransport;
         this.pack = pack == null ? PackSettings.defaults() : pack;
+        this.renderPolicy = renderPolicy == null ? RenderPolicy.defaults() : renderPolicy;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -121,6 +138,11 @@ public class MineplusConfig {
 
     public PackSettings getPack() {
         return pack;
+    }
+
+    /** Unified render engine routing policy ({@code RENDERING.POLICY}). */
+    public RenderPolicy getRenderPolicy() {
+        return renderPolicy;
     }
 
     public int getUpdateCheckResourceId() {
@@ -172,5 +194,9 @@ public class MineplusConfig {
 
     public static PackSettings parsePack(FileConfiguration yaml, PackSettings fallback) {
         return PackSettings.parse(yaml, fallback);
+    }
+
+    public static RenderPolicy parseRenderPolicy(FileConfiguration yaml, RenderPolicy fallback) {
+        return RenderPolicy.parse(yaml, fallback);
     }
 }

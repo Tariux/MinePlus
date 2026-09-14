@@ -39,7 +39,7 @@ public final class CabinetFeature extends ModuleFeature {
         support.installDefault(plugin, "defaults/models/acacia_cabinet_open.meta.json", "models/acacia_cabinet_open.meta.json", true);
         support.installDefault(plugin, "defaults/multiblocks/cabinet.json", "multiblocks/cabinet.json", false);
         // Pack-block twin: same models, but rendered as a single BlockDisplay
-        // through a generated resource pack (renderBackend: pack, renderKind: block).
+        // through a generated resource pack (renderMode: pack_block).
         support.installDefault(plugin, "defaults/multiblocks/cabinet_pack.json", "multiblocks/cabinet_pack.json", false);
 
         context.packApi().registerBlock(PackBlockDefinition.builder(

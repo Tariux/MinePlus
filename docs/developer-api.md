@@ -41,6 +41,8 @@ context.basicInfrastructureApi()
 context.infrastructureApi()
 context.jsonInfrastructureApi()
 context.animationApi()          // selector-based animation control (play/stop/pause/trigger/enable)
+context.packApi()               // resource pack registration/delivery (never null)
+context.renderRouter()          // unified render routing: policy + telemetry (never null)
 context.moduleSupport()        // module toolkit: resource install, looked-at resolution, command registration
 ```
 
@@ -96,6 +98,7 @@ Use this tier when your workflow is config-first and you only need runtime reloa
 | Timed processes | `startProcess`, `cancelProcess`, `getProcess` |
 | Lookups | `getBlock`, `getBlockAt` |
 | Persistence | `stagePersist(instanceId)` — stage an instance's state (incl. `stateData`) for the async write-behind queue; call after mutating `stateData` from hooks/GUI callbacks |
+| Render routing | Not on `InfrastructureApi` itself — content declares a `renderMode` (JSON/`MultiBlockLevel`) and the engine routes it. Read telemetry/policy through `context.renderRouter()`. See [Render Modes](#render-modes) |
 
 **Working examples:** [`examples/code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) • the complete [`mineplus-fun`](../examples/mineplus-fun/README.md) module (Juicer + Cannon)
 
@@ -240,7 +243,8 @@ Pixel-accurate vanilla texturing, zero resource pack: when a texture PNG sits ne
 
 - **Zero regression by default:** `MODE: AUTO` only upgrades faces that would otherwise render with the FULL strategy and have a resolvable PNG — models without adjacent PNGs render byte-identically. `TEXEL_BAKING.ENABLED: false` restores the pre-texel pipeline entirely.
 - **Entity count scales with geometry, not texture resolution:** the effective grid is the face's own pixel grid (16px face → 16×16 texels); a 4×4 texture upscales, a 32×32 downsamples.
-- **Budgets bound the cost:** `MAX_PLATES_PER_FACE` (96) and `MAX_PLATES_PER_INSTANCE` (150) fall over-budget faces back to the single-material plate, in deterministic face emission order. Per-model overrides: `"maxTexelPlatesPerFace"`/`"maxTexelPlatesPerInstance"` in the `.meta.json` (decorative pixel-art models legitimately want more plates than the global default).
+- **Budgets bound the cost:** `MAX_PLATES_PER_FACE` (96) and `MAX_PLATES_PER_INSTANCE` (150) bound the plate count, in deterministic face emission order. Per-model overrides: `"maxTexelPlatesPerFace"`/`"maxTexelPlatesPerInstance"` in the `.meta.json` (decorative pixel-art models legitimately want more plates than the global default).
+- **Plate-count reductions (all default-on):** large **uniform regions** coalesce into one stretched plate (`UNIFORM_AREA_DETECTION`, `UNIFORM_AREA_MIN_SIZE`, `UNIFORM_AREA_OKLAB_THRESHOLD`); **adaptive budgeting** scales the default per-face ceiling with texel area (`ADAPTIVE_BUDGETING`; an explicit per-model `maxTexelPlatesPerFace` is never reduced); an over-budget face degrades to **one dominant-color plate** instead of the legacy render (unless it has cutout holes, which must stay see-through) via `BUDGET_FALLBACK_TO_SIMPLE_COLOR`; and **identical faces** share a single sampling pass (`REUSE_SYMMETRIC_FACES`). `/mineplus model info` reports `simplifiedFallbacks` and `reusedFaceBakes` alongside the budget verdict.
 - **Authoring opt-in per model:** `"texelMode": "AUTO" | "ON" | "OFF"` and `"texelDetail": "FACE" | "SUPERSAMPLE_2X2" | "SUPERSAMPLE_4X4"` in the `.meta.json`; `"texelBrightness": 0-15` sets a minimum display light level so dark palette art stays readable outside full daylight.
 - Plates bind to their cube's bone exactly like the existing minority plates, so `AnimationApi` control composes naturally; brightness follows the model's `light_emission`.
 - `/mineplus model info <key>` reports the bake: faces baked, grids, palette-usage histogram, merged plate counts, budget verdict, bake time; texture entries show `[png]`/`[no png]`.
@@ -282,10 +286,37 @@ context.packApi().registerBlock(PackBlockDefinition.builder(
 A pack block is placed, collision-owned and persisted by the ordinary multiblock lifecycle (`createMultiBlock` / `placeMultiBlock` / `removeBlock`). Its multiblock JSON level selects the rendering:
 
 ```json
-"1": { "model": "models/alchemy-table.bbmodel", "renderBackend": "pack", "renderKind": "block" }
+"1": { "model": "models/alchemy-table.bbmodel", "renderMode": "pack_block" }
 ```
 
-`renderBackend` (`virtual` | `pack` | `virtual+pack`) and `renderKind` (`model` | `block`) are resolved in one place (`MultiBlockLevel` + `ModelRenderingManager`); when the pack subsystem is off, `pack` degrades to `virtual` automatically. Registration is order-insensitive — assets attach during the coordinated reload-driven recompile.
+Registration is order-insensitive — assets attach during the coordinated reload-driven recompile.
+
+---
+
+## Render Modes
+
+Rendering selection is a single declarative vocabulary, `RenderMode`. One value names both the subsystem and the primitive, replacing the older `renderBackend` + `renderKind` pair (which remains fully supported and maps onto the same modes).
+
+| `RenderMode` | Config key | Backend + kind | Meaning |
+|---|---|---|---|
+| `VIRTUAL` | `virtual` | `VIRTUAL` + `MODEL` | Packless virtual engine (default) |
+| `PACK_ITEM` | `pack_item` (`pack`/`item`) | `PACK` + `MODEL` | Pack item model (`ItemDisplay`) |
+| `PACK_BLOCK` | `pack_block` (`block`) | `PACK` + `BLOCK` | Pack block display (`BlockDisplay` + carrier state) |
+| `HYBRID_ITEM` | `hybrid_item` (`hybrid`/`virtual+pack`) | `VIRTUAL_PLUS_PACK` + `MODEL` | Virtual render plus the pack item layered on top |
+| `HYBRID_BLOCK` | `hybrid_block` | `VIRTUAL_PLUS_PACK` + `BLOCK` | Virtual render plus the pack block layered on top |
+
+**Routing is centralized.** A multiblock level declares intent; `ModelRenderingManager` resolves it through the `RenderRouter` — the single choke point that applies subsystem availability and the global `RENDERING.POLICY` (whether a pack request may degrade to the virtual engine when the pack is unavailable or a pack display fails to attach). A `RenderMode` selects one primitive for the whole level; mixing backends or primitives per cube/face is **not** supported by the engine (the pack axis draws an entire model client-side as one model or block).
+
+```java
+// Telemetry + policy, exposed through every PluginContext:
+RenderRouter router = context.renderRouter();
+RenderRouter.RenderStats stats = router.snapshot();     // per-mode counts, degraded/unavailable, attach failures
+RenderPolicy policy = router.policy();                  // the active routing policy
+```
+
+`/mineplus render stats` prints the same snapshot; `/mineplus render reset` zeroes the counters.
+
+> **Migrating from the legacy pair:** replace `"renderBackend": "pack", "renderKind": "block"` with `"renderMode": "pack_block"`. Both forms parse today, but new content should use `renderMode`. See the [migration guide](migration-guide.md).
 
 ---
 

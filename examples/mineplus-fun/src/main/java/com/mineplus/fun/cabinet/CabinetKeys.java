@@ -3,7 +3,7 @@ package com.mineplus.fun.cabinet;
 public final class CabinetKeys {
 
     public static final String MACHINE_ID = "cabinet";
-    /** Pack-block twin of {@link #MACHINE_ID}: same models, {@code renderBackend: pack} + {@code renderKind: block}. */
+    /** Pack-block twin of {@link #MACHINE_ID}: same models, {@code renderMode: pack_block}. */
     public static final String PACK_MACHINE_ID = "cabinet_pack";
     public static final String GUI_KEY = "cabinet_storage";
 

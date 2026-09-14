@@ -41,6 +41,7 @@ public class ConfigManager {
                     MineplusConfig.parseTexelBaking(yamlConfig, com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults()),
                     MineplusConfig.parseDisplayTransport(yamlConfig, com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()),
                     MineplusConfig.parsePack(yamlConfig, com.mineplus.pack.PackSettings.defaults()),
+                    MineplusConfig.parseRenderPolicy(yamlConfig, com.mineplus.infrastructure.render.RenderPolicy.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -105,6 +106,22 @@ public class ConfigManager {
                     UPDATE_CHECKER:
                       RESOURCE_ID: 0
 
+                    # Unified render engine routing. Content declares a render plan
+                    # (a renderMode, or the legacy renderBackend/renderKind pair);
+                    # this policy decides how the router behaves when a pack
+                    # request cannot be served.
+                    RENDERING:
+                      POLICY:
+                        # When a pack/hybrid level cannot be served (pack subsystem
+                        # unavailable, or the pack display fails to attach), fall
+                        # back to the virtual engine. false leaves it unrendered.
+                        ALLOW_DEGRADE_TO_VIRTUAL: true
+                        # Log each routing decision (downgrades, unavailable routes).
+                        # Requires ADDITIONAL_DEBUG_LOGS: true.
+                        LOG_ROUTING: false
+                        # Maintain the route counters shown by /mineplus render stats.
+                        TRACK_TELEMETRY: true
+
                     # Virtual rendering engine (bbmodel -> BlockDisplay pipeline).
                     # Per-model overrides live in models/<key>.meta.json.
                     VIRTUAL_RENDERING:
@@ -165,6 +182,26 @@ public class ConfigManager {
                       MAX_PLATES_PER_INSTANCE: 150
                       # Hard grid edge cap per face (max texels per axis pre-merge).
                       MAX_GRID_EDGE: 64
+                      # Collapse large flat color regions into one stretched plate
+                      # instead of many 1x1 plates. Regions of near-identical
+                      # stretchable colors merge within UNIFORM_AREA_OKLAB_THRESHOLD;
+                      # regions of exactly-equal grained colors merge exactly.
+                      UNIFORM_AREA_DETECTION: true
+                      # Minimum region area (in texels) to coalesce.
+                      UNIFORM_AREA_MIN_SIZE: 8
+                      # Perceptual (Oklab) tolerance for coalescing stretchable regions.
+                      UNIFORM_AREA_OKLAB_THRESHOLD: 0.05
+                      # Scale the per-face plate ceiling with face texel area, so
+                      # large faces keep proportional detail and small faces stay
+                      # cheap. The hard MAX_PLATES_PER_FACE ceiling still applies.
+                      ADAPTIVE_BUDGETING: true
+                      # An over-budget face degrades to a single dominant-color
+                      # plate instead of dropping to the legacy per-face render.
+                      # Faces with genuine cutout holes keep the legacy fallback.
+                      BUDGET_FALLBACK_TO_SIMPLE_COLOR: true
+                      # Memoize identical (texture + UV window + orientation) face
+                      # sampling passes within one model bake.
+                      REUSE_SYMMETRIC_FACES: true
 
                     # Display transport: packet-based streaming of the render pipeline's
                     # displays. Instead of spawning real entities (vanilla tracking), every
@@ -237,6 +274,14 @@ public class ConfigManager {
                       # The pack also declares a generous supported_formats
                       # range, so newer clients accept it by default.
                       PACK_FORMAT_OVERRIDE: 0
+                      # How pack display entities are lit:
+                      #   AUTO (default): non-emissive models use natural world
+                      #     light; emissive models get block light = their max
+                      #     light_emission and sky 15.
+                      #   NATURAL: never override (models are dark in caves).
+                      #   EMISSIVE: always block light = model max emission, sky 15.
+                      #   FULLBRIGHT: always (15, 15) — the legacy fully-lit look.
+                      LIGHTING: AUTO
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);
