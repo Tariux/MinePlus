@@ -1,0 +1,34 @@
+name: MineplusGun
+version: ${version}
+main: com.mineplus.gun.MineplusGunPlugin
+api-version: '1.21'
+author: Tariux
+description: Combat/weapons module for Mineplus - additive firearms, melee, grenades and ammunition with a Vault shop.
+website: https://github.com/Tariux/MinePlus
+
+# Hard dependency: the Core engine must be present and enabled first.
+depend: [Mineplus]
+
+# Both optional. Vault powers the shop economy; packetevents enables true
+# hold-to-fire input. The module runs (with graceful fallbacks) when absent.
+softdepend: [Vault, packetevents]
+
+# Commands are registered programmatically: /mpgun through ModuleSupport and
+# /mineplus gun through the Core router. Declaring them here would make the
+# server claim the label first and block programmatic registration.
+permissions:
+  mineplusgun.shop.use:
+    description: Allows opening the weapon shop
+    default: true
+  mineplusgun.shop.buy:
+    description: Allows purchasing weapons from the shop
+    default: true
+  mineplusgun.hud:
+    description: Allows toggling the ammo HUD
+    default: true
+  mineplusgun.bypass.cost:
+    description: Purchases skip payment entirely (staff/admin bypass)
+    default: op
+  mineplusgun.admin:
+    description: Allows MineplusGun administration (give/reload/stats/debug)
+    default: op

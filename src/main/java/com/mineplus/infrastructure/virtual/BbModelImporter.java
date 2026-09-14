@@ -83,6 +83,7 @@ public class BbModelImporter {
         TextureLookup textureLookup = new TextureLookup();
         VirtualModel.Resolution resolution = null;
         String modelFormat = null;
+        ModelDisplay display = ModelDisplay.EMPTY;
 
         // Raw element capture (kept as lightweight value holders, not Gson DOM).
         List<RawElement> rawElements = new ArrayList<>();
@@ -102,6 +103,7 @@ public class BbModelImporter {
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
                 case "resolution" -> resolution = parseResolution(json);
                 case "meta" -> modelFormat = parseMeta(json);
+                case "display" -> display = ModelDisplay.fromJson(json);
                 case "animations" -> parseAnimations(json, rawAnimations);
                 default -> json.skipValue();
             }
@@ -193,6 +195,20 @@ public class BbModelImporter {
             }
             String primaryTexture = choosePrimaryTexture(faces);
 
+            // Preserve the raw authored geometry so the pack writer can emit a
+            // rotated element natively (vanilla supports one axis, +/-45) instead
+            // of degrading it to an axis-aligned box. Only valid when the enclosing
+            // outliner group baked to identity; a rotated/pivoted parent would make
+            // raw coordinates unusable, so the writer falls back to the baked box.
+            ElementGeometry geometry = isIdentity(parentMatrix)
+                    ? new ElementGeometry(
+                            from,
+                            to,
+                            element.origin == null ? from : element.origin,
+                            element.rotation,
+                            element.rescale)
+                    : null;
+
             bakedCubes.add(new BakedCube(
                     element.name,
                     translation,
@@ -202,7 +218,8 @@ public class BbModelImporter {
                     faces,
                     primaryTexture,
                     element.lightEmission,
-                    element.uuid == null ? -1 : elementBoneIndex.getOrDefault(element.uuid, -1)
+                    element.uuid == null ? -1 : elementBoneIndex.getOrDefault(element.uuid, -1),
+                    geometry
             ));
         }
 
@@ -230,7 +247,8 @@ public class BbModelImporter {
                 modelFormat,
                 anchors,
                 List.copyOf(bones),
-                animations
+                animations,
+                display
         );
     }
 
@@ -295,10 +313,11 @@ public class BbModelImporter {
                     case "origin" -> element.origin = nextVector3(json);
                     case "rotation" -> element.rotation = nextVector3(json);
                     case "inflate" -> element.inflate = (float) nextDouble(json, 0.0);
+                    case "rescale" -> element.rescale = nextBoolean(json, false);
                     case "export" -> element.export = nextBoolean(json, true);
                     case "light_emission" -> element.lightEmission = (int) nextDouble(json, 0.0);
                     case "faces" -> parseFaces(json, element.faces);
-                    default -> json.skipValue(); // rescale, locked, color, autouv, render_order, ...
+                    default -> json.skipValue(); // locked, color, autouv, render_order, ...
                 }
             }
             json.endObject();
@@ -688,6 +707,26 @@ public class BbModelImporter {
         }
     }
 
+    /** True when {@code matrix} is (within tolerance) the identity transform. */
+    private static boolean isIdentity(Matrix4f matrix) {
+        if (matrix == null) {
+            return true;
+        }
+        float[] expected = new float[]{
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+        };
+        for (int i = 0; i < 16; i++) {
+            float actual = matrix.get(i % 4, i / 4);
+            if (Math.abs(actual - expected[i]) > 1.0e-5f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Matrix4f pivotRotation(Vector3f origin, Vector3f rotation) {
         if (rotation == null || origin == null) {
             return new Matrix4f();
@@ -870,6 +909,7 @@ public class BbModelImporter {
         Vector3f origin;
         Vector3f rotation;
         float inflate = 0f;
+        boolean rescale = false;
         boolean export = true;
         int lightEmission = 0;
         final Map<CubeFace, RawFace> faces = new EnumMap<>(CubeFace.class);

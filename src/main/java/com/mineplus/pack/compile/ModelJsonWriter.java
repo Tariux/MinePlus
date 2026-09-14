@@ -7,8 +7,11 @@ import com.google.gson.JsonObject;
 import com.mineplus.infrastructure.virtual.BakedCube;
 import com.mineplus.infrastructure.virtual.BakedFace;
 import com.mineplus.infrastructure.virtual.CubeFace;
+import com.mineplus.infrastructure.virtual.ElementGeometry;
 import com.mineplus.infrastructure.virtual.ModelMeta;
+import com.mineplus.infrastructure.virtual.ModelDisplay;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -119,10 +122,20 @@ public final class ModelJsonWriter {
         root.add("textures", textures);
         root.add("elements", elements);
         if (!block) {
-            // Item models need held/gui/ground transforms; block models are
-            // placed in the world through BlockDisplay and must not inherit
-            // item display settings.
-            root.add("display", vanillaDisplayTransforms());
+            // Item models: optional parent for natural held/GUI transforms.
+            String itemParent = model.itemParent();
+            if (itemParent != null && !itemParent.isBlank()) {
+                root.addProperty("parent", itemParent);
+            }
+            // Display: authored contexts win; if a parent is set, missing contexts
+            // come from the parent. If no parent and no authored display, fall back
+            // to vanilla generated defaults for compatibility.
+            ModelDisplay display = model.display();
+            if (display != null && !display.isEmpty()) {
+                root.add("display", displayTransforms(display));
+            } else if (itemParent == null) {
+                root.add("display", vanillaDisplayTransforms());
+            }
         }
         return GSON.toJson(root);
     }
@@ -135,7 +148,11 @@ public final class ModelJsonWriter {
             List<String> warnings,
             boolean block
     ) {
-        if (!cube.isAxisAligned()) {
+        ElementGeometry geom = cube.geometry();
+        boolean hasNativeRotation = geom != null && geom.hasRotation() && isSingleAxisRotation(geom.rotation());
+
+        // Warn only for non-representable rotations (multi-axis or >45°).
+        if (!cube.isAxisAligned() && !hasNativeRotation) {
             warnings.add("cube '" + cube.name() + "' carries a rotation; emitted as its axis-aligned "
                     + "bounding box (vanilla elements support at most one ±45° axis rotation).");
         }
@@ -145,17 +162,54 @@ public final class ModelJsonWriter {
         float originShiftY = 0.0f;
         float originShiftZ = centerShift;
 
-        float fromX = cube.translation().x * 16.0f + originShiftX;
-        float fromY = cube.translation().y * 16.0f + originShiftY;
-        float fromZ = cube.translation().z * 16.0f + originShiftZ;
-        float toX = fromX + cube.scale().x * 16.0f;
-        float toY = fromY + cube.scale().y * 16.0f;
-        float toZ = fromZ + cube.scale().z * 16.0f;
+        float fromX, fromY, fromZ, toX, toY, toZ;
+        if (geom != null) {
+            // Raw authored geometry (pixels) for exact reproduction.
+            fromX = geom.from().x + originShiftX;
+            fromY = geom.from().y + originShiftY;
+            fromZ = geom.from().z + originShiftZ;
+            toX = geom.to().x + originShiftX;
+            toY = geom.to().y + originShiftY;
+            toZ = geom.to().z + originShiftZ;
+        } else {
+            // Fallback: baked box from the virtual engine.
+            fromX = cube.translation().x * 16.0f + originShiftX;
+            fromY = cube.translation().y * 16.0f + originShiftY;
+            fromZ = cube.translation().z * 16.0f + originShiftZ;
+            toX = fromX + cube.scale().x * 16.0f;
+            toY = fromY + cube.scale().y * 16.0f;
+            toZ = fromZ + cube.scale().z * 16.0f;
+        }
 
         JsonObject element = new JsonObject();
         element.add("from", vec3(round(fromX), round(fromY), round(fromZ)));
         element.add("to", vec3(round(toX), round(toY), round(toZ)));
         element.addProperty("shade", false);
+
+        // Emit native element rotation when the authored rotation is single-axis
+        // and within the vanilla-supported ±45° range.
+        if (hasNativeRotation) {
+            char axis = dominantAxis(geom.rotation());
+            float angle = switch (axis) {
+                case 'x' -> geom.rotation().x;
+                case 'y' -> geom.rotation().y;
+                default -> geom.rotation().z;
+            };
+            if (Math.abs(angle) <= 45.001f) {
+                JsonObject rotation = new JsonObject();
+                rotation.add("origin", vec3(
+                        round(geom.origin().x + originShiftX),
+                        round(geom.origin().y + originShiftY),
+                        round(geom.origin().z + originShiftZ)));
+                rotation.addProperty("axis", axis);
+                rotation.addProperty("angle", round(angle));
+                rotation.addProperty("rescale", geom.rescale());
+                element.add("rotation", rotation);
+            } else {
+                warnings.add("cube '" + cube.name() + "' rotation angle " + angle
+                        + "° on " + axis + " exceeds vanilla limit (±45°); emitted as AABB.");
+            }
+        }
 
         JsonObject faces = new JsonObject();
         for (CubeFace faceKey : CubeFace.values()) {
@@ -163,12 +217,6 @@ public final class ModelJsonWriter {
             if (face == null || face.textureName() == null || face.textureName().isBlank()) {
                 continue;
             }
-            // Normalized once here: the reference written into the model and
-            // the texture asset's zip entry both use the same canonical path.
-            // The folder prefix matters: the client's block/item atlases only
-            // stitch textures under textures/block and textures/item, so a
-            // model referencing textures/<name> directly resolves to a missing
-            // sprite (the purple/black checkerboard).
             String texturePath = (block ? "block/" : "item/")
                     + com.mineplus.pack.asset.TextureAsset.normalizePath(face.textureName());
             if (texturePath.endsWith("/")) {
@@ -179,6 +227,22 @@ public final class ModelJsonWriter {
         }
         element.add("faces", faces);
         return element;
+    }
+
+    /** True when the rotation vector has exactly one non-zero component. */
+    private static boolean isSingleAxisRotation(Vector3f rotation) {
+        int nonZero = 0;
+        if (Math.abs(rotation.x) > 1.0e-4f) nonZero++;
+        if (Math.abs(rotation.y) > 1.0e-4f) nonZero++;
+        if (Math.abs(rotation.z) > 1.0e-4f) nonZero++;
+        return nonZero == 1;
+    }
+
+    /** Returns the dominant axis for a single-axis rotation ('x', 'y', or 'z'). */
+    private static char dominantAxis(Vector3f rotation) {
+        if (Math.abs(rotation.x) > 1.0e-4f) return 'x';
+        if (Math.abs(rotation.y) > 1.0e-4f) return 'y';
+        return 'z';
     }
 
     private static JsonObject face(
@@ -195,20 +259,12 @@ public final class ModelJsonWriter {
         float uScale = 16.0f / resolutionWidth;
         float vScale = 16.0f / resolutionHeight;
 
+        // Preserve authored UV orientation: vanilla mirrors when u2<u1 or v2<v1.
+        // Do NOT swap; the original ordering encodes intentional mirrors.
         float u1 = clampUv(face.u1() * uScale, warnings, face);
         float v1 = clampUv(face.v1() * vScale, warnings, face);
         float u2 = clampUv(face.u2() * uScale, warnings, face);
         float v2 = clampUv(face.v2() * vScale, warnings, face);
-        if (u2 < u1) {
-            float swap = u1;
-            u1 = u2;
-            u2 = swap;
-        }
-        if (v2 < v1) {
-            float swap = v1;
-            v1 = v2;
-            v2 = swap;
-        }
 
         // Standard vanilla texture-variable naming: the textures map declares
         // "0", faces reference "#0". (Using the reference itself as the map key
@@ -236,6 +292,21 @@ public final class ModelJsonWriter {
             warnings.add("face texture '" + face.textureName() + "' has a wrapping UV window; clamped to 0..16.");
         }
         return Math.max(0.0f, Math.min(16.0f, value));
+    }
+
+    /** Emits the authored display contexts, ordered deterministically. */
+    private static JsonObject displayTransforms(ModelDisplay display) {
+        JsonObject json = new JsonObject();
+        List<String> contexts = new ArrayList<>(display.contexts().keySet());
+        contexts.sort(java.util.Comparator.naturalOrder());
+        for (String context : contexts) {
+            ModelDisplay.Transform transform = display.contexts().get(context);
+            json.add(context, displayEntry(
+                    new float[]{transform.rotation().x, transform.rotation().y, transform.rotation().z},
+                    new float[]{transform.translation().x, transform.translation().y, transform.translation().z},
+                    new float[]{transform.scale().x, transform.scale().y, transform.scale().z}));
+        }
+        return json;
     }
 
     private static JsonObject vanillaDisplayTransforms() {
