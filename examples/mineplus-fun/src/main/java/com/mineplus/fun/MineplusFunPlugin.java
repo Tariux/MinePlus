@@ -70,7 +70,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new CabinetFeature(this, context));
         features.add(new PackShowcaseFeature(this, context));
         // Pack block axis: an alchemy table multiblock whose level renders as a
-        // pack BlockDisplay (renderKind: block) instead of an item display.
+        // pack BlockDisplay (renderMode: pack_block) instead of an item display.
         features.add(new AlchemyFeature(this, context));
 
         for (ModuleFeature feature : features) {

@@ -16,7 +16,10 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 
 | Layer | Responsibility |
 |---|---|
-| `com.mineplus.infrastructure.render.RenderBackend` | the one shared backend vocabulary: `VIRTUAL`, `PACK`, `VIRTUAL_PLUS_PACK` |
+| `com.mineplus.infrastructure.render.RenderMode` | the unified vocabulary; one value names subsystem + primitive (`virtual`, `pack_item`, `pack_block`, `hybrid_item`, `hybrid_block`) |
+| `RenderBackend` / `RenderKind` | the underlying two axes (`RenderBackend` = subsystem, `RenderKind` = primitive); `RenderMode.of(...)` maps a legacy pair onto a mode |
+| `com.mineplus.infrastructure.render.RenderRouter` | the routing choke point: applies subsystem availability + `RenderPolicy` and records telemetry |
+| `com.mineplus.pack.PackLighting` | how pack display entities are lit (`AUTO` / `NATURAL` / `EMISSIVE` / `FULLBRIGHT`) |
 | `com.mineplus.pack.PackApi` | the developer surface — a peer of `InfrastructureApi`/`AnimationApi`, obtained via `PluginContext.packApi()` |
 | `PackAssetRegistry` | namespaced assets (`namespace:path`) with owner tracking and conflict detection |
 | `PackCompiler` / `PackCache` | deterministic, dependency-aware compilation into hash-named `packs/mp-<hash>.zip` artifacts |
@@ -34,10 +37,13 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 - Pack world objects reuse the virtual engine's collision lattice through its
   public collision-only spawn API — barriers, break handling, occupancy and
   restore dedupe behave identically for both backends.
-- Backend selection lives in multiblock level definitions
-  (`"renderBackend": "virtual" | "pack" | "virtual+pack"`, default `virtual`);
-  the pack representation within that backend is selected by
-  `"renderKind": "model" | "block"` (default `model`).
+- Backend selection lives in multiblock level definitions, as a single
+  `"renderMode"` (`virtual` | `pack_item` | `pack_block` | `hybrid_item` |
+  `hybrid_block`, default `virtual`). The legacy pair
+  (`"renderBackend": "virtual" | "pack" | "virtual+pack"` +
+  `"renderKind": "model" | "block"`) still parses and maps onto the same modes.
+  The `RenderRouter` is the single place a level's mode becomes an effective
+  backend/kind, applying the global `RENDERING.POLICY` fallback.
 
 ## Backend semantics
 
@@ -48,11 +54,28 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 | `pack` + `block` | virtual engine (collision-only) | pack block model (one BlockDisplay) | the carrier block (a note block) |
 | `virtual+pack` | virtual engine | virtual render **+** pack display | virtual render |
 
-Fallbacks, in one place (`MultiBlockLevel.effectiveBackend`): when the pack
-subsystem is disabled, `pack` and `virtual+pack` degrade to `virtual`. When a
-model has no registered pack item/block, the pack render falls back to a full
-virtual render. A player without the pack always sees a valid mesh through
-`virtual+pack`, or the carrier block through `pack`.
+Fallbacks, in one place (`RenderRouter`, honoring `RENDERING.POLICY`): when the
+pack subsystem is disabled, pack/hybrid modes degrade to `virtual`
+(`ALLOW_DEGRADE_TO_VIRTUAL: true`, the default). When a model has no registered
+pack item/block, or a pack display fails to attach, the pack render falls back to
+a full virtual render. A player without the pack always sees a valid mesh through
+`hybrid`, or the carrier block through a pack mode.
+
+### Lighting
+
+Pack visuals are `Display` entities that inherit world light unless a
+`Brightness` override is set. `PACK.LIGHTING` (default `AUTO`) decides:
+
+- `AUTO` — non-emissive models get **natural world lighting**; a model with any
+  `light_emission` gets block light = the model's maximum emission and sky 15,
+  so glowing parts still glow.
+- `NATURAL` — never override (models are dark in unlit caves).
+- `EMISSIVE` — always apply the model's emission (virtual-engine parity).
+- `FULLBRIGHT` — always `(15, 15)`, the legacy fully-lit look.
+
+A `BlockDisplay`/`ItemDisplay` carries one brightness for the whole model, so
+per-face emission cannot be represented — the model's maximum is used, the same
+approximation the one-display pack axis requires.
 
 ## Content model
 
@@ -148,6 +171,7 @@ PACK:
   CACHE:
     MAX_ARTIFACTS: 8        # mp-<hash>.zip files kept before pruning
   PACK_FORMAT_OVERRIDE: 0   # pin pack_format when the version table lags
+  LIGHTING: AUTO            # AUTO | NATURAL | EMISSIVE | FULLBRIGHT (applies after restart)
 ```
 
 These are the **optimal defaults**: the subsystem is enabled with LOCAL
@@ -215,21 +239,23 @@ context.packApi().registerBlock(PackBlockDefinition.builder(
         .build());
 ```
 
-Multiblock levels select their backend and representation in JSON:
+Multiblock levels select their render mode in JSON:
 
 ```json
 "levels": {
   "1": {
     "model": "models/strad-wine.bbmodel",
-    "renderBackend": "pack"
+    "renderMode": "pack_item"
   },
   "2": {
     "model": "models/alchemy-table.bbmodel",
-    "renderBackend": "pack",
-    "renderKind": "block"
+    "renderMode": "pack_block"
   }
 }
 ```
+
+The legacy `"renderBackend": "pack"` + `"renderKind": "block"` pair is still
+accepted and maps to `pack_block`; new content should use `renderMode`.
 
 ## Compilation & delivery model
 
@@ -294,6 +320,11 @@ zip into a client's `resourcepacks` folder or host it and point
   allocated carrier state to players without the pack — a normal note block
   (visible). Use `virtual+pack` when a mixed population must see the exact
   minecraft-visible mesh rather than the carrier approximation.
+- **Pack lighting is per-model**: a display entity carries one `Brightness`, so
+  per-face/per-cube `light_emission` cannot be represented in pack modes — the
+  model's maximum emission is used (the virtual engine keeps per-cube emission
+  because it emits per-cube displays). `PACK.LIGHTING: AUTO` (default) still
+  gives non-emissive models natural world lighting; see [Lighting](#lighting).
 - **Legacy `CustomModelData` mode** regenerates vanilla item model host files
   (predicate-gated; the era-typical conflict surface). Modern servers
   (1.21.4+) use the strictly additive `item_model` component. Block host files

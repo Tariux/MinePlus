@@ -3,6 +3,7 @@ package com.mineplus.pack.render;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.pack.PackAssetRegistry;
+import com.mineplus.pack.PackLighting;
 import com.mineplus.pack.asset.PackBlockAsset;
 import com.mineplus.util.DebugLogger;
 import java.util.Map;
@@ -50,11 +51,22 @@ public final class PackBlockRenderer implements Listener {
 
     private final PackAssetRegistry registry;
     private final java.util.logging.Logger logger;
+    private volatile PackLighting lighting = PackLighting.AUTO;
     private final Map<UUID, UUID> displaysByInstance = new ConcurrentHashMap<>();
 
     public PackBlockRenderer(PackAssetRegistry registry, java.util.logging.Logger logger) {
+        this(registry, logger, PackLighting.AUTO);
+    }
+
+    public PackBlockRenderer(PackAssetRegistry registry, java.util.logging.Logger logger, PackLighting lighting) {
         this.registry = registry;
         this.logger = logger;
+        this.lighting = lighting == null ? PackLighting.AUTO : lighting;
+    }
+
+    /** Applies a new lighting policy (reload path); existing displays keep their spawned brightness. */
+    public void setLighting(PackLighting lighting) {
+        this.lighting = lighting == null ? PackLighting.AUTO : lighting;
     }
 
     /** True when a registered pack block renders this model key (render feasibility check). */
@@ -98,6 +110,15 @@ public final class PackBlockRenderer implements Listener {
         Location entityLocation = anchor.clone();
         Transformation transformation = transformationFor(placement);
 
+        // Lighting policy: display entities inherit world light. AUTO applies an
+        // override only to emissive models (block light = model max emission), so
+        // non-emissive models are lit naturally and glowing models still glow.
+        PackLighting lightingPolicy = lighting;
+        int emission = PackLighting.maxEmission(model);
+        boolean overrideLight = lightingPolicy.applies(emission);
+        int blockLight = lightingPolicy.blockLight(emission);
+        int skyLight = lightingPolicy.skyLight();
+
         BlockDisplay display = world.spawn(entityLocation, BlockDisplay.class, spawned -> {
             spawned.setBlock(data);
             spawned.addScoreboardTag(PACK_BLOCK_TAG_PREFIX + instanceId);
@@ -105,10 +126,9 @@ public final class PackBlockRenderer implements Listener {
             spawned.setShadowRadius(0f);
             spawned.setViewRange(1.0f);
             spawned.setInterpolationDuration(0);
-            // Match the virtual engine: display entities inherit world light, so
-            // an unlit cave renders the model black. Force the same fully-lit
-            // override the virtual displays use.
-            spawned.setBrightness(new org.bukkit.entity.Display.Brightness(15, 15));
+            if (overrideLight) {
+                spawned.setBrightness(new org.bukkit.entity.Display.Brightness(blockLight, skyLight));
+            }
             spawned.setTransformation(transformation);
         });
         displaysByInstance.put(instanceId, display.getUniqueId());
