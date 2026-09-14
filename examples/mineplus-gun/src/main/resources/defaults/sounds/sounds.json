@@ -1,0 +1,31 @@
+{
+  "shot": {
+    "sounds": [
+      { "name": "mineplusgun:shot1" },
+      { "name": "mineplusgun:shot2" },
+      { "name": "mineplusgun:shot3" },
+      { "name": "mineplusgun:shot4" }
+    ]
+  },
+  "reload": {
+    "sounds": [
+      { "name": "mineplusgun:reload_start" },
+      { "name": "mineplusgun:reload_end" }
+    ]
+  },
+  "empty": {
+    "sounds": [
+      { "name": "mineplusgun:empty" }
+    ]
+  },
+  "grenade_pin": {
+    "sounds": [
+      { "name": "mineplusgun:reload_start" }
+    ]
+  },
+  "grenade_throw": {
+    "sounds": [
+      { "name": "mineplusgun:shot3" }
+    ]
+  }
+}

@@ -27,6 +27,15 @@ public final class VirtualModel {
     private final List<VectorAnchor> anchors;
     private final List<VirtualBone> bones;
     private final List<AnimationClip> animations;
+    /** Authored vanilla item display transforms (may be {@link ModelDisplay#EMPTY}). */
+    private final ModelDisplay display;
+    /**
+     * Optional vanilla item-model {@code parent} (e.g.
+     * {@code minecraft:item/handheld}) used by the pack item axis so a weapon
+     * inherits natural held/GUI transforms for the contexts its own display does
+     * not author. Null keeps the model parentless.
+     */
+    private final String itemParent;
     /** Lowercased bone name -> preorder index; the first occurrence wins (import order). */
     private final Map<String, Integer> boneIndexByName;
 
@@ -38,7 +47,23 @@ public final class VirtualModel {
             String modelFormat,
             List<VectorAnchor> anchors,
             List<VirtualBone> bones,
-            List<AnimationClip> animations
+            List<AnimationClip> animations,
+            ModelDisplay display
+    ) {
+        this(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations, display, null);
+    }
+
+    public VirtualModel(
+            String name,
+            List<BakedCube> cubes,
+            Map<String, String> textureMappings,
+            Resolution resolution,
+            String modelFormat,
+            List<VectorAnchor> anchors,
+            List<VirtualBone> bones,
+            List<AnimationClip> animations,
+            ModelDisplay display,
+            String itemParent
     ) {
         this.name = name;
         this.cubes = List.copyOf(cubes);
@@ -48,6 +73,8 @@ public final class VirtualModel {
         this.anchors = anchors == null ? List.of() : List.copyOf(anchors);
         this.bones = bones == null ? List.of() : List.copyOf(bones);
         this.animations = animations == null ? List.of() : List.copyOf(animations);
+        this.display = display == null ? ModelDisplay.EMPTY : display;
+        this.itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
         Map<String, Integer> boneIndex = new HashMap<>();
         for (int i = 0; i < this.bones.size(); i++) {
             VirtualBone bone = this.bones.get(i);
@@ -62,17 +89,17 @@ public final class VirtualModel {
     }
 
     public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings) {
-        this(name, cubes, textureMappings, null, null, null, null, null);
+        this(name, cubes, textureMappings, null, null, null, null, null, null);
     }
 
     public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings,
                         Resolution resolution, String modelFormat) {
-        this(name, cubes, textureMappings, resolution, modelFormat, null, null, null);
+        this(name, cubes, textureMappings, resolution, modelFormat, null, null, null, null);
     }
 
     public VirtualModel(String name, List<BakedCube> cubes, Map<String, String> textureMappings,
                         Resolution resolution, String modelFormat, List<VectorAnchor> anchors) {
-        this(name, cubes, textureMappings, resolution, modelFormat, anchors, null, null);
+        this(name, cubes, textureMappings, resolution, modelFormat, anchors, null, null, null);
     }
 
     /**
@@ -89,7 +116,41 @@ public final class VirtualModel {
         if (newName == null || newName.equals(name)) {
             return this;
         }
-        return new VirtualModel(newName, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations);
+        return new VirtualModel(newName, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
+                display, itemParent);
+    }
+
+    /**
+     * The same model with a different item display: used to apply a
+     * {@code .meta.json} display override over the bbmodel's own transforms.
+     *
+     * @param newDisplay the display to use, or null to clear it
+     * @return a model identical to this one but with {@code newDisplay}
+     */
+    public VirtualModel withDisplay(ModelDisplay newDisplay) {
+        ModelDisplay resolved = newDisplay == null ? ModelDisplay.EMPTY : newDisplay;
+        if (resolved == display) {
+            return this;
+        }
+        return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
+                resolved, itemParent);
+    }
+
+    /**
+     * The same model with a different vanilla item-model {@code parent}: used to
+     * apply a {@code .meta.json} {@code itemParent} override so the pack item
+     * axis inherits natural held/GUI transforms.
+     *
+     * @param newParent the parent model reference (e.g. {@code minecraft:item/handheld}), or null
+     * @return a model identical to this one but with {@code newParent}
+     */
+    public VirtualModel withItemParent(String newParent) {
+        String resolved = newParent == null || newParent.isBlank() ? null : newParent.trim();
+        if (resolved == null ? itemParent == null : resolved.equals(itemParent)) {
+            return this;
+        }
+        return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
+                display, resolved);
     }
 
     public String name() {
@@ -122,6 +183,16 @@ public final class VirtualModel {
 
     public List<AnimationClip> animations() {
         return animations;
+    }
+
+    /** Authored vanilla item display transforms; {@link ModelDisplay#EMPTY} when none. */
+    public ModelDisplay display() {
+        return display;
+    }
+
+    /** Optional vanilla item-model parent reference, or {@code null}. */
+    public String itemParent() {
+        return itemParent;
     }
 
     /**

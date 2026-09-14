@@ -296,7 +296,8 @@ public final class BakeDaemon {
                         : base.texelDetail(),
                 overrideInt(overrides, "maxTexelPlatesPerFace", base.maxTexelPlatesPerFace()),
                 overrideInt(overrides, "maxTexelPlatesPerInstance", base.maxTexelPlatesPerInstance()),
-                overrideInt(overrides, "texelBrightness", base.texelBrightness()));
+                overrideInt(overrides, "texelBrightness", base.texelBrightness()),
+                base.display());
     }
 
     /**

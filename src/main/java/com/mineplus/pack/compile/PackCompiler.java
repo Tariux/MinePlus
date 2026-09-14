@@ -261,6 +261,14 @@ public final class PackCompiler {
                     return null;
                 }
                 ModelMeta meta = virtualBlockManager.getModelMeta(model.modelKey());
+                if (meta != null && meta.display() != null && !meta.display().isEmpty()) {
+                    // Display override precedence: meta-file over bbmodel.
+                    virtualModel = virtualModel.withDisplay(virtualModel.display().merge(meta.display()));
+                }
+                if (meta != null && meta.itemParent() != null && !meta.itemParent().isBlank()) {
+                    // Item model parent override (e.g. minecraft:item/handheld for natural held transforms).
+                    virtualModel = virtualModel.withItemParent(meta.itemParent());
+                }
                 ModelMeta.OriginMode originMode = ModelMeta.OriginMode.forModel(
                         virtualModel.modelFormat(), virtualModel.cubes());
                 ModelMeta.OriginMode metaOrigin = meta == null ? null : meta.originMode();

@@ -149,6 +149,28 @@ public final class ModuleSupport {
         return true;
     }
 
+    /**
+     * Registers a {@link SubCommand} on the <em>Core's</em> {@code /mineplus}
+     * router, so a module can contribute {@code /mineplus <name>} without
+     * owning the top-level command. The Core router enforces the subcommand's
+     * permission and includes it in {@code /mineplus} help/tab-completion.
+     * Registering is additive; existing Core subcommands are never replaced.
+     *
+     * @param subCommand the subcommand to add
+     * @return {@code true} when it was registered
+     */
+    public boolean registerCoreSubCommand(SubCommand subCommand) {
+        if (subCommand == null) {
+            return false;
+        }
+        boolean registered = core.registerCoreSubCommand(subCommand);
+        if (!registered) {
+            core.getLogger().warning("Could not register '/mineplus " + subCommand.name()
+                    + "' — the Core command router is not ready.");
+        }
+        return registered;
+    }
+
     private CommandMap commandMap() {
         try {
             Method direct = Bukkit.class.getMethod("getCommandMap");
