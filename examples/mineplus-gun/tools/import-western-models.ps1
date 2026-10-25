@@ -86,12 +86,7 @@ function Clean-Model([object]$model, [string]$namespace, [string]$textureName) {
     if ($model.textures) {
         $textureKeys = @($model.textures.PSObject.Properties.Name)
         foreach ($prop in $model.textures.PSObject.Properties) {
-            # "/item/pistol", "musketmod:item/pistol", "item/pistol" -> mineplusgun:item/<renamed>
-            $trimmed = $prop.Value -replace '^.*[:/]', ''
-            $prop.Value = "$namespace:item/$textureName"
-            if ($trimmed -ne $textureName -and -not $trimmed.EndsWith($textureName.Replace(".png", ""))) {
-                # source texture stem differs from the renamed file; refer by key anyway
-            }
+            $prop.Value = "${namespace}:item/${textureName}"
         }
     }
 

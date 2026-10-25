@@ -168,11 +168,18 @@ public final class PackSystem {
             return;
         }
         try {
-            ItemModelAsset itemAsset = new ItemModelAsset(
-                    definition.namespace(), definition.id(), definition.namespace(),
-                    definition.backingMaterial(), definition.displayName());
+            ItemModelAsset itemAsset = definition.frames().isEmpty()
+                    ? new ItemModelAsset(
+                            definition.namespace(), definition.id(), definition.namespace(),
+                            definition.backingMaterial(), definition.displayName())
+                    : new ItemModelAsset(
+                            definition.namespace(), definition.id(), definition.namespace(),
+                            definition.backingMaterial(), definition.displayName(),
+                            definition.fallbackModelReference(), toFrameAssets(definition.frames()));
             assetRegistry.register(itemAsset);
-            assetRegistry.bindItemToModel(definition.modelKey(), itemAsset);
+            if (definition.modelKey() != null) {
+                assetRegistry.bindItemToModel(definition.modelKey(), itemAsset);
+            }
             definition.bindFactory(itemFactory);
             itemRegistry.register(definition);
             registeredItems.add(definition);
@@ -181,6 +188,14 @@ public final class PackSystem {
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
         }
+    }
+
+    private static List<ItemModelAsset.Frame> toFrameAssets(List<PackItemDefinition.Frame> frames) {
+        List<ItemModelAsset.Frame> assets = new java.util.ArrayList<>(frames.size());
+        for (PackItemDefinition.Frame frame : frames) {
+            assets.add(new ItemModelAsset.Frame(frame.threshold(), frame.modelReference()));
+        }
+        return assets;
     }
 
     /** Registers a standalone model asset (referenced by items or raw pack content). */
@@ -304,6 +319,11 @@ public final class PackSystem {
      * {@code TextureAsset.normalizePath}).
      */
     private void ensureModelAssets(PackItemDefinition definition) {
+        // Framed items carry no virtual geometry: their models are registered
+        // raw by the owning module and referenced directly by the definition.
+        if (definition.modelKey() == null) {
+            return;
+        }
         VirtualModel model = virtualBlockManager.getModel(definition.modelKey());
         if (model == null) {
             return;
