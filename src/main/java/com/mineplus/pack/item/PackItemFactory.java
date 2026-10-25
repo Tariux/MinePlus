@@ -45,7 +45,12 @@ public final class PackItemFactory {
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, itemModelKey(definition));
         if (!applied) {
-            meta.setCustomModelData(stableCustomModelData(definition));
+            // Legacy fallback needs a resolvable geometry model; a framed item
+            // (raw model JSONs, modelKey null) has none, so it degrades to the
+            // bare backing material instead of a broken predicate.
+            if (definition.modelKey() != null) {
+                meta.setCustomModelData(stableCustomModelData(definition));
+            }
         }
         stack.setItemMeta(meta);
         return stack;
@@ -67,7 +72,7 @@ public final class PackItemFactory {
         }
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, assetModelKey(item));
-        if (!applied) {
+        if (!applied && !item.isFramed()) {
             meta.setCustomModelData(item.customModelData());
         }
         stack.setItemMeta(meta);

@@ -37,26 +37,71 @@ public final class ItemModelWriter {
     private ItemModelWriter() {
     }
 
-    /** Modern item model definition JSON: {@code {"model":{"type":"minecraft:model","model":"ns:item/id"}}}. */
+    /**
+     * Modern item model definition JSON. A plain item emits
+     * {@code {"model":{"type":"minecraft:model","model":"ns:item/id"}}}; a
+     * framed item emits a {@code range_dispatch} over the registering
+     * module's raw model references keyed by the item's
+     * {@code custom_model_data} value, with the resting-state fallback.
+     */
     public static String modernDefinitionJson(ItemModelAsset item) {
+        JsonObject root = new JsonObject();
+        if (item.isFramed()) {
+            root.add("model", framedDispatch(item));
+        } else {
+            JsonObject model = new JsonObject();
+            model.addProperty("type", "minecraft:model");
+            model.addProperty("model", item.modelReference());
+            root.add("model", model);
+        }
+        return GSON.toJson(root);
+    }
+
+    /**
+     * {@code range_dispatch} on {@code custom_model_data} (float index 0):
+     * entries in threshold order, resting-state fallback.
+     */
+    private static JsonObject framedDispatch(ItemModelAsset item) {
+        JsonObject dispatch = new JsonObject();
+        dispatch.addProperty("type", "minecraft:range_dispatch");
+        dispatch.addProperty("property", "minecraft:custom_model_data");
+        dispatch.addProperty("index", 0);
+        JsonArray entries = new JsonArray();
+        for (ItemModelAsset.Frame frame : item.frames()) {
+            entries.add(frameEntry(frame.threshold(), frame.modelReference()));
+        }
+        dispatch.add("entries", entries);
+        String fallbackReference = item.fallbackModelReference() != null
+                ? item.fallbackModelReference()
+                : item.modelReference();
+        dispatch.add("fallback", frameEntry(0.0f, fallbackReference).getAsJsonObject("model"));
+        return dispatch;
+    }
+
+    private static JsonObject frameEntry(float threshold, String modelReference) {
         JsonObject model = new JsonObject();
         model.addProperty("type", "minecraft:model");
-        model.addProperty("model", item.modelReference());
-
-        JsonObject root = new JsonObject();
-        root.add("model", model);
-        return GSON.toJson(root);
+        model.addProperty("model", modelReference);
+        JsonObject entry = new JsonObject();
+        entry.addProperty("threshold", threshold);
+        entry.add("model", model);
+        return entry;
     }
 
     /**
      * Legacy host files: backing material -> regenerated vanilla item model
      * with sorted predicate overrides for every item on that material.
      * Deterministic: hosts keyed by material id, overrides sorted by predicate
-     * value.
+     * value. Framed items (raw model JSONs) have no legacy representation —
+     * their references cannot resolve in a host override — so they are
+     * skipped and keep rendering their bare backing material.
      */
     public static Map<String, byte[]> legacyHostFiles(List<ItemModelAsset> items) {
         Map<Material, List<ItemModelAsset>> byMaterial = new LinkedHashMap<>();
         for (ItemModelAsset item : items) {
+            if (item.isFramed()) {
+                continue;
+            }
             byMaterial.computeIfAbsent(item.backingMaterial(), material -> new ArrayList<>()).add(item);
         }
 
