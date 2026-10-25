@@ -1,5 +1,6 @@
 package com.mineplus.gun.input;
 
+import com.mineplus.gun.diag.PressTrace;
 import com.mineplus.gun.weapon.WeaponDefinition;
 import java.util.ArrayList;
 import java.util.List;
@@ -126,9 +127,15 @@ public class BukkitInputAdapter implements InputAdapter {
         public void onInteract(PlayerInteractEvent event) {
             Player player = event.getPlayer();
             ItemStack main = player.getInventory().getItemInMainHand();
+            PressTrace.debug("[MineplusGun] interact received: player=" + player.getName() + " action="
+                    + event.getAction() + " hand=" + event.getHand() + " item=" + main.getType()
+                    + " cancelledBefore=" + event.isCancelled());
             if (!isWeapon(main)) {
                 return;
             }
+            PressTrace.trace(plugin, com.mineplus.gun.diag.PressTrace.key(player.getUniqueId(), "receipt"),
+                    "[MineplusGun] press received: " + player.getName() + " action=" + event.getAction()
+                            + " hand=" + event.getHand() + " cancelledBefore=" + event.isCancelled());
             if (event.getHand() != EquipmentSlot.HAND) {
                 // A gun in the main hand freezes off-hand use too (a torch or
                 // block in the off hand must not place on a right-click).
@@ -152,14 +159,62 @@ public class BukkitInputAdapter implements InputAdapter {
             }
         }
 
-        /** A gun in hand freezes entity interaction (mounting, trading, feeding). */
+        /**
+         * A gun in hand freezes entity interaction (mounting, trading, feeding)
+         * — and the interaction packet is the SHOT: aiming at a mob and
+         * right-clicking routes here instead of PlayerInteractEvent, so the
+         * press must still reach the runtime or aimed targets take nothing.
+         */
         @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
         public void onInteractEntity(PlayerInteractEntityEvent event) {
             Player player = event.getPlayer();
-            if (!isWeapon(player.getInventory().getItemInMainHand())) {
+            ItemStack main = player.getInventory().getItemInMainHand();
+            boolean weapon = isWeapon(main);
+            if (event.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) {
+                if (weapon) {
+                    event.setCancelled(true);
+                }
+                return;
+            }
+            if (!weapon) {
                 return;
             }
             event.setCancelled(true);
+            PressTrace.trace(plugin, com.mineplus.gun.diag.PressTrace.key(player.getUniqueId(), "receipt"),
+                    "[MineplusGun] aimed-entity press: " + player.getName() + " -> "
+                            + event.getRightClicked().getType());
+            try {
+                if (callback != null) {
+                    callback.onPress(player, main);
+                }
+            } catch (Throwable failure) {
+                report("entity press handling", failure);
+            }
+        }
+
+        /** Same freeze-and-fire semantics for entity-specific interactions (armor stands, seats). */
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
+        public void onInteractAtEntity(org.bukkit.event.player.PlayerInteractAtEntityEvent event) {
+            Player player = event.getPlayer();
+            ItemStack main = player.getInventory().getItemInMainHand();
+            boolean weapon = isWeapon(main);
+            if (event.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) {
+                if (weapon) {
+                    event.setCancelled(true);
+                }
+                return;
+            }
+            if (!weapon) {
+                return;
+            }
+            event.setCancelled(true);
+            try {
+                if (callback != null) {
+                    callback.onPress(player, main);
+                }
+            } catch (Throwable failure) {
+                report("entity press handling", failure);
+            }
         }
 
         /** A gun in hand never mines; left-click is shooting only. */

@@ -2,6 +2,7 @@ package com.mineplus.pack.item;
 
 import com.mineplus.infrastructure.definition.ItemCategory;
 import com.mineplus.infrastructure.definition.ItemDefinition;
+import com.mineplus.pack.asset.ItemModelAsset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -138,6 +139,21 @@ public final class PackItemDefinition implements ItemDefinition {
     /** Frame dispatch entries of a framed item, in registration order; empty on plain items. */
     public List<Frame> frames() {
         return frames;
+    }
+
+    /** True when the item dispatches over module-registered frame states. */
+    public boolean isFramed() {
+        return !frames.isEmpty();
+    }
+
+    /**
+     * The stack value that renders one frame state of this framed item — the
+     * item's stable custom-model-data base plus the state number, identical
+     * across representations (modern dispatch thresholds and legacy host
+     * predicates). {@code state <= 0} is the resting state (the base itself).
+     */
+    public int frameStackValue(int state) {
+        return ItemModelAsset.frameStackValue(namespace, id, state);
     }
 
     public org.bukkit.inventory.EquipmentSlot equipmentSlot() {

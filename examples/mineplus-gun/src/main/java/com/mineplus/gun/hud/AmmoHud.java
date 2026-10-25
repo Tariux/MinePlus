@@ -58,10 +58,19 @@ public final class AmmoHud {
         hud.update(player, title, progress, tone);
     }
 
-    /** Flashes the HUD red for a dry fire. */
-    public void flashEmpty(Player player, WeaponDefinition weapon) {
+    /** Flashes the HUD red for a dry fire; names the nugget supply when there is none. */
+    public void flashEmpty(Player player, WeaponDefinition weapon, int reserve) {
+        String suffix = reserve <= 0
+                ? ChatColor.DARK_GRAY + " | " + ChatColor.RED + "no gold nuggets"
+                : ChatColor.DARK_GRAY + " | " + ChatColor.GRAY + "swap hands to reload";
         hud.flash(player, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
-                + ChatColor.RED + "EMPTY");
+                + ChatColor.RED + "EMPTY" + suffix);
+    }
+
+    /** Flashes the HUD when a reload cannot start: the reserve supply is gone. */
+    public void flashNoReserve(Player player) {
+        hud.flash(player, ChatColor.RED + "NO AMMUNITION" + ChatColor.DARK_GRAY + " | "
+                + ChatColor.GRAY + "gold nuggets required");
     }
 
     /** Removes any boss bar tied to the player (on quit / world switch). */

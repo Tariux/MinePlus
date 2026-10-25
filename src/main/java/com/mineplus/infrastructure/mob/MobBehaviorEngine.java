@@ -258,6 +258,59 @@ public final class MobBehaviorEngine {
         }
     }
 
+    /**
+     * Forces one direct firing pass on a specific entity: every action
+     * registered by {@code owner} for the entity's type runs immediately with
+     * the odds gate bypassed, unlike the regular one-action-per-evaluation
+     * loop. Profile conditions still gate the actions unless
+     * {@code ignoreConditions} is set, so the report shows why an action
+     * would not fire naturally. Works even when the loop is disabled by
+     * settings; every action still runs through the edit budget. Main thread.
+     */
+    BehaviorFireResult forceFire(Plugin owner, LivingEntity entity, boolean ignoreConditions) {
+        if (owner == null || entity == null || entity.isDead() || !entity.isValid()) {
+            return BehaviorFireResult.EMPTY;
+        }
+        List<MobProfile> candidates = profilesByType.get(entity.getType());
+        List<MobProfile> owned = profilesByOwner.get(owner);
+        if (candidates == null || candidates.isEmpty() || owned == null || owned.isEmpty()) {
+            return BehaviorFireResult.EMPTY;
+        }
+        BehaviorFireResult.Builder result = new BehaviorFireResult.Builder();
+        // Fresh per-call budget: a forced pass never inherits lifetime edits.
+        RunGuard guard = new RunGuard(settings.maxBlockEditsPerRun());
+        // Same reusable evaluation context the run loop uses; forceFire is
+        // main-thread-only (enforced by the API), and the context binds one
+        // entity per call anyway.
+        evaluationContext.refresh(entity, ThreadLocalRandom.current(), guard);
+        for (MobProfile profile : candidates) {
+            if (!owned.contains(profile)) {
+                continue;
+            }
+            boolean conditionsOk = ignoreConditions || conditionsPass(profile);
+            for (MobProfile.ActionEntry entry : profile.actions()) {
+                if (!conditionsOk) {
+                    result.add(entry.action().id(), BehaviorFireResult.Status.CONDITION_FAILED);
+                    continue;
+                }
+                boolean fired = false;
+                try {
+                    fired = entry.action().execute(evaluationContext);
+                } catch (Throwable throwable) {
+                    plugin.getLogger().warning("[mob-behavior] force-fire action '" + entry.action().id()
+                            + "' threw on " + entity.getType() + ": " + throwable);
+                }
+                if (fired) {
+                    telemetry.eventFired(entry.action().id());
+                    result.add(entry.action().id(), BehaviorFireResult.Status.FIRED);
+                } else {
+                    result.add(entry.action().id(), BehaviorFireResult.Status.DECLINED);
+                }
+            }
+        }
+        return result.build();
+    }
+
     private boolean conditionsPass(MobProfile profile) {
         List<Predicate<BehaviorContext>> conditions = profile.conditions();
         for (int i = 0; i < conditions.size(); i++) {

@@ -50,8 +50,14 @@ public final class ContentItems {
     /**
      * Carriers with no server-side use action and no client-side effect, so a
      * mis-cancelled interaction (or a pack-less client) can never produce an
-     * accidental vanilla action (firing a bow, zooming a spyglass, igniting
-     * flint and steel). Anything outside this set is substituted.
+     * accidental vanilla action. Anything outside this set is substituted.
+     *
+     * <p>{@code BOW}/{@code CROSSBOW} are deliberately usable carriers: the
+     * client only enters its draw state for items with a vanilla use gesture,
+     * which is what powers held-right-click load animations (and a reliable
+     * activation hook). Modules banking on them must cancel every vanilla use
+     * of the weapon (interact, entity interact, attack) — the frame pipeline
+     * consumers do.</p>
      */
     private static final Set<Material> SAFE_CARRIERS = Set.of(
             Material.IRON_INGOT, Material.GOLD_INGOT, Material.COPPER_INGOT, Material.NETHERITE_INGOT,
@@ -63,7 +69,8 @@ public final class ContentItems {
             Material.QUARTZ, Material.CHARCOAL, Material.COAL, Material.NETHER_STAR, Material.NETHERITE_SCRAP,
             Material.RAW_IRON, Material.RAW_COPPER, Material.RAW_GOLD, Material.LEATHER, Material.RABBIT_HIDE,
             Material.SLIME_BALL, Material.MAGMA_CREAM, Material.GHAST_TEAR, Material.BRICK, Material.NETHER_BRICK,
-            Material.CLAY_BALL, Material.INK_SAC, Material.GLOW_INK_SAC);
+            Material.CLAY_BALL, Material.INK_SAC, Material.GLOW_INK_SAC,
+            Material.BOW, Material.CROSSBOW);
 
     private ContentItems() {
     }

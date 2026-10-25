@@ -43,7 +43,7 @@ Copy these into your server's `plugins/Mineplus/` data folders and run `/mineplu
 
 | Folder | Shows |
 |---|---|
-| [`mineplus-mobfun/`](mineplus-mobfun/) | A **complete, buildable plugin** built on the Core's mob behavior engine: three vanilla mobs (grazing cow, reforesting pig, lamplighter villager) driven by interval-gated, budget-capped world actions, with live status/toggles via `/mobfun` |
+| [`mineplus-mobfun/`](mineplus-mobfun/) | A **complete, buildable plugin** built on the Core's mob behavior engine: nine vanilla mobs (grazers, reforesting pig, lamplighter villager, florist bee, block-by-block golem guardians, necromancer witch with synced horseman raids, pilgrim villagers journeying to villages with night camps) driven by interval-gated, budget-capped, condition-gated world actions, with live status/toggles plus a spawn-and-force test bench via `/mobfun` |
 
 ## 🗺️ Where to go next
 

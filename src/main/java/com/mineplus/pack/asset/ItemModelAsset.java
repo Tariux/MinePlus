@@ -19,13 +19,13 @@ import org.bukkit.Material;
  * legacy representation allocates a stable predicate
  * {@code custom_model_data} value derived from the item id.</p>
  *
- * <p><b>Framed items</b> are assembled from verbatim model JSONs registered by
- * the module ({@code RawAsset}s); their geometry reference is null and the
- * emitted definition dispatches over registered frames by the item's
- * {@code custom_model_data} value, falling back to {@code fallbackModelReference}.
- * Framed items have no legacy representation: the legacy host overrides cannot
- * resolve their raw models, so they are excluded from host files and the
- * factory renders their backing material bare.</p>
+ * <p>Frames are one feature across both representations: modern (1.21.4+)
+ * serializes a {@code range_dispatch} over the frame states keyed by the
+ * item's {@code custom_model_data} value; legacy (pre-1.21.4) emits one
+ * host-file predicate override per frame state
+ * ({@code custom_model_data = frameStackValue(state)}). Both read the same
+ * integer the runtime writes, so a module drives frames identically on every
+ * server version by writing {@code frameStackValue(state)}.
  */
 public final class ItemModelAsset extends PackAsset {
 
@@ -67,8 +67,8 @@ public final class ItemModelAsset extends PackAsset {
         this.frames = frames == null ? List.of() : List.copyOf(sanitize(frames));
         // A geometry-bound asset owns a registered virtual model; raw-model
         // items (fallback reference set — with or without dispatch frames,
-        // e.g. a plain imported model) don't and must never appear in legacy
-        // host files.
+        // e.g. a plain imported model) don't and reduce to a single
+        // host-file override instead of a generated model asset.
         this.geometryBound = this.frames.isEmpty() && this.fallbackModelReference == null;
     }
 
@@ -109,6 +109,16 @@ public final class ItemModelAsset extends PackAsset {
         return frames;
     }
 
+    /** The staged (animation) frames: every dispatch frame but the final loaded one. */
+    public List<Frame> reloadFrames() {
+        return frames.size() <= 1 ? List.of() : frames.subList(0, frames.size() - 1);
+    }
+
+    /** The loaded-state model reference (the max-threshold frame), or null when unframed. */
+    public String loadedModelReference() {
+        return frames.isEmpty() ? null : frames.get(frames.size() - 1).modelReference();
+    }
+
     /** Model rendered at the resting state of a framed item; {@code null} on plain items. */
     public String fallbackModelReference() {
         return fallbackModelReference;
@@ -134,12 +144,34 @@ public final class ItemModelAsset extends PackAsset {
      * item id — deterministic across restarts so previously issued items keep
      * rendering, never zero (zero would match every vanilla item).
      * {@code floorMod} avoids the {@code Math.abs(Integer#MIN_VALUE)}
-     * overflow that would produce an invalid negative predicate. Must stay in sync with
+     * overflow that would produce an invalid negative predicate. This is also
+     * the base of a framed item's state values. Must stay in sync with
      * {@code PackItemFactory.stableCustomModelData}.
      */
     public int customModelData() {
-        int hash = (namespace() + ":" + itemId()).hashCode();
+        return frameBase(namespace(), itemId());
+    }
+
+    /** The stable per-item custom-model-data base of {@code <namespace>:<id>}. */
+    public static int frameBase(String namespace, String itemId) {
+        int hash = (namespace + ":" + itemId).hashCode();
         return 1000 + Math.floorMod(hash, 900_000);
+    }
+
+    /**
+     * The stack value that renders one frame state of a framed item — the
+     * item's base plus the state number, on every representation (modern
+     * dispatch thresholds and legacy host predicates use exactly this value).
+     * State {@code 0} is the resting state and yields the base itself. States
+     * start at {@code 1} ({@link ItemFrames} numbering).
+     */
+    public static int frameStackValue(String namespace, String itemId, int state) {
+        return frameBase(namespace, itemId) + Math.max(0, state);
+    }
+
+    /** The stack value of one of this item's frame states (see {@link #frameStackValue(String, String, int)}). */
+    public int frameStackValue(int state) {
+        return frameStackValue(namespace(), itemId(), state);
     }
 
     /** Modern representation entry: {@code assets/<ns>/items/<id>.json}. */

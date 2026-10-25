@@ -3,7 +3,7 @@ version: ${version}
 main: com.mineplus.mobfun.MobFunPlugin
 api-version: '1.21'
 author: Tariux
-description: Mob behavior showcase for Mineplus - three vanilla mobs driven by the Core's mob behavior engine (grazing cows, reforesting pigs, lamplighter villagers).
+description: Mob behavior showcase for Mineplus - nine vanilla mobs driven by the Core's mob behavior engine (grazers, reforesting pigs, lamplighter villagers, florist bees, block-by-block golem guardians, necromancer witches with horseman raids, pilgrim villagers journeying to villages) with a spawn-and-force test bench.
 website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.

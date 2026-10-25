@@ -75,17 +75,18 @@ public final class WeaponItemFactory {
 
     /**
      * Framed weapons leave the factory on their loaded state (a fresh magazine
-     * is full); the custom-model-data stays unset otherwise, which the pack
-     * dispatch reads as the resting idle model.
+     * is full); the idle base otherwise, which both the pack dispatch and the
+     * legacy host overrides read as the resting model.
      */
     private void applyInitialFrame(ItemStack stack, WeaponDefinition definition) {
         if (!definition.hasFrames()) {
             return;
         }
         var frames = definition.frames();
-        if (frames.loadedState() > 0 && definition.magazine() > 0) {
-            com.mineplus.pack.item.ItemFrameWriter.apply(stack, frames.loadedState());
-        }
+        int state = frames.loadedState() > 0 && definition.magazine() > 0
+                ? frames.loadedState()
+                : 0;
+        com.mineplus.pack.item.ItemFrameWriter.apply(stack, definition.frameStackValue(state));
     }
 
     private List<String> defaultLore(WeaponDefinition definition) {
@@ -116,6 +117,12 @@ public final class WeaponItemFactory {
         }
         int colon = coreKey.indexOf(':');
         return colon >= 0 ? coreKey.substring(colon + 1) : coreKey;
+    }
+
+    /** The module's own stamped weapon id — no Core-identity fallback — or {@code null}. */
+    public String readWeaponStamp(ItemStack stack) {
+        String id = weaponState.readString(stack);
+        return id == null || id.isBlank() ? null : id;
     }
 
     /** Rounds currently in the stack, or {@code -1} when it carries no ammo tag. */

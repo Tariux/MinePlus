@@ -100,6 +100,26 @@ predicate value (never unset vanilla items — but note it *does* regenerate the
 vanilla item model host file, the classic pre-1.21.4 cross-plugin conflict
 surface; prefer modern servers).
 
+### Frame-animated items (raw pack models)
+
+An item may also be assembled from **verbatim model JSONs the module registers
+as raw assets** (`PackApi.registerRawAsset` under `models/…`) instead of a
+serialized virtual model — the frame-animated axis used by weapons:
+
+- `ItemFrames` declares one idle model, an optional loaded model, and an
+  ordered reload animation (`state 0` idle, `1..N` the animation, `N+1`
+  loaded).
+- `ItemModelWriter` serializes a modern `range_dispatch` (thresholds =
+  `frameStackValue(state)`, idle fallback) or, per pre-1.21.4 representation,
+  one **host-file predicate override per frame state** in the backing
+  material's `assets/minecraft/models/item/<material>.json` at the same
+  values — plus raw-model items as a single override at the item's base.
+- `PackItemDefinition.frameStackValue(state)` (= the item's stable
+  `custom_model_data` base + state) is **identical on every representation**:
+  the runtime writes that one value (`ItemFrameWriter.apply`), and both the
+  modern dispatch and the legacy predicates read it. A module never branches
+  on the server version to animate a framed item.
+
 ## Block rendering (pack blocks)
 
 Items have the additive `item_model` component; blocks have no per-entity model
@@ -326,7 +346,9 @@ zip into a client's `resourcepacks` folder or host it and point
   because it emits per-cube displays). `PACK.LIGHTING: AUTO` (default) still
   gives non-emissive models natural world lighting; see [Lighting](#lighting).
 - **Legacy `CustomModelData` mode** regenerates vanilla item model host files
-  (predicate-gated; the era-typical conflict surface). Modern servers
+  (predicate-gated; the era-typical conflict surface). Geometry, raw-model and
+  framed items are all represented there (framed items get one predicate per
+  frame state at their `frameStackValue`); modern servers
   (1.21.4+) use the strictly additive `item_model` component. Block host files
   are representation-independent — a `BlockDisplay` has no per-entity model
   dispatch on any client version — but they necessarily own the carrier's

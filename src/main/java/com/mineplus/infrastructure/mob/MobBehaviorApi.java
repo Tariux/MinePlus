@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.mob;
 
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -31,6 +32,22 @@ public interface MobBehaviorApi {
 
     /** {@code true} when {@code owner} currently holds at least one profile. */
     boolean isRegistered(Plugin owner);
+
+    /**
+     * Forces one direct firing pass on a specific entity: every action
+     * registered by {@code owner} for the entity's type runs immediately with
+     * the odds gate bypassed — a testing/verification hook, not an evaluation.
+     * Profile conditions still gate the actions unless
+     * {@code ignoreConditions} is {@code true}; the returned report shows each
+     * action's outcome either way. Works even when the engine loop is
+     * disabled. Main thread only.
+     *
+     * @param owner            the module whose registered profiles apply
+     * @param entity           the entity to fire on
+     * @param ignoreConditions {@code true} to bypass profile conditions
+     * @return per-action outcome report
+     */
+    BehaviorFireResult forceFire(Plugin owner, LivingEntity entity, boolean ignoreConditions);
 
     /** Applies new engine settings ({@code MOB_BEHAVIOR} section). */
     void updateSettings(MobBehaviorSettings settings);
