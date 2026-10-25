@@ -50,6 +50,7 @@ public final class MineplusPlugin extends JavaPlugin {
                 this, virtualBlockManager, configManager.getConfig().getAnimation(),
                 configManager.getConfig().getPack());
         context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
+        context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
         context.finalizeSetup();
 
         registerCommand();
@@ -59,6 +60,7 @@ public final class MineplusPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (context != null) {
+            context.mobBehaviorApi().shutdown();
             context.infrastructureEngine().shutdown();
         }
 
@@ -173,6 +175,7 @@ public final class MineplusPlugin extends JavaPlugin {
         if (context != null && configManager != null) {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
             context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
+            context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
         }
         // Pack mode changes apply after restart (delivery binding, listeners);
         // a running subsystem still recompiles so freshly registered content

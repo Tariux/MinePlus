@@ -28,6 +28,7 @@ public final class WeaponItemFactory {
 
     private final NamespacedKey weaponKey;
     private final NamespacedKey ammoKey;
+    private final NamespacedKey uidKey;
 
     public WeaponItemFactory(MineplusGunPlugin plugin, ItemRegistry itemRegistry, com.mineplus.pack.PackApi packApi) {
         this.plugin = plugin;
@@ -35,12 +36,20 @@ public final class WeaponItemFactory {
         this.packApi = packApi;
         this.weaponKey = new NamespacedKey(plugin, "weapon");
         this.ammoKey = new NamespacedKey(plugin, "ammo");
+        this.uidKey = new NamespacedKey(plugin, "uid");
     }
 
     /** A fresh weapon stack with a full magazine. */
     public ItemStack create(WeaponDefinition definition) {
         ItemStack stack = packApi.createItem(NAMESPACE, definition.id());
         if (stack == null || stack.getType().isAir()) {
+            // The pack subsystem is disabled or the item is not registered:
+            // degrade to the vanilla carrier. Behaviour is identical; only the
+            // custom model is missing.
+            if (packApi.isAvailable()) {
+                plugin.getLogger().warning("[MineplusGun] Pack item '" + NAMESPACE + ":" + definition.id()
+                        + "' is not registered; issuing the vanilla carrier instead.");
+            }
             stack = new ItemStack(definition.backingMaterial());
         }
         ItemMeta meta = stack.getItemMeta();
@@ -49,6 +58,7 @@ public final class WeaponItemFactory {
             meta.setLore(defaultLore(definition));
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(weaponKey, PersistentDataType.STRING, definition.id());
+            pdc.set(uidKey, PersistentDataType.STRING, java.util.UUID.randomUUID().toString());
             if (definition.usesAmmo()) {
                 pdc.set(ammoKey, PersistentDataType.INTEGER, definition.magazine());
             }
@@ -117,6 +127,35 @@ public final class WeaponItemFactory {
             return;
         }
         meta.getPersistentDataContainer().set(ammoKey, PersistentDataType.INTEGER, Math.max(0, rounds));
+        stack.setItemMeta(meta);
+    }
+
+    /**
+     * The stable per-stack identity used to key the in-memory magazine, or
+     * {@code null} when the stack predates the uid tag.
+     */
+    public String readUid(ItemStack stack) {
+        if (stack == null || !stack.hasItemMeta()) {
+            return null;
+        }
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        String uid = meta.getPersistentDataContainer().get(uidKey, PersistentDataType.STRING);
+        return uid == null || uid.isBlank() ? null : uid;
+    }
+
+    /** Stamps a uid for a legacy stack; the caller must write the stack back. */
+    public void writeUid(ItemStack stack, String uid) {
+        if (stack == null || uid == null || !stack.hasItemMeta()) {
+            return;
+        }
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) {
+            return;
+        }
+        meta.getPersistentDataContainer().set(uidKey, PersistentDataType.STRING, uid);
         stack.setItemMeta(meta);
     }
 

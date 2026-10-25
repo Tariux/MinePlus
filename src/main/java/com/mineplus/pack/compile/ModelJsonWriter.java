@@ -294,12 +294,28 @@ public final class ModelJsonWriter {
         return Math.max(0.0f, Math.min(16.0f, value));
     }
 
+    /**
+     * The vanilla item display contexts. A {@code .bbmodel} may carry newer
+     * Blockbench-only contexts (e.g. {@code on_shelf}); emitting an unknown
+     * context makes the client's model deserializer reject the whole model, so
+     * only these are ever written (unknown ones are skipped and reported).
+     */
+    private static final java.util.Set<String> VANILLA_DISPLAY_CONTEXTS = java.util.Set.of(
+            "thirdperson_lefthand", "thirdperson_righthand",
+            "firstperson_lefthand", "firstperson_righthand",
+            "head", "gui", "ground", "fixed");
+
     /** Emits the authored display contexts, ordered deterministically. */
     private static JsonObject displayTransforms(ModelDisplay display) {
         JsonObject json = new JsonObject();
         List<String> contexts = new ArrayList<>(display.contexts().keySet());
         contexts.sort(java.util.Comparator.naturalOrder());
         for (String context : contexts) {
+            if (!VANILLA_DISPLAY_CONTEXTS.contains(context)) {
+                com.mineplus.util.DebugLogger.warning("[PackCompiler] Ignoring non-vanilla display context '"
+                        + context + "' (the client would reject the model).");
+                continue;
+            }
             ModelDisplay.Transform transform = display.contexts().get(context);
             json.add(context, displayEntry(
                     new float[]{transform.rotation().x, transform.rotation().y, transform.rotation().z},

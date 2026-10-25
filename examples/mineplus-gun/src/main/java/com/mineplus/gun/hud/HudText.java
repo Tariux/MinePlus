@@ -15,9 +15,11 @@ public final class HudText {
      * @param mag      rounds in the magazine
      * @param reserve  reserve rounds ({@code -1} renders {@code ∞})
      * @param reloading whether a reload is in progress
+     * @param scoping  whether the scope is raised
      */
-    public static String render(String template, WeaponDefinition weapon, int mag, int reserve, boolean reloading) {
-        String mode = reloading ? "RELOAD" : weapon.fireMode().name();
+    public static String render(String template, WeaponDefinition weapon, int mag, int reserve, boolean reloading,
+                                boolean scoping) {
+        String mode = reloading ? "RELOAD" : scoping ? "SCOPE" : weapon.fireMode().name();
         String reserveText = reserve < 0 ? "∞" : String.valueOf(reserve);
         String rendered = template
                 .replace("{weapon}", weapon.displayName())

@@ -65,18 +65,22 @@ public final class BulletSimulator {
     /**
      * Fires one round from {@code shooter} toward {@code direction} (already
      * normalized to the weapon's velocity in blocks/tick).
+     *
+     * @param spreadDegrees the <em>effective</em> cone for this shot, already
+     *                      scaled for aiming state by the caller
      */
-    public void fire(Player shooter, WeaponDefinition weapon, Location origin, Vector direction) {
+    public void fire(Player shooter, WeaponDefinition weapon, Location origin, Vector direction,
+                     double spreadDegrees) {
         totalShots++;
         GunConfig current = config.get();
         int max = current == null ? 96 : current.ballistics().maxActiveBullets();
         if (bullets.size() >= max) {
             // Graceful degradation: resolve immediately, never grow unbounded.
             instantTraces++;
-            instantTrace(shooter, weapon, origin, direction);
+            instantTrace(shooter, weapon, origin, direction, spreadDegrees);
             return;
         }
-        Vector spread = applySpread(direction, weapon.spreadDegrees());
+        Vector spread = applySpread(direction, spreadDegrees);
         bullets.add(new Bullet(shooter.getUniqueId(), weapon, origin.getWorld(), origin, spread));
     }
 
@@ -197,12 +201,13 @@ public final class BulletSimulator {
     }
 
     /** Single-trace fallback used when the active-bullet budget is exhausted. */
-    private void instantTrace(Player shooter, WeaponDefinition weapon, Location origin, Vector direction) {
+    private void instantTrace(Player shooter, WeaponDefinition weapon, Location origin, Vector direction,
+                              double spreadDegrees) {
         World world = origin.getWorld();
         if (world == null) {
             return;
         }
-        Vector dir = applySpread(direction.clone().normalize(), weapon.spreadDegrees());
+        Vector dir = applySpread(direction.clone().normalize(), spreadDegrees);
         double range = weapon.range();
         Location start = origin.clone();
         Location end = start.clone().add(dir.clone().multiply(range));

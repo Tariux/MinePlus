@@ -14,6 +14,14 @@ public interface InputAdapter {
     /** Runtime callbacks. The held stack is passed raw; the runtime resolves the weapon. */
     interface Listener {
         /**
+         * True when {@code stack} is one of this module's weapons. Used by the
+         * adapter to cancel vanilla behaviour <em>before</em> invoking the
+         * runtime, so an unexpected runtime error can never let a vanilla
+         * action through.
+         */
+        boolean isWeapon(ItemStack stack);
+
+        /**
          * Called on right-click press. Return true to cancel the vanilla action
          * (prevent block placement, item use, etc.). Return false to allow it.
          */
@@ -21,6 +29,11 @@ public interface InputAdapter {
 
         void onRelease(Player player);
 
+        /**
+         * Called on left-click swing. Unused by the Bukkit adapter for weapons
+         * (left-click is inert so no arm-punch animation plays); kept on the
+         * seam for a future packet-driven input source.
+         */
         void onSwing(Player player, ItemStack stack);
 
         void onReload(Player player, ItemStack stack);

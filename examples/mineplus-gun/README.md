@@ -25,9 +25,39 @@ melee. Phase 4+ (magazine items, animated rigs) remains future work.
 | Commands | `/mpgun …` and `/mineplus gun …` |
 | Item axis | `PackApi.registerItem` (additive `item_model`; legacy `CustomModelData` fallback) |
 | Physics | tick-stepped simulated bullets (gravity, drag, penetration, ricochet) |
-| Input | Bukkit events (press = use; release = stop-use for usable carriers + switch/drop/sneak bounds) |
+| Input | Bukkit events: right-click is the only trigger (hold to fire / scope), left-click is inert, swap-hands reloads |
 | Economy | Vault; all prices config-driven; admins/bypass-permission never charged |
 | Assets | 19 weapon `.bbmodel` + textures from the author's `mineplus-guns` set |
+
+## Controls
+
+| Input | Action |
+|---|---|
+| **Right-click** | The only action. Fire (hold to keep firing — AUTO stays automatic while held); a scoped weapon scopes while held (spread × `aim.spread-multiplier`, HUD `SCOPE`); melee swings; a grenade is thrown. |
+| **Left-click** | Inert. Mining, attacking and the vanilla arm-punch animation are all suppressed. |
+| **Swap hands (F)** | Reload from the magazine capacity. |
+
+Left-click is deliberately not a fire button: the client plays the arm-punch
+animation locally when a swing happens, and it cannot be suppressed
+server-side, so a gun must never be fired from it. Every action lives on
+right-click. The runtime never branches on the input source, so a packet-level
+adapter drops in without touching weapon logic.
+
+## Carriers (why no gun ever zooms or ignites)
+
+A gun's `backing-material` is only the vanilla carrier the additive
+`item_model` replaces — **its vanilla behaviour is not replaced**. That is why
+the module refuses unsafe carriers:
+
+- `FLINT_AND_STEEL` would ignite fire on a right-click into a block.
+- `SPYGLASS` would zoom the camera on right-click.
+
+Normal firearms (scoped ones included) therefore use `IRON_INGOT` — a material
+with no use action at all — and the loader substitutes it automatically for any
+unsafe material such as `SPYGLASS` (which would render as a vanilla spyglass and
+zoom the camera) or `FLINT_AND_STEEL` (which would ignite fire). A weapon with
+`aim.scope: true` toggles a **scope** on right-click: its spread is multiplied
+by `aim.spread-multiplier` and the HUD reads `SCOPE`.
 
 ## Build
 
@@ -66,9 +96,9 @@ start). Highlights, all editable:
 | `ballistics` | `max-active-bullets`, `max-particles-per-tick` | global budgets; over-budget shots resolve as an instant trace |
 | `economy` | `mode`, `price-multiplier`, `price-scale` | `VAULT`/`FREE`, price scaling |
 | `shop` | `title`, `rows`, `admin-bypass-payment` | GUI and bypass |
-| `weapons.<id>` | `model`, `type`, `backing-material`, `price`, `ammo`, `ballistics`, `fire`, `fx`, `grenade`, `melee` | one entry per weapon |
+| `weapons.<id>` | `model`, `type`, `backing-material`, `price`, `ammo`, `ballistics`, `fire`, `aim`, `fx`, `grenade`, `melee` | one entry per weapon |
 
 Every value is clamped by `WeaponConfigLoader`; a bad weapon is logged and
-skipped, never fatal. Use `SPYGLASS` as the backing material for automatic
-weapons when PacketEvents is absent: it is a usable, non-projectile carrier, so
-hold/release is observable (at the cost of the client's scope zoom).
+skipped, never fatal. `backing-material` is validated against a safe-carrier
+allow-list (`IRON_INGOT` is the neutral default) and a scoped weapon is always
+carried by `SPYGLASS` — see _Carriers_ above.

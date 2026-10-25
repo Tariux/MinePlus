@@ -21,6 +21,33 @@ import org.bukkit.configuration.file.FileConfiguration;
  */
 public final class WeaponConfigLoader {
 
+    /**
+     * Default carrier for firearms. A gun's backing material is a carrier only
+     * (the additive {@code item_model} draws the weapon), but its vanilla
+     * behaviour is NOT replaced: {@code FLINT_AND_STEEL} ignites fire on a
+     * right-click and {@code SPYGLASS} zooms the camera, so neither may be used
+     * for a normal weapon. This item has no use action at all.
+     */
+    public static final Material DEFAULT_CARRIER = Material.IRON_INGOT;
+
+    /**
+     * Carriers with no server-side use action and no client-side effect, so a
+     * mis-cancelled interaction (or a pack-less client) can never produce an
+     * accidental vanilla action. Only scoped weapons are allowed to opt into
+     * {@code SPYGLASS} (whose zoom is the scope).
+     */
+    private static final Set<Material> SAFE_CARRIERS = Set.of(
+            Material.IRON_INGOT, Material.GOLD_INGOT, Material.COPPER_INGOT, Material.NETHERITE_INGOT,
+            Material.IRON_NUGGET, Material.GOLD_NUGGET, Material.STICK, Material.BONE, Material.FEATHER,
+            Material.FLINT, Material.STRING, Material.PAPER, Material.BOOK, Material.BLAZE_ROD,
+            Material.BREEZE_ROD, Material.GUNPOWDER, Material.GLOWSTONE_DUST, Material.SUGAR,
+            Material.PRISMARINE_SHARD, Material.PRISMARINE_CRYSTALS, Material.NAUTILUS_SHELL,
+            Material.PHANTOM_MEMBRANE, Material.SHULKER_SHELL, Material.ECHO_SHARD, Material.AMETHYST_SHARD,
+            Material.QUARTZ, Material.CHARCOAL, Material.COAL, Material.NETHER_STAR, Material.NETHERITE_SCRAP,
+            Material.RAW_IRON, Material.RAW_COPPER, Material.RAW_GOLD, Material.LEATHER, Material.RABBIT_HIDE,
+            Material.SLIME_BALL, Material.MAGMA_CREAM, Material.GHAST_TEAR, Material.BRICK, Material.NETHER_BRICK,
+            Material.CLAY_BALL, Material.INK_SAC, Material.GLOW_INK_SAC);
+
     private WeaponConfigLoader() {
     }
 
@@ -79,8 +106,9 @@ public final class WeaponConfigLoader {
         WeaponType type = WeaponType.fromKey(s.getString("type", s.getString("category", "PISTOL")),
                 WeaponType.PISTOL);
         FireMode fireMode = FireMode.fromKey(s.getString("fire.mode", defaultFireMode(type)), FireMode.SEMI);
-        Material backing = material(s.getString("backing-material", "FLINT_AND_STEEL"),
-                Material.FLINT_AND_STEEL, id);
+        boolean scope = s.getBoolean("aim.scope", false);
+        double scopeSpread = clamp(s.getDouble("aim.spread-multiplier", 0.35), 0.0, 1.0);
+        Material backing = resolveCarrier(s, id);
 
         ItemCategory category = switch (type) {
             case GRENADE, MELEE -> ItemCategory.WEAPON;
@@ -114,6 +142,8 @@ public final class WeaponConfigLoader {
                 .rpm((int) clamp(s.getDouble("fire.rpm", defaultRpm(type)), 30, 1200))
                 .burstCount((int) clamp(s.getDouble("fire.burst", 3), 1, 50))
                 .maxHoldTicks((int) clamp(s.getDouble("fire.max-hold-ticks", 120), 1, 1200))
+                .scope(scope)
+                .scopeSpreadMultiplier(scopeSpread)
                 .muzzleParticle(s.getString("fx.muzzle", "SMOKE"))
                 .tracerParticle(s.getString("fx.tracer", "CRIT"))
                 .impactParticle(s.getString("fx.impact", "CRIT"))
@@ -176,6 +206,31 @@ public final class WeaponConfigLoader {
         };
     }
 
+    /**
+     * Resolves the carrier material, refusing any material whose vanilla
+     * behaviour would leak through. A gun's backing material is only a carrier
+     * (the additive {@code item_model} draws the weapon), but its vanilla
+     * behaviour is NOT replaced: {@code SPYGLASS} zooms the camera and
+     * {@code FLINT_AND_STEEL} ignites fire. If the model override is not applied
+     * (pack disabled / stale client) the player must still see a harmless item,
+     * never a working spyglass. Anything outside {@link #SAFE_CARRIERS} is
+     * substituted with {@link #DEFAULT_CARRIER} and reported.
+     */
+    private static Material resolveCarrier(ConfigurationSection s, String id) {
+        Material configured = material(s.getString("backing-material", null), null, id);
+        if (configured == null) {
+            return DEFAULT_CARRIER;
+        }
+        if (!SAFE_CARRIERS.contains(configured)) {
+            DebugLogger.warning("[MineplusGun] Weapon '" + id + "' backing-material " + configured
+                    + " has a vanilla use behaviour (e.g. SPYGLASS zooms, FLINT_AND_STEEL ignites) and was "
+                    + "replaced with " + DEFAULT_CARRIER + ".");
+            return DEFAULT_CARRIER;
+        }
+        return configured;
+    }
+
+    /** Tolerant material lookup; an unknown or blank name yields {@code fallback}. */
     private static Material material(String name, Material fallback, String id) {
         if (name == null || name.isBlank()) {
             return fallback;

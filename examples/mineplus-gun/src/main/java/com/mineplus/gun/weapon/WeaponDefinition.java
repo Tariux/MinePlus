@@ -43,6 +43,9 @@ public final class WeaponDefinition {
     private final int burstCount;
     private final int maxHoldTicks;
 
+    private final boolean scope;
+    private final double scopeSpreadMultiplier;
+
     private final String muzzleParticle;
     private final String tracerParticle;
     private final String impactParticle;
@@ -87,6 +90,8 @@ public final class WeaponDefinition {
         this.rpm = b.rpm;
         this.burstCount = b.burstCount;
         this.maxHoldTicks = b.maxHoldTicks;
+        this.scope = b.scope;
+        this.scopeSpreadMultiplier = b.scopeSpreadMultiplier;
         this.muzzleParticle = b.muzzleParticle;
         this.tracerParticle = b.tracerParticle;
         this.impactParticle = b.impactParticle;
@@ -137,6 +142,12 @@ public final class WeaponDefinition {
     public int burstCount() { return burstCount; }
     public int maxHoldTicks() { return maxHoldTicks; }
 
+    /** True when the weapon can toggle a scope (tightens spread on right-click). */
+    public boolean scope() { return scope; }
+
+    /** Spread multiplier applied while scoped; {@code 1.0} means no benefit. */
+    public double scopeSpreadMultiplier() { return scopeSpreadMultiplier; }
+
     public String muzzleParticle() { return muzzleParticle; }
     public String tracerParticle() { return tracerParticle; }
     public String impactParticle() { return impactParticle; }
@@ -178,7 +189,7 @@ public final class WeaponDefinition {
         private WeaponType type = WeaponType.PISTOL;
         private ItemCategory category = ItemCategory.WEAPON;
         private FireMode fireMode = FireMode.SEMI;
-        private Material backingMaterial = Material.FLINT_AND_STEEL;
+        private Material backingMaterial = Material.IRON_INGOT;
         private boolean hidden;
         private double price;
 
@@ -202,6 +213,9 @@ public final class WeaponDefinition {
         private int rpm = 600;
         private int burstCount = 3;
         private int maxHoldTicks = 120;
+
+        private boolean scope = false;
+        private double scopeSpreadMultiplier = 0.35;
 
         private String muzzleParticle = "SMOKE";
         private String tracerParticle = "CRIT";
@@ -252,6 +266,9 @@ public final class WeaponDefinition {
         public Builder rpm(int v) { this.rpm = v; return this; }
         public Builder burstCount(int v) { this.burstCount = v; return this; }
         public Builder maxHoldTicks(int v) { this.maxHoldTicks = v; return this; }
+
+        public Builder scope(boolean v) { this.scope = v; return this; }
+        public Builder scopeSpreadMultiplier(double v) { this.scopeSpreadMultiplier = v; return this; }
 
         public Builder muzzleParticle(String v) { this.muzzleParticle = v; return this; }
         public Builder tracerParticle(String v) { this.tracerParticle = v; return this; }

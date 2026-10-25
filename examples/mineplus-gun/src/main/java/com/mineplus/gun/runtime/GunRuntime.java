@@ -22,8 +22,25 @@ import org.bukkit.util.Vector;
  * The per-player fire-flow state machine. One repeating task drives every
  * active shooter, every simulated bullet and every in-flight grenade — never
  * one task per bullet or per weapon.
+ *
+ * <p>Controls (all firearms): <b>left-click fires</b> (hold for AUTO/BURST; the
+ * client repeats the arm-swing while the button is held, which is what keeps an
+ * automatic weapon alive). <b>Right-click</b> is one trigger pull for a normal
+ * firearm, the scope for a scoped weapon (the spyglass carrier's native zoom),
+ * and the throw for a grenade. Swapping hands reloads.
+ *
+ * <p>Ammunition is authoritative in memory while a weapon is in use and is
+ * flushed back to the stack's PDC when it leaves the shooter's hand, so the
+ * held ItemStack is never rewritten per shot (which would replay the client's
+ * item-swap equip animation).
  */
 public final class GunRuntime implements InputAdapter.Listener {
+
+    /** Ticks without a trigger repeat before automatic fire / scoping stops. */
+    private static final long AUTO_RELEASE_TICKS = 8L;
+
+    /** Minimum gap between trigger presses for a new SEMI/PUMP/BOLT/BURST shot. */
+    private static final long SEMI_REPRESS_TICKS = 6L;
 
     private final JavaPlugin plugin;
     private final GunServices services;
@@ -56,6 +73,9 @@ public final class GunRuntime implements InputAdapter.Listener {
             task.cancel();
             task = null;
         }
+        for (Session session : sessions.values()) {
+            flushMagazine(session);
+        }
         sessions.clear();
         simulator.clear();
         grenades.clear();
@@ -66,6 +86,18 @@ public final class GunRuntime implements InputAdapter.Listener {
     // ------------------------------------------------------------------
 
     @Override
+    public boolean isWeapon(ItemStack stack) {
+        return resolve(stack) != null;
+    }
+
+    /**
+     * Right-click is the one and only trigger: firearms fire (hold to keep
+     * firing — the client repeats the use packet while the button is held),
+     * scoped weapons tighten their spread while held, melee swings, grenades
+     * are thrown. Left-click is frozen by the input adapter because firing from
+     * it would replay the client's arm-punch animation on every shot.
+     */
+    @Override
     public boolean onPress(Player player, ItemStack stack) {
         WeaponDefinition weapon = resolve(stack);
         if (weapon == null || disabled(player)) {
@@ -74,29 +106,14 @@ public final class GunRuntime implements InputAdapter.Listener {
         Session session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
         session.weaponId = weapon.id();
         switch (weapon.fireMode()) {
-            case MELEE -> {
-                // Melee reads the arm swing; right-click does nothing.
-            }
             case THROW -> throwGrenade(player, weapon);
-            case AUTO -> {
-                session.firing = true;
-                session.burstRemaining = 0;
-                session.holdTicks = 0;
-                session.nextShotTick = tick;
-            }
-            case BURST -> {
+            case MELEE -> {
                 if (tick >= session.nextShotTick) {
-                    session.burstRemaining = weapon.burstCount();
-                    session.firing = true;
-                    session.holdTicks = 0;
-                    session.nextShotTick = tick;
+                    meleeAttack(player, weapon);
+                    session.nextShotTick = tick + weapon.shotIntervalTicks();
                 }
             }
-            default -> {
-                if (tick >= session.nextShotTick) {
-                    shoot(player, session, weapon, stack);
-                }
-            }
+            default -> trigger(player, session, weapon, stack);
         }
         return true; // Cancel vanilla action for our weapons
     }
@@ -110,19 +127,14 @@ public final class GunRuntime implements InputAdapter.Listener {
         }
     }
 
+    /**
+     * Left-click is deliberately inert for our weapons: firing from it would
+     * replay the client's arm-punch animation on every shot. Every action lives
+     * on right-click.
+     */
     @Override
     public void onSwing(Player player, ItemStack stack) {
-        WeaponDefinition weapon = resolve(stack);
-        if (weapon == null || !weapon.isMelee() || disabled(player)) {
-            return;
-        }
-        Session session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
-        session.weaponId = weapon.id();
-        if (tick < session.nextShotTick) {
-            return;
-        }
-        meleeAttack(player, weapon);
-        session.nextShotTick = tick + weapon.shotIntervalTicks();
+        // Intentionally empty.
     }
 
     @Override
@@ -138,13 +150,59 @@ public final class GunRuntime implements InputAdapter.Listener {
 
     @Override
     public boolean onAttack(Player player, ItemStack stack) {
-        WeaponDefinition weapon = resolve(stack);
-        if (weapon == null) {
-            return false;
+        // Cancel vanilla melee damage for ALL weapons; melee is our arc sweep and
+        // firearms replace the punch with the simulated round.
+        return resolve(stack) != null;
+    }
+
+    // ------------------------------------------------------------------
+    // Trigger handling
+    // ------------------------------------------------------------------
+
+    /**
+     * One trigger event (a right-click press; the client repeats the use packet
+     * roughly every four ticks while the button is held). AUTO keeps firing as
+     * long as those repeats keep arriving; BURST and SEMI/PUMP/BOLT need a
+     * genuine re-press, so holding the button cannot machine-gun them. A scoped
+     * weapon scopes while the trigger repeats and unscopes when they stop.
+     */
+    private void trigger(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
+        long gap = tick - session.lastSwingTick;
+        session.lastSwingTick = tick;
+        if (weapon.scope()) {
+            session.scoping = true;
         }
-        // Cancel vanilla melee damage for ALL weapons; we handle melee via onSwing.
-        // For firearms this prevents the vanilla punch; for melee we use our arc.
-        return true;
+        switch (weapon.fireMode()) {
+            case AUTO -> {
+                if (!session.firing) {
+                    session.firing = true;
+                    session.holdTicks = 0;
+                    if (tick >= session.nextShotTick) {
+                        shoot(player, session, weapon, stack);
+                    }
+                }
+            }
+            case BURST -> {
+                if (gap > SEMI_REPRESS_TICKS) {
+                    startBurst(session, weapon);
+                }
+            }
+            default -> {
+                if (gap > SEMI_REPRESS_TICKS && tick >= session.nextShotTick) {
+                    shoot(player, session, weapon, stack);
+                }
+            }
+        }
+    }
+
+    private void startBurst(Session session, WeaponDefinition weapon) {
+        if (tick < session.nextShotTick) {
+            return;
+        }
+        session.burstRemaining = weapon.burstCount();
+        session.firing = true;
+        session.holdTicks = 0;
+        session.nextShotTick = tick;
     }
 
     // ------------------------------------------------------------------
@@ -166,10 +224,18 @@ public final class GunRuntime implements InputAdapter.Listener {
             ItemStack stack = player.getInventory().getItemInMainHand();
             WeaponDefinition weapon = resolve(stack);
             if (weapon == null || !weapon.id().equals(session.weaponId)) {
-                session.firing = false;
-                session.burstRemaining = 0;
-                session.reloading = false;
+                // The weapon left the hand (or was swapped): persist its live
+                // magazine and forget the trigger state.
+                flushMagazine(session);
+                session.resetTransient();
                 continue;
+            }
+
+            // The scope is held with the trigger and drops as soon as the
+            // trigger repeats stop (the carrier is neutral, so there is no
+            // vanilla use state to read).
+            if (!weapon.scope() || tick - session.lastSwingTick > AUTO_RELEASE_TICKS) {
+                session.scoping = false;
             }
 
             if (session.reloading) {
@@ -182,7 +248,9 @@ public final class GunRuntime implements InputAdapter.Listener {
 
             if (session.firing) {
                 session.holdTicks++;
-                if (session.holdTicks > weapon.maxHoldTicks()) {
+                boolean released = weapon.fireMode() == FireMode.AUTO
+                        && tick - session.lastSwingTick > AUTO_RELEASE_TICKS;
+                if (session.holdTicks > weapon.maxHoldTicks() || released) {
                     session.firing = false;
                     session.burstRemaining = 0;
                 } else if (tick >= session.nextShotTick) {
@@ -203,18 +271,20 @@ public final class GunRuntime implements InputAdapter.Listener {
             return;
         }
         if (weapon.usesAmmo()) {
-            int rounds = ammo.rounds(stack, weapon);
-            if (rounds <= 0) {
+            AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
+            if (magazine.rounds() <= 0) {
                 dryFire(player, session, weapon);
                 return;
             }
-            ammo.spend(stack, weapon);
-            player.getInventory().setItemInMainHand(stack);
+            magazine.spend();
         }
 
         Location origin = player.getEyeLocation();
         Vector direction = origin.getDirection().normalize().multiply(weapon.velocity());
-        simulator.fire(player, weapon, origin, direction);
+        double spread = session.scoping
+                ? weapon.spreadDegrees() * weapon.scopeSpreadMultiplier()
+                : weapon.spreadDegrees();
+        simulator.fire(player, weapon, origin, direction, spread);
 
         services.soundFx().play(origin, weapon.soundFire(), 1.0f, 1.0f);
         services.particleFx().muzzle(origin.clone().add(origin.getDirection().normalize().multiply(0.6)), weapon);
@@ -304,15 +374,14 @@ public final class GunRuntime implements InputAdapter.Listener {
         if (session.reloading) {
             return;
         }
-        int rounds = ammo.rounds(stack, weapon);
-        if (rounds >= weapon.magazine()) {
+        AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
+        if (magazine.rounds() >= weapon.magazine()) {
             return;
         }
         session.firing = false;
         session.burstRemaining = 0;
         if (weapon.reloadTicks() <= 0) {
-            ammo.reload(stack, weapon);
-            player.getInventory().setItemInMainHand(stack);
+            magazine.refill(weapon.magazine());
             updateHud(player, session, weapon, stack);
             return;
         }
@@ -323,8 +392,7 @@ public final class GunRuntime implements InputAdapter.Listener {
     }
 
     private void completeReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
-        ammo.reload(stack, weapon);
-        player.getInventory().setItemInMainHand(stack);
+        magazine(player, session, weapon, stack).refill(weapon.magazine());
         session.reloading = false;
         services.soundFx().playTo(player, weapon.soundReload(), 0.8f, 1.1f);
         updateHud(player, session, weapon, stack);
@@ -334,8 +402,46 @@ public final class GunRuntime implements InputAdapter.Listener {
         if (!weapon.usesAmmo()) {
             return;
         }
-        int rounds = ammo.rounds(stack, weapon);
-        services.ammoHud().update(player, weapon, rounds, -1, session.reloading);
+        AmmoModel.Magazine magazine = session.magazine;
+        int rounds = magazine != null ? magazine.rounds() : ammo.rounds(stack, weapon);
+        services.ammoHud().update(player, weapon, rounds, -1, session.reloading, session.scoping);
+    }
+
+    // ------------------------------------------------------------------
+    // Live magazine (deferred persistence)
+    // ------------------------------------------------------------------
+
+    /**
+     * The live magazine of the held stack. Reopens (and flushes the previous
+     * one) when the shooter switches to a different stack; a legacy stack with
+     * no uid is tagged once, which is written back so it persists.
+     */
+    private AmmoModel.Magazine magazine(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
+        String uid = services.itemFactory().readUid(stack);
+        if (session.magazine != null && uid != null && session.magazine.uid().equals(uid)) {
+            return session.magazine;
+        }
+        flushMagazine(session);
+        boolean legacy = uid == null;
+        session.magazine = ammo.open(stack, weapon);
+        if (legacy) {
+            // The stack just gained its uid: persist it (a one-time write).
+            player.getInventory().setItemInMainHand(stack);
+        }
+        return session.magazine;
+    }
+
+    /** Persists the session's live magazine onto the matching inventory stack. */
+    private void flushMagazine(Session session) {
+        AmmoModel.Magazine magazine = session.magazine;
+        session.magazine = null;
+        if (magazine == null) {
+            return;
+        }
+        Player player = Bukkit.getPlayer(session.playerId);
+        if (player != null && player.isOnline()) {
+            ammo.flush(player, magazine);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -357,11 +463,17 @@ public final class GunRuntime implements InputAdapter.Listener {
     }
 
     public void clear(Player player) {
-        sessions.remove(player.getUniqueId());
+        Session session = sessions.remove(player.getUniqueId());
+        if (session != null) {
+            flushMagazine(session);
+        }
         services.ammoHud().clear(player.getUniqueId());
     }
 
     public void clearAll() {
+        for (Session session : sessions.values()) {
+            flushMagazine(session);
+        }
         sessions.clear();
         services.ammoHud().clearAll();
     }
@@ -395,13 +507,24 @@ public final class GunRuntime implements InputAdapter.Listener {
         String weaponId = "";
         boolean firing;
         boolean reloading;
+        boolean scoping;
         int burstRemaining;
         int holdTicks;
         long nextShotTick;
         long reloadEndTick;
+        long lastSwingTick = -1000L;
+        AmmoModel.Magazine magazine;
 
         Session(UUID playerId) {
             this.playerId = playerId;
+        }
+
+        void resetTransient() {
+            firing = false;
+            reloading = false;
+            scoping = false;
+            burstRemaining = 0;
+            holdTicks = 0;
         }
     }
 }

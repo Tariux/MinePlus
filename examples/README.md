@@ -39,6 +39,12 @@ Copy these into your server's `plugins/Mineplus/` data folders and run `/mineplu
 |---|---|
 | [`mineplus-fun/`](mineplus-fun/README.md) | A **complete, buildable plugin** — the Juicer (recipes, GUI, custom items, upgrades) and the Cannon (conditional interaction, torch firing, TNT ballistics, persistent ammo) — built entirely outside the core |
 
+### 🐄 The mob behavior showcase
+
+| Folder | Shows |
+|---|---|
+| [`mineplus-mobfun/`](mineplus-mobfun/) | A **complete, buildable plugin** built on the Core's mob behavior engine: three vanilla mobs (grazing cow, reforesting pig, lamplighter villager) driven by interval-gated, budget-capped world actions, with live status/toggles via `/mobfun` |
+
 ## 🗺️ Where to go next
 
 - **Setting up the furnace examples?** → [Step-by-Step Setup Guide](STEP_BY_STEP_FUN_GUIDE.md)

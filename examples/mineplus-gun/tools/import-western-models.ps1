@@ -1,0 +1,138 @@
+# Imports the author's Western gunpacks (vanilla resource-pack JSON models)
+# into MineplusGun frame resources.
+#
+# Source packs (local authoring material, never committed):
+#   C:\Users\Tariux\Desktop\gunpacks\western_1   (Colt + repeater, bow overlay)
+#   C:\Users\Tariux\Desktop\gunpacks\western_2   (bolt rifle + coach shotgun)
+#   C:\Users\Tariux\Desktop\gunpacks\western_3   (musketmod: flintlocks)
+#
+# Output (module resources):
+#   src/main/resources/defaults/frames/<weapon-id>/<frame>.json
+#   src/main/resources/defaults/frames/textures/<weapon-specific>.png
+#
+# Cleanup applied to every model:
+#   - texture references re-pointed into the mineplusgun namespace with a
+#     per-weapon unique texture file (packs share names like "pistol.png")
+#   - dangling "#missing" face textures mapped to the model's first texture
+#   - Blockbench/vanilla-decoration keys stripped (format_version, credit,
+#     texture_size, groups) and mod-item "overrides" dropped (the plugin
+#     drives frame switching itself via custom_model_data)
+
+$ErrorActionPreference = "Stop"
+
+$moduleRoot = Split-Path -Parent $PSScriptRoot
+$outRoot = Join-Path $moduleRoot "src\main\resources\defaults\frames"
+$textureOutDir = Join-Path $outRoot "textures"
+
+$pack1 = "C:\Users\Tariux\Desktop\gunpacks\western_1\assets\minecraft"
+$pack2 = "C:\Users\Tariux\Desktop\gunpacks\western_2\assets\minecraft"
+$pack3 = "C:\Users\Tariux\Desktop\gunpacks\western_3\assets\musketmod"
+
+# Per-weapon frame mapping: logical frame -> source model stem.
+$weapons = @(
+    @{ id = "colt_peacemaker";   texture = "colt_peacemaker.png";
+       base = "$pack1\models\item\pistol";   tex = "$pack1\textures\item\pistol.png";
+       frames = @{ idle = "pistol_idle"; reload0 = "pistol_loading_0"; reload1 = "pistol_loading_1";
+                   reload2 = "pistol_loading_2"; reload3 = "pistol_loading_3"; reload4 = "pistol_loading_4";
+                   ready = "pistol_primed" } },
+    @{ id = "rifle_repeater";    texture = "rifle_repeater.png";
+       base = "$pack1\models\item\rifle";    tex = "$pack1\textures\item\rifle.png";
+       frames = @{ idle = "rifle_idle"; reload0 = "rifle_loading_0"; reload1 = "rifle_loading_1";
+                   reload2 = "rifle_loading_2"; reload3 = "rifle_loading_3"; reload4 = "rifle_loading_4";
+                   reload5 = "rifle_loading_5"; ready = "rifle_primed" } },
+    @{ id = "rifle_boltaction";  texture = "rifle_boltaction.png";
+       base = "$pack2\models\item\rifle";    tex = "$pack2\textures\item\rifle.png";
+       frames = @{ idle = "rifle_idle"; reload0 = "rifle_loading_0"; reload1 = "rifle_loading_1";
+                   reload2 = "rifle_loading_2"; reload3 = "rifle_loading_3"; reload4 = "rifle_loading_4";
+                   ready = "rifle_primed" } },
+    @{ id = "shotgun_coach";     texture = "shotgun_coach.png";
+       base = "$pack2\models\item\shotgun";  tex = "$pack2\textures\item\shotgun.png";
+       frames = @{ idle = "shotgun_idle"; reload0 = "shotgun_loading_0"; reload1 = "shotgun_loading_1";
+                   reload2 = "shotgun_loading_2"; reload3 = "shotgun_loading_3"; reload4 = "shotgun_loading_4";
+                   reload5 = "shotgun_loading_5"; reload6 = "shotgun_loading_6"; reload7 = "shotgun_loading_7";
+                   ready = "shotgun_primed" } },
+    @{ id = "pistol_flintlock";  texture = "flintlock_pistol.png";
+       base = "$pack3\models\item";           tex = "$pack3\textures\item\pistol.png";
+       frames = @{ idle = "pistol"; ready = "pistol_loaded" } },
+    @{ id = "musket_flintlock";  texture = "musket.png";
+       base = "$pack3\models\item";           tex = "$pack3\textures\item\musket.png";
+       frames = @{ idle = "musket"; ready = "musket_loaded" } },
+    @{ id = "musket_marksman";   texture = "musket_scope.png";
+       base = "$pack3\models\item";           tex = "$pack3\textures\item\musket_with_scope.png";
+       frames = @{ idle = "musket_with_scope"; ready = "musket_with_scope_loaded" } },
+    @{ id = "musket_bayonet";    texture = "musket_bayonet.png";
+       base = "$pack3\models\item";           tex = "$pack3\textures\item\musket_with_bayonet.png";
+       frames = @{ idle = "musket_with_bayonet"; ready = "musket_with_bayonet_loaded" } },
+    @{ id = "blunderbuss_flintlock"; texture = "blunderbuss.png";
+       base = "$pack3\models\item";           tex = "$pack3\textures\item\blunderbuss.png";
+       frames = @{ idle = "blunderbuss"; ready = "blunderbuss_loaded" } }
+)
+
+if (-not (Test-Path -LiteralPath $outRoot)) {
+    New-Item -ItemType Directory -Path $outRoot | Out-Null
+}
+if (-not (Test-Path -LiteralPath $textureOutDir)) {
+    New-Item -ItemType Directory -Path $textureOutDir | Out-Null
+}
+
+function Clean-Model([object]$model, [string]$namespace, [string]$textureName) {
+    foreach ($key in @("format_version", "credit", "texture_size", "groups", "overrides")) {
+        if ($model.PSObject.Properties[$key]) {
+            $model.PSObject.Properties.Remove($key)
+        }
+    }
+
+    $textureKeys = @()
+    if ($model.textures) {
+        $textureKeys = @($model.textures.PSObject.Properties.Name)
+        foreach ($prop in $model.textures.PSObject.Properties) {
+            # "/item/pistol", "musketmod:item/pistol", "item/pistol" -> mineplusgun:item/<renamed>
+            $trimmed = $prop.Value -replace '^.*[:/]', ''
+            $prop.Value = "$namespace:item/$textureName"
+            if ($trimmed -ne $textureName -and -not $trimmed.EndsWith($textureName.Replace(".png", ""))) {
+                # source texture stem differs from the renamed file; refer by key anyway
+            }
+        }
+    }
+
+    if ($model.elements) {
+        foreach ($element in $model.elements) {
+            foreach ($faceProp in $element.faces.PSObject.Properties) {
+                $face = $faceProp.Value
+                if ($face -and $face.texture) {
+                    if ($face.texture -eq "#missing" -or $face.texture -notin $textureKeys) {
+                        $face.texture = "#" + $textureKeys[0]
+                    }
+                }
+            }
+        }
+    }
+    return $model
+}
+
+$imported = 0
+foreach ($weapon in $weapons) {
+    $weaponDir = Join-Path $outRoot $weapon.id
+    if (-not (Test-Path -LiteralPath $weaponDir)) {
+        New-Item -ItemType Directory -Path $weaponDir | Out-Null
+    }
+
+    $textureTarget = Join-Path $textureOutDir $weapon.texture
+    Copy-Item -LiteralPath $weapon.tex -Destination $textureTarget -Force
+
+    foreach ($frameName in $weapon.frames.Keys) {
+        $stem = $weapon.frames[$frameName]
+        $sourceFile = Join-Path $weapon.base ($stem + ".json")
+        if (-not (Test-Path -LiteralPath $sourceFile)) {
+            Write-Warning "Missing source model: $sourceFile"
+            continue
+        }
+        $json = Get-Content -LiteralPath $sourceFile -Raw | ConvertFrom-Json
+        $clean = Clean-Model -model $json -namespace "mineplusgun" -textureName ($weapon.texture -replace '\.png$', '')
+        $target = Join-Path $weaponDir ($frameName + ".json")
+        $clean | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $target -Encoding UTF8
+        $imported++
+    }
+    Write-Host ("[{0}] {1} frame(s), texture {2}" -f $weapon.id, $weapon.frames.Count, $weapon.texture)
+}
+Write-Host "Imported $imported frame model(s) into $outRoot"

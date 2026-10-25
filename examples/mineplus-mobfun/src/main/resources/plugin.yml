@@ -1,0 +1,18 @@
+name: MobFun
+version: ${version}
+main: com.mineplus.mobfun.MobFunPlugin
+api-version: '1.21'
+author: Tariux
+description: Mob behavior showcase for Mineplus - three vanilla mobs driven by the Core's mob behavior engine (grazing cows, reforesting pigs, lamplighter villagers).
+website: https://github.com/Tariux/MinePlus
+
+# Hard dependency: the Core engine must be present and enabled first.
+depend: [Mineplus]
+
+# The /mobfun command is registered dynamically at enable time via
+# context.moduleSupport().registerCommand(...) - no plugin.yml entry needed.
+
+permissions:
+  mineplusmobfun.admin:
+    description: Allows using /mobfun mob behavior controls
+    default: op

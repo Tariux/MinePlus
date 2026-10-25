@@ -48,13 +48,14 @@ public final class AmmoHud {
     }
 
     /** Pushes the current ammo state for the held weapon. */
-    public void update(Player player, WeaponDefinition weapon, int mag, int reserve, boolean reloading) {
+    public void update(Player player, WeaponDefinition weapon, int mag, int reserve, boolean reloading,
+                       boolean scoping) {
         GunConfig current = config;
         if (current == null || current.settings().hudMode() == GunConfig.HudMode.OFF
                 || hidden.contains(player.getUniqueId())) {
             return;
         }
-        String text = HudText.render(current.settings().hudTemplate(), weapon, mag, reserve, reloading);
+        String text = HudText.render(current.settings().hudTemplate(), weapon, mag, reserve, reloading, scoping);
         if (current.settings().hudMode() == GunConfig.HudMode.BOSSBAR) {
             updateBossBar(player, weapon, mag, reloading, text, current.settings().lowAmmoThreshold());
         } else {
