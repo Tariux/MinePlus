@@ -1,23 +1,24 @@
 # MineplusGun — Western module configuration.
 #
-# The arsenal is the imported Western set: a Colt, two rifles, a coach
-# shotgun, three flintlock muskets (plain, scoped, bayoneted), a flintlock
-# pistol and a blunderbuss, plus a Bowie knife. Every weapon is data-driven:
-# add an entry to add a weapon, never code.
+# The arsenal is the imported Western gunpacks: two pack-1 guns (pistol and
+# rifle), two pack-2 guns (lever rifle and coach shotgun) and the five
+# musketmod flintlocks (pistol, musket, bayoneted, scoped, blunderbuss).
+# Every weapon is data-driven: add an entry to add a weapon, never code.
 #
-# Presentation axis:
-#   - `frames:` (Western packs) - the weapon renders through the Core's
-#     framed-item infrastructure. Stems resolve to the raw pack models the
-#     module installs from defaults/frames/<weapon-id>/<stem>.json; state 0
-#     is idle, 1..N play the reload animation, N+1 is the loaded state (the
-#     `loaded` stem). `texture` names the per-weapon texture file the frame
-#     models sample.
-#   - `model:` (knife) - a virtual .bbmodel under models/gun/, as before.
+# Presentation axis (`frames:`): the weapon renders through the Core's
+# framed-item infrastructure. Stems resolve to the raw pack models the module
+# installs from defaults/frames/<weapon-id>/<stem>.json; state 0 is idle,
+# 1..N play the reload animation, N+1 is the loaded state (the `loaded`
+# stem). `texture` names the per-weapon texture file the frame models sample.
 #
-# `backing-material` is only the carrier item the additive item_model
-# replaces; with PACK.ENABLED: false (or a client that has not applied the
-# pack) the weapon degrades to that vanilla material, so it must have NO
-# vanilla use action. IRON_INGOT is the neutral default.
+# `backing-material` is the vanilla carrier item the item model replaces.
+# CROSSBOW is the default carrier on purpose: a usable item is the only way
+# the client enters its draw gesture, which powers the held-right-click load
+# animation (each staged pose plays over the pull progress across both the
+# modern item definitions and legacy pulling overrides). The module cancels
+# every vanilla use of the gun — the crossbow never charges or fires an arrow.
+# With PACK.ENABLED: false (or a client that has not applied the pack) the
+# weapon degrades to the bare crossbow.
 #
 # `aim.scope: true` marks a weapon as scoped: while the trigger is held its
 # spread is multiplied by `aim.spread-multiplier` and the HUD shows SCOPE.
@@ -62,147 +63,136 @@ shop:
   admin-bypass-payment: true   # ops (with the bypass permission) are never charged
 
 weapons:
-  # --- Pistols -----------------------------------------------------------
-  colt_peacemaker:
-    display-name: "&fColt Peacemaker"
+  # --- western_1 pack ------------------------------------------------------
+  western_pistol:
+    display-name: "&fWestern Pistol"
     type: PISTOL
-    backing-material: IRON_INGOT
+    backing-material: CROSSBOW
     price: 500
     frames:
       idle: idle
       reload: [reload0, reload1, reload2, reload3, reload4]
-      loaded: ready
-      texture: colt_peacemaker.png
+      loaded: loaded
+      texture: western_pistol.png
     ammo: { magazine: 6, reload-ticks: 50 }
     ballistics: { damage: 7.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
     fire: { mode: SEMI, rpm: 280 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
 
-  pistol_flintlock:
+  western_rifle:
+    display-name: "&fWestern Rifle"
+    type: RIFLE
+    backing-material: CROSSBOW
+    price: 2600
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4, reload5]
+      loaded: loaded
+      texture: western_rifle.png
+    ammo: { magazine: 5, reload-ticks: 65 }
+    ballistics: { damage: 11.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
+    fire: { mode: BOLT, rpm: 47 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  # --- western_2 pack ------------------------------------------------------
+  lever_rifle:
+    display-name: "&fLever-Action Rifle"
+    type: RIFLE
+    backing-material: CROSSBOW
+    price: 1800
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4]
+      loaded: loaded
+      texture: lever_rifle.png
+    ammo: { magazine: 8, reload-ticks: 60 }
+    ballistics: { damage: 8.5, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
+    fire: { mode: SEMI, rpm: 130 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  coach_shotgun:
+    display-name: "&fCoach Shotgun"
+    type: SHOTGUN
+    backing-material: CROSSBOW
+    price: 1400
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4, reload5, reload6, reload7]
+      loaded: loaded
+      texture: coach_shotgun.png
+    ammo: { magazine: 6, reload-ticks: 80 }
+    ballistics: { damage: 5.5, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
+    fire: { mode: PUMP, rpm: 75, pellets: 4 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  # --- western_3 pack (musketmod flintlocks) -------------------------------
+  flintlock_pistol:
     display-name: "&fFlintlock Pistol"
     type: PISTOL
-    backing-material: IRON_INGOT
+    backing-material: CROSSBOW
     price: 350
     frames:
       idle: idle
-      loaded: ready
+      loaded: loaded
       texture: flintlock_pistol.png
     ammo: { magazine: 1, reload-ticks: 90 }
     ballistics: { damage: 12.0, headshot-multiplier: 2.5, velocity: 3.4, gravity: 0.04, drag: 0.015, range: 60, spread-degrees: 2.5, falloff-start: 25, falloff-per-block: 0.045 }
     fire: { mode: SEMI, rpm: 120 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
 
-  # --- Rifles ------------------------------------------------------------
-  rifle_repeater:
-    display-name: "&fRepeater Rifle"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 1800
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4, reload5]
-      loaded: ready
-      texture: rifle_repeater.png
-    ammo: { magazine: 8, reload-ticks: 60 }
-    ballistics: { damage: 8.5, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
-    fire: { mode: SEMI, rpm: 130 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
-
-  rifle_boltaction:
-    display-name: "&fBolt-Action Rifle"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 2600
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4]
-      loaded: ready
-      texture: rifle_boltaction.png
-    ammo: { magazine: 5, reload-ticks: 65 }
-    ballistics: { damage: 11.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
-    fire: { mode: BOLT, rpm: 47 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
-
-  musket_flintlock:
+  flintlock_musket:
     display-name: "&fFlintlock Musket"
     type: RIFLE
-    backing-material: IRON_INGOT
+    backing-material: CROSSBOW
     price: 2800
     frames:
       idle: idle
-      loaded: ready
-      texture: musket.png
+      loaded: loaded
+      texture: flintlock_musket.png
     ammo: { magazine: 1, reload-ticks: 100 }
     ballistics: { damage: 16.0, headshot-multiplier: 2.4, velocity: 4.6, gravity: 0.02, drag: 0.01, penetration: 1, range: 180, spread-degrees: 1.5, falloff-start: 60, falloff-per-block: 0.02 }
     fire: { mode: SEMI, rpm: 55 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
 
-  musket_marksman:
+  bayonet_musket:
+    display-name: "&fBayoneted Musket"
+    type: RIFLE
+    backing-material: CROSSBOW
+    price: 3200
+    frames:
+      idle: idle
+      loaded: loaded
+      texture: bayonet_musket.png
+    ammo: { magazine: 1, reload-ticks: 100 }
+    ballistics: { damage: 15.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
+    fire: { mode: SEMI, rpm: 60 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  scope_musket:
     display-name: "&fMarksman's Musket"
     type: RIFLE
-    backing-material: IRON_INGOT
+    backing-material: CROSSBOW
     price: 3600
     frames:
       idle: idle
-      loaded: ready
-      texture: musket_scope.png
+      loaded: loaded
+      texture: scope_musket.png
     ammo: { magazine: 1, reload-ticks: 110 }
     ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.008, penetration: 2, range: 200, spread-degrees: 0.9, falloff-start: 80, falloff-per-block: 0.012 }
     fire: { mode: BOLT, rpm: 50 }
     aim: { scope: true, spread-multiplier: 0.35 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
 
-  musket_bayonet:
-    display-name: "&fBayoneted Musket"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 3200
-    frames:
-      idle: idle
-      loaded: ready
-      texture: musket_bayonet.png
-    ammo: { magazine: 1, reload-ticks: 100 }
-    ballistics: { damage: 15.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
-    fire: { mode: SEMI, rpm: 60 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
-
-  # --- Shotguns ----------------------------------------------------------
-  shotgun_coach:
-    display-name: "&fCoach Shotgun"
-    type: SHOTGUN
-    backing-material: IRON_INGOT
-    price: 1400
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4, reload5, reload6, reload7]
-      loaded: ready
-      texture: shotgun_coach.png
-    ammo: { magazine: 6, reload-ticks: 80 }
-    ballistics: { damage: 5.5, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
-    fire: { mode: PUMP, rpm: 75, pellets: 4 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
-
-  blunderbuss_flintlock:
+  blunderbuss:
     display-name: "&fBlunderbuss"
     type: SHOTGUN
-    backing-material: IRON_INGOT
+    backing-material: CROSSBOW
     price: 1150
     frames:
       idle: idle
-      loaded: ready
+      loaded: loaded
       texture: blunderbuss.png
     ammo: { magazine: 2, reload-ticks: 70 }
     ballistics: { damage: 4.0, headshot-multiplier: 1.5, velocity: 2.6, gravity: 0.06, drag: 0.03, range: 18, spread-degrees: 9.0, falloff-start: 8, falloff-per-block: 0.1 }
     fire: { mode: PUMP, rpm: 60, pellets: 6 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
-
-  # --- Melee -------------------------------------------------------------
-  knife_bowie:
-    display-name: "&fBowie Knife"
-    model: gun/knife-01-light
-    type: MELEE
-    backing-material: STICK
-    price: 150
-    ballistics: { damage: 7.0 }
-    fire: { mode: MELEE, rpm: 150 }
-    melee: { reach: 3.0, arc-degrees: 55, knockback: 0.4 }

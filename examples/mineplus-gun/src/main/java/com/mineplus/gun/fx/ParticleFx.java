@@ -31,7 +31,7 @@ public final class ParticleFx {
     }
 
     public void muzzle(Location location, WeaponDefinition weapon) {
-        if (!reserve(2)) {
+        if (!reserve(8)) {
             return;
         }
         World world = location.getWorld();
@@ -39,7 +39,7 @@ public final class ParticleFx {
             return;
         }
         Particle particle = particle(weapon.muzzleParticle(), Particle.SMOKE);
-        world.spawnParticle(particle, location, 3, 0.03, 0.03, 0.03, 0.0);
+        world.spawnParticle(particle, location, 8, 0.06, 0.06, 0.06, 0.02);
     }
 
     /**

@@ -2,9 +2,9 @@
 # into MineplusGun frame resources.
 #
 # Source packs (local authoring material, never committed):
-#   C:\Users\Tariux\Desktop\gunpacks\western_1   (Colt + repeater, bow overlay)
-#   C:\Users\Tariux\Desktop\gunpacks\western_2   (bolt rifle + coach shotgun)
-#   C:\Users\Tariux\Desktop\gunpacks\western_3   (musketmod: flintlocks)
+#   C:\Users\Tariux\Desktop\gunpacks\western_1   (western pistol + rifle, bow overlay)
+#   C:\Users\Tariux\Desktop\gunpacks\western_2   (lever rifle + coach shotgun)
+#   C:\Users\Tariux\Desktop\gunpacks\western_3   (musketmod: flintlocks + blunderbuss)
 #
 # Output (module resources):
 #   src/main/resources/defaults/frames/<weapon-id>/<frame>.json
@@ -29,43 +29,45 @@ $pack2 = "C:\Users\Tariux\Desktop\gunpacks\western_2\assets\minecraft"
 $pack3 = "C:\Users\Tariux\Desktop\gunpacks\western_3\assets\musketmod"
 
 # Per-weapon frame mapping: logical frame -> source model stem.
+# The arsenal is exactly the pack guns: western_1 pistol + rifle,
+# western_2 lever rifle + shotgun, western_3 musketmod flintlocks.
 $weapons = @(
-    @{ id = "colt_peacemaker";   texture = "colt_peacemaker.png";
+    @{ id = "western_pistol";     texture = "western_pistol.png";
        base = "$pack1\models\item\pistol";   tex = "$pack1\textures\item\pistol.png";
        frames = @{ idle = "pistol_idle"; reload0 = "pistol_loading_0"; reload1 = "pistol_loading_1";
                    reload2 = "pistol_loading_2"; reload3 = "pistol_loading_3"; reload4 = "pistol_loading_4";
-                   ready = "pistol_primed" } },
-    @{ id = "rifle_repeater";    texture = "rifle_repeater.png";
+                   loaded = "pistol_primed" } },
+    @{ id = "western_rifle";      texture = "western_rifle.png";
        base = "$pack1\models\item\rifle";    tex = "$pack1\textures\item\rifle.png";
        frames = @{ idle = "rifle_idle"; reload0 = "rifle_loading_0"; reload1 = "rifle_loading_1";
                    reload2 = "rifle_loading_2"; reload3 = "rifle_loading_3"; reload4 = "rifle_loading_4";
-                   reload5 = "rifle_loading_5"; ready = "rifle_primed" } },
-    @{ id = "rifle_boltaction";  texture = "rifle_boltaction.png";
+                   reload5 = "rifle_loading_5"; loaded = "rifle_primed" } },
+    @{ id = "lever_rifle";        texture = "lever_rifle.png";
        base = "$pack2\models\item\rifle";    tex = "$pack2\textures\item\rifle.png";
        frames = @{ idle = "rifle_idle"; reload0 = "rifle_loading_0"; reload1 = "rifle_loading_1";
                    reload2 = "rifle_loading_2"; reload3 = "rifle_loading_3"; reload4 = "rifle_loading_4";
-                   ready = "rifle_primed" } },
-    @{ id = "shotgun_coach";     texture = "shotgun_coach.png";
+                   loaded = "rifle_primed" } },
+    @{ id = "coach_shotgun";      texture = "coach_shotgun.png";
        base = "$pack2\models\item\shotgun";  tex = "$pack2\textures\item\shotgun.png";
        frames = @{ idle = "shotgun_idle"; reload0 = "shotgun_loading_0"; reload1 = "shotgun_loading_1";
                    reload2 = "shotgun_loading_2"; reload3 = "shotgun_loading_3"; reload4 = "shotgun_loading_4";
                    reload5 = "shotgun_loading_5"; reload6 = "shotgun_loading_6"; reload7 = "shotgun_loading_7";
-                   ready = "shotgun_primed" } },
-    @{ id = "pistol_flintlock";  texture = "flintlock_pistol.png";
+                   loaded = "shotgun_primed" } },
+    @{ id = "flintlock_pistol";   texture = "flintlock_pistol.png";
        base = "$pack3\models\item";           tex = "$pack3\textures\item\pistol.png";
-       frames = @{ idle = "pistol"; ready = "pistol_loaded" } },
-    @{ id = "musket_flintlock";  texture = "musket.png";
+       frames = @{ idle = "pistol"; loaded = "pistol_loaded" } },
+    @{ id = "flintlock_musket";   texture = "flintlock_musket.png";
        base = "$pack3\models\item";           tex = "$pack3\textures\item\musket.png";
-       frames = @{ idle = "musket"; ready = "musket_loaded" } },
-    @{ id = "musket_marksman";   texture = "musket_scope.png";
+       frames = @{ idle = "musket"; loaded = "musket_loaded" } },
+    @{ id = "scope_musket";       texture = "scope_musket.png";
        base = "$pack3\models\item";           tex = "$pack3\textures\item\musket_with_scope.png";
-       frames = @{ idle = "musket_with_scope"; ready = "musket_with_scope_loaded" } },
-    @{ id = "musket_bayonet";    texture = "musket_bayonet.png";
+       frames = @{ idle = "musket_with_scope"; loaded = "musket_with_scope_loaded" } },
+    @{ id = "bayonet_musket";     texture = "bayonet_musket.png";
        base = "$pack3\models\item";           tex = "$pack3\textures\item\musket_with_bayonet.png";
-       frames = @{ idle = "musket_with_bayonet"; ready = "musket_with_bayonet_loaded" } },
-    @{ id = "blunderbuss_flintlock"; texture = "blunderbuss.png";
+       frames = @{ idle = "musket_with_bayonet"; loaded = "musket_with_bayonet_loaded" } },
+    @{ id = "blunderbuss";        texture = "blunderbuss.png";
        base = "$pack3\models\item";           tex = "$pack3\textures\item\blunderbuss.png";
-       frames = @{ idle = "blunderbuss"; ready = "blunderbuss_loaded" } }
+       frames = @{ idle = "blunderbuss"; loaded = "blunderbuss_loaded" } }
 )
 
 if (-not (Test-Path -LiteralPath $outRoot)) {

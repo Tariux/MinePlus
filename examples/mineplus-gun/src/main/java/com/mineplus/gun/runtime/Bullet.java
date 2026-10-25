@@ -15,6 +15,7 @@ public final class Bullet {
     private final Location position;
     private Vector velocity;
     private double travelled;
+    private double nextTracerAt;
     private int penetrationLeft;
     private int ricochetLeft;
     private double damageMultiplier = 1.0;
@@ -46,6 +47,8 @@ public final class Bullet {
     public void velocity(Vector value) { this.velocity = value; }
     public double travelled() { return travelled; }
     public void addTravelled(double distance) { this.travelled += distance; }
+    public double nextTracerAt() { return nextTracerAt; }
+    public void nextTracerAt(double value) { this.nextTracerAt = value; }
     public int penetrationLeft() { return penetrationLeft; }
     public void consumePenetration() { this.penetrationLeft--; }
     public int ricochetLeft() { return ricochetLeft; }

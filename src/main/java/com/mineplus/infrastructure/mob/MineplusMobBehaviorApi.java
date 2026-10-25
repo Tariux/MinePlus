@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.mob;
 
 import org.bukkit.Bukkit;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -37,6 +38,12 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
     @Override
     public boolean isRegistered(Plugin owner) {
         return engine.hasProfiles(owner);
+    }
+
+    @Override
+    public BehaviorFireResult forceFire(Plugin owner, LivingEntity entity, boolean ignoreConditions) {
+        requireMainThread();
+        return engine.forceFire(owner, entity, ignoreConditions);
     }
 
     @Override

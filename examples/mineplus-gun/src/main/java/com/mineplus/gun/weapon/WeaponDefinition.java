@@ -126,6 +126,16 @@ public final class WeaponDefinition {
         return base.model() == null ? null : base.model().frames();
     }
 
+    /**
+     * The {@code custom_model_data} stack value that renders one frame state
+     * of this weapon — the value the generated pack dispatch/host overrides
+     * read on every server version. Frame states are {@code 0} (idle) through
+     * {@link ItemFrames#loadedState()} (loaded), per the weapon's spec.
+     */
+    public int frameStackValue(int state) {
+        return com.mineplus.pack.asset.ItemModelAsset.frameStackValue(base.namespace(), base.id(), state);
+    }
+
     public WeaponType type() { return type; }
     public FireMode fireMode() { return fireMode; }
 

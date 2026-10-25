@@ -27,6 +27,9 @@ import org.bukkit.util.Vector;
  */
 public final class BulletSimulator {
 
+    /** Blocks between in-flight tracer puffs. */
+    private static final double TRACER_SPACING = 5.0;
+
     private final Supplier<GunConfig> config;
     private final ParticleFx fx;
     private final SoundFx sound;
@@ -134,6 +137,12 @@ public final class BulletSimulator {
         if (!bullet.alive()) {
             return;
         }
+        if (bullet.travelled() >= bullet.nextTracerAt()) {
+            // A visible tracer puff every few blocks of flight — the shot reads
+            // as a streak, not a silent teleport.
+            bullet.nextTracerAt(bullet.nextTracerAt() + TRACER_SPACING);
+            fx.impact(start, weapon);
+        }
         bullet.addTravelled(stepLength);
         bullet.position(end);
     }
@@ -161,6 +170,11 @@ public final class BulletSimulator {
             } else {
                 living.damage(damage);
             }
+        }
+        // Hit marker: a short native tick to the shooter, feedback that works
+        // for every player without any pack or chat spam.
+        if (shooter != null) {
+            sound.playTo(shooter, "block.note_block.hat", 0.5f, headshot ? 2.2f : 1.7f);
         }
 
         if (bullet.penetrationLeft() > 0) {

@@ -52,11 +52,13 @@ public final class PackItemFactory {
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, itemModelKey(definition));
         if (!applied) {
-            // Legacy fallback needs a resolvable geometry model; a framed item
-            // (raw model JSONs, modelKey null) has none, so it degrades to the
-            // bare backing material instead of a broken predicate.
+            // Legacy fallback: geometry items carry their stable identity value;
+            // framed items carry their frame-state base (the resting state), so
+            // a pristine stack renders the idle model on pre-1.21.4 clients.
             if (definition.modelKey() != null) {
                 meta.setCustomModelData(stableCustomModelData(definition));
+            } else if (definition.isFramed()) {
+                meta.setCustomModelData(definition.frameStackValue(0));
             }
         }
         stack.setItemMeta(meta);

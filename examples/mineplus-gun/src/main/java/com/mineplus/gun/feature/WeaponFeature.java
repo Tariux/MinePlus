@@ -126,8 +126,12 @@ public final class WeaponFeature extends ModuleFeature {
                             FRAME_TEXTURE_RESOURCE_ROOT + texture, FRAME_TEXTURE_INSTALL_ROOT + texture, true)) {
                 File installed = context.moduleSupport().dataFile(FRAME_TEXTURE_INSTALL_ROOT + texture);
                 if (installed.isFile()) {
+                    // The model JSONs reference mineplusgun:item/<weapon-id> —
+                    // the pack path is extension-less (the .png is appended by
+                    // the compiler), so the configured file name is normalized.
+                    String normalized = com.mineplus.pack.asset.TextureAsset.normalizePath(texture);
                     context.packApi().registerTexture(WeaponConfigLoader.NAMESPACE,
-                            "item/" + texture, installed);
+                            "item/" + normalized, installed);
                     textures++;
                 } else {
                     plugin.getLogger().warning("[MineplusGun] Weapon '" + weaponId
