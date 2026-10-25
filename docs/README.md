@@ -54,6 +54,7 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) | Advanced | Hooks, lifecycle, signals |
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
 | [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon) |
+| [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms, melee, grenades, scopes and a Vault shop |
 
 For building your own module, follow the canonical recipe in
 [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md).

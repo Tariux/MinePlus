@@ -11,6 +11,9 @@ import com.mineplus.gun.runtime.GrenadeRuntime;
 import com.mineplus.gun.runtime.GunRuntime;
 import com.mineplus.infrastructure.PluginContext;
 import org.bukkit.Bukkit;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -18,7 +21,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  * ballistics, grenades and effects. Selects the input adapter once at enable;
  * weapon logic never branches on it.
  */
-public final class CombatFeature extends ModuleFeature {
+public final class CombatFeature extends ModuleFeature implements Listener {
 
     private final GunServices services;
 
@@ -45,9 +48,22 @@ public final class CombatFeature extends ModuleFeature {
 
         inputAdapter = packetEventsPresent() ? new PacketInputAdapter(plugin) : new BukkitInputAdapter();
         inputAdapter.register(plugin, runtime);
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
         runtime.start();
 
         plugin.getLogger().info("[MineplusGun] Combat runtime started (input=" + inputAdapter.name() + ").");
+    }
+
+    /**
+     * Persists the quitting player's live magazine before their inventory is
+     * saved and drops the session (the tick loop only skips offline players, so
+     * without this the session would linger).
+     */
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        if (runtime != null) {
+            runtime.clear(event.getPlayer());
+        }
     }
 
     @Override
@@ -60,6 +76,7 @@ public final class CombatFeature extends ModuleFeature {
             runtime.stop();
             runtime = null;
         }
+        org.bukkit.event.HandlerList.unregisterAll(this);
     }
 
     private static boolean packetEventsPresent() {

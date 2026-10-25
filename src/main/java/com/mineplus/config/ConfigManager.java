@@ -42,6 +42,7 @@ public class ConfigManager {
                     MineplusConfig.parseDisplayTransport(yamlConfig, com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()),
                     MineplusConfig.parsePack(yamlConfig, com.mineplus.pack.PackSettings.defaults()),
                     MineplusConfig.parseRenderPolicy(yamlConfig, com.mineplus.infrastructure.render.RenderPolicy.defaults()),
+                    MineplusConfig.parseMobBehavior(yamlConfig, com.mineplus.infrastructure.mob.MobBehaviorSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -282,6 +283,26 @@ public class ConfigManager {
                       #   EMISSIVE: always block light = model max emission, sky 15.
                       #   FULLBRIGHT: always (15, 15) — the legacy fully-lit look.
                       LIGHTING: AUTO
+
+                    # Mob behavior engine: budgeted, distance-gated execution of
+                    # entity behavior profiles registered by modules (actions like
+                    # grazing, planting, or torch lighting around moving mobs).
+                    # Lazy: costs nothing until a module registers a profile.
+                    MOB_BEHAVIOR:
+                      # Master switch (false = registered profiles stay frozen).
+                      ENABLED: true
+                      # Server ticks between engine runs.
+                      INTERVAL_TICKS: 3
+                      # Entity buckets: each entity is evaluated every N-th run,
+                      # spreading per-entity checks across time.
+                      STAGGER_BUCKETS: 4
+                      # Chunk radius around each online player considered active.
+                      SCAN_RADIUS_CHUNKS: 2
+                      # Soft processing budget per run in milliseconds; excess is
+                      # deferred to the next run (never a hard tick spike).
+                      BUDGET_MILLIS_PER_RUN: 5
+                      # Hard ceiling of world block changes per run.
+                      MAX_BLOCK_EDITS_PER_RUN: 96
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

@@ -155,6 +155,28 @@ policy. Modules that only used `InfrastructureApi`, `BasicInfrastructureApi`,
 
 ---
 
+## 5) Module transition: Gunsmith → MineplusGun
+
+The `mineplus-fun` **Gunsmith** feature overlaid vanilla `bow`/`crossbow`
+(`registerRawAsset` into the `minecraft` namespace plus a `replace: true`
+`sounds.json`). That approach is **retired**: it is removed from new module
+builds and replaced by the standalone **[`mineplus-gun`](../examples/mineplus-gun/README.md)**
+module, which is fully additive.
+
+| | Gunsmith (retired) | MineplusGun |
+|---|---|---|
+| Items | Overlaid vanilla `bow`/`crossbow` | Additive custom items (`PackApi.registerItem`) |
+| Textures/sounds | `minecraft` namespace, `replace: true` | `mineplusgun` namespace, additive only |
+| Firing | Vanilla arrow launch, cancelled + hitscan | Tick-stepped simulated projectiles |
+| Input | Bow draw / crossbow charge | Left-click fire, right-click scope/throw |
+
+**Action needed:** if you relied on `/gunsmith give` or the `minecraft:gun.fire`
+pack assets, install the `MineplusGun` module and use `/mpgun give` /
+`/mpgun shop` instead. No vanilla asset is overridden by the new module, so a
+previously shipped Gunsmith pack overlay can be deleted.
+
+---
+
 > ➡️ **Next:** the exact key-by-key reference is in the
 > [Configuration Reference](config-reference.md); the render-mode API is in the
 > [Developer API](developer-api.md#render-modes).

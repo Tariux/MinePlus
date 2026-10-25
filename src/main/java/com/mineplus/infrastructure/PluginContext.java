@@ -6,6 +6,9 @@ import com.mineplus.infrastructure.core.api.AnimationApi;
 import com.mineplus.infrastructure.core.api.BasicInfrastructureApi;
 import com.mineplus.infrastructure.core.api.InfrastructureApi;
 import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
+import com.mineplus.infrastructure.mob.MineplusMobBehaviorApi;
+import com.mineplus.infrastructure.mob.MobBehaviorApi;
+import com.mineplus.infrastructure.mob.MobBehaviorEngine;
 import com.mineplus.infrastructure.module.ModuleSupport;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
@@ -28,6 +31,7 @@ public final class PluginContext {
     private final ModuleSupport moduleSupport;
     private final PackSystem packSystem;
     private final PackApi packApi;
+    private final MobBehaviorApi mobBehaviorApi;
 
     private PluginContext(
             MineplusPlugin plugin,
@@ -40,7 +44,8 @@ public final class PluginContext {
             AnimationApi animationApi,
             ModuleSupport moduleSupport,
             PackSystem packSystem,
-            PackApi packApi
+            PackApi packApi,
+            MobBehaviorApi mobBehaviorApi
     ) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
@@ -53,6 +58,7 @@ public final class PluginContext {
         this.moduleSupport = moduleSupport;
         this.packSystem = packSystem;
         this.packApi = packApi;
+        this.mobBehaviorApi = mobBehaviorApi;
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -93,6 +99,11 @@ public final class PluginContext {
                 ? new MineplusPackApi(packSystem)
                 : PackApi.disabled(itemRegistry);
 
+        // Lazy-starting mob behavior engine: costs nothing until a module
+        // registers its first behavior profile.
+        MobBehaviorEngine mobBehaviorEngine = new MobBehaviorEngine(plugin);
+        MobBehaviorApi mobBehaviorApi = new MineplusMobBehaviorApi(mobBehaviorEngine);
+
         return new PluginContext(
                 plugin,
                 itemRegistry,
@@ -104,7 +115,8 @@ public final class PluginContext {
                 infrastructureEngine.animationApi(),
                 new ModuleSupport(plugin, infrastructureEngine.registry(), virtualBlockManager),
                 packSystem,
-                packApi
+                packApi,
+                mobBehaviorApi
         );
     }
 
@@ -171,5 +183,15 @@ public final class PluginContext {
     /** Module toolkit: resource installation, looked-at resolution, command registration. */
     public ModuleSupport moduleSupport() {
         return moduleSupport;
+    }
+
+    /**
+     * Mob behavior API — never null. Lets dependent plugins register
+     * per-entity-type behavior profiles (interval-gated world actions) that
+     * the Core's budgeted, distance-gated engine executes. The engine is
+     * lazy: it costs nothing until the first profile is registered.
+     */
+    public MobBehaviorApi mobBehaviorApi() {
+        return mobBehaviorApi;
     }
 }

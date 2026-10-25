@@ -5,6 +5,7 @@ import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.mob.MobBehaviorSettings;
 import com.mineplus.infrastructure.render.RenderPolicy;
 import com.mineplus.pack.PackSettings;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -18,6 +19,7 @@ public class MineplusConfig {
     private final DisplayTransportSettings displayTransport;
     private final PackSettings pack;
     private final RenderPolicy renderPolicy;
+    private final MobBehaviorSettings mobBehavior;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -103,6 +105,22 @@ public class MineplusConfig {
             RenderPolicy renderPolicy,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, MobBehaviorSettings.defaults(), updateCheckResourceId);
+    }
+
+    /** Canonical constructor; new settings groups thread through here. */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
@@ -113,6 +131,7 @@ public class MineplusConfig {
                 ? DisplayTransportSettings.defaults() : displayTransport;
         this.pack = pack == null ? PackSettings.defaults() : pack;
         this.renderPolicy = renderPolicy == null ? RenderPolicy.defaults() : renderPolicy;
+        this.mobBehavior = mobBehavior == null ? MobBehaviorSettings.defaults() : mobBehavior;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -143,6 +162,11 @@ public class MineplusConfig {
     /** Unified render engine routing policy ({@code RENDERING.POLICY}). */
     public RenderPolicy getRenderPolicy() {
         return renderPolicy;
+    }
+
+    /** Mob behavior engine settings ({@code MOB_BEHAVIOR}). */
+    public MobBehaviorSettings getMobBehavior() {
+        return mobBehavior;
     }
 
     public int getUpdateCheckResourceId() {
@@ -198,5 +222,9 @@ public class MineplusConfig {
 
     public static RenderPolicy parseRenderPolicy(FileConfiguration yaml, RenderPolicy fallback) {
         return RenderPolicy.parse(yaml, fallback);
+    }
+
+    public static MobBehaviorSettings parseMobBehavior(FileConfiguration yaml, MobBehaviorSettings fallback) {
+        return MobBehaviorSettings.parse(yaml, fallback);
     }
 }
