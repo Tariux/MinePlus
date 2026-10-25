@@ -53,6 +53,12 @@ public final class AmmoModel {
             return rounds;
         }
 
+        /** Adds rounds, never exceeding the weapon's magazine capacity. */
+        public int addRounds(WeaponDefinition weapon, int delta) {
+            rounds = Math.min(Math.max(0, weapon.magazine()), rounds + Math.max(0, delta));
+            return rounds;
+        }
+
         public void refill(int capacity) {
             rounds = Math.max(0, capacity);
         }

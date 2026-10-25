@@ -9,8 +9,7 @@ public enum WeaponType {
     RIFLE,
     SHOTGUN,
     SNIPER,
-    MELEE,
-    GRENADE;
+    MELEE;
 
     /** Human-facing category label ("Pistols"). */
     public String categoryLabel() {
@@ -21,7 +20,6 @@ public enum WeaponType {
             case SHOTGUN -> "Shotguns";
             case SNIPER -> "Snipers";
             case MELEE -> "Melee";
-            case GRENADE -> "Grenades";
         };
     }
 

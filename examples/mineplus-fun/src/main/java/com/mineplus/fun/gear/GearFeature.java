@@ -1,6 +1,6 @@
 package com.mineplus.fun.gear;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -9,7 +9,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>The gear model ({@code gear-1-1.bbmodel}) ships the {@code rotate_gear}
  * clip internally; the multiblock JSON deliberately declares <em>no</em>
- * {@code animations} autoplay — rotation is state-driven (adjacent redstone
+ * {@code animations} autoplay â€” rotation is state-driven (adjacent redstone
  * power or an adjacent rotating gear), controlled through the Core's
  * {@code AnimationApi} by {@link GearGrid}.
  */

@@ -2,119 +2,98 @@ package com.mineplus.gun.hud;
 
 import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.weapon.WeaponDefinition;
+import com.mineplus.infrastructure.hud.HudService;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
-import net.md_5.bungee.api.ChatMessageType;
-import net.md_5.bungee.api.chat.TextComponent;
 
 /**
- * Per-player ammo HUD. Defaults to the action bar; a boss bar mode is
- * available per config. Players may toggle it off with {@code /mpgun hud}.
+ * The weapon ammo HUD: a thin module adapter over the Core {@link HudService}
+ * (action bar / boss bar / off, per-player toggle, bar tones). The module
+ * owns only the template placeholder values and the bar semantics — the
+ * generic presentation machinery lives in the Core.
  */
 public final class AmmoHud {
 
-    private final Set<UUID> hidden = ConcurrentHashMap.newKeySet();
-    private final Map<UUID, BossBar> bossBars = new ConcurrentHashMap<>();
+    private final HudService hud = new HudService();
     private volatile GunConfig config;
 
     public AmmoHud(GunConfig config) {
         this.config = config;
+        applySettings(config);
     }
 
     public void setConfig(GunConfig config) {
         this.config = config;
+        applySettings(config);
     }
 
     /** Toggles the HUD for one player; returns the new "enabled" state. */
     public boolean toggle(UUID playerId) {
-        if (hidden.remove(playerId)) {
-            return true;
-        }
-        hidden.add(playerId);
-        clear(playerId);
-        return false;
+        return hud.toggle(playerId);
     }
 
     public boolean isEnabled(UUID playerId) {
-        return !hidden.contains(playerId);
+        return hud.isEnabled(playerId);
     }
 
     /** Pushes the current ammo state for the held weapon. */
     public void update(Player player, WeaponDefinition weapon, int mag, int reserve, boolean reloading,
                        boolean scoping) {
         GunConfig current = config;
-        if (current == null || current.settings().hudMode() == GunConfig.HudMode.OFF
-                || hidden.contains(player.getUniqueId())) {
+        if (current == null || !weapon.usesAmmo()) {
             return;
         }
-        String text = HudText.render(current.settings().hudTemplate(), weapon, mag, reserve, reloading, scoping);
-        if (current.settings().hudMode() == GunConfig.HudMode.BOSSBAR) {
-            updateBossBar(player, weapon, mag, reloading, text, current.settings().lowAmmoThreshold());
-        } else {
-            sendActionBar(player, text);
-        }
+        Map<String, String> placeholders = Map.of(
+                "weapon", weapon.displayName(),
+                "mag", String.valueOf(mag),
+                "reserve", String.valueOf(reserve),
+                "mode", modeLabel(weapon, scoping));
+        String title = HudService.render(current.settings().hudTemplate(), placeholders);
+        float progress = Math.max(0.0f, Math.min(1.0f, mag / (float) Math.max(1, weapon.magazine())));
+        HudService.Tone tone = reloading ? HudService.Tone.BUSY
+                : mag <= current.settings().lowAmmoThreshold() ? HudService.Tone.LOW
+                : HudService.Tone.NORMAL;
+        hud.update(player, title, progress, tone);
     }
 
-    private void updateBossBar(Player player, WeaponDefinition weapon, int mag, boolean reloading,
-                               String text, int lowThreshold) {
-        BossBar bar = bossBars.computeIfAbsent(player.getUniqueId(), ignored -> {
-            BossBar created = Bukkit.createBossBar(text, BarColor.GREEN, BarStyle.SEGMENTED_10);
-            created.addPlayer(player);
-            return created;
-        });
-        bar.setTitle(text);
-        int capacity = Math.max(1, weapon.magazine());
-        float progress = Math.max(0.0f, Math.min(1.0f, mag / (float) capacity));
-        bar.setProgress(progress);
-        bar.setColor(reloading ? BarColor.YELLOW
-                : mag <= lowThreshold ? BarColor.RED : BarColor.GREEN);
-        if (!bar.getPlayers().contains(player)) {
-            bar.addPlayer(player);
-        }
+    /** Flashes the HUD red for a dry fire. */
+    public void flashEmpty(Player player, WeaponDefinition weapon) {
+        hud.flash(player, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
+                + ChatColor.RED + "EMPTY");
     }
 
-    /** Removes any boss bar tied to the player. */
+    /** Removes any boss bar tied to the player (on quit / world switch). */
     public void clear(UUID playerId) {
-        BossBar bar = bossBars.remove(playerId);
-        if (bar != null) {
-            bar.removeAll();
-        }
+        hud.clear(playerId);
     }
 
     public void clearAll() {
-        for (BossBar bar : bossBars.values()) {
-            bar.removeAll();
-        }
-        bossBars.clear();
-        hidden.clear();
+        hud.clearAll();
     }
 
-    /** Flash the HUD red for a dry fire. */
-    public void flashEmpty(Player player, WeaponDefinition weapon) {
-        GunConfig current = config;
-        if (current == null || current.settings().hudMode() == GunConfig.HudMode.OFF
-                || hidden.contains(player.getUniqueId())) {
+    private void applySettings(GunConfig config) {
+        if (config == null) {
             return;
         }
-        if (current.settings().hudMode() == GunConfig.HudMode.BOSSBAR) {
-            updateBossBar(player, weapon, 0, false,
-                    ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | " + ChatColor.RED + "EMPTY",
-                    current.settings().lowAmmoThreshold());
-        } else {
-            sendActionBar(player, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
-                    + ChatColor.RED + "EMPTY");
-        }
+        hud.apply(new HudService.Settings(
+                toMode(config.settings().hudMode()),
+                config.settings().hudTemplate()));
     }
 
-    private static void sendActionBar(Player player, String text) {
-        player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText(text));
+    private static HudService.Mode toMode(GunConfig.HudMode mode) {
+        return switch (mode) {
+            case ACTIONBAR -> HudService.Mode.ACTIONBAR;
+            case BOSSBAR -> HudService.Mode.BOSSBAR;
+            case OFF -> HudService.Mode.OFF;
+        };
+    }
+
+    private static String modeLabel(WeaponDefinition weapon, boolean scoping) {
+        if (weapon.scope() && scoping) {
+            return "SCOPE";
+        }
+        return weapon.fireMode().name();
     }
 }

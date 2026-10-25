@@ -1,6 +1,6 @@
 package com.mineplus.fun.alchemy;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.pack.block.PackBlockCarrier;
 import com.mineplus.pack.block.PackBlockDefinition;
@@ -19,12 +19,12 @@ import org.bukkit.plugin.java.JavaPlugin;
  * ({@code note_block}, whose uniform model and {@code MODEL} render type let a
  * {@code BlockDisplay} draw the override) to that model, and spawns one block
  * display. The multiblock lifecycle still owns placement, barriers, break
- * handling and persistence — the pack subsystem only draws.</p>
+ * handling and persistence â€” the pack subsystem only draws.</p>
  *
  * <p>With the pack subsystem disabled, the level's {@code pack}+{@code block}
  * backend degrades to the virtual engine in one place
- * ({@code MultiBlockLevel.effectiveBackend}), so the table still renders —
- * through the texel/virtual pipeline — exactly like every other Mineplus
+ * ({@code MultiBlockLevel.effectiveBackend}), so the table still renders â€”
+ * through the texel/virtual pipeline â€” exactly like every other Mineplus
  * machine.</p>
  */
 public final class AlchemyFeature extends ModuleFeature {

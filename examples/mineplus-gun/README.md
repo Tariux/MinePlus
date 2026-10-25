@@ -1,7 +1,7 @@
 # MineplusGun
 
 A standalone [Mineplus](../../README.md) module that owns the combat/weapons
-ecosystem — firearms, melee, grenades and ammunition — as **fully additive**
+ecosystem â€” firearms, melee and ammunition â€” as **fully additive**
 content. It never overrides a vanilla item, block, texture or sound.
 
 - **[PLAN.md](PLAN.md)** — the design: asset inventory & organization, physics
@@ -14,8 +14,10 @@ content. It never overrides a vanilla item, block, texture or sound.
 
 v1 implemented: Phase 0 Core readiness (item `display` import/emit, module
 `/mineplus` subcommand registration, additive `WEAPON`/`AMMO` categories),
-Phase 1 presentation + shop, Phase 2 shooting runtime, and Phase 3 grenades +
-melee. Phase 4+ (magazine items, animated rigs) remains future work.
+Phase 1 presentation + shop, and Phase 2 shooting runtime — plus the Western
+content axis on the Core `ItemFrames` infrastructure: frame-animated weapons,
+magazine rounds drawn from the player's gold-nugget supply, multi-pellet
+scatter guns and melee.
 
 ## Quick facts
 
@@ -27,15 +29,15 @@ melee. Phase 4+ (magazine items, animated rigs) remains future work.
 | Physics | tick-stepped simulated bullets (gravity, drag, penetration, ricochet) |
 | Input | Bukkit events: right-click is the only trigger (hold to fire / scope), left-click is inert, swap-hands reloads |
 | Economy | Vault; all prices config-driven; admins/bypass-permission never charged |
-| Assets | 19 weapon `.bbmodel` + textures from the author's `mineplus-guns` set |
+| Assets | 9 Western frame-animated weapons (raw pack model JSONs, unique per-weapon textures, imported via `tools/import-western-models.ps1`) + virtual `.bbmodel` melee |
 
 ## Controls
 
 | Input | Action |
 |---|---|
-| **Right-click** | The only action. Fire (hold to keep firing — AUTO stays automatic while held); a scoped weapon scopes while held (spread × `aim.spread-multiplier`, HUD `SCOPE`); melee swings; a grenade is thrown. |
+| **Right-click** | The only action. Fire (hold to keep firing â€” AUTO stays automatic while held); a scoped weapon scopes while held (spread Ã— `aim.spread-multiplier`, HUD `SCOPE`); melee swings. |
 | **Left-click** | Inert. Mining, attacking and the vanilla arm-punch animation are all suppressed. |
-| **Swap hands (F)** | Reload from the magazine capacity. |
+| **Swap hands (F)** | Reload â€” the magazine rounds are drawn from the player's nugget supply (`ammo.material`, `ammo.items-per-round`; no nuggets, no reload). |
 
 Left-click is deliberately not a fire button: the client plays the arm-punch
 animation locally when a swing happens, and it cannot be suppressed

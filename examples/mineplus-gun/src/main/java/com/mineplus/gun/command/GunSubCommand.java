@@ -2,6 +2,8 @@ package com.mineplus.gun.command;
 
 import com.mineplus.gun.GunServices;
 import com.mineplus.gun.MineplusGunPlugin;
+import com.mineplus.gun.config.GunConfig;
+import com.mineplus.gun.runtime.AmmoSupply;
 import com.mineplus.gun.shop.ShopGui;
 import com.mineplus.gun.weapon.WeaponDefinition;
 import com.mineplus.infrastructure.command.SubCommand;
@@ -45,7 +47,7 @@ public final class GunSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/" + label + " <shop|give|hud|reload|stats|debug>";
+        return "/" + label + " <shop|give|ammo|hud|reload|stats|debug>";
     }
 
     @Override
@@ -64,6 +66,7 @@ public final class GunSubCommand implements SubCommand {
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "shop" -> shop(sender);
             case "give" -> give(sender, args);
+            case "ammo" -> ammo(sender, args);
             case "hud" -> hud(sender);
             case "reload" -> reload(sender);
             case "stats" -> stats(sender);
@@ -78,6 +81,7 @@ public final class GunSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.YELLOW + "/" + label + " shop" + ChatColor.GRAY + " - open the weapon shop");
         if (sender.hasPermission("mineplusgun.admin")) {
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " give <weapon> [player]");
+            sender.sendMessage(ChatColor.YELLOW + "/" + label + " ammo [player] [amount]");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " reload");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " stats");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " debug <hitbox|trace>");
@@ -129,6 +133,44 @@ public final class GunSubCommand implements SubCommand {
                 + target.getName() + ".");
     }
 
+    /**
+     * Tops a player up with ammunition nuggets (default 32). Admin
+     * convenience for testing the reload economy.
+     */
+    private void ammo(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("mineplusgun.admin")) {
+            sender.sendMessage(ChatColor.RED + "You do not have permission.");
+            return;
+        }
+        boolean explicitTarget = args.length >= 3 || (args.length >= 2 && !(sender instanceof Player));
+        if (!explicitTarget && !(sender instanceof Player)) {
+            sender.sendMessage(ChatColor.RED + "Usage: /" + label + " ammo <player> [amount]");
+            return;
+        }
+        Player target = explicitTarget
+                ? Bukkit.getPlayerExact(args[1])
+                : ((Player) sender).getPlayer();
+        int amount = explicitTarget
+                ? (args.length >= 3 ? parseAmount(args[2]) : 32)
+                : (args.length >= 2 ? parseAmount(args[1]) : 32);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Target player not found.");
+            return;
+        }
+        GunConfig.Ammo supply = services.config().ammo();
+        AmmoSupply.give(target, supply.material(), amount);
+        sender.sendMessage(ChatColor.GREEN + "Gave " + amount + "× " + supply.material().name()
+                + " to " + target.getName() + ".");
+    }
+
+    private static int parseAmount(String raw) {
+        try {
+            return Math.max(1, Math.min(576, Integer.parseInt(raw)));
+        } catch (NumberFormatException exception) {
+            return 32;
+        }
+    }
+
     private void hud(CommandSender sender) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage(ChatColor.RED + "Only players have a HUD.");
@@ -165,8 +207,7 @@ public final class GunSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.YELLOW + "Weapons: " + ChatColor.WHITE + services.registry().size());
         if (services.runtime() != null) {
             sender.sendMessage(ChatColor.YELLOW + "Shooters: " + ChatColor.WHITE + services.runtime().activeSessions()
-                    + ChatColor.YELLOW + "  Bullets: " + ChatColor.WHITE + services.runtime().activeBullets()
-                    + ChatColor.YELLOW + "  Grenades: " + ChatColor.WHITE + services.runtime().activeGrenades());
+                    + ChatColor.YELLOW + "  Bullets: " + ChatColor.WHITE + services.runtime().activeBullets());
             sender.sendMessage(ChatColor.YELLOW + "Shots: " + ChatColor.WHITE + services.runtime().totalShots()
                     + ChatColor.YELLOW + "  Hits: " + ChatColor.WHITE + services.runtime().totalHits()
                     + ChatColor.YELLOW + "  Instant traces: " + ChatColor.WHITE
@@ -210,17 +251,26 @@ public final class GunSubCommand implements SubCommand {
             completions.add("hud");
             if (sender.hasPermission("mineplusgun.admin")) {
                 completions.add("give");
+                completions.add("ammo");
                 completions.add("reload");
                 completions.add("stats");
                 completions.add("debug");
             }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("give")) {
-            for (WeaponDefinition weapon : services.registry().all()) {
-                completions.add(weapon.id());
+        } else if (args[0].equalsIgnoreCase("give")) {
+            if (args.length == 2) {
+                for (WeaponDefinition weapon : services.registry().all()) {
+                    completions.add(weapon.id());
+                }
+            } else if (args.length == 3) {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    completions.add(player.getName());
+                }
             }
-        } else if (args.length == 3 && args[0].equalsIgnoreCase("give")) {
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                completions.add(player.getName());
+        } else if (args[0].equalsIgnoreCase("ammo")) {
+            if (args.length == 2) {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    completions.add(player.getName());
+                }
             }
         }
         String last = args[args.length - 1].toLowerCase(Locale.ROOT);

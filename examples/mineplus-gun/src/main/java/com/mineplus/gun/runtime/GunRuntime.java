@@ -4,6 +4,8 @@ import com.mineplus.gun.GunServices;
 import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.input.InputAdapter;
 import com.mineplus.gun.weapon.WeaponDefinition;
+import com.mineplus.pack.item.ItemFrameWriter;
+import com.mineplus.pack.item.ItemFrames;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,19 +22,22 @@ import org.bukkit.util.Vector;
 
 /**
  * The per-player fire-flow state machine. One repeating task drives every
- * active shooter, every simulated bullet and every in-flight grenade — never
- * one task per bullet or per weapon.
+ * active shooter and every simulated bullet — never one task per bullet or
+ * per weapon.
  *
- * <p>Controls (all firearms): <b>left-click fires</b> (hold for AUTO/BURST; the
- * client repeats the arm-swing while the button is held, which is what keeps an
- * automatic weapon alive). <b>Right-click</b> is one trigger pull for a normal
- * firearm, the scope for a scoped weapon (the spyglass carrier's native zoom),
- * and the throw for a grenade. Swapping hands reloads.
+ * <p><b>Controls.</b> Right-click is the one and only trigger (hold for AUTO);
+ * left-click is inert; swapping hands reloads — pulling the needed rounds out
+ * of the shooter's gold-nugget supply.</p>
+ *
+ * <p><b>Frames.</b> A framed weapon (Western pack visuals) animates through
+ * its reload frames during the reload and settles on its loaded state while
+ * rounds remain. Frame switches perform one slot update each, so a frame is
+ * only written when it actually changes.</p>
  *
  * <p>Ammunition is authoritative in memory while a weapon is in use and is
  * flushed back to the stack's PDC when it leaves the shooter's hand, so the
  * held ItemStack is never rewritten per shot (which would replay the client's
- * item-swap equip animation).
+ * item-swap equip animation).</p>
  */
 public final class GunRuntime implements InputAdapter.Listener {
 
@@ -46,19 +51,17 @@ public final class GunRuntime implements InputAdapter.Listener {
     private final GunServices services;
     private final AmmoModel ammo;
     private final BulletSimulator simulator;
-    private final GrenadeRuntime grenades;
 
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
     private BukkitTask task;
     private long tick;
 
     public GunRuntime(JavaPlugin plugin, GunServices services, AmmoModel ammo,
-                      BulletSimulator simulator, GrenadeRuntime grenades) {
+                      BulletSimulator simulator) {
         this.plugin = plugin;
         this.services = services;
         this.ammo = ammo;
         this.simulator = simulator;
-        this.grenades = grenades;
     }
 
     public void start() {
@@ -78,7 +81,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         }
         sessions.clear();
         simulator.clear();
-        grenades.clear();
     }
 
     // ------------------------------------------------------------------
@@ -93,9 +95,9 @@ public final class GunRuntime implements InputAdapter.Listener {
     /**
      * Right-click is the one and only trigger: firearms fire (hold to keep
      * firing — the client repeats the use packet while the button is held),
-     * scoped weapons tighten their spread while held, melee swings, grenades
-     * are thrown. Left-click is frozen by the input adapter because firing from
-     * it would replay the client's arm-punch animation on every shot.
+     * scoped weapons tighten their spread while held, melee swings. Left-click
+     * is frozen by the input adapter because firing from it would replay the
+     * client's arm-punch animation on every shot.
      */
     @Override
     public boolean onPress(Player player, ItemStack stack) {
@@ -106,7 +108,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         Session session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
         session.weaponId = weapon.id();
         switch (weapon.fireMode()) {
-            case THROW -> throwGrenade(player, weapon);
             case MELEE -> {
                 if (tick >= session.nextShotTick) {
                     meleeAttack(player, weapon);
@@ -213,7 +214,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         tick++;
         services.particleFx().beginTick();
         simulator.tick();
-        grenades.tick();
 
         for (Map.Entry<UUID, Session> entry : sessions.entrySet()) {
             Session session = entry.getValue();
@@ -241,10 +241,11 @@ public final class GunRuntime implements InputAdapter.Listener {
             if (session.reloading) {
                 if (tick >= session.reloadEndTick) {
                     completeReload(player, session, weapon, stack);
-                } else if (tick % 4 == 0) {
-                    updateHud(player, session, weapon, stack);
+                } else {
+                    applyReloadFrames(player, stack, session, weapon);
                 }
             }
+            reconcileFrame(player, stack, session, weapon);
 
             if (session.firing) {
                 session.holdTicks++;
@@ -256,8 +257,8 @@ public final class GunRuntime implements InputAdapter.Listener {
                 } else if (tick >= session.nextShotTick) {
                     shoot(player, session, weapon, stack);
                 }
-            } else if (!session.reloading && tick % 4 == 0) {
-                updateHud(player, session, weapon, stack);
+            } else if (tick % 4 == 0) {
+                updateHud(player, session, weapon);
             }
         }
     }
@@ -284,7 +285,10 @@ public final class GunRuntime implements InputAdapter.Listener {
         double spread = session.scoping
                 ? weapon.spreadDegrees() * weapon.scopeSpreadMultiplier()
                 : weapon.spreadDegrees();
-        simulator.fire(player, weapon, origin, direction, spread);
+        for (int pellet = 0; pellet < weapon.pellets(); pellet++) {
+            // Each pellet gets its own cone sample of the (already aimed) cone.
+            simulator.fire(player, weapon, origin, direction, spread);
+        }
 
         services.soundFx().play(origin, weapon.soundFire(), 1.0f, 1.0f);
         services.particleFx().muzzle(origin.clone().add(origin.getDirection().normalize().multiply(0.6)), weapon);
@@ -296,7 +300,7 @@ public final class GunRuntime implements InputAdapter.Listener {
                 session.firing = false;
             }
         }
-        updateHud(player, session, weapon, stack);
+        updateHud(player, session, weapon);
     }
 
     private void dryFire(Player player, Session session, WeaponDefinition weapon) {
@@ -304,24 +308,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         session.burstRemaining = 0;
         services.soundFx().playTo(player, weapon.soundEmpty(), 0.7f, 1.0f);
         services.ammoHud().flashEmpty(player, weapon);
-    }
-
-    private void throwGrenade(Player player, WeaponDefinition weapon) {
-        ItemStack stack = player.getInventory().getItemInMainHand();
-        if (stack == null || stack.getType().isAir()) {
-            return;
-        }
-        if (stack.getAmount() <= 1) {
-            player.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
-        } else {
-            stack.setAmount(stack.getAmount() - 1);
-            player.getInventory().setItemInMainHand(stack);
-        }
-        Location origin = player.getEyeLocation();
-        Vector velocity = origin.getDirection().normalize().multiply(1.2);
-        grenades.throwGrenade(player, weapon, origin, velocity);
-        services.soundFx().play(origin, "mineplusgun:grenade_pin", 0.8f, 1.2f);
-        services.soundFx().play(origin, "mineplusgun:grenade_throw", 0.8f, 1.0f);
     }
 
     private void meleeAttack(Player player, WeaponDefinition weapon) {
@@ -367,7 +353,7 @@ public final class GunRuntime implements InputAdapter.Listener {
     }
 
     // ------------------------------------------------------------------
-    // Reload
+    // Reload (gold-nugget economy)
     // ------------------------------------------------------------------
 
     private void startReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
@@ -375,36 +361,113 @@ public final class GunRuntime implements InputAdapter.Listener {
             return;
         }
         AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
-        if (magazine.rounds() >= weapon.magazine()) {
+        int missing = weapon.magazine() - magazine.rounds();
+        if (missing <= 0) {
+            return;
+        }
+        GunConfig.Ammo supply = services.config().ammo();
+        if (AmmoSupply.count(player, supply.material()) <= 0) {
+            // Out of nuggets: the reload simply never starts.
+            services.soundFx().playTo(player, weapon.soundEmpty(), 0.7f, 1.2f);
+            services.ammoHud().flashEmpty(player, weapon);
             return;
         }
         session.firing = false;
         session.burstRemaining = 0;
         if (weapon.reloadTicks() <= 0) {
-            magazine.refill(weapon.magazine());
-            updateHud(player, session, weapon, stack);
+            completeReload(player, session, weapon, stack);
             return;
         }
         session.reloading = true;
         session.reloadEndTick = tick + weapon.reloadTicks();
+        session.reloadFrame = -1;
         services.soundFx().playTo(player, weapon.soundReload(), 0.8f, 1.0f);
-        updateHud(player, session, weapon, stack);
+        updateHud(player, session, weapon);
     }
 
     private void completeReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
-        magazine(player, session, weapon, stack).refill(weapon.magazine());
+        AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
+        int missing = weapon.magazine() - magazine.rounds();
+        if (missing > 0) {
+            GunConfig.Ammo supply = services.config().ammo();
+            int affordable = AmmoSupply.count(player, supply.material()) / supply.itemsPerRound();
+            int loaded = Math.min(missing, affordable);
+            if (loaded > 0) {
+                int consumed = AmmoSupply.take(player, supply.material(), loaded * supply.itemsPerRound());
+                magazine.addRounds(weapon, consumed / supply.itemsPerRound());
+            }
+        }
         session.reloading = false;
         services.soundFx().playTo(player, weapon.soundReload(), 0.8f, 1.1f);
-        updateHud(player, session, weapon, stack);
+        updateHud(player, session, weapon);
     }
 
-    private void updateHud(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
+    // ------------------------------------------------------------------
+    // Frame driving (Core framed-item infrastructure)
+    // ------------------------------------------------------------------
+
+    /**
+     * Frame progression during a reload: the weapon's reload states play
+     * across the reload duration through the Core {@link ItemFrames} math;
+     * the loaded state arrives on completion ({@link #reconcileFrame}).
+     */
+    private void applyReloadFrames(Player player, ItemStack stack, Session session, WeaponDefinition weapon) {
+        ItemFrames frames = frames(weapon);
+        if (frames == null || !frames.isFramed()) {
+            return;
+        }
+        float progress = (session.reloadEndTick - tick) / (float) Math.max(1, weapon.reloadTicks());
+        int state = frames.reloadState(1.0f - progress);
+        if (state != session.reloadFrame && ItemFrameWriter.apply(stack, state)) {
+            session.reloadFrame = state;
+        }
+    }
+
+    /**
+     * Lines the held stack's state up with the weapon (loaded visual while
+     * rounds remain, idle when empty); the reload owns the frames while it
+     * runs, except for weapons without reload states (muzzle-loaders keep
+     * their idle pose while ramming).
+     */
+    private void reconcileFrame(Player player, ItemStack stack, Session session, WeaponDefinition weapon) {
+        ItemFrames frames = frames(weapon);
+        if (frames == null) {
+            return;
+        }
+        int wanted;
+        if (session.reloading) {
+            if (frames.reloadReferences().isEmpty()) {
+                wanted = frames.idleState();
+            } else {
+                return; // applyReloadFrames owns the frame during a reload
+            }
+        } else {
+            AmmoModel.Magazine magazine = session.magazine;
+            int rounds = magazine != null ? magazine.rounds() : ammo.rounds(stack, weapon);
+            wanted = rounds > 0 ? frames.loadedState() : frames.idleState();
+        }
+        if (wanted != session.appliedFrame && ItemFrameWriter.apply(stack, wanted)) {
+            session.appliedFrame = wanted;
+        }
+    }
+
+    private static ItemFrames frames(WeaponDefinition weapon) {
+        return weapon.frames();
+    }
+
+    // ------------------------------------------------------------------
+    // HUD
+    // ------------------------------------------------------------------
+
+    private void updateHud(Player player, Session session, WeaponDefinition weapon) {
         if (!weapon.usesAmmo()) {
             return;
         }
         AmmoModel.Magazine magazine = session.magazine;
-        int rounds = magazine != null ? magazine.rounds() : ammo.rounds(stack, weapon);
-        services.ammoHud().update(player, weapon, rounds, -1, session.reloading, session.scoping);
+        int rounds = magazine != null ? magazine.rounds() : ammo.rounds(player.getInventory().getItemInMainHand(), weapon);
+        GunConfig.Ammo supply = services.config().ammo();
+        int reserve = AmmoSupply.count(player, supply.material());
+        services.ammoHud().update(player, weapon, rounds, reserve, session.reloading, session.scoping);
     }
 
     // ------------------------------------------------------------------
@@ -486,10 +549,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         return simulator.activeBullets();
     }
 
-    public int activeGrenades() {
-        return grenades.activeGrenades();
-    }
-
     public long totalShots() {
         return simulator.totalShots();
     }
@@ -510,6 +569,8 @@ public final class GunRuntime implements InputAdapter.Listener {
         boolean scoping;
         int burstRemaining;
         int holdTicks;
+        int reloadFrame = -1;
+        int appliedFrame = -1;
         long nextShotTick;
         long reloadEndTick;
         long lastSwingTick = -1000L;
@@ -525,6 +586,8 @@ public final class GunRuntime implements InputAdapter.Listener {
             scoping = false;
             burstRemaining = 0;
             holdTicks = 0;
+            reloadFrame = -1;
+            appliedFrame = -1;
         }
     }
 }

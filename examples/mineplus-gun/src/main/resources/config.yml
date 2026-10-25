@@ -1,37 +1,54 @@
-# MineplusGun — module configuration.
+# MineplusGun — Western module configuration.
 #
-# Every weapon below is data-driven: add an entry to add a weapon, never code.
-# The `model` key is the installed bbmodel stem under the Core's models folder
-# (models/gun/<stem>.bbmodel).
+# The arsenal is the imported Western set: a Colt, two rifles, a coach
+# shotgun, three flintlock muskets (plain, scoped, bayoneted), a flintlock
+# pistol and a blunderbuss, plus a Bowie knife. Every weapon is data-driven:
+# add an entry to add a weapon, never code.
 #
-# `backing-material` is only the carrier item the additive item_model replaces;
-# with PACK.ENABLED: false (or a client that has not applied the pack) the weapon
-# degrades to that vanilla material, so it must have NO vanilla use action: the
-# carrier's behaviour is NOT replaced, so FLINT_AND_STEEL would ignite fire and
-# SPYGLASS would render as a vanilla spyglass and zoom the camera. IRON_INGOT is
-# the neutral default; the loader rejects unsafe carriers and substitutes it.
+# Presentation axis:
+#   - `frames:` (Western packs) - the weapon renders through the Core's
+#     framed-item infrastructure. Stems resolve to the raw pack models the
+#     module installs from defaults/frames/<weapon-id>/<stem>.json; state 0
+#     is idle, 1..N play the reload animation, N+1 is the loaded state (the
+#     `loaded` stem). `texture` names the per-weapon texture file the frame
+#     models sample.
+#   - `model:` (knife) - a virtual .bbmodel under models/gun/, as before.
+#
+# `backing-material` is only the carrier item the additive item_model
+# replaces; with PACK.ENABLED: false (or a client that has not applied the
+# pack) the weapon degrades to that vanilla material, so it must have NO
+# vanilla use action. IRON_INGOT is the neutral default.
 #
 # `aim.scope: true` marks a weapon as scoped: while the trigger is held its
-# spread is multiplied by `aim.spread-multiplier` and the HUD shows SCOPE. The
-# carrier stays neutral, so a scoped weapon can never render as a spyglass.
+# spread is multiplied by `aim.spread-multiplier` and the HUD shows SCOPE.
 #
-# Controls: RIGHT-click is the only action — firearms fire (hold to keep firing),
-# a scoped weapon scopes while held, melee swings, a grenade is thrown.
-# LEFT-click is inert (no mining, no attacking, no arm punch). Swapping hands
-# reloads.
+# Controls: RIGHT-click is the only action — firearms fire (hold for AUTO),
+# a scoped weapon scopes while held, melee swings. LEFT-click is inert.
+# Swapping hands reloads, drawing the rounds from the gold-nugget supply
+# (see `ammo` below).
+#
+# Sandbox (per shot): damage is per pellet; pellets x damage grow with
+# `fire.pellets`. Flintlocks take one shot and a long, exposed reload;
+# repeaters trade capacity for steady aim; scatter guns only pay off close.
 
 settings:
   language: en
   hud:
     mode: ACTIONBAR            # ACTIONBAR | BOSSBAR | OFF
     template: "&e{weapon} &7| &f{mag}&7/&f{reserve} &7| &b{mode}"
-    low-ammo-threshold: 3
+    low-ammo-threshold: 2
   disabled-worlds: []          # gameplay (firing/shop use) disabled in these worlds
   pvp-only: false              # only damage players, never other living entities
-  block-damage: true           # grenade terrain damage
+
+# The reload economy: one reload round consumes `items-per-round` items of
+# `material` from the player's inventory (gold nuggets by default — pan for
+# gold, hoard your shots). An empty supply means no reload.
+ammo:
+  material: GOLD_NUGGET
+  items-per-round: 1
 
 ballistics:
-  max-active-bullets: 96       # bullets simulated per tick; overflow resolves instantly
+  max-active-bullets: 128      # bullets simulated per tick; overflow resolves instantly
   max-particles-per-tick: 240
 
 economy:
@@ -40,205 +57,152 @@ economy:
   price-scale: 1               # 0 = integers, 1 = tenths, 2 = hundredths, 3 = thousandths
 
 shop:
-  title: "Weapon Store"
+  title: "Frontier Gunsmith"
   rows: 6
   admin-bypass-payment: true   # ops (with the bypass permission) are never charged
 
 weapons:
-  pistol_cobra:
-    display-name: "&fColt Cobra"
-    model: gun/colt-cobra-gun-03
+  # --- Pistols -----------------------------------------------------------
+  colt_peacemaker:
+    display-name: "&fColt Peacemaker"
     type: PISTOL
     backing-material: IRON_INGOT
-    price: 600
-    ammo: { ammo-type: "9x18", magazine: 6, reload-ticks: 45 }
-    ballistics: { damage: 6.0, headshot-multiplier: 2.0, velocity: 3.4, gravity: 0.03, drag: 0.01, penetration: 0, ricochet: 0.0, range: 80, spread-degrees: 1.0, falloff-start: 30, falloff-per-block: 0.03 }
-    fire: { mode: SEMI, rpm: 300 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  pistol_heavy:
-    display-name: "&fColt Heavy"
-    model: gun/colt-heavy-gun-01
-    type: PISTOL
-    backing-material: IRON_INGOT
-    price: 700
-    ammo: { ammo-type: "9x18", magazine: 7, reload-ticks: 45 }
-    ballistics: { damage: 7.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, penetration: 0, ricochet: 0.0, range: 80, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
+    price: 500
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4]
+      loaded: ready
+      texture: colt_peacemaker.png
+    ammo: { magazine: 6, reload-ticks: 50 }
+    ballistics: { damage: 7.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
     fire: { mode: SEMI, rpm: 280 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  pistol_deagle:
-    display-name: "&fDesert Eagle"
-    model: gun/colt-deagle-heavy-gun-02
+
+  pistol_flintlock:
+    display-name: "&fFlintlock Pistol"
     type: PISTOL
     backing-material: IRON_INGOT
-    price: 700
-    ammo: { ammo-type: "9x18", magazine: 7, reload-ticks: 50 }
-    ballistics: { damage: 9.0, headshot-multiplier: 2.0, velocity: 3.8, gravity: 0.03, drag: 0.01, penetration: 1, ricochet: 0.0, range: 100, spread-degrees: 1.4, falloff-start: 35, falloff-per-block: 0.03 }
-    fire: { mode: SEMI, rpm: 240 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  pistol_negav:
-    display-name: "&fNegav Heavy"
-    model: gun/negav-heavy-gun-01
-    type: PISTOL
-    backing-material: IRON_INGOT
-    price: 600
-    ammo: { ammo-type: "9x18", magazine: 6, reload-ticks: 50 }
-    ballistics: { damage: 8.0, headshot-multiplier: 2.0, velocity: 3.5, gravity: 0.03, drag: 0.01, penetration: 0, ricochet: 0.0, range: 85, spread-degrees: 1.3, falloff-start: 30, falloff-per-block: 0.03 }
-    fire: { mode: SEMI, rpm: 260 }
+    price: 350
+    frames:
+      idle: idle
+      loaded: ready
+      texture: flintlock_pistol.png
+    ammo: { magazine: 1, reload-ticks: 90 }
+    ballistics: { damage: 12.0, headshot-multiplier: 2.5, velocity: 3.4, gravity: 0.04, drag: 0.015, range: 60, spread-degrees: 2.5, falloff-start: 25, falloff-per-block: 0.045 }
+    fire: { mode: SEMI, rpm: 120 }
     fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
 
-  smg_mp:
-    display-name: "&fMP SMG"
-    model: gun/rifle-smg-gun-01
-    type: SMG
+  # --- Rifles ------------------------------------------------------------
+  rifle_repeater:
+    display-name: "&fRepeater Rifle"
+    type: RIFLE
     backing-material: IRON_INGOT
-    price: 1250
-    ammo: { ammo-type: "9x18", magazine: 30, reload-ticks: 40 }
-    ballistics: { damage: 4.0, headshot-multiplier: 1.8, velocity: 3.0, gravity: 0.04, drag: 0.015, penetration: 0, ricochet: 0.0, range: 70, spread-degrees: 2.2, falloff-start: 25, falloff-per-block: 0.04 }
-    fire: { mode: AUTO, rpm: 800, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  smg_compact:
-    display-name: "&fCompact SMG"
-    model: gun/rifle-smg-gun-04
-    type: SMG
+    price: 1800
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4, reload5]
+      loaded: ready
+      texture: rifle_repeater.png
+    ammo: { magazine: 8, reload-ticks: 60 }
+    ballistics: { damage: 8.5, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
+    fire: { mode: SEMI, rpm: 130 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  rifle_boltaction:
+    display-name: "&fBolt-Action Rifle"
+    type: RIFLE
+    backing-material: IRON_INGOT
+    price: 2600
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4]
+      loaded: ready
+      texture: rifle_boltaction.png
+    ammo: { magazine: 5, reload-ticks: 65 }
+    ballistics: { damage: 11.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
+    fire: { mode: BOLT, rpm: 47 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  musket_flintlock:
+    display-name: "&fFlintlock Musket"
+    type: RIFLE
+    backing-material: IRON_INGOT
+    price: 2800
+    frames:
+      idle: idle
+      loaded: ready
+      texture: musket.png
+    ammo: { magazine: 1, reload-ticks: 100 }
+    ballistics: { damage: 16.0, headshot-multiplier: 2.4, velocity: 4.6, gravity: 0.02, drag: 0.01, penetration: 1, range: 180, spread-degrees: 1.5, falloff-start: 60, falloff-per-block: 0.02 }
+    fire: { mode: SEMI, rpm: 55 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  musket_marksman:
+    display-name: "&fMarksman's Musket"
+    type: RIFLE
+    backing-material: IRON_INGOT
+    price: 3600
+    frames:
+      idle: idle
+      loaded: ready
+      texture: musket_scope.png
+    ammo: { magazine: 1, reload-ticks: 110 }
+    ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.008, penetration: 2, range: 200, spread-degrees: 0.9, falloff-start: 80, falloff-per-block: 0.012 }
+    fire: { mode: BOLT, rpm: 50 }
+    aim: { scope: true, spread-multiplier: 0.35 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  musket_bayonet:
+    display-name: "&fBayoneted Musket"
+    type: RIFLE
+    backing-material: IRON_INGOT
+    price: 3200
+    frames:
+      idle: idle
+      loaded: ready
+      texture: musket_bayonet.png
+    ammo: { magazine: 1, reload-ticks: 100 }
+    ballistics: { damage: 15.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
+    fire: { mode: SEMI, rpm: 60 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  # --- Shotguns ----------------------------------------------------------
+  shotgun_coach:
+    display-name: "&fCoach Shotgun"
+    type: SHOTGUN
+    backing-material: IRON_INGOT
+    price: 1400
+    frames:
+      idle: idle
+      reload: [reload0, reload1, reload2, reload3, reload4, reload5, reload6, reload7]
+      loaded: ready
+      texture: shotgun_coach.png
+    ammo: { magazine: 6, reload-ticks: 80 }
+    ballistics: { damage: 5.5, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
+    fire: { mode: PUMP, rpm: 75, pellets: 4 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+
+  blunderbuss_flintlock:
+    display-name: "&fBlunderbuss"
+    type: SHOTGUN
     backing-material: IRON_INGOT
     price: 1150
-    ammo: { ammo-type: "9x18", magazine: 25, reload-ticks: 38 }
-    ballistics: { damage: 4.0, headshot-multiplier: 1.8, velocity: 3.0, gravity: 0.04, drag: 0.015, penetration: 0, ricochet: 0.0, range: 70, spread-degrees: 2.4, falloff-start: 25, falloff-per-block: 0.04 }
-    fire: { mode: AUTO, rpm: 750, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  smg_uzi:
-    display-name: "&fUzi"
-    model: gun/rifle-smg-uzi-gun-03
-    type: SMG
-    backing-material: IRON_INGOT
-    price: 1050
-    ammo: { ammo-type: "9x18", magazine: 32, reload-ticks: 36 }
-    ballistics: { damage: 3.6, headshot-multiplier: 1.8, velocity: 2.9, gravity: 0.045, drag: 0.015, penetration: 0, ricochet: 0.0, range: 65, spread-degrees: 2.8, falloff-start: 22, falloff-per-block: 0.045 }
-    fire: { mode: AUTO, rpm: 900, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
+    frames:
+      idle: idle
+      loaded: ready
+      texture: blunderbuss.png
+    ammo: { magazine: 2, reload-ticks: 70 }
+    ballistics: { damage: 4.0, headshot-multiplier: 1.5, velocity: 2.6, gravity: 0.06, drag: 0.03, range: 18, spread-degrees: 9.0, falloff-start: 8, falloff-per-block: 0.1 }
+    fire: { mode: PUMP, rpm: 60, pellets: 6 }
+    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
 
-  rifle_ak:
-    display-name: "&fAK Rifle"
-    model: gun/rifle-ak-gun-05
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 2700
-    ammo: { ammo-type: "545", magazine: 30, reload-ticks: 45 }
-    ballistics: { damage: 7.0, headshot-multiplier: 2.0, velocity: 3.4, gravity: 0.03, drag: 0.01, penetration: 1, ricochet: 0.05, range: 120, spread-degrees: 1.2, falloff-start: 50, falloff-per-block: 0.02 }
-    fire: { mode: AUTO, rpm: 600, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  rifle_medium:
-    display-name: "&fMedium Rifle"
-    model: gun/rifle-medium-gun-01
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 2500
-    ammo: { ammo-type: "545", magazine: 30, reload-ticks: 42 }
-    ballistics: { damage: 6.5, headshot-multiplier: 2.0, velocity: 3.3, gravity: 0.03, drag: 0.01, penetration: 1, ricochet: 0.05, range: 115, spread-degrees: 1.1, falloff-start: 48, falloff-per-block: 0.02 }
-    fire: { mode: AUTO, rpm: 620, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  rifle_m4:
-    display-name: "&fM4 Rifle"
-    model: gun/rifle-medium-m4-gun-02
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 3100
-    ammo: { ammo-type: "545", magazine: 30, reload-ticks: 40 }
-    ballistics: { damage: 6.8, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.028, drag: 0.01, penetration: 1, ricochet: 0.05, range: 125, spread-degrees: 0.9, falloff-start: 55, falloff-per-block: 0.02 }
-    fire: { mode: AUTO, rpm: 700, max-hold-ticks: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  rifle_dmr:
-    display-name: "&fScoped Rifle"
-    model: gun/rifle-heavy-scope-gun-02
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 4200
-    ammo: { ammo-type: "545", magazine: 10, reload-ticks: 55 }
-    ballistics: { damage: 11.0, headshot-multiplier: 2.2, velocity: 4.4, gravity: 0.02, drag: 0.008, penetration: 2, ricochet: 0.0, range: 180, spread-degrees: 0.5, falloff-start: 80, falloff-per-block: 0.012 }
-    fire: { mode: SEMI, rpm: 150 }
-    aim: { scope: true, spread-multiplier: 0.25 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-
-  shotgun_old:
-    display-name: "&fOld Shotgun"
-    model: gun/shutgun-gun-old-02
-    type: SHOTGUN
-    backing-material: IRON_INGOT
-    price: 1100
-    ammo: { ammo-type: "12g", magazine: 5, reload-ticks: 60 }
-    ballistics: { damage: 6.0, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, penetration: 0, ricochet: 0.0, range: 30, spread-degrees: 6.0, falloff-start: 12, falloff-per-block: 0.06 }
-    fire: { mode: PUMP, rpm: 70 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  shotgun_pump:
-    display-name: "&fPump Shotgun"
-    model: gun/shutgun-gun-01
-    type: SHOTGUN
-    backing-material: IRON_INGOT
-    price: 1700
-    ammo: { ammo-type: "12g", magazine: 6, reload-ticks: 60 }
-    ballistics: { damage: 7.0, headshot-multiplier: 1.5, velocity: 3.0, gravity: 0.05, drag: 0.03, penetration: 0, ricochet: 0.0, range: 34, spread-degrees: 5.0, falloff-start: 14, falloff-per-block: 0.055 }
-    fire: { mode: PUMP, rpm: 80 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-
-  sniper_heavy:
-    display-name: "&fHeavy Sniper"
-    model: gun/sniper-heavy-gun-01
-    type: SNIPER
-    backing-material: IRON_INGOT
-    price: 4750
-    ammo: { ammo-type: "762", magazine: 5, reload-ticks: 70 }
-    ballistics: { damage: 16.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.006, penetration: 3, ricochet: 0.0, range: 220, spread-degrees: 0.3, falloff-start: 100, falloff-per-block: 0.008 }
-    fire: { mode: BOLT, rpm: 45 }
-    aim: { scope: true, spread-multiplier: 0.15 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  sniper_heavy_mk2:
-    display-name: "&fHeavy Sniper MK2"
-    model: gun/sniper-heavy-gun-02
-    type: SNIPER
-    backing-material: IRON_INGOT
-    price: 4750
-    ammo: { ammo-type: "762", magazine: 5, reload-ticks: 70 }
-    ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 5.0, gravity: 0.018, drag: 0.006, penetration: 3, ricochet: 0.0, range: 230, spread-degrees: 0.3, falloff-start: 110, falloff-per-block: 0.008 }
-    fire: { mode: BOLT, rpm: 42 }
-    aim: { scope: true, spread-multiplier: 0.15 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-  sniper_awp:
-    display-name: "&fAWP"
-    model: gun/sniper-heavy-awp-gun-03
-    type: SNIPER
-    backing-material: IRON_INGOT
-    price: 4750
-    ammo: { ammo-type: "762", magazine: 10, reload-ticks: 75 }
-    ballistics: { damage: 18.0, headshot-multiplier: 2.5, velocity: 5.2, gravity: 0.016, drag: 0.006, penetration: 3, ricochet: 0.0, range: 240, spread-degrees: 0.25, falloff-start: 120, falloff-per-block: 0.008 }
-    fire: { mode: BOLT, rpm: 40 }
-    aim: { scope: true, spread-multiplier: 0.12 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
-
-  knife_light:
-    display-name: "&fLight Knife"
+  # --- Melee -------------------------------------------------------------
+  knife_bowie:
+    display-name: "&fBowie Knife"
     model: gun/knife-01-light
     type: MELEE
     backing-material: STICK
-    price: 200
-    ballistics: { damage: 5.0 }
+    price: 150
+    ballistics: { damage: 7.0 }
     fire: { mode: MELEE, rpm: 150 }
-    melee: { reach: 3.0, arc-degrees: 55, knockback: 0.3 }
-  knife_heavy:
-    display-name: "&fHeavy Knife"
-    model: gun/knife-02-heavy
-    type: MELEE
-    backing-material: STICK
-    price: 350
-    ballistics: { damage: 8.0 }
-    fire: { mode: MELEE, rpm: 100 }
-    melee: { reach: 3.0, arc-degrees: 45, knockback: 0.5 }
-
-  grenade_red:
-    display-name: "&cFrag Grenade"
-    model: gun/geanade-red-01
-    type: GRENADE
-    backing-material: STICK
-    price: 300
-    ballistics: { damage: 0.0 }
-    fire: { mode: THROW, rpm: 60 }
-    grenade: { fuse-ticks: 60, radius: 4.5, damage: 14.0, bounces: 3 }
+    melee: { reach: 3.0, arc-degrees: 55, knockback: 0.4 }

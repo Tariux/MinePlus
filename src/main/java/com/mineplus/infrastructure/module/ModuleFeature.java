@@ -1,26 +1,29 @@
-package com.mineplus.fun;
+package com.mineplus.infrastructure.module;
 
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Lifecycle contract for one game feature of this module.
+ * Lifecycle contract for one game feature of a Mineplus module plugin — the
+ * shared skeleton every example module composes its features from.
  *
- * <p>Features are declared once in the plugin main's feature list; the bootstrap
- * then runs, in order: {@link #start()} for every feature, one <em>coordinated</em>
- * {@code reloadAll()} for the whole module, and {@link #registerCommand()} for
- * every feature. Teardown runs {@link #stop()} in reverse enable order.
+ * <p>Features are declared once in the plugin main's feature list; the
+ * bootstrap then runs, in order: {@link #start()} for every feature, one
+ * <em>coordinated</em> {@code reloadAll()} for the whole module, and
+ * {@link #registerCommand()} for every feature. Teardown runs {@link #stop()}
+ * in reverse enable order.
  *
  * <p>Contract rules:
  * <ul>
- *   <li>{@link #onEnable()} installs resources and registers hooks, listeners and
- *       GUIs — it must <b>not</b> call {@code reloadAll()}. The module performs
- *       exactly one reload after all features started, so N features cost one
- *       model/registry reload instead of N.</li>
+ *   <li>{@link #onEnable()} installs resources and registers hooks, listeners
+ *       and GUIs — it must <b>not</b> call {@code reloadAll()}. The module
+ *       performs exactly one reload after all features started, so N features
+ *       cost one model/registry reload instead of N.</li>
  *   <li>Bootstrap and teardown are exception-isolated per feature (the same
- *       philosophy the Core applies to hook dispatch): a feature that throws is
- *       logged as severe and skipped; it never aborts the remaining features.</li>
+ *       philosophy the Core applies to hook dispatch): a feature that throws
+ *       is logged as severe and skipped; it never aborts the remaining
+ *       features.</li>
  *   <li>{@link #onDisable()} must tolerate a feature that failed mid-enable:
  *       null-guard every collaborator it cleans up.</li>
  * </ul>
@@ -53,6 +56,7 @@ public abstract class ModuleFeature {
         return null;
     }
 
+    /** Enables the feature with exception isolation; never throws. */
     public final void start() {
         try {
             onEnable();
@@ -62,6 +66,7 @@ public abstract class ModuleFeature {
         }
     }
 
+    /** Registers {@link #command()} under the feature's id; never throws. */
     public final void registerCommand() {
         SubCommand command = command();
         if (command == null) {
@@ -75,11 +80,13 @@ public abstract class ModuleFeature {
         }
     }
 
+    /** Disables the feature with exception isolation; never throws. */
     public final void stop() {
         try {
             onDisable();
         } catch (Exception exception) {
-            plugin.getLogger().severe("Feature '" + id() + "' failed to disable cleanly: " + exception);
+            plugin.getLogger().severe("Feature '" + id() + "' failed to disable cleanly: "
+                    + exception);
         }
     }
 }

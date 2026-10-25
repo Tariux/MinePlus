@@ -38,10 +38,11 @@ public final class ItemModelWriter {
     }
 
     /**
-     * Modern item model definition JSON. A plain item emits
+     * Modern item model definition JSON. A geometry item emits
      * {@code {"model":{"type":"minecraft:model","model":"ns:item/id"}}}; a
-     * framed item emits a {@code range_dispatch} over the registering
-     * module's raw model references keyed by the item's
+     * raw-model item without frames emits the same shape toward its registered
+     * reference; a framed item emits a {@code range_dispatch} over the
+     * registering module's raw model references keyed by the item's
      * {@code custom_model_data} value, with the resting-state fallback.
      */
     public static String modernDefinitionJson(ItemModelAsset item) {
@@ -51,7 +52,10 @@ public final class ItemModelWriter {
         } else {
             JsonObject model = new JsonObject();
             model.addProperty("type", "minecraft:model");
-            model.addProperty("model", item.modelReference());
+            String reference = item.fallbackModelReference() != null
+                    ? item.fallbackModelReference()
+                    : item.modelReference();
+            model.addProperty("model", reference);
             root.add("model", model);
         }
         return GSON.toJson(root);
@@ -92,14 +96,14 @@ public final class ItemModelWriter {
      * Legacy host files: backing material -> regenerated vanilla item model
      * with sorted predicate overrides for every item on that material.
      * Deterministic: hosts keyed by material id, overrides sorted by predicate
-     * value. Framed items (raw model JSONs) have no legacy representation —
-     * their references cannot resolve in a host override — so they are
-     * skipped and keep rendering their bare backing material.
+     * value. Raw-model items (module-registered model JSONs) have no legacy
+     * representation — their references cannot resolve in a host override —
+     * so they are skipped and keep rendering their bare backing material.
      */
     public static Map<String, byte[]> legacyHostFiles(List<ItemModelAsset> items) {
         Map<Material, List<ItemModelAsset>> byMaterial = new LinkedHashMap<>();
         for (ItemModelAsset item : items) {
-            if (item.isFramed()) {
+            if (item.isRawModel()) {
                 continue;
             }
             byMaterial.computeIfAbsent(item.backingMaterial(), material -> new ArrayList<>()).add(item);

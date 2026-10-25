@@ -1,6 +1,6 @@
 package com.mineplus.fun.juicer;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.fun.juicer.gui.JuicerGui;
 import com.mineplus.fun.juicer.items.CarrotJuiceItemDefinition;
 import com.mineplus.fun.juicer.items.MelonJuiceItemDefinition;

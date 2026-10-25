@@ -65,9 +65,11 @@ public final class ItemModelAsset extends PackAsset {
                 ? null
                 : fallbackModelReference;
         this.frames = frames == null ? List.of() : List.copyOf(sanitize(frames));
-        // A geometry-bound asset owns a registered virtual model; framed
-        // (raw-model) items don't and must never appear in legacy host files.
-        this.geometryBound = this.frames.isEmpty();
+        // A geometry-bound asset owns a registered virtual model; raw-model
+        // items (fallback reference set — with or without dispatch frames,
+        // e.g. a plain imported model) don't and must never appear in legacy
+        // host files.
+        this.geometryBound = this.frames.isEmpty() && this.fallbackModelReference == null;
     }
 
     private static List<Frame> sanitize(List<Frame> raw) {
@@ -115,6 +117,11 @@ public final class ItemModelAsset extends PackAsset {
     /** True when the item carries dispatch frames (raw model JSONs, modern representation only). */
     public boolean isFramed() {
         return !frames.isEmpty();
+    }
+
+    /** True when the item's models are raw references registered by the module (no virtual geometry). */
+    public boolean isRawModel() {
+        return fallbackModelReference != null;
     }
 
     /** True when this item resolves to a registered virtual model (legacy-representable). */

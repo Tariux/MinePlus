@@ -2,21 +2,20 @@ package com.mineplus.gun.weapon;
 
 import com.mineplus.gun.MineplusGunPlugin;
 import com.mineplus.infrastructure.registry.ItemRegistry;
+import com.mineplus.infrastructure.registry.ItemState;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.ChatColor;
-import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
 
 /**
- * Builds the {@link ItemStack} for a weapon: Core pack-item identity plus the
- * module's runtime PDC block ({@code mpgun:weapon}, {@code mpgun:ammo}).
+ * Builds the {@link ItemStack} for a weapon: Core pack-item identity via the
+ * pack API, plus the module's runtime state through the Core
+ * {@link ItemState} slots (weapon id, live rounds, per-stack identity tag).
  *
- * <p>With {@code PACK.ENABLED: false} the Core returns the vanilla backing
- * item; identity and gameplay still work.
+ * <p>Lore is the weapon's stat block; the Core content layer supplies the
+ * display name already. With {@code PACK.ENABLED: false} the Core returns
+ * the vanilla carrier; identity and gameplay still work.</p>
  */
 public final class WeaponItemFactory {
 
@@ -26,17 +25,17 @@ public final class WeaponItemFactory {
     private final ItemRegistry itemRegistry;
     private final com.mineplus.pack.PackApi packApi;
 
-    private final NamespacedKey weaponKey;
-    private final NamespacedKey ammoKey;
-    private final NamespacedKey uidKey;
+    private final ItemState weaponState;
+    private final ItemState ammoState;
+    private final ItemState identityTag;
 
     public WeaponItemFactory(MineplusGunPlugin plugin, ItemRegistry itemRegistry, com.mineplus.pack.PackApi packApi) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
         this.packApi = packApi;
-        this.weaponKey = new NamespacedKey(plugin, "weapon");
-        this.ammoKey = new NamespacedKey(plugin, "ammo");
-        this.uidKey = new NamespacedKey(plugin, "uid");
+        this.weaponState = new ItemState(plugin, "weapon");
+        this.ammoState = new ItemState(plugin, "ammo");
+        this.identityTag = ItemState.identityTag(plugin);
     }
 
     /** A fresh weapon stack with a full magazine. */
@@ -51,20 +50,42 @@ public final class WeaponItemFactory {
                         + "' is not registered; issuing the vanilla carrier instead.");
             }
             stack = new ItemStack(definition.backingMaterial());
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', definition.displayName()));
-            meta.setLore(defaultLore(definition));
-            PersistentDataContainer pdc = meta.getPersistentDataContainer();
-            pdc.set(weaponKey, PersistentDataType.STRING, definition.id());
-            pdc.set(uidKey, PersistentDataType.STRING, java.util.UUID.randomUUID().toString());
-            if (definition.usesAmmo()) {
-                pdc.set(ammoKey, PersistentDataType.INTEGER, definition.magazine());
+            var meta = stack.getItemMeta();
+            if (meta != null) {
+                meta.setDisplayName(org.bukkit.ChatColor.translateAlternateColorCodes('&', definition.displayName()));
+                stack.setItemMeta(meta);
             }
+        }
+
+        weaponState.setString(stack, definition.id());
+        identityTag.getOrCreateIdentity(stack);
+        if (definition.usesAmmo()) {
+            ammoState.set(stack, definition.magazine());
+        }
+
+        // The stat block lore is weapon gameplay, not content presentation.
+        var meta = stack.getItemMeta();
+        if (meta != null) {
+            meta.setLore(defaultLore(definition));
             stack.setItemMeta(meta);
         }
+        applyInitialFrame(stack, definition);
         return stack;
+    }
+
+    /**
+     * Framed weapons leave the factory on their loaded state (a fresh magazine
+     * is full); the custom-model-data stays unset otherwise, which the pack
+     * dispatch reads as the resting idle model.
+     */
+    private void applyInitialFrame(ItemStack stack, WeaponDefinition definition) {
+        if (!definition.hasFrames()) {
+            return;
+        }
+        var frames = definition.frames();
+        if (frames.loadedState() > 0 && definition.magazine() > 0) {
+            com.mineplus.pack.item.ItemFrameWriter.apply(stack, frames.loadedState());
+        }
     }
 
     private List<String> defaultLore(WeaponDefinition definition) {
@@ -83,14 +104,7 @@ public final class WeaponItemFactory {
 
     /** The weapon id stamped on the stack, or {@code null}. */
     public String weaponId(ItemStack stack) {
-        if (stack == null || stack.getType().isAir() || !stack.hasItemMeta()) {
-            return null;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-        String id = meta.getPersistentDataContainer().get(weaponKey, PersistentDataType.STRING);
+        String id = weaponState.readString(stack);
         if (id != null && !id.isBlank()) {
             return id;
         }
@@ -106,57 +120,27 @@ public final class WeaponItemFactory {
 
     /** Rounds currently in the stack, or {@code -1} when it carries no ammo tag. */
     public int readAmmo(ItemStack stack) {
-        if (stack == null || !stack.hasItemMeta()) {
-            return -1;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return -1;
-        }
-        Integer ammo = meta.getPersistentDataContainer().get(ammoKey, PersistentDataType.INTEGER);
+        Integer ammo = ammoState.read(stack);
         return ammo == null ? -1 : ammo;
     }
 
     /** Writes the rounds carried by the stack (clamped at zero). */
     public void writeAmmo(ItemStack stack, int rounds) {
-        if (stack == null || !stack.hasItemMeta()) {
-            return;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return;
-        }
-        meta.getPersistentDataContainer().set(ammoKey, PersistentDataType.INTEGER, Math.max(0, rounds));
-        stack.setItemMeta(meta);
+        ammoState.set(stack, Math.max(0, rounds));
     }
 
     /**
      * The stable per-stack identity used to key the in-memory magazine, or
-     * {@code null} when the stack predates the uid tag.
+     * {@code null} when the stack carries none.
      */
     public String readUid(ItemStack stack) {
-        if (stack == null || !stack.hasItemMeta()) {
-            return null;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-        String uid = meta.getPersistentDataContainer().get(uidKey, PersistentDataType.STRING);
+        String uid = identityTag.readString(stack);
         return uid == null || uid.isBlank() ? null : uid;
     }
 
-    /** Stamps a uid for a legacy stack; the caller must write the stack back. */
+    /** Stamps an identity tag for a legacy stack; the caller must write the stack back. */
     public void writeUid(ItemStack stack, String uid) {
-        if (stack == null || uid == null || !stack.hasItemMeta()) {
-            return;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return;
-        }
-        meta.getPersistentDataContainer().set(uidKey, PersistentDataType.STRING, uid);
-        stack.setItemMeta(meta);
+        identityTag.setString(stack, uid);
     }
 
     public MineplusGunPlugin plugin() {

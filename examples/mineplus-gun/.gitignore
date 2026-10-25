@@ -6,3 +6,6 @@ src/main/resources/defaults/models/gun/*.bbmodel
 src/main/resources/defaults/models/gun/*.png
 src/main/resources/defaults/models/gun/*.meta.json
 src/main/resources/defaults/sounds/mineplusgun/*.ogg
+
+# Imported Western frame textures are local authoring binaries as well.
+src/main/resources/defaults/frames/**/*.png

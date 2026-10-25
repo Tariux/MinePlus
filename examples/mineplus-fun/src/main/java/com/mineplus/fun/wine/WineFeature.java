@@ -1,10 +1,10 @@
 package com.mineplus.fun.wine;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Wires the vinery wine bottle showcase into the Mineplus Core engine — the
+ * Wires the vinery wine bottle showcase into the Mineplus Core engine â€” the
  * reference demonstration of <b>texel surface baking</b> across a lineup of
  * sprites.
  *
@@ -12,13 +12,13 @@ import org.bukkit.plugin.java.JavaPlugin;
  * PNG. Because each PNG ships next to its {@code <key>-wine.bbmodel} in the
  * Core's {@code models/} folder, the Core's load-time baker decomposes every
  * face into texels, quantizes each texel to the nearest visually-flat vanilla
- * block, and emits one thin plate per merged same-color run — each sprite is
+ * block, and emits one thin plate per merged same-color run â€” each sprite is
  * reconstructed pixel-by-pixel out of vanilla concretes/terracottas with zero
  * resource pack.
  *
  * <p>The shipped models were pruned to their <i>visible</i> cubes (neck, body,
  * label band, cork where present): the source files contained cubes fully
- * nested inside the label band and zero-depth decals — redundant in an opaque
+ * nested inside the label band and zero-depth decals â€” redundant in an opaque
  * renderer and a source of layered artifacts. Intentional nesting (band
  * wrapping the body, cork seated in the neck) is handled by the Core's
  * occlusion culling. Geometry stays in vanilla {@code java_block} [0..16]
@@ -36,7 +36,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  * <p>No hooks, GUI, or listeners: this feature installs the resources (the
  * JSON multiblock definitions register the {@code wine_bottle*} types during
  * the module's coordinated reload) and exposes
- * {@code /wine place [variant] | flight | remove | clear | status} — the
+ * {@code /wine place [variant] | flight | remove | clear | status} â€” the
  * tasting flight lays all five variants out side by side for bake comparison.
  */
 public final class WineFeature extends ModuleFeature {

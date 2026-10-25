@@ -1,13 +1,12 @@
 package com.mineplus.gun.feature;
 
 import com.mineplus.gun.GunServices;
-import com.mineplus.gun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.gun.input.BukkitInputAdapter;
 import com.mineplus.gun.input.InputAdapter;
 import com.mineplus.gun.input.PacketInputAdapter;
 import com.mineplus.gun.runtime.AmmoModel;
 import com.mineplus.gun.runtime.BulletSimulator;
-import com.mineplus.gun.runtime.GrenadeRuntime;
 import com.mineplus.gun.runtime.GunRuntime;
 import com.mineplus.infrastructure.PluginContext;
 import org.bukkit.Bukkit;
@@ -18,8 +17,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * Owns the shooting runtime: input, the fire-flow state machine, tick-stepped
- * ballistics, grenades and effects. Selects the input adapter once at enable;
- * weapon logic never branches on it.
+ * ballistics and effects. Selects the input adapter once at enable; weapon
+ * logic never branches on it.
  */
 public final class CombatFeature extends ModuleFeature implements Listener {
 
@@ -42,8 +41,7 @@ public final class CombatFeature extends ModuleFeature implements Listener {
     protected void onEnable() {
         AmmoModel ammo = new AmmoModel(services.itemFactory());
         BulletSimulator simulator = new BulletSimulator(services::config, services.particleFx(), services.soundFx());
-        GrenadeRuntime grenades = new GrenadeRuntime(services::config, services.particleFx(), services.soundFx());
-        runtime = new GunRuntime(plugin, services, ammo, simulator, grenades);
+        runtime = new GunRuntime(plugin, services, ammo, simulator);
         services.setRuntime(runtime);
 
         inputAdapter = packetEventsPresent() ? new PacketInputAdapter(plugin) : new BukkitInputAdapter();

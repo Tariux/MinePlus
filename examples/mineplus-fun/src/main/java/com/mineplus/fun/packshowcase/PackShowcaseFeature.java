@@ -1,6 +1,6 @@
 package com.mineplus.fun.packshowcase;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.definition.ItemCategory;
 import com.mineplus.pack.PackApi;
@@ -18,16 +18,16 @@ import org.bukkit.plugin.java.JavaPlugin;
  * The Phase 2 reference demonstration: <b>pack-based custom content</b> built
  * from the exact same authoring assets as the packless features.
  *
- * <p>The feature registers one custom item — {@code fun:strad_wine}, backed by
- * a vanilla glass bottle — whose model and texture are the Wine feature's
+ * <p>The feature registers one custom item â€” {@code fun:strad_wine}, backed by
+ * a vanilla glass bottle â€” whose model and texture are the Wine feature's
  * already-installed {@code strad-wine.bbmodel} and {@code strad_wine.png}.
  * Nothing new is authored: the pack pipeline consumes the existing Mineplus
  * model/texture systems, compiles them into the generated resource pack, and
  * the item renders at full client fidelity for pack players.
  *
  * <p>Coexistence contract, live: with the pack subsystem disabled (or the
- * player without the pack) the item still exists — identity, give command and
- * gameplay work — and renders as its vanilla backing item. The packless Wine
+ * player without the pack) the item still exists â€” identity, give command and
+ * gameplay work â€” and renders as its vanilla backing item. The packless Wine
  * feature keeps rendering the same model through the texel pipeline
  * regardless; neither subsystem touches the other.
  */
@@ -53,7 +53,7 @@ public final class PackShowcaseFeature extends ModuleFeature {
         packApi = context.packApi();
         // Registration order deliberately mirrors the module contract: the item
         // registers before the coordinated model reload, so its model/texture
-        // assets attach during the reload-driven recompile — exactly how a real
+        // assets attach during the reload-driven recompile â€” exactly how a real
         // module registers pack content.
         packApi.registerItem(PackItemDefinition.builder(
                         NAMESPACE, ITEM_ID,
@@ -113,7 +113,7 @@ public final class PackShowcaseFeature extends ModuleFeature {
                     .forEach(overflow -> player.getWorld().dropItemNaturally(player.getLocation(), overflow));
             player.sendMessage(ChatColor.GREEN + "Gave you the Strad Wine Bottle."
                     + ChatColor.GRAY + " With the pack applied it renders the full 3D model; without it, "
-                    + "the vanilla glass bottle — identity and behavior are identical either way.");
+                    + "the vanilla glass bottle â€” identity and behavior are identical either way.");
             PlayerPackState state = packApi.playerPackState(player.getUniqueId());
             player.sendMessage(ChatColor.GRAY + "Your pack state: " + ChatColor.WHITE + state);
             return true;
