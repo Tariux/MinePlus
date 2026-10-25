@@ -18,9 +18,7 @@ public enum FireMode {
     /** Bolt action: a long cycle cooldown between shots. */
     BOLT,
     /** Melee arc sweep; no ammunition. */
-    MELEE,
-    /** Thrown projectile (grenade). */
-    THROW;
+    MELEE;
 
     public static FireMode fromKey(String key, FireMode fallback) {
         if (key == null || key.isBlank()) {

@@ -4,6 +4,7 @@ import com.mineplus.gun.weapon.WeaponDefinition;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.bukkit.Material;
 
 /**
  * Immutable, fully-validated module configuration parsed from the module's
@@ -14,6 +15,7 @@ import java.util.Set;
 public record GunConfig(
         Settings settings,
         Ballistics ballistics,
+        Ammo ammo,
         Economy economy,
         Shop shop,
         List<WeaponDefinition> weapons
@@ -62,8 +64,7 @@ public record GunConfig(
             String hudTemplate,
             int lowAmmoThreshold,
             Set<String> disabledWorlds,
-            boolean pvpOnly,
-            boolean blockDamage
+            boolean pvpOnly
     ) {
         public Settings {
             language = language == null || language.isBlank() ? "en" : language;
@@ -84,6 +85,18 @@ public record GunConfig(
         public Ballistics {
             maxActiveBullets = Math.max(1, Math.min(4096, maxActiveBullets));
             maxParticlesPerTick = Math.max(0, Math.min(4096, maxParticlesPerTick));
+        }
+    }
+
+    /**
+     * The ammunition supply: reload pulls rounds out of the player's inventory
+     * one item (nugget) at a time. The material is config-driven — gold
+     * nuggets by default, matching the Western economy.
+     */
+    public record Ammo(Material material, int itemsPerRound) {
+        public Ammo {
+            material = material == null ? Material.GOLD_NUGGET : material;
+            itemsPerRound = Math.max(1, Math.min(9, itemsPerRound));
         }
     }
 

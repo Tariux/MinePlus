@@ -168,14 +168,14 @@ public final class PackSystem {
             return;
         }
         try {
-            ItemModelAsset itemAsset = definition.frames().isEmpty()
+            ItemModelAsset itemAsset = definition.modelKey() == null
                     ? new ItemModelAsset(
                             definition.namespace(), definition.id(), definition.namespace(),
-                            definition.backingMaterial(), definition.displayName())
+                            definition.backingMaterial(), definition.displayName(),
+                            definition.fallbackModelReference(), toFrameAssets(definition.frames()))
                     : new ItemModelAsset(
                             definition.namespace(), definition.id(), definition.namespace(),
-                            definition.backingMaterial(), definition.displayName(),
-                            definition.fallbackModelReference(), toFrameAssets(definition.frames()));
+                            definition.backingMaterial(), definition.displayName());
             assetRegistry.register(itemAsset);
             if (definition.modelKey() != null) {
                 assetRegistry.bindItemToModel(definition.modelKey(), itemAsset);

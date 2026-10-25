@@ -3,7 +3,7 @@ version: ${version}
 main: com.mineplus.gun.MineplusGunPlugin
 api-version: '1.21'
 author: Tariux
-description: Combat/weapons module for Mineplus - additive firearms, melee, grenades and ammunition with a Vault shop.
+description: Western combat module for Mineplus - frame-animated firearms on the Core pack infrastructure, gold-nugget ammunition and a Vault shop.
 website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.

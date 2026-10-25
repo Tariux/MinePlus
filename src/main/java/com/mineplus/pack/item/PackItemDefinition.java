@@ -225,6 +225,23 @@ public final class PackItemDefinition implements ItemDefinition {
             return this;
         }
 
+        /**
+         * The full frame choreography of a framed item (framed items; modelKey
+         * null): the spec's idle model becomes the fallback reference and its
+         * states become the dispatch frames. The simplest and preferred
+         * registration path for framed items.
+         */
+        public Builder frames(ItemFrames value) {
+            if (value == null) {
+                this.fallbackModelReference = null;
+                this.frames = List.of();
+                return this;
+            }
+            this.fallbackModelReference = value.idleReference();
+            this.frames = new ArrayList<>(value.dispatch());
+            return this;
+        }
+
         public Builder category(ItemCategory value) {
             this.category = value;
             return this;

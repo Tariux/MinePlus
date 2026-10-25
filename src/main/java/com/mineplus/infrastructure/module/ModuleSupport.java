@@ -91,6 +91,31 @@ public final class ModuleSupport {
     }
 
     /**
+     * Installs a batch of embedded resources that mirror one folder layout:
+     * every relative path is copied from {@code resourceRoot + relative} in
+     * the module jar to {@code installRoot + relative} in the Core's data
+     * folder, always overwriting (asset binaries must follow module updates).
+     * Missing resources are skipped with a warning, never fatal.
+     *
+     * @return how many of the relative paths were installed
+     */
+    public int installAll(JavaPlugin module, String resourceRoot, String installRoot,
+                          Iterable<String> relativePaths) {
+        int installed = 0;
+        for (String relative : relativePaths) {
+            if (installDefault(module, resourceRoot + relative, installRoot + relative, true)) {
+                installed++;
+            }
+        }
+        return installed;
+    }
+
+    /** The file the Core's data folder maps a relative install path to. */
+    public File dataFile(String dataRelativePath) {
+        return new File(core.getDataFolder(), dataRelativePath);
+    }
+
+    /**
      * Resolves the multiblock instance the player is looking at: first by
      * anchor/origin block, then through the rendered-model id (barrier
      * collision cells map back to instances).

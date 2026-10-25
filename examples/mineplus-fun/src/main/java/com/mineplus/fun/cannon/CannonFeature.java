@@ -1,6 +1,6 @@
 package com.mineplus.fun.cannon;
 
-import com.mineplus.fun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.fun.cannon.gui.CannonGui;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;

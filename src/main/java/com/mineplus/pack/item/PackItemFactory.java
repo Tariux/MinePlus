@@ -39,7 +39,14 @@ public final class PackItemFactory {
         }
 
         if (!definition.displayName().isBlank()) {
-            meta.setDisplayName(definition.displayName());
+            meta.setDisplayName(org.bukkit.ChatColor.translateAlternateColorCodes('&', definition.displayName()));
+        }
+        if (!definition.descriptionLines().isEmpty()) {
+            java.util.List<String> lore = new java.util.ArrayList<>(definition.descriptionLines().size());
+            for (String line : definition.descriptionLines()) {
+                lore.add(org.bukkit.ChatColor.translateAlternateColorCodes('&', line));
+            }
+            meta.setLore(lore);
         }
 
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
@@ -68,7 +75,7 @@ public final class PackItemFactory {
             return stack;
         }
         if (!item.displayName().isBlank()) {
-            meta.setDisplayName(item.displayName());
+            meta.setDisplayName(org.bukkit.ChatColor.translateAlternateColorCodes('&', item.displayName()));
         }
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, assetModelKey(item));

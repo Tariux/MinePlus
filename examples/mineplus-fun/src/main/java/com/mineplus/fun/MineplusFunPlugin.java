@@ -5,11 +5,11 @@ import com.mineplus.fun.alchemy.AlchemyFeature;
 import com.mineplus.fun.cabinet.CabinetFeature;
 import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
-import com.mineplus.fun.gunsmith.GunsmithFeature;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.packshowcase.PackShowcaseFeature;
 import com.mineplus.fun.wine.WineFeature;
 import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Bukkit;
@@ -17,8 +17,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * Example "module" plugin that turns the Mineplus Core engine into Juicer,
- * Cannon, Gear, Wine, Gunsmith, and Cabinet game features plus the
- * pack-system showcase.
+ * Cannon, Gear, Wine, and Cabinet game features plus the pack-system
+ * showcase.
  *
  * <p>This plugin is intentionally a <em>separate</em> artifact from the Core. It depends on
  * the Core at runtime (see {@code plugin.yml -> depend: [Mineplus]}) and obtains the Core
@@ -62,11 +62,10 @@ public final class MineplusFunPlugin extends JavaPlugin {
         features.add(new CannonFeature(this, context));
         features.add(new GearFeature(this, context));
         features.add(new WineFeature(this, context));
-        // Pack-axis field tests after wine: their pack registrations land before
-        // the coordinated reload, so model/texture/raw assets attach during the
-        // reload-driven pack recompile (order-insensitive, but kept after wine
-        // for a deterministic bootstrap sequence).
-        features.add(new GunsmithFeature(this, context));
+        // Pack-axis feature tests after wine: their pack registrations land
+        // before the coordinated reload, so model/texture/raw assets attach
+        // during the reload-driven pack recompile (order-insensitive, but
+        // kept after wine for a deterministic bootstrap sequence).
         features.add(new CabinetFeature(this, context));
         features.add(new PackShowcaseFeature(this, context));
         // Pack block axis: an alchemy table multiblock whose level renders as a
@@ -86,7 +85,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine, Gunsmith, Cabinet, PackShowcase, Alchemy)"
+                + " features (Juicer, Cannon, Gear, Wine, Cabinet, PackShowcase, Alchemy)"
                 + " enabled on top of Mineplus Core.");
     }
 

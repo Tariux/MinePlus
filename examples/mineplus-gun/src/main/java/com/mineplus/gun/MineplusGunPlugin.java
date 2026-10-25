@@ -16,6 +16,7 @@ import com.mineplus.gun.shop.ShopService;
 import com.mineplus.gun.weapon.WeaponItemFactory;
 import com.mineplus.gun.weapon.WeaponRegistry;
 import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Bukkit;

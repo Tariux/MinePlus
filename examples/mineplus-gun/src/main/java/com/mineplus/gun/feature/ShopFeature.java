@@ -1,7 +1,7 @@
 package com.mineplus.gun.feature;
 
 import com.mineplus.gun.GunServices;
-import com.mineplus.gun.ModuleFeature;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import com.mineplus.gun.shop.ShopGui;
 import com.mineplus.infrastructure.PluginContext;
 import org.bukkit.event.EventHandler;
