@@ -51,6 +51,7 @@ public final class MineplusPlugin extends JavaPlugin {
                 configManager.getConfig().getPack());
         context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
         context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
+        context.applyCombatSettings(configManager.getConfig().getCombat());
         context.finalizeSetup();
 
         registerCommand();
@@ -60,7 +61,7 @@ public final class MineplusPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (context != null) {
-            context.mobBehaviorApi().shutdown();
+            context.shutdownServices();
             context.infrastructureEngine().shutdown();
         }
 
@@ -176,6 +177,7 @@ public final class MineplusPlugin extends JavaPlugin {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
             context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
             context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
+            context.applyCombatSettings(configManager.getConfig().getCombat());
         }
         // Pack mode changes apply after restart (delivery binding, listeners);
         // a running subsystem still recompiles so freshly registered content
@@ -214,5 +216,25 @@ public final class MineplusPlugin extends JavaPlugin {
     /** Resource pack API (safe fallback when the subsystem is disabled). */
     public com.mineplus.pack.PackApi packApi() {
         return context == null ? null : context.packApi();
+    }
+
+    /** Simulated-round projectile engine (shared, self-arming). */
+    public com.mineplus.infrastructure.combat.Ballistics ballistics() {
+        return context == null ? null : context.ballistics();
+    }
+
+    /** Budgeted particle emission shared by every module. */
+    public com.mineplus.infrastructure.fx.ParticleFx particleFx() {
+        return context == null ? null : context.particleFx();
+    }
+
+    /** Held-item input routing for item-driven modules. */
+    public com.mineplus.infrastructure.input.HeldItemInput heldItemInput() {
+        return context == null ? null : context.heldItemInput();
+    }
+
+    /** Mob behavior API (profiles, activity claims, navigation, journeys). */
+    public com.mineplus.infrastructure.mob.MobBehaviorApi mobBehaviorApi() {
+        return context == null ? null : context.mobBehaviorApi();
     }
 }

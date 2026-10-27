@@ -122,7 +122,7 @@ This plan outlines the steps to implement the Major Update: "Unified Rendering E
    - Remove any references to deprecated methods or classes (e.g., old `renderBackend` usage without migration notes).
 
 2. **Update Examples in `mineplus-fun`**
-   - Navigate to `examples/mineplus-fun/src/main/java` and update all feature classes (Juicer, Cannon, Gear, Wine, Gunsmith, Cabinet, Alchemy, Pack Showcase) to use the latest API.
+   - Navigate to `examples/mineplus-fun/src/main/java` and update all feature classes (Juicer, Cannon, Gear, Wine, Cabinet, Alchemy, Pack Showcase) to use the latest API.
    - Specifically:
      - Update multiblock registration to use the new `InfrastructureApi.registerMultiBlock` method that accepts a `RenderPlan`.
      - For features like Cabinet and Alchemy (which are showcases for pack and texel), demonstrate the use of `HYBRID` or per-cube render plans.

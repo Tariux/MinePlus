@@ -2,8 +2,13 @@ package com.mineplus.mobfun;
 
 import com.mineplus.MineplusPlugin;
 import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.fx.ParticleFx;
+import com.mineplus.infrastructure.mob.BehaviorContext;
+import com.mineplus.infrastructure.mob.MobBehaviorApi;
+import com.mineplus.infrastructure.mob.MobProfile;
 import com.mineplus.infrastructure.mob.action.EatPlantsAction;
 import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
+import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
 import java.util.ArrayList;
@@ -12,45 +17,54 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.IronGolem;
+import org.bukkit.entity.Snowman;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * MobFun — Mob behavior showcase module for the Mineplus Core.
  *
- * <p>Demonstrates the Core's mob behavior engine (the budgeted,
- * distance-gated re-implementation of the reference mod's per-tick AI event
- * system) with eight vanilla mobs, each on a different mechanics axis:
+ * <p>Demonstrates the Core's mob behavior engine (the budgeted, distance-gated,
+ * arbitrated re-implementation of the reference mod's per-tick AI event system)
+ * with eight vanilla mobs, each on a different mechanics axis:
  *
  * <ul>
  *   <li><b>Grazer Cow</b> / <b>Grazing Sheep</b> — eat the plant they stand
  *       in (with baby-growth and healing side effects) and keep grassy ground
  *       blooming ({@code eat_plants} + {@code grow_plants}).</li>
  *   <li><b>Reforesting Pig</b> — plants biome-appropriate saplings with
- *       spacing checks ({@code plant_sapling}).</li>
+ *       spacing checks ({@code plant_sapling}, gated by the Core's
+ *       {@code adult_only} condition).</li>
  *   <li><b>Lamplighter Villager</b> — places torches on dark ground
  *       ({@code place_torch}).</li>
  *   <li><b>Florist Bee</b> — plants wildflowers on grass ({@code
- *       plant_flower}); a module-side {@link BehaviorAction} implementation
- *       proving the action interface is fully open to modules.</li>
+ *       plant_flower}); a module-side {@link com.mineplus.infrastructure.mob.BehaviorAction}
+ *       implementation proving the action interface is fully open to modules.</li>
  *   <li><b>Golem Guardian Villager</b> — only when endangered (hostile
  *       nearby or low health), raises an iron-golem column <b>block by
- *       block</b> that assembles into a real golem which immediately fights
- *       the threat ({@code summon_iron_golem} + {@code inDanger} condition;
- *       per-builder cooldown and a one-golem cap keep raids spam-free).</li>
- *   <li><b>Frost Builder Villager</b> — the same guardian pattern with a
- *       snow golem ({@code summon_snow_golem}).</li>
+ *       block</b> under one engine-granted {@code MobEditSession} and assembles
+ *       it into a real golem that immediately fights the threat
+ *       ({@code summon_iron_golem} + {@code inDanger} condition; per-builder
+ *       cooldown and a one-golem cap keep raids spam-free).</li>
+ *   <li><b>Frost Builder Villager</b> — the same guardian pattern with a snow
+ *       golem ({@code summon_snow_golem}).</li>
  *   <li><b>Necromancer Witch</b> — when prey (a villager in sight) or a
  *       predator (a golem within 10 blocks) is around, she fields a small,
  *       space-adaptive mixed horde (husks/strays/drowned/cave spiders per
- *       biome, occasional skeleton horseman) that hunts as one synced crew,
- *       hurls potions at close golems, and retreats behind her own minions
- *       ({@code summon_minions} + {@code threatOrPrey} condition).</li>
- *   <li><b>Pilgrim Villager</b> — villagers in the wastelands locate the
- *       nearest village and journey there in a synced crew; at night the
- *       leader raises one shared camp (campfire + a row of beds, one per
- *       crew member) and the crew holds until dawn; they celebrate on
- *       arrival ({@code village_journey}); /mobfun status lists each
- *       pilgrim's journey state.</li>
+ *       biome, occasional skeleton horseman) summoned through the engine's
+ *       spawn budget, re-targeted from a single neighbourhood scan, leashed to
+ *       her side, hurling potions at close golems and retreating behind her own
+ *       minions ({@code summon_minions} + {@code threatOrPrey} condition).</li>
+ *   <li><b>Pilgrim Villager</b> — the Core's {@code journey_to_structure}
+ *       scenario with this module's camp and celebration: the village is found
+ *       through the engine's structure cache, the crew marches through the
+ *       {@code JourneyRunner} (legs inside path range, stalls routed around)
+ *       and holds cohesion, night halts the crew together while the leader
+ *       raises one shared camp (campfire + a contiguous bed row, one bed per
+ *       crew member), and arrival celebrates. Guardians keep their post: the
+ *       profile is gated by {@code notBuilder}, and the journey's activity
+ *       claim means no other villager showcase can pull a marching pilgrim
+ *       somewhere else.</li>
  * </ul>
  *
  * <p>Rates are tuned for demonstration (fires are observable within seconds
@@ -71,7 +85,6 @@ public final class MobFunPlugin extends JavaPlugin {
     private PluginContext context;
     private MobFunSubCommand command;
     private final List<MobFunShowcase> showcases = new ArrayList<>();
-    private JourneyAction journeyAction;
 
     @Override
     public void onEnable() {
@@ -89,56 +102,68 @@ public final class MobFunPlugin extends JavaPlugin {
             Bukkit.getPluginManager().disablePlugin(this);
             return;
         }
+        MobBehaviorApi mobApi = context.mobBehaviorApi();
+        ParticleFx fx = context.particleFx();
 
         showcases.add(new MobFunShowcase(this, "grazer", "Grazer Cow", EntityType.COW,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.COW)
+                mobApi, () -> MobProfile.builder(EntityType.COW)
                 .action(new EatPlantsAction(), 10.0)
                 .action(new GrowPlantsAction(), 60.0)
                 .build()));
         showcases.add(new MobFunShowcase(this, "sheep", "Grazing Sheep", EntityType.SHEEP,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.SHEEP)
+                mobApi, () -> MobProfile.builder(EntityType.SHEEP)
                 .action(new EatPlantsAction(), 10.0)
                 .action(new GrowPlantsAction(), 60.0)
                 .build()));
         showcases.add(new MobFunShowcase(this, "reforest", "Reforesting Pig", EntityType.PIG,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.PIG)
+                mobApi, () -> MobProfile.builder(EntityType.PIG)
                 .action(new PlantSaplingAction(), 45.0)
-                .condition(BehaviorConditions.adult())
+                .condition(BehaviorContext.Conditions.adultOnly())
                 .build()));
         showcases.add(new MobFunShowcase(this, "lamplighter", "Lamplighter Villager", EntityType.VILLAGER,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.VILLAGER)
+                mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
                 .action(new TorchPlaceAction(4), 10.0)
                 .build()));
         showcases.add(new MobFunShowcase(this, "florist", "Florist Bee", EntityType.BEE,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.BEE)
-                .action(new PlantFlowerAction(), 45.0)
+                mobApi, () -> MobProfile.builder(EntityType.BEE)
+                .action(new PlantFlowerAction(fx), 45.0)
                 .build()));
         showcases.add(new MobFunShowcase(this, "golem", "Golem Guardian Villager", EntityType.VILLAGER,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.VILLAGER)
-                .action(new GolemSummonAction(this, "summon_iron_golem", "Summoned Iron Guardian",
-                        Material.IRON_BLOCK, EntityType.IRON_GOLEM,
-                        Sound.BLOCK_METAL_PLACE, Sound.ENTITY_IRON_GOLEM_REPAIR), 30.0)
+                mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .action(new GolemSummonAction(this, mobApi, fx, "summon_iron_golem",
+                        "Summoned Iron Guardian", Material.IRON_BLOCK, EntityType.IRON_GOLEM,
+                        IronGolem.class, Sound.BLOCK_METAL_PLACE, Sound.ENTITY_IRON_GOLEM_REPAIR), 30.0)
                 .condition(BehaviorConditions.inDanger(8.0))
                 .build()));
         showcases.add(new MobFunShowcase(this, "snowgolem", "Frost Builder Villager", EntityType.VILLAGER,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.VILLAGER)
-                .action(new GolemSummonAction(this, "summon_snow_golem", "Summoned Snow Guardian",
-                        Material.SNOW_BLOCK, EntityType.SNOW_GOLEM,
-                        Sound.BLOCK_SNOW_PLACE, Sound.BLOCK_SNOW_BREAK), 30.0)
+                mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .action(new GolemSummonAction(this, mobApi, fx, "summon_snow_golem",
+                        "Summoned Snow Guardian", Material.SNOW_BLOCK, EntityType.SNOW_GOLEM,
+                        Snowman.class, Sound.BLOCK_SNOW_PLACE, Sound.BLOCK_SNOW_BREAK), 30.0)
                 .condition(BehaviorConditions.inDanger(8.0))
                 .build()));
         showcases.add(new MobFunShowcase(this, "necromancer", "Necromancer Witch", EntityType.WITCH,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.WITCH)
-                .action(new SummonMinionHordeAction(this), 12.0)
+                mobApi, () -> MobProfile.builder(EntityType.WITCH)
+                .action(new SummonMinionHordeAction(this, fx), 12.0)
                 .condition(BehaviorConditions.threatOrPrey(12.0, 10.0))
                 .build()));
-        // One shared JourneyAction instance: the /mobfun status command reads
-        // active journey states from it, while profile rebuilds (toggles)
-        // keep reusing it - its per-entity state lives on the entities' PDC.
-        this.journeyAction = new JourneyAction(this);
+        // One shared journey instance: its scenario state (crews, camps, the
+        // not-found report) lives on the engine's services and in itself, so a
+        // profile rebuild on toggle never strands a march halfway across a map.
+        JourneyToStructureAction pilgrim = JourneyToStructureAction.builder()
+                .id("village_journey")
+                .structure("village")
+                .crewName(PilgrimCamp.CREW)
+                .searchRadiusChunks(64)
+                .arrivalDistance(24)
+                .cohesionRadius(8)
+                .recruitRadius(16)
+                .callbacks(new PilgrimCamp(fx))
+                .build();
         showcases.add(new MobFunShowcase(this, "pilgrim", "Pilgrim Villager", EntityType.VILLAGER,
-                context.mobBehaviorApi(), () -> com.mineplus.infrastructure.mob.MobProfile.builder(EntityType.VILLAGER)
-                .action(journeyAction, 2.0)
+                mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .action(pilgrim, 2.0)
+                .condition(BehaviorConditions.notBuilder(this))
                 .build()));
 
         for (MobFunShowcase showcase : showcases) {
@@ -151,7 +176,7 @@ public final class MobFunPlugin extends JavaPlugin {
         }
 
         try {
-            this.command = new MobFunSubCommand(this, showcases, journeyAction);
+            this.command = new MobFunSubCommand(this, showcases);
             context.moduleSupport().registerCommand(this, "mobfun", this.command);
         } catch (Exception exception) {
             getLogger().severe("Command registration failed: " + exception);

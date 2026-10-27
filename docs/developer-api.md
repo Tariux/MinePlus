@@ -10,7 +10,7 @@ Mineplus exposes three usage tiers. They stack: a machine defined through JSON (
 | **2 — Basic** | `BasicInfrastructureApi` | Simple place/remove/lookup add-ons |
 | **3 — Advanced** | `InfrastructureApi` | Full hooks, lifecycle listeners, GUIs, links, signals, processes |
 
-**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Module Toolkit](#module-toolkit) · [Hooks](#multiblock-hooks) · [Animation Engine](#animation-engine) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
+**Jump to:** [API Handles](#getting-api-handles) · [Tier 1](#tier-1-json-infrastructure-api) · [Tier 2](#tier-2-basic-infrastructure-api) · [Tier 3](#tier-3-advanced-infrastructure-api) · [Module Toolkit](#module-toolkit) · [Hooks](#multiblock-hooks) · [Animation Engine](#animation-engine) · [Combat Services](#combat-services) · [Mob Behavior API](#mob-behavior-api) · [Timed Processes](#timed-crafting-processes) · [Auto-Linking](#auto-linking-pipe-networks) · [Runtime Internals](#core-runtime-behavior)
 
 ---
 
@@ -44,6 +44,10 @@ context.animationApi()          // selector-based animation control (play/stop/p
 context.packApi()               // resource pack registration/delivery (never null)
 context.renderRouter()          // unified render routing: policy + telemetry (never null)
 context.moduleSupport()        // module toolkit: resource install, looked-at resolution, command registration
+context.mobBehaviorApi()       // mob behavior engine: profiles, journeys, crews, world-edit grants
+context.particleFx()           // budgeted particle + sound emission (shared, never throws)
+context.ballistics()           // core projectile simulation
+context.heldItemInput()        // held-item press/release/swap seam with vanilla-interaction freeze
 ```
 
 Always perform the dependency check in `onEnable` and disable with a human-readable message if the core is absent — see the reference implementation in [`MineplusFunPlugin.java`](../examples/mineplus-fun/src/main/java/com/mineplus/fun/MineplusFunPlugin.java).
@@ -320,6 +324,196 @@ RenderPolicy policy = router.policy();                  // the active routing po
 
 ---
 
+## Combat Services
+
+Gameplay that fires, hits and reloads is a Core concern: the tick loop, the
+particle budget and the damage bookkeeping are the parts every module would
+otherwise re-implement badly. The pieces are:
+
+| Handle | Type | Role |
+|---|---|---|
+| `context.ballistics()` | `Ballistics` | Simulated round engine: per-tick stepping, spread, gravity/drag, falloff, penetration, ricochet, headshot, tracer/impact FX |
+| `context.heldItemInput()` | `HeldItemInput` | The held-item seam: routes presses/releases/swap-hands to the handler that owns the stack, and freezes vanilla interactions while it is held |
+| `context.particleFx()` | `ParticleFx` | Budgeted particle emission (CRITICAL never starved by AMBIENT); `Sounds` resolves custom or vanilla events and never throws |
+| `BallisticProfile` | value | One weapon's ballistics, authored once in code or config |
+| `ProjectileHandler` | interface | Per-fire callbacks: targeting gate, launch/hit/expire notifications |
+| `DamageTransactions` | static | Damage attribution that cannot double-count: `apply(victim, amount, attacker)` and the re-entrancy guard for melee |
+| `ItemMagazine` / `ItemState` | registry | Countable item state (rounds) live in memory while held, persisted to PDC when the stack leaves the hand |
+| `ItemFrames` | pack item | Idle / loaded / reload frame math for `item_model` presentation |
+
+```java
+// 1. Describe the round (WeaponDefinition in mineplus-gun does exactly this).
+BallisticProfile profile = BallisticProfile.builder()
+        .damage(7.0).velocity(2.6).gravity(0.08).drag(0.01).range(64)
+        .spreadDegrees(1.2).pellets(1)
+        .falloff(28, 0.06).minDamageFraction(0.35)
+        .headshotMultiplier(1.8).penetration(1)
+        .particles("minecraft: muzzle", "tracer", "impact")   // tolerant names
+        .sounds("gun.fire", "impact", "ENTITY_ARROW_SHOOT", 1.0f)
+        .build();
+
+// 2. Fire it. fireWeapon() launches profile.pellets() independent rounds.
+int launched = context.ballistics().fireWeapon(player, muzzle, aim, profile,
+        new ProjectileHandler() {
+            @Override public boolean allowTarget(Entity e, Player shooter) {
+                return e instanceof Monster;             // this weapon is non-lethal vs wildlife
+            }
+            @Override public void onBlockHit(ProjectileHit hit) {
+                // default impact FX already ran; add module flavour here
+            }
+        });
+if (launched == 0) { /* ballistics disabled or origin unusable — the module owns the fallback */ }
+
+// 3. Damage the module computes itself (melee, grenades) goes through the
+//    transaction so the swing is not counted twice.
+DamageTransactions.apply(victim, 6.0, player);
+```
+
+**Verified behavior:**
+
+- **Callbacks run on the server thread inside the simulation step** — a hit may
+  damage, teleport or spawn directly; no scheduling, no read-then-write race
+  against the round being resolved.
+- **Over-budget shots degrade, never queue.** When `MAX_ACTIVE_ROUNDS` is
+  reached, the shot resolves as one instant trace over its full range: same hit,
+  same damage, one tick earlier than a stepped round would land. `degradedShots()`
+  counts them.
+- **`ParticleFx` tiers** keep a burst of tracers from eating the muzzle flash and
+  impact puff that tell the player what their shot did; emission never throws, a
+  refused particle is counted as dropped and the simulation continues.
+- **`HeldItemInput` freezes nothing it does not own.** A handler's
+  `owns(stack, holder)` is consulted per player, so a feature disabled for that
+  world/player leaves the carrier fully vanilla (no frozen placement, no
+  swallowed press). `suppressVanillaMelee` defaults to `true` but is never
+  consulted for damage the module applied itself.
+- **Magazines are not rewritten per shot.** Rewriting a held stack's components
+  20 times a second re-triggers the client's equip animation and spams slot
+  packets; `ItemMagazine` keeps the live count in memory and flushes one silent
+  PDC write when the stack leaves the hand. Identity is a per-stack tag, so a
+  magazine survives slot re-ordering, off-hand hops and re-logs; stacks of two or
+  more are deliberately never tagged (they are clones and would share one
+  magazine).
+- **`DamageTransactions.inProgress()`** is the re-entrancy flag: a module whose
+  own damage fires `EntityDamageByEntityEvent` back into its listener checks it
+  (the gun's melee path stands down while a transaction runs).
+- Telemetry: `context.ballistics().telemetrySummary()` (active/total rounds,
+  hits, degraded shots) and `particleFx().emitted()` / `dropped()`.
+
+**Complete working module:** [`examples/mineplus-gun`](../examples/mineplus-gun/README.md)
+— firearms, melee, throwables and the reload/animation state machine, all on
+these surfaces; the feature code owns only weapon definitions and HUD.
+
+---
+
+## Mob Behavior API
+
+`context.mobBehaviorApi()` is a data-driven "vanilla-like" mob behavior engine:
+a module says *which entity type does which action how often, under which
+condition*, and the Core schedules it inside a hard time/world-edit/spawn
+budget. Nothing runs until a profile is registered, and the whole subsystem is
+free when no module uses it.
+
+```java
+MobBehaviorApi mob = context.mobBehaviorApi();
+
+MobProfile cow = MobProfile.builder(EntityType.COW)
+        .priority(10)                                  // lower wins an arbitration tie
+        .action(new EatPlantsAction(), 12.0)           // once per ~12s of eligible checks
+        .action(new GrowPlantsAction(), 30.0)
+        .condition(BehaviorContext.Conditions.adultOnly())
+        .build();
+mob.register(this, cow);                               // main thread only
+```
+
+At most **one** action fires per entity evaluation, with the reference-mod odds
+`1 / (intervalSeconds * checksPerSecond)`; `MobProfile` entries are tried in
+declaration order.
+
+### What `BehaviorContext` gives an action
+
+| Group | Methods |
+|---|---|
+| Sensing | `entity()`, `world()`, `footBlock()`, `groundBlock()`, `biome()`, `random()`, `footBlockLight()`, `onGrassyGround()`, `onPlantableGround()`, `countNearby(...)`, `isChunkLoaded(...)` |
+| World edits (budgeted) | `trySetBlock(Block, BlockData)`, `tryBreak(Block, boolean)`, `trySpawn(Location, Class, Consumer)` — all return `false` once the run's grant is spent, so an action degrades instead of throwing |
+| Scenario arbitration | `claimActivity(id[, durationTicks])`, `claimActivity(id, anchor, anchorRadius, durationTicks)`, `releaseActivity`, `ownsActivity`, `activeActivityId`, `activityAnchor()` |
+| Confinement | `confinementCenter()`, `confinementRadius()`, `withinConfinement()` — the claimed anchor is what keeps a scenario mob inside the area it belongs to |
+| Navigation | `navigateTo(target, speed)`, `navigateToWithin(target, stopDistance, speed)`, `stopNavigation()` — through `MobNavigator`, which tries Paper's public `Pathfinder` API first and falls back to the reflective NMS/Brain channel on Spigot. It never teleports and never spawns: movement is always the entity's own vanilla walk, so the client's motion stays authoritative. |
+| Journeys | `advanceJourney(...)`, `abandonJourney()`, `isJourneying()`, `journeyDestination()`, `journeys()` |
+| Crews | `joinCrew(crew, leader, goal)`, `rallyCrew`, `crewFocus`, `crewLeader`, `crewGoal`, `crewMembers`, `isCrewLeader`, `leaveCrew`, `disbandCrew` |
+| Structures | `nearestStructure(key, maxRadiusChunks)` — async-chunk-safe lookup through `StructureLookup`, cached per region |
+
+`BehaviorContext.Conditions` is the shared predicate vocabulary: `inWorld`,
+`adultOnly`, `maxBlockLight`, `belowHealth(fraction)`,
+`nearbyEntity(radius, matcher)`, `visibleEntity(radius, matcher)` — module-side
+conditions compose these instead of re-scanning entity lists.
+
+### Bundled actions
+
+`EatPlantsAction`, `GrowPlantsAction` (vanilla bonemeal), `PlantSaplingAction`
+(biome-matched, spacing-checked), `TorchPlaceAction` (block-light gated), and
+`JourneyToStructureAction` — the long-range one:
+
+```java
+BehaviorAction pilgrim = JourneyToStructureAction.builder()
+        .id("village_journey").structure("village")
+        .crewName("pilgrims")                 // group travel: leader + recruited stragglers
+        .searchRadiusChunks(64).arrivalDistance(24)
+        .cohesionRadius(8).recruitRadius(16)
+        .restAtNight(true)
+        .callbacks(new JourneyToStructureAction.Callbacks() {
+            @Override public boolean onNight(BehaviorContext ctx, Location campSite) {
+                // raise the camp; return false to retry later the same night
+                return true;
+            }
+            @Override public void onArrival(BehaviorContext ctx, Location destination) { }
+            @Override public void onNotFound(BehaviorContext ctx) { }
+        })
+        .build();
+```
+
+The action itself owns the mechanics the modules used to hand-roll and get
+wrong: the village (or temple, fortress, …) is found through the Core's
+structure lookup on a search cooldown, the destination is normalised to a
+standable cell before it is ever pathed to, the walk is executed leg by leg by
+`JourneyRunner` with stall detection, detour retry and a leash, the crew is kept
+cohesive by `MobCrewService` (stragglers are walked back **before** the crew
+halts, which is why a night camp now has everyone beside it), and the journey
+runs under an exclusive activity claim so no other profile can steer the same
+mob mid-march. Journey and crew state is runtime-only inside the engine — PDC is
+never used for it, so a restart cleanly forgets a half-finished march.
+
+### Budgets, arbitration and testing
+
+- The engine sweeps chunks around online players with **alternating parity**,
+  dedupes entities through a fastutil long set, and staggers them into buckets,
+  so an entity is evaluated once every `2 × INTERVAL_TICKS × STAGGER_BUCKETS`
+  ticks. `MOB_BEHAVIOR.BUDGET_MILLIS_PER_RUN` is a soft cap: excess work is
+  deferred to the next run instead of spiking the tick.
+- Every run gets one `MobEditSession` grant: block writes and entity spawns are
+  counted against `MAX_BLOCK_EDITS_PER_RUN` / `MAX_ENTITY_SPAWNS_PER_RUN`. A
+  build that outlives the evaluation (a golem column raised tick by tick) asks
+  for its own grant: `mob.openEditSession(editBudget, spawnBudget)` — the engine
+  clamps both to its per-run caps, and `session.setBlock` / `breakBlock` /
+  `spawnMob` refuse once spent.
+- **Activity arbitration** is what stops scenarios conflicting: a mob already
+  claimed by an action refuses other claims, an anchored claim drags the mob
+  back toward its area (and abandons the scenario past the leash), and claims
+  expire on their duration. `activeActivity(entity)` reads the current holder,
+  `clearActivity(entity, actionId)` releases it.
+- `forceFire(plugin, entity, ignoreConditions)` runs one profile against a real
+  entity right now and returns the per-action `BehaviorFireResult`
+  (`FIRED` / `DECLINED` / `CONDITION_FAILED`) — the test hook behind
+  `/mobfun spawn|fire <id> [force]`.
+- `telemetrySummary()`, `journeySnapshot(maxLines)` and `crewSnapshot(maxLines)`
+  are the operator-visible state; `unregisterAll(plugin)` runs on module disable.
+
+**Complete working module:** [`examples/mineplus-mobfun`](../examples/mineplus-mobfun/README.md)
+— grazers, a reforesting pig, a lamplighter villager, a florist bee, golem- and
+snow-golem-summoning builders, a necromancer witch with a terrain-adaptive minion
+horde, and the pilgrim villagers above.
+
+---
+
 ## Timed Crafting Processes
 
 `startProcess(instanceId, recipeId)` runs a recipe as a timed process on an ACTIVE machine:
@@ -374,6 +568,9 @@ What runs underneath your feature code:
 | `PersistenceFacade` | SQLite persistence (`plugins/Mineplus/infrastructure.db`, HikariCP-pooled single connection) via an asynchronous write-behind queue with **incremental writes**: hot paths (place/upgrade/remove, process advancement) stage single-instance upserts/deletes, so one mutation no longer rewrites every row; bulk paths (reload, shutdown) stage a full replace. A background task flushes off-thread, and a synchronous flush runs on shutdown/reload. Failed flushes are re-queued and retried. (`MultiBlockStorageEngine` is deprecated, retained only for legacy JSON migration) |
 | `HookBus` | Publishes lifecycle events to registered listeners |
 | `MultiBlockLinkingSystem` | Directed links and signal propagation |
+| `MobBehaviorEngine` | Budgeted, distance-gated mob profile evaluation with activity arbitration, journey and crew upkeep, and per-run edit/spawn grants (lazy: no task exists before the first registration) |
+| `Ballistics` | Shared round simulation loop: one stepped pass per configured interval over all live rounds, instant-trace degradation over the round cap |
+| `HeldItemInput` | The single held-item listener set every module shares: owner routing, press/release/swap delivery, vanilla-interaction freeze, punch-animation suppression |
 
 **Ticking is chunk-aware:** instances in unloaded chunks are fully skipped (no hooks, heartbeats, renders, or process advancement) until their chunk loads again — vanilla tile-entity parity.
 

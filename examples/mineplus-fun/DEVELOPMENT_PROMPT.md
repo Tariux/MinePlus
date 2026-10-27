@@ -550,25 +550,14 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   already-installed assets, demonstrating that the pack pipeline consumes the
   same bbmodel/PNG pairs as the texel baker. `/packshowcase [status]` gives the
   item and reports subsystem/artifact/player state. The canonical §10b consumer.
-- **gunsmith** (`com.mineplus.fun.gunsmith`): the Phase 2 item/texture/animation
-  axis field test — a pre-authored pack tree shipped verbatim under
-  `defaults/pack/gun/**`, staged with `installDefault` into `pack-src/gun/`
-  and registered verbatim under the **`minecraft` namespace** (`registerRawAsset`,
-  a deliberate vanilla overlay: bow → pistol, crossbow → rifle, draw frames via
-  client-side `items/*.json` predicates on 1.21.4+ and `custom_model_data`
-  predicate overrides in vanilla-replica `models/item/bow.json` +
-  `models/item/crossbow.json` host files on 1.21–1.21.3 — value 1, stamped by
-  `/gunsmith give`). The overlay changes looks only: `sounds.json` registers
-  the additive `minecraft:gun.fire` event (no vanilla sound/texture is
-  overridden), and `GunsmithGunListener` is a hitscan firing runtime — the
-  vanilla launch is always cancelled (no arrow entity, no vanilla bow sound,
-  no spent ammunition arrow; the crossbow's charged projectile is drained and
-  its arrow refunded), then one ray trace per shot draws the tracer, chips the
-  impact point and damages the entity under the crosshair. Rounds live in a
-  PDC counter on the gun (`GunsmithKeys.PDC_AMMO`, magazine 12). `/gunsmith
-  give|status`. Every *visual* requires the generated pack applied; firing
-  works without it. `npm run pack` in the repository builds the same tree
-  into a ready-to-use manual zip.
+- **gunsmith** — *retired from this module.* The bow/crossbow `minecraft`-namespace
+  overlay experiment now lives as its own reference module,
+  [`examples/mineplus-gun`](../mineplus-gun/DEVELOPMENT_PROMPT.md), which builds
+  named guns on the Core combat services (`Ballistics`, `HeldItemInput`,
+  `ItemMagazine`) instead of overlaying vanilla weapons. Nothing here registers
+  gun assets any more: no `com.mineplus.fun.gunsmith` package, no `/gunsmith`
+  command, no `mineplusfun.admin.gunsmith` permission. See
+  [docs/migration-guide.md §5](../../docs/migration-guide.md) for the transition.
 - **alchemy** (`com.mineplus.fun.alchemy`): the pack **block** axis. An
   `alchemy_table` multiblock whose level declares `renderBackend: pack` +
   `renderKind: block`, rendered as one `BlockDisplay` carrying an allocated

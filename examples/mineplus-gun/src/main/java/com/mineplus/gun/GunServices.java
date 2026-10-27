@@ -1,8 +1,6 @@
 package com.mineplus.gun;
 
 import com.mineplus.gun.config.GunConfig;
-import com.mineplus.gun.fx.ParticleFx;
-import com.mineplus.gun.fx.SoundFx;
 import com.mineplus.gun.hud.AmmoHud;
 import com.mineplus.gun.runtime.GunRuntime;
 import com.mineplus.gun.shop.EconomyBridge;
@@ -10,11 +8,18 @@ import com.mineplus.gun.shop.ShopService;
 import com.mineplus.gun.weapon.WeaponItemFactory;
 import com.mineplus.gun.weapon.WeaponRegistry;
 import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.combat.Ballistics;
 
 /**
  * Shared, reloadable services of the module, wired once by the plugin main and
- * handed to each feature. Keeping the graph in one place lets every feature
- * stay small and lets reload swap the config/registry without re-wiring.
+ * handed to each feature.
+ *
+ * <p>Only what the module <em>owns</em> is held here: its config, its weapon
+ * registry and item factory, its HUD, its shop and its fire-flow state machine.
+ * Everything that is a server-wide runtime service — the projectile engine, the
+ * particle budget, held-item input routing, magazine persistence — is reached
+ * through the Core's {@link PluginContext}, so the module never keeps a second
+ * copy of a mechanism the Core already meters globally.
  */
 public final class GunServices implements ShopService.GunServicesProvider {
 
@@ -24,8 +29,6 @@ public final class GunServices implements ShopService.GunServicesProvider {
     private volatile GunConfig config;
     private volatile WeaponRegistry registry;
     private volatile WeaponItemFactory itemFactory;
-    private volatile ParticleFx particleFx;
-    private volatile SoundFx soundFx;
     private volatile AmmoHud ammoHud;
     private volatile EconomyBridge economy;
     private volatile ShopService shopService;
@@ -42,6 +45,11 @@ public final class GunServices implements ShopService.GunServicesProvider {
 
     public PluginContext context() {
         return context;
+    }
+
+    /** The Core's projectile engine — rounds, tracers, impacts and damage. */
+    public Ballistics ballistics() {
+        return context.ballistics();
     }
 
     public GunConfig config() {
@@ -66,22 +74,6 @@ public final class GunServices implements ShopService.GunServicesProvider {
 
     public void setItemFactory(WeaponItemFactory itemFactory) {
         this.itemFactory = itemFactory;
-    }
-
-    public ParticleFx particleFx() {
-        return particleFx;
-    }
-
-    public void setParticleFx(ParticleFx particleFx) {
-        this.particleFx = particleFx;
-    }
-
-    public SoundFx soundFx() {
-        return soundFx;
-    }
-
-    public void setSoundFx(SoundFx soundFx) {
-        this.soundFx = soundFx;
     }
 
     public AmmoHud ammoHud() {

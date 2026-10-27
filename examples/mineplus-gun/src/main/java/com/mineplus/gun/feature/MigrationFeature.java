@@ -108,14 +108,11 @@ public final class MigrationFeature extends ModuleFeature implements Listener {
                 continue;
             }
             ItemStack fresh = factory.create(replacement);
-            // Conserve identity and live rounds across the swap.
-            String uid = factory.readUid(stack);
-            if (uid != null && !uid.isBlank()) {
-                factory.writeUid(fresh, uid);
-            }
-            int rounds = factory.readAmmo(stack);
-            if (rounds >= 0 && replacement.usesAmmo()) {
-                factory.writeAmmo(fresh, Math.min(rounds, replacement.magazine()));
+            // Conserve identity and live rounds across the swap, both through
+            // the Core magazine so the migrated stack stays traceable.
+            factory.transferUid(stack, fresh);
+            if (replacement.usesAmmo()) {
+                factory.setRounds(fresh, factory.rounds(stack, replacement), replacement);
             }
             player.getInventory().setItem(slot, fresh);
             if (retired) {

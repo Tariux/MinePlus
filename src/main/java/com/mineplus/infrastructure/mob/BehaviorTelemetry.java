@@ -17,6 +17,7 @@ public final class BehaviorTelemetry {
     private final AtomicLong candidatesSeen = new AtomicLong();
     private final AtomicLong eventsFired = new AtomicLong();
     private final AtomicLong blockEdits = new AtomicLong();
+    private final AtomicLong entitySpawns = new AtomicLong();
     private final AtomicLong budgetDeferredRuns = new AtomicLong();
     private final Map<String, AtomicLong> firesByAction = new ConcurrentHashMap<>();
 
@@ -35,6 +36,10 @@ public final class BehaviorTelemetry {
 
     void blockEditDone() {
         blockEdits.incrementAndGet();
+    }
+
+    void entitySpawnDone() {
+        entitySpawns.incrementAndGet();
     }
 
     void budgetDeferred() {
@@ -57,6 +62,10 @@ public final class BehaviorTelemetry {
         return blockEdits.get();
     }
 
+    public long entitySpawns() {
+        return entitySpawns.get();
+    }
+
     public long budgetDeferredRuns() {
         return budgetDeferredRuns.get();
     }
@@ -75,6 +84,7 @@ public final class BehaviorTelemetry {
                 .append(", candidates=").append(candidatesSeen())
                 .append(", fired=").append(eventsFired())
                 .append(", edits=").append(blockEdits())
+                .append(", spawns=").append(entitySpawns())
                 .append(", deferred=").append(budgetDeferredRuns());
         Map<String, Long> fires = firesByAction();
         if (!fires.isEmpty()) {

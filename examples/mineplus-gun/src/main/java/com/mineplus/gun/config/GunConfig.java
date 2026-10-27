@@ -11,10 +11,14 @@ import org.bukkit.Material;
  * {@code config.yml}. Every value is clamped by {@link WeaponConfigLoader};
  * a bad value degrades to a documented default instead of disabling the
  * feature.
+ *
+ * <p>There is no ballistics envelope here on purpose: the round budget and the
+ * particle budgets are Core engine settings ({@code BALLISTICS} and
+ * {@code PARTICLE_FX} in {@code settings.mp.yml}), metered across every module
+ * on the server rather than negotiated between them.
  */
 public record GunConfig(
         Settings settings,
-        Ballistics ballistics,
         Ammo ammo,
         Economy economy,
         Shop shop,
@@ -78,13 +82,6 @@ public record GunConfig(
         /** True when gameplay is disabled in the given world. */
         public boolean worldDisabled(String worldName) {
             return worldName != null && disabledWorlds.contains(worldName.toLowerCase(Locale.ROOT));
-        }
-    }
-
-    public record Ballistics(int maxActiveBullets, int maxParticlesPerTick) {
-        public Ballistics {
-            maxActiveBullets = Math.max(1, Math.min(4096, maxActiveBullets));
-            maxParticlesPerTick = Math.max(0, Math.min(4096, maxParticlesPerTick));
         }
     }
 

@@ -17,7 +17,7 @@ plugins/Mineplus/
 
 Reload everything from game with `/mineplus reload all`.
 
-**Contents:** [Multiblock JSON](#1-multiblock-type-json) · [Recipe JSON](#2-machine-recipe-json) · [Models](#3-model-files-bbmodel) · [settings.mp.yml](#settingsmpyml-rendering-engine) · [Commands](#admin-command-reference)
+**Contents:** [Multiblock JSON](#1-multiblock-type-json) · [Recipe JSON](#2-machine-recipe-json) · [Models](#3-model-files-bbmodel) · [settings.mp.yml](#settingsmpyml-engine--runtime-services) · [Commands](#admin-command-reference)
 
 ---
 
@@ -51,7 +51,7 @@ Reload everything from game with `/mineplus reload all`.
 | `renderBackend` | `virtual` | Legacy backend axis: `virtual` \| `pack` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
 | `renderKind` | `model` | Legacy primitive axis: `model` \| `block`. Still fully supported; prefer `renderMode`. |
 
-> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-rendering-engine) and [Render Modes](developer-api.md#render-modes).
+> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
 
 ### Example
 
@@ -326,9 +326,9 @@ Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` list
 
 ---
 
-## `settings.mp.yml` (Rendering Engine)
+## `settings.mp.yml` (Engine & Runtime Services)
 
-Auto-generated on first start at `plugins/Mineplus/settings.mp.yml`. Controls the global bbmodel → BlockDisplay pipeline; per-model `.meta.json` overrides take precedence.
+Auto-generated on first start at `plugins/Mineplus/settings.mp.yml`. Controls the bbmodel → BlockDisplay rendering pipeline (per-model `.meta.json` overrides take precedence), the resource pack subsystem, and the shared runtime services — ballistics, particle budgets and the mob behavior engine.
 
 ```yaml
 # Toggle additional detailed debug logs across multiblock lifecycle,
@@ -418,6 +418,33 @@ PACK:
   # How pack display entities are lit: AUTO | NATURAL | EMISSIVE | FULLBRIGHT
   LIGHTING: AUTO
 
+# Combat services: the Core's simulated projectile engine and the particle
+# budgets that make gameplay legible. Both are shared by modules (guns,
+# throwables, machines firing rounds) so no module writes its own loop.
+BALLISTICS:
+  ENABLED: true
+  MAX_ACTIVE_ROUNDS: 128
+  TRACERS: true
+  INTERVAL_TICKS: 1
+
+PARTICLE_FX:
+  CRITICAL_PER_TICK: 96
+  AMBIENT_PER_TICK: 128
+  MAX_PER_EMIT: 32
+
+# Mob behavior engine: budgeted, distance-gated execution of entity behavior
+# profiles registered by modules. Lazy: costs nothing until a module
+# registers a profile.
+MOB_BEHAVIOR:
+  ENABLED: true
+  INTERVAL_TICKS: 3
+  STAGGER_BUCKETS: 4
+  SCAN_RADIUS_CHUNKS: 2
+  BUDGET_MILLIS_PER_RUN: 5
+  MAX_BLOCK_EDITS_PER_RUN: 96
+  MAX_ENTITY_SPAWNS_PER_RUN: 8
+  MAX_SUSTAINED_PER_RUN: 64
+
 ```
 
 | Key | Values | Effect |
@@ -461,6 +488,21 @@ PACK:
 | `PACK.CACHE.MAX_ARTIFACTS` | artifacts ≥ 1 | Generated `mp-<hash>.zip` artifacts kept before pruning (default 8; the current one is always pinned) |
 | `PACK.PACK_FORMAT_OVERRIDE` | format ≥ 1 | Non-zero pins `pack.mcmeta`'s `pack_format` when the built-in table lags a new release; the pack also declares a generous `supported_formats` range so newer clients accept it by default |
 | `PACK.LIGHTING` | `AUTO` / `NATURAL` / `EMISSIVE` / `FULLBRIGHT` | How pack display entities are lit (default `AUTO`): non-emissive models use natural world light; emissive models get block light = their max `light_emission` and sky 15. `NATURAL` never overrides (dark in caves), `EMISSIVE` always applies the model's emission, `FULLBRIGHT` is the legacy `(15, 15)` glow. Applies after restart |
+| `BALLISTICS.ENABLED` | `true` / `false` | Projectile engine master switch. `false` makes `Ballistics.fire` refuse, and the firing module owns the no-op path (never an exception) |
+| `BALLISTICS.MAX_ACTIVE_ROUNDS` | rounds 1-4096 | Rounds simulated concurrently (default 128). A shot fired over the cap degrades to one instant trace across its full range — same hit, same damage, no simulation backlog; counted in `degradedShots()` |
+| `BALLISTICS.TRACERS` | `true` / `false` | Draw the dashed tracer along each round's path (the AMBIENT particle channel) |
+| `BALLISTICS.INTERVAL_TICKS` | ticks 1-5 | Server ticks between simulation steps; `1` (default) is the finest a server-side renderer can update |
+| `PARTICLE_FX.CRITICAL_PER_TICK` | particles 0-4096 | Per-tick budget for confirmation effects (muzzle flash, impact). This channel is never starved by decoration (default 96) |
+| `PARTICLE_FX.AMBIENT_PER_TICK` | particles 0-4096 | Per-tick budget for decorative effects (tracers, smoke, rings) — the channel that degrades first under load (default 128). `0` disables it |
+| `PARTICLE_FX.MAX_PER_EMIT` | particles 1-256 | Ceiling a single emission request may spend (default 32) |
+| `MOB_BEHAVIOR.ENABLED` | `true` / `false` | Mob behavior engine master switch; `false` freezes the engine and leaves registered profiles intact |
+| `MOB_BEHAVIOR.INTERVAL_TICKS` | ticks 1-40 | Server ticks between engine runs (default 3) |
+| `MOB_BEHAVIOR.STAGGER_BUCKETS` | buckets 1-40 | Entities are hashed into buckets and only one bucket is eligible per run, spreading per-entity checks over time (default 4). With the alternating chunk parity, an entity is seen once every `2 × INTERVAL_TICKS × STAGGER_BUCKETS` ticks — the divisor behind every profile's declared `intervalSeconds` odds |
+| `MOB_BEHAVIOR.SCAN_RADIUS_CHUNKS` | chunks 1-8 | Chunk radius around each online player considered active (default 2) |
+| `MOB_BEHAVIOR.BUDGET_MILLIS_PER_RUN` | milliseconds ≥ 0 | Soft processing budget per run; excess entities are deferred to the next run rather than spiking the tick (default 5) |
+| `MOB_BEHAVIOR.MAX_BLOCK_EDITS_PER_RUN` | edits 0-4096 | Hard ceiling of world block changes per run (default 96) — also clamps every `openEditSession` grant a module asks for |
+| `MOB_BEHAVIOR.MAX_ENTITY_SPAWNS_PER_RUN` | spawns 0-256 | Hard ceiling of entities summoned per run (default 8). Mob scenarios summon minions, golems and horses; an unbounded summon is the one way this subsystem can flood a tick |
+| `MOB_BEHAVIOR.MAX_SUSTAINED_PER_RUN` | entities 0-512 | Cap on scenario-claimed entities the sustained sweep advances per run even with no player near them — journeys and camps tick on (default 64) |
 
 ---
 

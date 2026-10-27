@@ -157,8 +157,8 @@ start). Highlights, all editable:
 | Section | Key | Meaning |
 |---|---|---|
 | `settings.hud` | `mode` / `template` / `low-ammo-threshold` | `ACTIONBAR`/`BOSSBAR`/`OFF`, `{weapon} {mag} {reserve} {mode}` |
-| `settings` | `disabled-worlds`, `pvp-only`, `block-damage` | gameplay gating |
-| `ballistics` | `max-active-bullets`, `max-particles-per-tick` | global budgets; over-budget shots resolve as an instant trace |
+| `settings` | `language`, `disabled-worlds`, `pvp-only` | gameplay gating (a disabled world's guns behave as plain vanilla carriers) |
+| _not here_ | round budget, particle budgets | owned by the **Core** (`BALLISTICS.*` and `PARTICLE_FX.*` in `plugins/Mineplus/settings.mp.yml`), metered across every module that fires; over-budget shots resolve as an instant trace |
 | `economy` | `mode`, `price-multiplier`, `price-scale` | `VAULT`/`FREE`, price scaling |
 | `shop` | `title`, `rows`, `admin-bypass-payment` | GUI and bypass |
 | `weapons.<id>` | `model`, `type`, `backing-material`, `price`, `ammo`, `ballistics`, `fire`, `aim`, `fx`, `grenade`, `melee` | one entry per weapon |

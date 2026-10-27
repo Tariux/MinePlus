@@ -65,7 +65,6 @@ public final class WeaponFeature extends ModuleFeature {
         services.setConfig(config);
         services.registry().reload(config.weapons());
         services.ammoHud().setConfig(config);
-        services.particleFx().updateBudget(config.ballistics().maxParticlesPerTick());
         installFrames();
         registerItems();
     }

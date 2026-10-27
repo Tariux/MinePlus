@@ -43,6 +43,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Occlusion tests** in texel baking gain a per-cube bounding-box pre-filter
   before the oriented-box test; results are unchanged, only faster.
 
+### Core engine (`Mineplus`) — Combat & mob behavior services
+
+#### Added
+
+- **Core projectile simulation** — `infrastructure.combat.Ballistics` steps every
+  live round once per `BALLISTICS.INTERVAL_TICKS`, applying spread, gravity,
+  drag, distance falloff, penetration, ricochet, headshot multipliers and the
+  profile's own tracer/impact FX through `ParticleFx`; over
+  `MAX_ACTIVE_ROUNDS` a shot degrades to a single instant trace (same hit, same
+  damage) instead of queueing, counted in `degradedShots()`. Authored through
+  `BallisticProfile.builder()` (tolerant particle and sound names) and observed
+  through `ProjectileHandler`, whose default methods make a plain gun a
+  zero-callback call. Reachable from every context: `PluginContext.ballistics()`.
+- **`DamageTransactions`** — the damage-attribution seam for module-computed
+  hits (melee, throwables): `apply(victim, amount, attacker)` plus
+  `inProgress()`/`isTransaction(event)` so a module's own listener never
+  double-counts or zeroes the hit it just made.
+- **`HeldItemInput`** — one shared held-item listener set for the whole server:
+  modules attach a `HeldItemHandler` (`owns`, `owns(stack, holder)`, `onPress`,
+  `onRelease`, `onSwapHands`, `suppressVanillaMelee`, `freezeVanillaInteractions`)
+  instead of registering their own `PlayerInteractEvent` handlers. It routes
+  presses across both hands, swallows the vanilla swing, and freezes
+  place/mine/trade/ride while an owned item is held — per player, so a disabled
+  world or opt-out leaves the carrier fully vanilla. `PluginContext.heldItemInput()`.
+- **`ItemMagazine` / `ItemState`** — countable item state (rounds) held in memory
+  while the stack is in hand and flushed as one silent PDC write when it leaves,
+  keyed by a per-stack identity tag so a magazine survives slot re-ordering,
+  off-hand hops and re-logs. Rewriting a held stack per shot is what makes the
+  client replay the equip animation and receive slot spam 20×/s; the deferred
+  model removes that entirely.
+- **`MobEditSession` spawn budget** — the world-work grant now carries entity
+  spawns as well as block edits (`spawnMob`, `hasSpawnBudget`,
+  `openEditSession(editBudget, spawnBudget)`), both clamped to
+  `MOB_BEHAVIOR.MAX_BLOCK_EDITS_PER_RUN` / `MAX_ENTITY_SPAWNS_PER_RUN`, so a
+  staged build that outlives its evaluation cannot write or populate outside the
+  subsystem's limits.
+- **Generic sensing conditions** — `BehaviorContext.Conditions.belowHealth`,
+  `nearbyEntity(radius, matcher)` and `visibleEntity(radius, matcher)`, so
+  module gates compose Core primitives instead of re-scanning entity lists.
+
+#### Changed
+
+- **Journey night rest is cohesion-first** — `JourneyToStructureAction` walks
+  stragglers back to the crew focus *before* halting the crew for the night, and
+  `Callbacks.onNight` now returns `boolean`: returning `false` (e.g. the edit
+  budget refused a write) retries inside the same night instead of burning it.
+
+### Modules (`mineplus-gun`, `mineplus-mobfun`)
+
+#### Fixed
+
+- **Gun shots had no feedback or damage** — the shipped module jar predated the
+  `BulletSimulator` source, so the build never compiled the firing path: the shot
+  consumed a round and updated the HUD while particles, impact and crosshair
+  damage silently never ran. Firing is now the Core's `Ballistics`, the input
+  seam is the Core's `HeldItemInput`, and ammo is a Core `ItemMagazine`.
+- **Pilgrim villagers never reached a distant village** — the module's hand-rolled
+  `JourneyAction` commanded movement through an `instanceof Pathfinder` cast that
+  is never true for a villager entity, so nothing was ever pathed; and villagers
+  camping at night were scattered because each halted where it stood. The
+  showcase now runs on the Core's `JourneyToStructureAction` +
+  `JourneyRunner`/`MobCrewService`, with the module keeping only the camp and
+  celebration content (`PilgrimCamp`).
+- **Scenario conflicts** — the four villager profiles (lamplighter, two golem
+  builders, pilgrim) could steer the same mob at once. Journeys now hold an
+  exclusive anchored activity claim, builders tag themselves so they are never
+  marched away, and summoning scenarios are leashed to their own area.
+
+#### Added
+
+- Core-surface migration in both modules: `ParticleFx`/`Sounds` for feedback,
+  `Conditions` for gates, `openEditSession`/`trySpawn` for world work,
+  `journeySnapshot()`/`crewSnapshot()`/`activeActivity()` in `/mobfun status`.
+
 ### Texel devtool (`devtools/texel`)
 
 #### Added

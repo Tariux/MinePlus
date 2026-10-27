@@ -20,6 +20,13 @@ import org.bukkit.configuration.file.FileConfiguration;
  *                            the engine defers remaining entities to the next
  *                            run once exceeded
  * @param maxBlockEditsPerRun hard ceiling of world block changes per run
+ * @param maxEntitySpawnsPerRun hard ceiling of entities spawned per run — mob
+ *                            actions summon minions and golems, and an
+ *                            unbounded spawn is the one way this subsystem can
+ *                            flood the tick
+ * @param maxSustainedPerRun  cap on activity-claimed entities the sustained
+ *                            sweep advances per run (journeys and camps tick
+ *                            even when no player is near them)
  */
 public record MobBehaviorSettings(
         boolean enabled,
@@ -27,18 +34,27 @@ public record MobBehaviorSettings(
         int staggerBuckets,
         int scanRadiusChunks,
         long budgetMillisPerRun,
-        int maxBlockEditsPerRun
+        int maxBlockEditsPerRun,
+        int maxEntitySpawnsPerRun,
+        int maxSustainedPerRun
 ) {
 
     public static MobBehaviorSettings defaults() {
-        return new MobBehaviorSettings(true, 3, 4, 2, 5L, 96);
+        return new MobBehaviorSettings(true, 3, 4, 2, 5L, 96, 8, 64);
     }
 
-    /** Entity evaluation opportunities per second after staggering. */
+    /**
+     * Entity evaluation opportunities per second. Two things thin the raw run
+     * rate: only half the chunks are swept per run (alternating parity), and
+     * only one stagger bucket per run is eligible — so an entity is seen once
+     * every {@code 2 * intervalTicks * staggerBuckets} ticks. The odds gate has
+     * to divide by the same number or every declared interval would silently be
+     * twice as long as configured.
+     */
     public double checksPerSecond() {
         int interval = Math.max(1, intervalTicks);
         int buckets = Math.max(1, staggerBuckets);
-        return (20.0 / interval) / buckets;
+        return 20.0 / (2.0 * interval * buckets);
     }
 
     public static MobBehaviorSettings parse(FileConfiguration yaml, MobBehaviorSettings fallback) {
@@ -53,7 +69,9 @@ public record MobBehaviorSettings(
                 clamp(section.getInt("STAGGER_BUCKETS", defaults.staggerBuckets()), 1, 40),
                 clamp(section.getInt("SCAN_RADIUS_CHUNKS", defaults.scanRadiusChunks()), 1, 8),
                 Math.max(0L, section.getLong("BUDGET_MILLIS_PER_RUN", defaults.budgetMillisPerRun())),
-                clamp(section.getInt("MAX_BLOCK_EDITS_PER_RUN", defaults.maxBlockEditsPerRun()), 0, 4096)
+                clamp(section.getInt("MAX_BLOCK_EDITS_PER_RUN", defaults.maxBlockEditsPerRun()), 0, 4096),
+                clamp(section.getInt("MAX_ENTITY_SPAWNS_PER_RUN", defaults.maxEntitySpawnsPerRun()), 0, 256),
+                clamp(section.getInt("MAX_SUSTAINED_PER_RUN", defaults.maxSustainedPerRun()), 0, 512)
         );
     }
 

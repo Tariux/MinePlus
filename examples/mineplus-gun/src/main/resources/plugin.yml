@@ -9,9 +9,10 @@ website: https://github.com/Tariux/MinePlus
 # Hard dependency: the Core engine must be present and enabled first.
 depend: [Mineplus]
 
-# Both optional. Vault powers the shop economy; packetevents enables true
-# hold-to-fire input. The module runs (with graceful fallbacks) when absent.
-softdepend: [Vault, packetevents]
+# Optional: Vault powers the shop economy. The module runs (weapons still
+# deliver free) when it is absent. Input, ballistics, effects and magazine
+# persistence all come from the Core, so nothing else is soft-depended on.
+softdepend: [Vault]
 
 # Commands are registered programmatically: /mpgun through ModuleSupport and
 # /mineplus gun through the Core router. Declaring them here would make the

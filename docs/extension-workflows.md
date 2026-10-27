@@ -9,6 +9,8 @@ Pick the workflow that matches your role. Each one references working sample fil
 | **[A — JSON-Only](#a-json-only-servers-no-coding)** | Server operator | Zero coding |
 | **[B — Basic Add-on](#b-basic-add-on-developers)** | Light plugin dev | Place/remove/query only |
 | **[C — Advanced Framework](#c-advanced-framework-developers)** | Framework dev | Hooks, GUIs, signals, processes |
+| **[D — Combat Module](#d-combat-modules)** | Gameplay dev | Weapons, projectiles, held-item state |
+| **[E — Smart-Mob Module](#e-smart-mob-modules)** | Gameplay dev | Entity behavior, journeys, groups |
 | **[Runtime Administration](#runtime-administration)** | Admin | Live server control |
 
 ---
@@ -89,6 +91,40 @@ The canonical module is [`examples/mineplus-fun`](../examples/mineplus-fun/READM
 For the full module-building recipe (project layout, resource installation, hook wiring, API traps to avoid), read [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md) — it is the standard onboarding document for new module work.
 
 > 📁 **Code samples:** [`examples/code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) • [`examples/hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) (JSON data + code behavior combined)
+
+---
+
+## D) Combat Modules
+
+A weapon module ships definitions and presentation; the Core owns the shot. Same module shape as workflow C, with these four seams:
+
+1. **Define the round** — build a `BallisticProfile` per weapon (damage, velocity, gravity/drag, range, spread, pellet count, falloff, penetration, ricochet, headshot, particles, sounds). Keep it derivable from your config so a balance tweak is a file edit.
+2. **Own the item** — implement `HeldItemInput.HeldItemHandler` (`owns`, `onPress`, `onRelease`, `onSwapHands`) and attach it once: `context.heldItemInput().addHandler(runtime)`. Do not register your own `PlayerInteractEvent` listener for the same items — the Core seam routes presses, suppresses the vanilla swing and freezes place/mine/trade while the item is held.
+3. **Fire it** — on a press, spend a round and call `context.ballistics().fireWeapon(player, origin, aim, profile, handler)`. Return value is the number of rounds launched, so `0` is your own dry/no-op path.
+4. **Track the ammo** — `ItemMagazine.open(stack, capacity)` gives a live count; `spend()`/`add()`/`refill()` it in memory and `flush(player, live)` when the stack leaves the hand. Never rewrite the held stack per shot.
+
+Damage the Core's ballistics applies needs nothing from you (`ProjectileHandler.STANDARD`); damage you compute yourself (melee, explosions) goes through `DamageTransactions.apply(victim, amount, attacker)` so your own listener does not double-count it.
+
+> 📁 **Working module:** [`examples/mineplus-gun`](../examples/mineplus-gun/README.md) — firearms, melee, grenades, reload frame animation, scopes and a Vault shop.
+>
+> 📖 **API detail:** [Combat Services](developer-api.md#combat-services)
+
+---
+
+## E) Smart-Mob Modules
+
+Behavior profiles, not listeners. One `MobProfile` per entity type, registered on the main thread at enable and released with `unregisterAll(this)` at disable:
+
+1. **Pick the actions** — use a bundled one (`EatPlantsAction`, `GrowPlantsAction`, `PlantSaplingAction`, `TorchPlaceAction`, `JourneyToStructureAction`) or implement `BehaviorAction` for module-specific content.
+2. **Set the pace** — `action(myAction, intervalSeconds)`; the engine turns that into the reference-mod odds `1/(intervalSeconds × checksPerSecond)`, so declare the interval you want observed, not a tick count.
+3. **Gate the situation** — compose `BehaviorContext.Conditions` (`adultOnly`, `maxBlockLight`, `belowHealth`, `nearbyEntity`, `visibleEntity`) instead of writing your own entity scans.
+4. **Work through the context** — `trySetBlock` / `tryBreak` / `trySpawn`, `navigateTo`, `claimActivity`, `joinCrew`, `advanceJourney`, `nearestStructure`. Everything is budgeted and confined: a claim with an anchor keeps the mob inside the area it belongs to and stops two profiles steering the same entity.
+5. **Write back only what must survive a restart** — PDC for a builder tag or a summon cooldown; journeys, crews and activity claims are runtime state owned by the engine.
+6. **Test it** — `/mineplus`-side: `forceFire(plugin, entity, true)` returns a per-action `BehaviorFireResult`; the mob-side: `journeySnapshot()` / `crewSnapshot()` / `telemetrySummary()`.
+
+> 📁 **Working module:** [`examples/mineplus-mobfun`](../examples/mineplus-mobfun/README.md) — grazers, reforesting pig, lamplighter villager, florist bee, iron/snow golem builders, a necromancer witch with a terrain-adaptive minion horde, and pilgrim villagers that march to the nearest village and camp overnight. Its `/mobfun spawn|fire|status|despawn` bench is the pattern for testing behavior without waiting for the odds.
+>
+> 📖 **API detail:** [Mob Behavior API](developer-api.md#mob-behavior-api)
 
 ---
 

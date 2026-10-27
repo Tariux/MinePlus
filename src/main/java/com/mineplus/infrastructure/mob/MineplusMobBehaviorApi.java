@@ -1,5 +1,7 @@
 package com.mineplus.infrastructure.mob;
 
+import com.mineplus.infrastructure.mob.journey.JourneyRunner;
+import com.mineplus.infrastructure.mob.journey.StructureLookup;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
@@ -57,8 +59,53 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
     }
 
     @Override
+    public String activeActivity(LivingEntity entity) {
+        return engine.activityIdOf(entity);
+    }
+
+    @Override
+    public boolean clearActivity(LivingEntity entity, String actionId) {
+        requireMainThread();
+        return engine.releaseActivity(entity, actionId);
+    }
+
+    @Override
     public String telemetrySummary() {
-        return engine.telemetry().summary() + "\nregistered types=" + engine.profileTypeCount();
+        return engine.telemetry().summary() + "\nregistered types=" + engine.profileTypeCount()
+                + "\njourneys=" + engine.journeys().activeCount()
+                + ", crews=" + engine.crews().activeCount()
+                + ", cached regions=" + engine.structures().cachedRegions();
+    }
+
+    @Override
+    public JourneyRunner journeys() {
+        return engine.journeys();
+    }
+
+    @Override
+    public StructureLookup structures() {
+        return engine.structures();
+    }
+
+    @Override
+    public com.mineplus.infrastructure.mob.group.MobCrewService crews() {
+        return engine.crews();
+    }
+
+    @Override
+    public java.util.List<String> journeySnapshot(int maxLines) {
+        return engine.journeys().snapshot(maxLines);
+    }
+
+    @Override
+    public java.util.List<String> crewSnapshot(int maxLines) {
+        return engine.crews().snapshot(maxLines);
+    }
+
+    @Override
+    public MobEditSession openEditSession(int editBudget, int spawnBudget) {
+        requireMainThread();
+        return engine.openEditSession(editBudget, spawnBudget);
     }
 
     @Override

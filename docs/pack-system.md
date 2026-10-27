@@ -3,7 +3,7 @@
 Mineplus' second rendering axis: rich custom content — custom items, custom
 block/item models, textures — through a **generated resource pack**, with **no
 client mod required** and **zero impact on vanilla content**. It is a peer of
-the packless [virtual rendering engine](config-reference.md#settingsmpyml-rendering-engine);
+the packless [virtual rendering engine](config-reference.md#settingsmpyml-engine--runtime-services);
 both run side by side, and neither touches the other's internals.
 
 ```
@@ -313,13 +313,16 @@ accepted and maps to `pack_block`; new content should use `renderMode`.
 /mineplus pack status            # subsystem, artifact, asset + player state summary
 /mineplus pack recompile         # explicit recompile (async, reports the artifact)
 /mineplus pack push <player>     # deliver the current pack to one player
-npm run pack                     # (repository) build the manual gun-overlay pack zip
+npm run pack                     # (repository) build the MineplusGun assets as a manual zip
 ```
 
-`npm run pack` assembles `examples/mineplus-fun`'s `defaults/pack/gun/` tree
-into `dist/mineplus-resource-pack.zip` — a ready-to-use, deterministic pack
-for hand distribution when the LOCAL endpoint is unreachable (firewalled
-hosts, proxies). `--format <n>` pins `pack_format` (default 34 = 1.21.1;
+`npm run pack` assembles the `examples/mineplus-gun` module resources — framed
+weapon models, item textures, sounds and `sounds.json` — into
+`dist/mineplus-resource-pack.zip` under the module's own `mineplusgun`
+namespace. It is a convenience for hand distribution when the LOCAL endpoint is
+unreachable (firewalled hosts, proxies); the **Core artifact is always the
+complete pack**, because every module registers its assets into the same
+`PackAssetRegistry`. `--format <n>` pins `pack_format` (default 34 = 1.21.1;
 the `supported_formats` ceiling keeps newer clients accepting it). Drop the
 zip into a client's `resourcepacks` folder or host it and point
 `resource-pack=` at it.
@@ -357,17 +360,19 @@ zip into a client's `resourcepacks` folder or host it and point
 - **Pack-format table** lags new Minecraft releases; the emitted
   `supported_formats` range keeps newer clients accepting the pack anyway, and
   `PACK_FORMAT_OVERRIDE` pins the exact `pack_format` when needed.
-- **Vanilla overlay raw assets** (the Gunsmith tree) re-skin the overlaid
-  items' *looks only*. Modern clients (1.21.4+) resolve the overlay through
-  the tree's `items/*.json` definitions; older clients (1.21–1.21.3)
-  resolve the same pistol/rifle models through `custom_model_data`
-  predicate overrides in the shipped vanilla-replica
-  `models/item/bow.json` / `models/item/crossbow.json` host files (value 1,
-  stamped on the test rig by `/gunsmith give` — unset vanilla items stay
-  vanilla on every version). No vanilla sound or projectile texture is
-  overridden: the tree's `sounds.json` registers only the additive
-  `minecraft:gun.fire` event, played explicitly by the Gunsmith firing
-  runtime (a hitscan — no arrow is ever launched).
+- **Vanilla-namespace raw assets are an escape hatch, not a feature path.**
+  `registerRawAsset("minecraft", …)` overwrites the client's own files, so any
+  model it redirects (`items/*.json` on 1.21.4+, `models/item/*.json` predicate
+  host files on 1.21–1.21.3) re-skins *looks only* and silently conflicts with
+  other packs that touch the same vanilla item. `ItemFrames` /
+  `PackItemDefinition.frameStackValue(...)` give the same multi-frame
+  appearance additively — one `custom_model_data` predicate per frame state on
+  legacy clients, a distinct `item_model` on modern ones — with no vanilla file
+  touched, which is why the MineplusGun module registers framed items in its
+  own `mineplusgun` namespace instead of overlaying `bow`/`crossbow`
+  ([migration guide §5](migration-guide.md)). If you do ship a raw vanilla
+  overlay, keep sounds additive (a new event in your own `sounds.json` entry,
+  never a replaced vanilla one) and expect to resolve conflicts yourself.
 - **Pack-driven animation**: pack world objects reuse the existing animation
   architecture's pose pipeline where bindings apply, but client-side
   predicate/item-model animation (ModelEngine-style rigs) is future work — the

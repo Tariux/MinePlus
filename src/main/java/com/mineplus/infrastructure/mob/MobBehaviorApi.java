@@ -1,5 +1,7 @@
 package com.mineplus.infrastructure.mob;
 
+import com.mineplus.infrastructure.mob.journey.JourneyRunner;
+import com.mineplus.infrastructure.mob.journey.StructureLookup;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
 
@@ -55,9 +57,65 @@ public interface MobBehaviorApi {
     /** The active engine settings. */
     MobBehaviorSettings settings();
 
-    /** Telemetry summary (runs, fired events, per-action counts, deferrals). */
+    /**
+     * The action id of the entity's current exclusive activity claim, or
+     * {@code null}. While a claim is live, only the owning action runs on the
+     * entity and every other action of any module skips it.
+     */
+    String activeActivity(LivingEntity entity);
+
+    /**
+     * Ends the entity's activity claim when it is owned by {@code actionId};
+     * {@code true} when the claim was dropped.
+     */
+    boolean clearActivity(LivingEntity entity, String actionId);
+
+    /**
+     * Telemetry summary (runs, fired events, per-action counts, edits, spawns,
+     * deferrals).
+     */
     String telemetrySummary();
 
-    /** Stops the run task. Called by the Core's disable path; idempotent. */
+    // ------------------------------------------------------------------
+    // Shared scenario services (the primitives a showcase re-implements badly)
+    // ------------------------------------------------------------------
+
+    /**
+     * The engine's long-walk runner. Actions normally go through
+     * {@link BehaviorContext#advanceJourney}; this is for scheduled module tasks
+     * that drive a mob between engine runs.
+     */
+    JourneyRunner journeys();
+
+    /** The engine's cached, cost-gated structure discovery. */
+    StructureLookup structures();
+
+    /** The engine's crew (group-movement) registry. */
+    com.mineplus.infrastructure.mob.group.MobCrewService crews();
+
+    /** One line per live journey, for status commands. */
+    java.util.List<String> journeySnapshot(int maxLines);
+
+    /** One line per live crew, for status commands. */
+    java.util.List<String> crewSnapshot(int maxLines);
+
+    /**
+     * A bounded world-write allowance for a scenario that keeps building after
+     * the evaluation that started it (a tower raised block by block over
+     * scheduled ticks). The grant is capped by the engine's per-run edit limit —
+     * asking for more does not earn more. Main thread only.
+     */
+    default MobEditSession openEditSession(int editBudget) {
+        return openEditSession(editBudget, 0);
+    }
+
+    /**
+     * The same allowance with a summon allowance attached, for a scenario whose
+     * scheduled work ends in an entity (the golem a column becomes). Both
+     * budgets are capped by the engine's per-run limits.
+     */
+    MobEditSession openEditSession(int editBudget, int spawnBudget);
+
+    /** Stops the engine run loop and releases every claim. Idempotent. */
     void shutdown();
 }

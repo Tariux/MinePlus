@@ -3,45 +3,60 @@ package com.mineplus.gun.runtime;
 import com.mineplus.gun.GunServices;
 import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.diag.PressTrace;
-import com.mineplus.gun.input.InputAdapter;
 import com.mineplus.gun.weapon.WeaponDefinition;
+import com.mineplus.gun.weapon.WeaponItemFactory;
+import com.mineplus.infrastructure.combat.BallisticProfile;
+import com.mineplus.infrastructure.combat.DamageTransactions;
+import com.mineplus.infrastructure.combat.ProjectileHandler;
+import com.mineplus.infrastructure.combat.ProjectileHit;
+import com.mineplus.infrastructure.fx.Sounds;
+import com.mineplus.infrastructure.input.HeldItemInput;
+import com.mineplus.infrastructure.registry.ItemMagazine;
 import com.mineplus.pack.item.ItemFrameWriter;
 import com.mineplus.pack.item.ItemFrames;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
 /**
- * The per-player fire-flow state machine. One repeating task drives every
- * active shooter and every simulated bullet â€” never one task per bullet or
- * per weapon.
+ * The per-player fire-flow state machine.
+ *
+ * <p>What this class owns is only the part no server can own generically: the
+ * trigger gesture (hold-to-fire, re-press gating, burst counting, scope hold),
+ * the reload economy against the player's nugget supply, the weapon frame
+ * progression, and the action-bar HUD cadence. Everything else is Core
+ * infrastructure reached through the services —
+ * {@link HeldItemInput} delivers the press (including the one aimed at an
+ * entity, which never reaches a plain {@code PlayerInteractEvent}),
+ * {@link com.mineplus.infrastructure.combat.Ballistics} simulates the round and
+ * lands its damage transactionally, {@link ItemMagazine} meters the rounds, and
+ * {@link com.mineplus.infrastructure.fx.Sounds} emits the report without ever
+ * letting an unresolvable custom event unwind the shot.
  *
  * <p><b>Controls.</b> Right-click is the one and only trigger (hold for AUTO);
- * left-click is inert; swapping hands reloads â€” pulling the needed rounds out
- * of the shooter's gold-nugget supply.</p>
+ * left-click is inert; swapping hands reloads — pulling the needed rounds out
+ * of the shooter's gold-nugget supply.
  *
- * <p><b>Frames.</b> A framed weapon (Western pack visuals) animates through
- * its reload frames during the reload and settles on its loaded state while
- * rounds remain. Frame switches perform one slot update each, so a frame is
- * only written when it actually changes.</p>
+ * <p><b>Frames.</b> A framed weapon animates through its reload frames during
+ * the reload and settles on its loaded state while rounds remain; a frame is
+ * only written when it actually changes, because every write is a slot update
+ * to the client.
  *
- * <p>Ammunition is authoritative in memory while a weapon is in use and is
- * flushed back to the stack's PDC when it leaves the shooter's hand, so the
- * held ItemStack is never rewritten per shot (which would replay the client's
- * item-swap equip animation).</p>
+ * <p><b>Threading.</b> All input callbacks and the one repeating task run on the
+ * main thread.
  */
-public final class GunRuntime implements InputAdapter.Listener {
+public final class GunRuntime implements HeldItemInput.HeldItemHandler {
 
     /** Ticks without a trigger repeat before automatic fire / scoping stops. */
     private static final long AUTO_RELEASE_TICKS = 8L;
@@ -55,21 +70,20 @@ public final class GunRuntime implements InputAdapter.Listener {
     /** Minimum ticks between reload frame switches (avoids client equip strobe). */
     private static final int RELOAD_FRAME_HOLD_TICKS = 8;
 
+    /** Pitch of the hit marker the shooter gets for a landed round. */
+    private static final String HIT_MARKER_SOUND = "block.note_block.hat";
+
     private final JavaPlugin plugin;
     private final GunServices services;
-    private final AmmoModel ammo;
-    private final BulletSimulator simulator;
 
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
+    private final ProjectileHandler projectileHandler = new GunRounds();
     private BukkitTask task;
     private long tick;
 
-    public GunRuntime(JavaPlugin plugin, GunServices services, AmmoModel ammo,
-                      BulletSimulator simulator) {
+    public GunRuntime(JavaPlugin plugin, GunServices services) {
         this.plugin = plugin;
         this.services = services;
-        this.ammo = ammo;
-        this.simulator = simulator;
     }
 
     public void start() {
@@ -79,114 +93,116 @@ public final class GunRuntime implements InputAdapter.Listener {
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
+    /** Flushes every live magazine and stops the loop. Idempotent. */
     public void stop() {
         if (task != null) {
             task.cancel();
             task = null;
         }
-        for (Session session : sessions.values()) {
-            flushMagazine(session);
+        for (Map.Entry<UUID, Session> entry : sessions.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null) {
+                flushMagazine(player, entry.getValue());
+            }
         }
         sessions.clear();
-        simulator.clear();
     }
 
     // ------------------------------------------------------------------
-    // InputAdapter.Listener
+    // HeldItemInput.HeldItemHandler
     // ------------------------------------------------------------------
 
     @Override
-    public boolean isWeapon(ItemStack stack) {
+    public boolean owns(ItemStack stack) {
         return resolve(stack) != null;
     }
 
     /**
+     * A weapon in a disabled world is not owned <em>for that holder</em>: the
+     * Core then stops routing its presses and stops freezing its vanilla
+     * behavior, so the item is exactly the vanilla carrier it always was.
+     */
+    @Override
+    public boolean owns(ItemStack stack, Player holder) {
+        return owns(stack) && enabledIn(holder);
+    }
+
+    /** {@code true} when gun gameplay runs in the shooter's world. */
+    private boolean enabledIn(Player player) {
+        GunConfig config = services.config();
+        return config == null || player.getWorld() == null
+                || !config.settings().worldDisabled(player.getWorld().getName());
+    }
+
+    /**
      * Right-click is the one and only trigger: firearms fire (hold to keep
-     * firing â€” the client repeats the use packet while the button is held),
+     * firing — the client repeats the use packet while the button is held),
      * scoped weapons tighten their spread while held, melee swings. Left-click
-     * is frozen by the input adapter because firing from it would replay the
+     * is frozen by the input service because firing from it would replay the
      * client's arm-punch animation on every shot.
      */
     @Override
     public boolean onPress(Player player, ItemStack stack) {
         WeaponDefinition weapon = resolve(stack);
-        if (weapon == null || disabled(player)) {
-            PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "press"),
-                    "[MineplusGun] press by " + player.getName() + ": REJECTED ("
-                            + (weapon == null ? "unresolved weapon" : "world disabled")
-                            + ", item=" + stack.getType() + ")");
+        if (weapon == null) {
             return false;
-        }
-        boolean created;
-        Session session = sessions.get(player.getUniqueId());
-        if (session == null) {
-            session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
-            created = true;
-        } else {
-            created = false;
-        }
-        String previousId = session.weaponId;
-        session.weaponId = weapon.id();
-        String sessionNote;
-        if (created) {
-            sessionNote = "new";
-        } else if (previousId.equals(weapon.id())) {
-            sessionNote = "existing";
-        } else {
-            sessionNote = "existing (was " + (previousId.isEmpty() ? "none" : previousId) + ")";
-        }
-        PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "press"),
-                "[MineplusGun] press by " + player.getName() + ": weapon=" + weapon.id() + " mode="
-                        + weapon.fireMode() + " session=" + sessionNote + " cmd="
-                        + com.mineplus.pack.item.ItemFrameWriter.read(stack) + " pdcRounds="
-                        + ammo.rounds(stack, weapon));
-        switch (weapon.fireMode()) {
-            case MELEE -> {
-                if (tick >= session.nextShotTick) {
-                    meleeAttack(player, weapon);
-                    session.nextShotTick = tick + weapon.shotIntervalTicks();
-                }
-            }
-            default -> trigger(player, session, weapon, stack);
-        }
-        return true; // Cancel vanilla action for our weapons
-    }
-
-    @Override
-    public void onRelease(Player player) {
-        Session session = sessions.get(player.getUniqueId());
-        if (session != null) {
-            session.firing = false;
-            session.burstRemaining = 0;
-        }
-    }
-
-    /**
-     * Left-click is deliberately inert for our weapons: firing from it would
-     * replay the client's arm-punch animation on every shot. Every action lives
-     * on right-click.
-     */
-    @Override
-    public void onSwing(Player player, ItemStack stack) {
-        // Intentionally empty.
-    }
-
-    @Override
-    public void onReload(Player player, ItemStack stack) {
-        WeaponDefinition weapon = resolve(stack);
-        if (weapon == null || !weapon.usesAmmo() || disabled(player)) {
-            return;
         }
         Session session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
         session.weaponId = weapon.id();
-        startReload(player, session, weapon, stack);
+        PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "press"),
+                "[MineplusGun] press by " + player.getName() + ": weapon=" + weapon.id()
+                        + " mode=" + weapon.fireMode());
+        if (weapon.isMelee()) {
+            if (tick >= session.nextShotTick) {
+                meleeAttack(player, weapon);
+                session.nextShotTick = tick + weapon.shotIntervalTicks();
+            }
+            return true;
+        }
+        trigger(player, session, weapon, stack);
+        return true;
     }
 
+    /**
+     * The item left the hand: stop the trigger and persist the live magazine,
+     * which is exactly the moment the Core's deferred write is designed for.
+     */
     @Override
-    public boolean onAttack(Player player, ItemStack stack) {
-        // Cancel vanilla melee damage for ALL weapons; melee is our arc sweep and
-        // firearms replace the punch with the simulated round.
-        return resolve(stack) != null;
+    public void onRelease(Player player) {
+        Session session = sessions.get(player.getUniqueId());
+        if (session == null) {
+            return;
+        }
+        session.firing = false;
+        session.burstRemaining = 0;
+        if (!session.weaponId.isEmpty()) {
+            flushMagazine(player, session);
+            session.resetTransient();
+            session.weaponId = "";
+        }
+    }
+
+    /** Swap-hands is the reload gesture; it is consumed whenever a reload can run. */
+    @Override
+    public boolean onSwapHands(Player player, ItemStack stack) {
+        WeaponDefinition weapon = resolve(stack);
+        if (weapon == null || !weapon.usesAmmo()) {
+            return false;
+        }
+        Session session = sessions.computeIfAbsent(player.getUniqueId(), Session::new);
+        session.weaponId = weapon.id();
+        return startReload(player, session, weapon, stack);
+    }
+
+    /**
+     * Vanilla melee never lands with a gun in hand: a firearm replaces the
+     * punch with its round, and a blade replaces it with the arc sweep. The
+     * module's own damage calls are unaffected — the Core's suppression listener
+     * stands down while a {@link DamageTransactions} is in progress.
+     */
+    @Override
+    public boolean suppressVanillaMelee(Player attacker, EntityDamageByEntityEvent event) {
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -201,8 +217,8 @@ public final class GunRuntime implements InputAdapter.Listener {
      * weapon scopes while the trigger repeats and unscopes when they stop.
      */
     private void trigger(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
-        long gap = tick - session.lastSwingTick;
-        session.lastSwingTick = tick;
+        long gap = tick - session.lastTriggerTick;
+        session.lastTriggerTick = tick;
         if (weapon.scope()) {
             session.scoping = true;
         }
@@ -223,8 +239,8 @@ public final class GunRuntime implements InputAdapter.Listener {
             }
             default -> {
                 if (tick < session.nextShotTick) {
-                    PressTrace.debug("[MineplusGun] trigger suppressed (cooldown, " + (session.nextShotTick - tick)
-                            + " ticks left) for " + player.getName());
+                    PressTrace.debug("[MineplusGun] trigger suppressed (cooldown, "
+                            + (session.nextShotTick - tick) + " ticks left) for " + player.getName());
                     return;
                 }
                 if (gap <= SEMI_REPRESS_TICKS) {
@@ -253,9 +269,6 @@ public final class GunRuntime implements InputAdapter.Listener {
 
     private void tick() {
         tick++;
-        services.particleFx().beginTick();
-        simulator.tick();
-
         for (Map.Entry<UUID, Session> entry : sessions.entrySet()) {
             Session session = entry.getValue();
             Player player = Bukkit.getPlayer(entry.getKey());
@@ -264,7 +277,11 @@ public final class GunRuntime implements InputAdapter.Listener {
             }
             ItemStack stack = player.getInventory().getItemInMainHand();
             WeaponDefinition weapon = resolve(stack);
-            if (weapon == null || !weapon.id().equals(session.weaponId)) {
+            // The world this player is in may have been disabled since the
+            // session started; treat that exactly like the item leaving the
+            // hand, so the live magazine is persisted and nothing fires.
+            boolean inPlay = weapon != null && weapon.id().equals(session.weaponId) && enabledIn(player);
+            if (!inPlay) {
                 // The weapon left the hand (or was swapped): persist its live
                 // magazine and forget the trigger state. A session that never
                 // held a weapon (weaponId empty) skips the churn entirely.
@@ -273,7 +290,7 @@ public final class GunRuntime implements InputAdapter.Listener {
                             "[MineplusGun] session reset for " + player.getName() + ": was=" + session.weaponId
                                     + " held=" + (weapon == null ? stack.getType() + " (not a weapon)"
                                     : weapon.id()) + " reloading=" + session.reloading);
-                    flushMagazine(session);
+                    flushMagazine(player, session);
                     session.resetTransient();
                     session.weaponId = "";
                 }
@@ -283,7 +300,7 @@ public final class GunRuntime implements InputAdapter.Listener {
             // The scope is held with the trigger and drops as soon as the
             // trigger repeats stop (the carrier is neutral, so there is no
             // vanilla use state to read).
-            if (!weapon.scope() || tick - session.lastSwingTick > AUTO_RELEASE_TICKS) {
+            if (!weapon.scope() || tick - session.lastTriggerTick > AUTO_RELEASE_TICKS) {
                 session.scoping = false;
             }
 
@@ -299,7 +316,7 @@ public final class GunRuntime implements InputAdapter.Listener {
             if (session.firing) {
                 session.holdTicks++;
                 boolean released = weapon.fireMode() == FireMode.AUTO
-                        && tick - session.lastSwingTick > AUTO_RELEASE_TICKS;
+                        && tick - session.lastTriggerTick > AUTO_RELEASE_TICKS;
                 if (session.holdTicks > weapon.maxHoldTicks() || released) {
                     session.firing = false;
                     session.burstRemaining = 0;
@@ -316,18 +333,30 @@ public final class GunRuntime implements InputAdapter.Listener {
     // Shot resolution
     // ------------------------------------------------------------------
 
+    /**
+     * Fires one trigger's worth of rounds. The Core engine owns the muzzle
+     * flash, the report and the tracer; this method owns the magazine, the
+     * cadence, the recoil frame and the HUD.
+     */
     private void shoot(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
         if (session.reloading) {
             PressTrace.debug("[MineplusGun] shot blocked: reload in progress for " + player.getName());
             return;
         }
+        boolean stacked = false;
         if (weapon.usesAmmo()) {
-            AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
-            if (magazine.rounds() <= 0) {
+            ItemMagazine.Live magazine = magazine(player, session, weapon, stack);
+            if (magazine.empty()) {
                 dryFire(player, session, weapon);
                 return;
             }
             magazine.spend();
+            // An untagged (multi-count, anomalous) stack cannot be traced by
+            // identity, so its count is persisted per shot instead of deferred.
+            stacked = magazine.uid() == null;
+            if (stacked) {
+                factory().setRounds(stack, magazine.rounds(), weapon);
+            }
             PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "shot"),
                     "[MineplusGun] SHOT by " + player.getName() + ": " + weapon.id() + " rounds="
                             + magazine.rounds() + "/" + weapon.magazine() + " pellets=" + weapon.pellets()
@@ -335,20 +364,17 @@ public final class GunRuntime implements InputAdapter.Listener {
         }
 
         Location origin = player.getEyeLocation();
-        Vector direction = origin.getDirection().normalize().multiply(weapon.velocity());
-        double spread = session.scoping
-                ? weapon.spreadDegrees() * weapon.scopeSpreadMultiplier()
-                : weapon.spreadDegrees();
-        for (int pellet = 0; pellet < weapon.pellets(); pellet++) {
-            // Each pellet gets its own cone sample of the (already aimed) cone.
-            simulator.fire(player, weapon, origin, direction, spread);
+        Vector aim = origin.getDirection();
+        BallisticProfile profile = session.scoping ? weapon.scopedBallistics() : weapon.ballistics();
+        int launched = services.ballistics().fireWeapon(player, origin, aim, profile, projectileHandler);
+        if (launched == 0 && weapon.usesAmmo() && !stacked) {
+            // The engine refused (disabled or unusable origin): the round was
+            // never fired, so it was never spent.
+            ItemMagazine.Live magazine = session.magazine;
+            if (magazine != null) {
+                magazine.add(1);
+            }
         }
-
-        // Firearm report with a small per-shot pitch variance, so a magazine of
-        // rounds never renders as one identical sample loop.
-        services.soundFx().play(origin, weapon.soundFire(), 1.0f,
-                0.94f + ThreadLocalRandom.current().nextFloat() * 0.12f);
-        services.particleFx().muzzle(origin.clone().add(origin.getDirection().normalize().multiply(0.6)), weapon);
 
         session.nextShotTick = tick + weapon.shotIntervalTicks();
         if (weapon.fireMode() == FireMode.BURST) {
@@ -364,8 +390,8 @@ public final class GunRuntime implements InputAdapter.Listener {
     /**
      * Per-shot visual kick: a framed weapon flashes its first reload pose for
      * a few ticks (hammer/lever action) before settling back on the loaded
-     * frame â€” the server-side stand-in for a fire animation, alongside the
-     * muzzle smoke. Recoil pauses while a reload owns the frames.
+     * frame — the server-side stand-in for a fire animation. Recoil pauses while
+     * a reload owns the frames.
      */
     private void punchRecoil(Session session, WeaponDefinition weapon) {
         if (session.reloading || !weapon.hasFrames()) {
@@ -383,12 +409,13 @@ public final class GunRuntime implements InputAdapter.Listener {
         // Gate the empty-click cadence like a shot, so spam-clicking an empty
         // gun clicks once per interval instead of machine-gunning the sound.
         session.nextShotTick = tick + Math.max(4, weapon.shotIntervalTicks() / 2);
-        int reserve = AmmoSupply.count(player, services.config().ammo().material());
+        GunConfig.Ammo supply = services.config().ammo();
+        int reserve = AmmoSupply.count(player, supply.material());
         PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "dry-fire"),
                 "[MineplusGun] DRY FIRE by " + player.getName() + ": " + weapon.id() + " magazine empty,"
-                        + " reserve(" + services.config().ammo().material().name().toLowerCase(java.util.Locale.ROOT)
-                        + ")=" + reserve + " (swap hands to reload)");
-        services.soundFx().playTo(player, weapon.soundEmpty(), 0.7f, 1.0f);
+                        + " reserve(" + supply.material().name().toLowerCase(Locale.ROOT) + ")=" + reserve
+                        + " (swap hands to reload)");
+        Sounds.playTo(player, weapon.soundEmpty(), 0.7f, 1.0f, org.bukkit.Sound.BLOCK_NOTE_BLOCK_HAT);
         services.ammoHud().flashEmpty(player, weapon, reserve);
     }
 
@@ -397,6 +424,7 @@ public final class GunRuntime implements InputAdapter.Listener {
         Vector direction = eye.getDirection().normalize();
         double reach = weapon.meleeReach();
         double cosLimit = Math.cos(Math.toRadians(weapon.meleeArcDegrees() / 2.0));
+        boolean landed = false;
         for (Entity nearby : player.getWorld().getNearbyEntities(eye, reach, reach, reach)) {
             if (!(nearby instanceof LivingEntity living) || living.isDead() || !living.isValid()
                     || nearby.getUniqueId().equals(player.getUniqueId())) {
@@ -414,14 +442,20 @@ public final class GunRuntime implements InputAdapter.Listener {
             if (blocked(eye, living, distance)) {
                 continue;
             }
-            living.damage(weapon.damage(), player);
+            // Transactional: the arc's damage is this module's own hit, and a
+            // melee-suppression listener must not be allowed to cancel it.
+            if (DamageTransactions.apply(living, weapon.damage(), player)) {
+                landed = true;
+            }
             Vector knockback = living.getLocation().toVector().subtract(player.getLocation().toVector());
             if (knockback.lengthSquared() > 0) {
                 living.setVelocity(living.getVelocity()
                         .add(knockback.normalize().multiply(weapon.meleeKnockback())));
             }
         }
-        services.soundFx().play(eye, "mineplusgun:shot", 0.5f, 1.8f);
+        if (landed) {
+            Sounds.play(eye, HIT_MARKER_SOUND, 0.5f, 1.6f);
+        }
     }
 
     private boolean blocked(Location eye, LivingEntity target, double distance) {
@@ -438,18 +472,19 @@ public final class GunRuntime implements InputAdapter.Listener {
     // Reload (gold-nugget economy)
     // ------------------------------------------------------------------
 
-    private void startReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
+    /** @return {@code true} when a reload actually started (the swap is consumed) */
+    private boolean startReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
         if (session.reloading) {
             PressTrace.debug("[MineplusGun] reload ignored: one already running for " + player.getName());
-            return;
+            return false;
         }
-        AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
+        ItemMagazine.Live magazine = magazine(player, session, weapon, stack);
         int missing = weapon.magazine() - magazine.rounds();
         if (missing <= 0) {
             PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "reload"),
                     "[MineplusGun] reload ignored: magazine already full ("
                             + magazine.rounds() + "/" + weapon.magazine() + ") for " + player.getName());
-            return;
+            return false;
         }
         GunConfig.Ammo supply = services.config().ammo();
         int nuggets = AmmoSupply.count(player, supply.material());
@@ -458,29 +493,30 @@ public final class GunRuntime implements InputAdapter.Listener {
             PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "reload"),
                     "[MineplusGun] reload cannot start: no " + supply.material().name()
                             + " in inventory for " + player.getName());
-            services.soundFx().playTo(player, weapon.soundEmpty(), 0.7f, 1.2f);
+            Sounds.playTo(player, weapon.soundEmpty(), 0.7f, 1.2f, org.bukkit.Sound.BLOCK_NOTE_BLOCK_HAT);
             services.ammoHud().flashNoReserve(player);
-            return;
+            return false;
         }
         PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "reload"),
                 "[MineplusGun] reload started: " + weapon.id() + " need=" + missing + " reserve=" + nuggets
-                        + " " + supply.material().name().toLowerCase(java.util.Locale.ROOT)
+                        + " " + supply.material().name().toLowerCase(Locale.ROOT)
                         + " duration=" + weapon.reloadTicks() + "t for " + player.getName());
         session.firing = false;
         session.burstRemaining = 0;
         if (weapon.reloadTicks() <= 0) {
             completeReload(player, session, weapon, stack);
-            return;
+            return true;
         }
         session.reloading = true;
         session.reloadEndTick = tick + weapon.reloadTicks();
         session.reloadFrame = -1;
-        services.soundFx().playTo(player, weapon.soundReload(), 0.8f, 1.0f);
+        Sounds.playTo(player, weapon.soundReload(), 0.8f, 1.0f, org.bukkit.Sound.BLOCK_NOTE_BLOCK_BASS);
         updateHud(player, session, weapon);
+        return true;
     }
 
     private void completeReload(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
-        AmmoModel.Magazine magazine = magazine(player, session, weapon, stack);
+        ItemMagazine.Live magazine = magazine(player, session, weapon, stack);
         int missing = weapon.magazine() - magazine.rounds();
         if (missing > 0) {
             GunConfig.Ammo supply = services.config().ammo();
@@ -488,15 +524,19 @@ public final class GunRuntime implements InputAdapter.Listener {
             int loaded = Math.min(missing, affordable);
             if (loaded > 0) {
                 int consumed = AmmoSupply.take(player, supply.material(), loaded * supply.itemsPerRound());
-                magazine.addRounds(weapon, consumed / supply.itemsPerRound());
+                int roundsLoaded = consumed / supply.itemsPerRound();
+                magazine.add(roundsLoaded);
+                if (magazine.uid() == null) {
+                    factory().setRounds(stack, magazine.rounds(), weapon);
+                }
                 PressTrace.trace(plugin, PressTrace.key(player.getUniqueId(), "reload"),
-                        "[MineplusGun] reload complete: " + loaded + " round(s) loaded into " + weapon.id()
+                        "[MineplusGun] reload complete: " + roundsLoaded + " round(s) loaded into " + weapon.id()
                                 + " (magazine " + magazine.rounds() + "/" + weapon.magazine()
                                 + ") for " + player.getName());
             }
         }
         session.reloading = false;
-        services.soundFx().playTo(player, weapon.soundReload(), 0.8f, 1.1f);
+        Sounds.playTo(player, weapon.soundReload(), 0.8f, 1.1f, org.bukkit.Sound.BLOCK_NOTE_BLOCK_PLING);
         updateHud(player, session, weapon);
     }
 
@@ -510,7 +550,7 @@ public final class GunRuntime implements InputAdapter.Listener {
      * the loaded state arrives on completion ({@link #reconcileFrame}).
      */
     private void applyReloadFrames(Player player, ItemStack stack, Session session, WeaponDefinition weapon) {
-        ItemFrames frames = frames(weapon);
+        ItemFrames frames = weapon.frames();
         if (frames == null || !frames.isFramed()) {
             return;
         }
@@ -537,7 +577,7 @@ public final class GunRuntime implements InputAdapter.Listener {
      * their idle pose while ramming).
      */
     private void reconcileFrame(Player player, ItemStack stack, Session session, WeaponDefinition weapon) {
-        ItemFrames frames = frames(weapon);
+        ItemFrames frames = weapon.frames();
         if (frames == null) {
             return;
         }
@@ -551,8 +591,9 @@ public final class GunRuntime implements InputAdapter.Listener {
         } else if (tick < session.recoilEndTick && !frames.reloadReferences().isEmpty()) {
             wanted = 1; // recoil pose: the first staged frame flinches the gun
         } else {
-            AmmoModel.Magazine magazine = session.magazine;
-            int rounds = magazine != null ? magazine.rounds() : ammo.rounds(stack, weapon);
+            int rounds = session.magazine != null
+                    ? session.magazine.rounds()
+                    : factory().rounds(stack, weapon);
             wanted = rounds > 0 ? frames.loadedState() : frames.idleState();
         }
         if (wanted != session.appliedFrame) {
@@ -573,10 +614,6 @@ public final class GunRuntime implements InputAdapter.Listener {
         }
     }
 
-    private static ItemFrames frames(WeaponDefinition weapon) {
-        return weapon.frames();
-    }
-
     // ------------------------------------------------------------------
     // HUD
     // ------------------------------------------------------------------
@@ -585,95 +622,94 @@ public final class GunRuntime implements InputAdapter.Listener {
         if (!weapon.usesAmmo()) {
             return;
         }
-        AmmoModel.Magazine magazine = session.magazine;
-        int rounds = magazine != null ? magazine.rounds() : ammo.rounds(player.getInventory().getItemInMainHand(), weapon);
+        int rounds = session.magazine != null
+                ? session.magazine.rounds()
+                : factory().rounds(player.getInventory().getItemInMainHand(), weapon);
         GunConfig.Ammo supply = services.config().ammo();
         int reserve = AmmoSupply.count(player, supply.material());
         services.ammoHud().update(player, weapon, rounds, reserve, session.reloading, session.scoping);
     }
 
     // ------------------------------------------------------------------
-    // Live magazine (deferred persistence)
+    // Live magazine (Core deferred persistence)
     // ------------------------------------------------------------------
 
     /**
      * The live magazine of the held stack. Reopens (and flushes the previous
-     * one) when the shooter switches to a different stack; a legacy stack with
-     * no uid is tagged once, which is written back so it persists.
+     * one) when the shooter switches to a different stack; a stack that has no
+     * identity yet is tagged by {@link ItemMagazine#open} and mirrored once,
+     * which is the only write the held item ever gets between shots.
      */
-    private AmmoModel.Magazine magazine(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
-        String uid = services.itemFactory().readUid(stack);
-        if (session.magazine != null && uid != null && session.magazine.uid().equals(uid)) {
+    private ItemMagazine.Live magazine(Player player, Session session, WeaponDefinition weapon, ItemStack stack) {
+        String uid = factory().uid(stack);
+        if (session.magazine != null && uid != null && uid.equals(session.magazine.uid())) {
             return session.magazine;
         }
-        flushMagazine(session);
-        boolean legacy = uid == null;
-        session.magazine = ammo.open(stack, weapon);
-        if (legacy) {
-            // The stack just gained its uid: persist it (a one-time write).
+        flushMagazine(player, session);
+        ItemMagazine.Live live = factory().magazine().open(stack, WeaponItemFactory.capacity(weapon));
+        session.magazine = live;
+        if (uid == null && live.uid() != null) {
+            // The stack just gained its identity: persist it (a one-time write).
             player.getInventory().setItemInMainHand(stack);
         }
-        return session.magazine;
+        return live;
     }
 
     /** Persists the session's live magazine onto the matching inventory stack. */
-    private void flushMagazine(Session session) {
-        AmmoModel.Magazine magazine = session.magazine;
+    private void flushMagazine(Player player, Session session) {
+        ItemMagazine.Live magazine = session.magazine;
         session.magazine = null;
         if (magazine == null) {
             return;
         }
-        Player player = Bukkit.getPlayer(session.playerId);
-        if (player != null && player.isOnline()) {
-            ammo.flush(player, magazine);
-        }
+        factory().magazine().flush(player, magazine);
     }
 
     // ------------------------------------------------------------------
     // Helpers / lifecycle
     // ------------------------------------------------------------------
 
+    private WeaponItemFactory factory() {
+        return services.itemFactory();
+    }
+
     public WeaponDefinition resolve(ItemStack stack) {
         if (stack == null || stack.getType().isAir() || services.registry() == null) {
             return null;
         }
-        String id = services.itemFactory().weaponId(stack);
+        String id = factory().weaponId(stack);
         WeaponDefinition weapon = id == null ? null : services.registry().get(id);
         if (weapon == null) {
             // Anomalies only: stacks carrying THIS module's stamps (or an
             // unknown id stamp) that fail to resolve — half-migrated or
             // registry-drifted stacks. Vanilla items stay silent.
-            String stamp = services.itemFactory().readWeaponStamp(stack);
-            String uid = services.itemFactory().readUid(stack);
-            int storedAmmo = services.itemFactory().readAmmo(stack);
-            if (stamp != null || uid != null || storedAmmo >= 0) {
+            String stamp = factory().readWeaponStamp(stack);
+            String uid = factory().uid(stack);
+            if (stamp != null || uid != null) {
                 plugin.getLogger().warning("[MineplusGun] held item is stamped as a gun but does not"
                         + " resolve: item=" + stack.getType() + " stamp=" + stamp + " uid="
-                        + (uid == null ? "none" : uid.substring(0, Math.min(8, uid.length()))) + " ammoTag="
-                        + storedAmmo + " cmd=" + com.mineplus.pack.item.ItemFrameWriter.read(stack)
+                        + (uid == null ? "none" : uid.substring(0, Math.min(8, uid.length())))
                         + " knownWeapons=" + services.registry().size());
             }
         }
         return weapon;
     }
 
-    private boolean disabled(Player player) {
-        GunConfig config = services.config();
-        return config != null && player.getWorld() != null
-                && config.settings().worldDisabled(player.getWorld().getName());
-    }
-
+    /** Drops one player's session, persisting the magazine first. */
     public void clear(Player player) {
         Session session = sessions.remove(player.getUniqueId());
         if (session != null) {
-            flushMagazine(session);
+            flushMagazine(player, session);
         }
         services.ammoHud().clear(player.getUniqueId());
     }
 
     public void clearAll() {
-        for (Session session : sessions.values()) {
-            flushMagazine(session);
+        for (Map.Entry<UUID, Session> entry : sessions.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null) {
+                flushMagazine(player, entry.getValue());
+            }
         }
         sessions.clear();
         services.ammoHud().clearAll();
@@ -683,20 +719,50 @@ public final class GunRuntime implements InputAdapter.Listener {
         return sessions.size();
     }
 
-    public int activeBullets() {
-        return simulator.activeBullets();
+    /** One-line telemetry for the module's status command. */
+    public String telemetry() {
+        return "shooters=" + sessions.size() + " " + services.ballistics().telemetrySummary();
     }
 
-    public long totalShots() {
-        return simulator.totalShots();
-    }
+    /**
+     * The module's aim rules on top of the Core engine's defaults. Targeting is
+     * the one place a weapon module genuinely differs from server to server —
+     * a PvP-only arsenal must not wound wildlife — so it is expressed here and
+     * everything else (damage, falloff, effects) stays Core-owned.
+     */
+    private final class GunRounds implements ProjectileHandler {
 
-    public long totalHits() {
-        return simulator.totalHits();
-    }
+        @Override
+        public boolean allowTarget(Entity candidate, Player shooter) {
+            if (!(candidate instanceof LivingEntity living) || !living.isValid() || living.isDead()) {
+                return false;
+            }
+            if (shooter != null && candidate.getUniqueId().equals(shooter.getUniqueId())) {
+                return false;
+            }
+            GunConfig current = services.config();
+            if (current != null) {
+                if (current.settings().pvpOnly() && !(candidate instanceof Player)) {
+                    return false;
+                }
+                if (living.getWorld() != null
+                        && current.settings().worldDisabled(living.getWorld().getName())) {
+                    return false;
+                }
+            }
+            return true;
+        }
 
-    public long instantTraces() {
-        return simulator.instantTraces();
+        @Override
+        public boolean onEntityHit(ProjectileHit hit) {
+            Player shooter = hit.shooter();
+            if (shooter != null) {
+                // Hit marker: a short native tick, the confirmation that works
+                // for every client without a pack or chat spam.
+                Sounds.playTo(shooter, HIT_MARKER_SOUND, 0.5f, hit.headshot() ? 2.2f : 1.7f);
+            }
+            return true;
+        }
     }
 
     private static final class Session {
@@ -713,8 +779,8 @@ public final class GunRuntime implements InputAdapter.Listener {
         int appliedFrame = -1;
         long nextShotTick;
         long reloadEndTick;
-        long lastSwingTick = -1000L;
-        AmmoModel.Magazine magazine;
+        long lastTriggerTick = -1000L;
+        ItemMagazine.Live magazine;
 
         Session(UUID playerId) {
             this.playerId = playerId;
@@ -730,6 +796,7 @@ public final class GunRuntime implements InputAdapter.Listener {
             reloadFrameAtTick = 0;
             recoilEndTick = 0;
             appliedFrame = -1;
+            magazine = null;
         }
     }
 }
