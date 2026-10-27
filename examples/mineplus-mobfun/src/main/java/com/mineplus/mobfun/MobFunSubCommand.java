@@ -2,6 +2,7 @@ package com.mineplus.mobfun;
 
 import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.mob.BehaviorFireResult;
+import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -26,7 +27,8 @@ import org.bukkit.util.Vector;
  * showcases.
  *
  * <pre>
- * /mobfun status                            - engine settings + telemetry + showcase states
+ * /mobfun status                            - engine settings + telemetry + showcase states,
+ *                                             plus the engine's live journeys, crews and claims
  * /mobfun &lt;id&gt; [on|off|toggle]              - enable/disable one showcase
  * /mobfun spawn &lt;id&gt; [force]                - spawn the showcase mob in front of you and
  *                                             force-fire its actions immediately
@@ -42,16 +44,16 @@ import org.bukkit.util.Vector;
 public final class MobFunSubCommand implements SubCommand {
 
     private static final double FIRE_SEARCH_RADIUS = 10.0;
+    /** Status prints at most this many live journeys / crews (a village full of pilgrims is not a chat page). */
+    private static final int STATUS_LINES = 12;
 
     private final MobFunPlugin plugin;
     private final List<MobFunShowcase> showcases;
-    private final JourneyAction journeyAction;
     private final Set<UUID> spawnedTestMobs = new HashSet<>();
 
-    public MobFunSubCommand(MobFunPlugin plugin, List<MobFunShowcase> showcases, JourneyAction journeyAction) {
+    public MobFunSubCommand(MobFunPlugin plugin, List<MobFunShowcase> showcases) {
         this.plugin = plugin;
         this.showcases = showcases;
-        this.journeyAction = journeyAction;
     }
 
     @Override
@@ -309,25 +311,49 @@ public final class MobFunSubCommand implements SubCommand {
             sender.sendMessage(ChatColor.GREEN + showcase.statusLine());
         }
         if (plugin.context() != null) {
+            MobBehaviorApi mobApi = plugin.context().mobBehaviorApi();
             sender.sendMessage(ChatColor.DARK_GREEN + "Core mob behavior settings: "
-                    + ChatColor.WHITE + plugin.context().mobBehaviorApi().settings());
+                    + ChatColor.WHITE + mobApi.settings());
             sender.sendMessage(ChatColor.DARK_GREEN + "Engine telemetry:\n"
-                    + ChatColor.WHITE + plugin.context().mobBehaviorApi().telemetrySummary());
-        }
-        if (journeyAction != null) {
-            List<String> journeys = journeyAction.describeJourneys();
-            sender.sendMessage(ChatColor.DARK_GREEN + "Pilgrim journeys:");
-            if (journeys.isEmpty()) {
-                sender.sendMessage(ChatColor.GRAY
-                        + "  none active (searches start within ~30-60s for villagers outside a village)");
-            } else {
-                for (String line : journeys) {
-                    sender.sendMessage(ChatColor.WHITE + line);
-                }
-            }
+                    + ChatColor.WHITE + mobApi.telemetrySummary());
+            sender.sendMessage(ChatColor.DARK_GREEN + "Pilgrim journeys (engine state):");
+            sendLines(sender, mobApi.journeySnapshot(STATUS_LINES),
+                    "  none active (the Core searches for a village for villagers outside one, on its"
+                            + " structure-cache cooldown)");
+            sender.sendMessage(ChatColor.DARK_GREEN + "Crews (engine state):");
+            sendLines(sender, mobApi.crewSnapshot(STATUS_LINES), "  none marching");
+            sender.sendMessage(ChatColor.DARK_GREEN + "Activity claims: " + ChatColor.WHITE
+                    + claimedMobs());
         }
         sender.sendMessage(ChatColor.DARK_GREEN + "Test bench: " + ChatColor.WHITE
                 + "/mobfun spawn <id> [force], /mobfun fire <id> [force], /mobfun despawn");
+    }
+
+    private void sendLines(CommandSender sender, List<String> lines, String whenEmpty) {
+        if (lines.isEmpty()) {
+            sender.sendMessage(ChatColor.GRAY + whenEmpty);
+            return;
+        }
+        for (String line : lines) {
+            sender.sendMessage(ChatColor.WHITE + line);
+        }
+    }
+
+    /**
+     * Which test mobs the engine currently owns for a long-running scenario —
+     * the read-out that shows arbitration working (a marching pilgrim is
+     * claimed, so no other villager showcase can pull it away mid-journey).
+     */
+    private String claimedMobs() {
+        MobBehaviorApi mobApi = plugin.context().mobBehaviorApi();
+        int claimed = 0;
+        for (UUID id : spawnedTestMobs) {
+            if (Bukkit.getEntity(id) instanceof LivingEntity entity
+                    && mobApi.activeActivity(entity) != null) {
+                claimed++;
+            }
+        }
+        return claimed + " of " + spawnedTestMobs.size() + " test mob(s)";
     }
 
     private MobFunShowcase findShowcase(String token) {

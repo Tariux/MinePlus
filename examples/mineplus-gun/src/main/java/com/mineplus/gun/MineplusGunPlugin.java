@@ -9,8 +9,6 @@ import com.mineplus.gun.feature.HudFeature;
 import com.mineplus.gun.feature.MigrationFeature;
 import com.mineplus.gun.feature.ShopFeature;
 import com.mineplus.gun.feature.WeaponFeature;
-import com.mineplus.gun.fx.ParticleFx;
-import com.mineplus.gun.fx.SoundFx;
 import com.mineplus.gun.hud.AmmoHud;
 import com.mineplus.gun.shop.EconomyBridge;
 import com.mineplus.gun.shop.ShopService;
@@ -67,9 +65,7 @@ public final class MineplusGunPlugin extends JavaPlugin {
         WeaponRegistry registry = new WeaponRegistry();
         registry.reload(config.weapons());
         services.setRegistry(registry);
-        services.setItemFactory(new WeaponItemFactory(this, context.itemRegistry(), context.packApi()));
-        services.setParticleFx(new ParticleFx(config.ballistics().maxParticlesPerTick()));
-        services.setSoundFx(new SoundFx());
+        services.setItemFactory(new WeaponItemFactory(this, context));
         services.setAmmoHud(new AmmoHud(config));
 
         EconomyBridge economy = new EconomyBridge();

@@ -1,6 +1,7 @@
 package com.mineplus.gun.weapon;
 
 import com.mineplus.gun.runtime.FireMode;
+import com.mineplus.infrastructure.combat.BallisticProfile;
 import com.mineplus.infrastructure.content.ContentItem;
 import com.mineplus.infrastructure.content.ContentModel;
 import com.mineplus.pack.item.ItemFrames;
@@ -59,6 +60,16 @@ public final class WeaponDefinition {
     private final double meleeArcDegrees;
     private final double meleeKnockback;
 
+    /**
+     * The Core ballistics description of one round of this weapon, and its
+     * scoped sibling. Both are built once, at parse time: the firing path must
+     * not rebuild an immutable profile per shot, and spread is a property of the
+     * profile (the engine samples the cone itself), so the scoped variant is a
+     * second prebuilt profile rather than a per-shot copy.
+     */
+    private final BallisticProfile ballistics;
+    private final BallisticProfile scopedBallistics;
+
     private WeaponDefinition(Builder b) {
         this.base = b.base;
         this.type = b.type;
@@ -93,6 +104,40 @@ public final class WeaponDefinition {
         this.meleeReach = b.meleeReach;
         this.meleeArcDegrees = b.meleeArcDegrees;
         this.meleeKnockback = b.meleeKnockback;
+        this.ballistics = buildProfile(spreadDegrees);
+        this.scopedBallistics = buildProfile(spreadDegrees * scopeSpreadMultiplier);
+    }
+
+    /** The immutable Core profile of one round, at the weapon's own spread. */
+    public BallisticProfile ballistics() {
+        return ballistics;
+    }
+
+    /** The same profile with the scope's tighter cone. */
+    public BallisticProfile scopedBallistics() {
+        return scopedBallistics;
+    }
+
+    private BallisticProfile buildProfile(double spread) {
+        return BallisticProfile.builder()
+                .damage(damage)
+                .velocity(velocity)
+                .gravity(gravity)
+                .drag(drag)
+                .range(range)
+                .spreadDegrees(spread)
+                .pellets(pellets)
+                .falloff(falloffStart, falloffPerBlock)
+                .minDamageFraction(minDamageFraction)
+                .headshotMultiplier(headshotMultiplier)
+                .penetration(penetration)
+                // A weapon configures one ricochet probability; the engine also
+                // caps how many bounces one round may spend, so a ricochet-able
+                // gun gets one.
+                .ricochet(ricochet, ricochet > 0.0 ? 1 : 0)
+                .particles(muzzleParticle, tracerParticle, impactParticle)
+                .sounds(soundFire, null, "block.note_block.basedrum", 1.0f)
+                .build();
     }
 
     public static Builder builder(ContentItem base) {

@@ -21,9 +21,12 @@ import org.bukkit.persistence.PersistentDataType;
  * }</pre>
  *
  * <p>Keys live under the plugin's own namespace; values are integers plus
- * strings. Stack meta writes resend the stack — callers that update held
- * items continuously should keep the value authoritative in memory and write
- * it back on switch/quit, exactly like the gun module's magazine model.</p>
+ * strings. Writing meta to an {@link ItemStack} changes only that object —
+ * the server never resends it, so a player's client keeps showing the old
+ * value until the stack is placed in a slot with {@code setItem}/{@code
+ * setInMainHand}. Continuous per-tick writes are also a packet storm: keep
+ * the authoritative number in memory (see {@link ItemMagazine}) and flush it
+ * to the PDC on switch, quit and death.</p>
  */
 public final class ItemState {
 

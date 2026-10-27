@@ -1,31 +1,32 @@
 package com.mineplus.gun.feature;
 
 import com.mineplus.gun.GunServices;
-import com.mineplus.infrastructure.module.ModuleFeature;
-import com.mineplus.gun.input.BukkitInputAdapter;
-import com.mineplus.gun.input.InputAdapter;
-import com.mineplus.gun.input.PacketInputAdapter;
-import com.mineplus.gun.runtime.AmmoModel;
-import com.mineplus.gun.runtime.BulletSimulator;
 import com.mineplus.gun.runtime.GunRuntime;
 import com.mineplus.infrastructure.PluginContext;
-import org.bukkit.Bukkit;
+import com.mineplus.infrastructure.input.HeldItemInput;
+import com.mineplus.infrastructure.module.ModuleFeature;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Owns the shooting runtime: input, the fire-flow state machine, tick-stepped
- * ballistics and effects. Selects the input adapter once at enable; weapon
- * logic never branches on it.
+ * Owns the shooting runtime: the fire-flow state machine and its lifecycle.
+ *
+ * <p>Input is not installed here — the module registers a
+ * {@link HeldItemInput.HeldItemHandler} with the Core's shared routing service,
+ * which already owns the press funnel, the vanilla freeze, the aimed-entity
+ * press and the melee arbitration for every held-item module on the server. The
+ * one thing this feature still listens for directly is the quit: the magazine
+ * must be persisted while the player's inventory is still readable.
  */
 public final class CombatFeature extends ModuleFeature implements Listener {
 
     private final GunServices services;
 
-    private InputAdapter inputAdapter;
     private GunRuntime runtime;
+    private HeldItemInput.HeldItemHandler handler;
 
     public CombatFeature(JavaPlugin plugin, PluginContext context, GunServices services) {
         super(plugin, context);
@@ -39,17 +40,15 @@ public final class CombatFeature extends ModuleFeature implements Listener {
 
     @Override
     protected void onEnable() {
-        AmmoModel ammo = new AmmoModel(services.itemFactory());
-        BulletSimulator simulator = new BulletSimulator(services::config, services.particleFx(), services.soundFx());
-        runtime = new GunRuntime(plugin, services, ammo, simulator);
+        runtime = new GunRuntime(plugin, services);
         services.setRuntime(runtime);
-
-        inputAdapter = packetEventsPresent() ? new PacketInputAdapter(plugin) : new BukkitInputAdapter();
-        inputAdapter.register(plugin, runtime);
+        handler = runtime;
+        context.heldItemInput().addHandler(runtime);
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         runtime.start();
 
-        plugin.getLogger().info("[MineplusGun] Combat runtime started (input=" + inputAdapter.name() + ").");
+        plugin.getLogger().info("[MineplusGun] Combat runtime started (input="
+                + "core held-item routing, handlers=" + context.heldItemInput().handlerCount() + ").");
     }
 
     /**
@@ -66,19 +65,16 @@ public final class CombatFeature extends ModuleFeature implements Listener {
 
     @Override
     protected void onDisable() {
-        if (inputAdapter != null) {
-            inputAdapter.unregister();
-            inputAdapter = null;
+        HeldItemInput.HeldItemHandler attached = handler;
+        if (attached != null) {
+            context.heldItemInput().removeHandler(attached);
+            handler = null;
         }
         if (runtime != null) {
             runtime.stop();
             runtime = null;
         }
-        org.bukkit.event.HandlerList.unregisterAll(this);
-    }
-
-    private static boolean packetEventsPresent() {
-        return Bukkit.getPluginManager().getPlugin("packetevents") != null
-                || Bukkit.getPluginManager().getPlugin("PacketEvents") != null;
+        services.setRuntime(null);
+        HandlerList.unregisterAll(this);
     }
 }

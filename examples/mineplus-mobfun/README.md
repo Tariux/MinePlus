@@ -16,7 +16,7 @@ Nine vanilla mobs, each driven by the Core's **mob behavior engine** — a budge
 | **Golem Guardian Villager** | `minecraft:villager` | `summon_iron_golem` (30s) + `inDanger(8)` | When endangered: raises an iron-block + carved-pumpkin column **block by block** (one block every few ticks, sound on each) that assembles into a real golem which immediately charges the menace. Per-builder PDC cooldown (45s, restart-safe) and a one-golem cap keep raids spam-free |
 | **Frost Builder Villager** | `minecraft:villager` | `summon_snow_golem` (30s) + `inDanger(8)` | Same staged guardian pattern with snow blocks → snow golem |
 | **Necromancer Witch** | `minecraft:witch` | `summon_minions` (12s) + `threatOrPrey(12, 10)` | Adaptive-raid-space mixed horde: biome-matched melee/flanker/archer (husk/stray/drowned/cave spider), a tamed **skeleton horseman archer** roughly every fifth raid, whole-horde target sync, potion retaliation against close golems, then a retreat-hop **behind her own screen**; per-witch summon cooldown + horde cap (5) |
-| **Pilgrim Villager** | `minecraft:villager` | `village_journey` (2s) | Villagers in the wastelands locate the nearest village (64-chunk search, retried every ~30-60s until found) and **journey there as a synced crew** (leader + followers that regroup, self-promoting if the leader dies; step-aware hop bursts); between dusk and late night they halt and the leader raises **one shared camp — a single campfire plus a side-by-side row of beds, one per crew member** (once per night; nearby villagers will even path over and sleep); arrival clears the journey with a celebration; `/mobfun status` lists each pilgrim's journey state (target, distance, leader, day/night mode) |
+| **Pilgrim Villager** | `minecraft:villager` | `village_journey` (2s) | The Core's `JourneyToStructureAction` with this module's `PilgrimCamp` callbacks: villagers in the wastelands locate the nearest village (64-chunk search, on the engine's search cooldown) and **journey there as a synced crew** through `JourneyRunner` legs and `MobCrewService` cohesion (leader self-promotes if killed); between dusk and late night the stragglers are walked back to the crew focus **before** the crew halts, then the leader raises **one shared camp — a single campfire plus a side-by-side row of beds, one per crew member** (both halves of every bed verified before either is written; a budget-refused camp is retried later the same night, not lost); arrival clears the journey with a celebration; `/mobfun status` prints the Core's live journey and crew snapshots plus the active activity claims |
 
 ### The two sides
 
@@ -30,7 +30,7 @@ Enable `necromancer` plus the guardians (`golem`, `snowgolem`) and `pilgrim` tog
 
 Intervals are tuned **for demonstration**. For natural pacing, pass larger interval seconds when building the profile.
 
-Every world write funnels through `BehaviorContext.trySetBlock`/`tryBreak`, so the engine's per-run **block edit budget** caps changes, and the per-run **nanotime budget** defers work instead of spiking tick time. Entities outside players' scan radius are never evaluated. Staged work (golem assembly, retreat hops, march bursts) runs via the vanilla scheduler — bounded, pre-verified, and self-canceling when the world changed underneath.
+Every world write funnels through `BehaviorContext.trySetBlock`/`tryBreak`/`trySpawn`, so the engine's per-run **block-edit** and **entity-spawn** budgets cap what a scenario may change, and the per-run **nanotime budget** defers work instead of spiking tick time. Work that outlives the evaluation that started it (a golem column raised tick by tick) asks the engine for its own bounded grant with `openEditSession(edits, spawns)` — the grant is clamped to the same per-run caps, and each staged step writes under it, so no module edits or populates the world outside the subsystem's limits. Entities outside players' scan radius are never evaluated; a mob whose scenario claimed an activity is held inside its claim anchor and refuses other profiles, which is what keeps the four villager showcases from steering the same person. Staged work (golem assembly, retreat hops) runs through the vanilla scheduler — bounded, pre-verified, and self-canceling when the world changed underneath.
 
 ## Building
 
@@ -45,9 +45,9 @@ gradle build
 1. Install `Mineplus-1.3.0.jar` (Core) and `mineplus-mobfun-1.0.0.jar` in `plugins/`.
 2. Start the server — the behaviors are live immediately (module `depend: [Mineplus]`).
 3. Commands (`mineplusmobfun.admin`, default op):
-   - `/mobfun status` — showcase states, engine settings, live telemetry (runs, fired actions, block edits, budget deferrals).
+   - `/mobfun status` — showcase states, engine settings, live telemetry (runs, fired actions, block edits, spawns, budget deferrals), the Core's journey and crew snapshots, and how many tracked mobs currently hold an activity claim.
    - `/mobfun <grazer|sheep|reforest|lamplighter|florist|golem|snowgolem|necromancer|pilgrim> <on|off|toggle>` — flip one showcase without touching the others.
-   - `/mobfun spawn <id> [force]` — spawn the showcase mob 2 blocks in front of you, name it, and immediately **force-fire** its actions: one forced pass with the odds gate bypassed, printing a per-action report (`FIRED`, `DECLINED` for a failed context check, `BLOCKED` for failed profile conditions). With `force`, profile conditions are ignored too.
+   - `/mobfun spawn <id> [force]` — spawn the showcase mob 2 blocks in front of you, name it, and immediately **force-fire** its actions: one forced pass with the odds gate bypassed, printing a per-action report (`FIRED`, `DECLINED` when the action's own checks refused, `CONDITION_FAILED` when a profile condition blocked it). With `force`, profile conditions are ignored too.
    - `/mobfun fire <id> [force]` — same forced pass on the **nearest** mob of that type within 10 blocks.
    - `/mobfun despawn` — remove every test mob spawned via `/mobfun spawn` (also removed on disable). Golems, minions and journeys launched into the world are ordinary world state — kill/capture as usual.
 
@@ -61,13 +61,25 @@ gradle build
 ## Module API quick reference
 
 ```java
-MobBehaviorApi api = mineplusPlugin.getPluginContext().mobBehaviorApi();
+PluginContext context = mineplusPlugin.getPluginContext();
+MobBehaviorApi api = context.mobBehaviorApi();
+ParticleFx fx = context.particleFx();          // shared budgeted particles + Sounds
 
 api.register(this, MobProfile.builder(EntityType.VILLAGER)
-        .action(new GolemSummonAction(plugin, "summon_iron_golem", "Summoned Iron Guardian",
-                Material.IRON_BLOCK, EntityType.IRON_GOLEM,
+        .action(new GolemSummonAction(this, api, fx, "summon_iron_golem", "Summoned Iron Guardian",
+                Material.IRON_BLOCK, EntityType.IRON_GOLEM, IronGolem.class,
                 Sound.BLOCK_METAL_PLACE, Sound.ENTITY_IRON_GOLEM_REPAIR), 30.0)
-        .condition(BehaviorConditions.inDanger(8.0))   // module-side situational gate
+        .condition(BehaviorConditions.inDanger(8.0))   // module-side gate on core conditions
+        .build());
+
+// A long-range scenario is the Core's bundled journey action; content is callbacks only.
+api.register(this, MobProfile.builder(EntityType.VILLAGER)
+        .action(JourneyToStructureAction.builder()
+                .id("village_journey").structure("village").crewName("pilgrims")
+                .searchRadiusChunks(64).arrivalDistance(24).cohesionRadius(8).recruitRadius(16)
+                .callbacks(new PilgrimCamp(fx))
+                .build(), 2.0)
+        .condition(BehaviorConditions.notBuilder(this))
         .build());
 
 api.unregister(this, profile);                    // per-profile toggle
@@ -76,6 +88,9 @@ api.unregisterAll(this);                          // module shutdown
 // Direct testing: odds-bypassed firing pass with per-action diagnostics
 BehaviorFireResult result = api.forceFire(this, entity, false);  // true = ignore conditions
 result.attempts();                                // (actionId, FIRED|DECLINED|CONDITION_FAILED)
+api.journeySnapshot(12);                          // live marches: target, leg, distance, crew
+api.crewSnapshot(12);                             // crews: leader, members, cohesion, goal
+api.activeActivity(entity);                       // which scenario (if any) holds this mob
 ```
 
-Custom behavior = implement `BehaviorAction` (`id()` + `execute(BehaviorContext)`) — see this module's `PlantFlowerAction`, `GolemSummonAction` (staged build + PDC cooldown), `SummonMinionHordeAction` (adaptive space, mixed pool, retaliation) and `JourneyAction` (PDC-carried state machine) for the module-side pattern; reuse the Core's bundled actions from `com.mineplus.infrastructure.mob.action`. Situational gates like `inDanger`/`threatOrPrey` (`BehaviorConditions`) compose entity searches on top of the block-level `BehaviorContext`.
+Custom behavior = implement `BehaviorAction` (`id()` + `execute(BehaviorContext)`) — see this module's `PlantFlowerAction` (a small FX-and-sound action), `GolemSummonAction` (a staged build under one `openEditSession` grant, plus PDC cooldown and golem cap) and `SummonMinionHordeAction` (a leashed, terrain-adaptive raid under the run's spawn budget) for the module-side pattern. Long-range movement does **not** need a custom action: `JourneyToStructureAction` already owns structure lookup, ground normalisation, leg-by-leg walking, stall recovery, crew cohesion and night rest, so a module supplies only the scenario's content through its `Callbacks` (`PilgrimCamp`). Situational gates like `inDanger`/`threatOrPrey` (`BehaviorConditions`) compose the Core's `BehaviorContext.Conditions` (`belowHealth`, `nearbyEntity`, `visibleEntity`, `adultOnly`, `maxBlockLight`) rather than re-scanning entities themselves.

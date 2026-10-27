@@ -1,16 +1,20 @@
 package com.mineplus.infrastructure.mob;
 
+import com.mineplus.infrastructure.mob.journey.JourneyRunner;
+import com.mineplus.infrastructure.mob.journey.StructureLookup;
 import com.mineplus.util.DebugLogger;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -38,6 +42,9 @@ import org.bukkit.scheduler.BukkitTask;
  *       {@code 1 / (intervalSeconds * checksPerSecond)}, the same
  *       expected-fire semantics as the reference mod's
  *       {@code 1 / (seconds * CHECKS_PER_SECOND)}.</li>
+ *   <li><b>Activity claims:</b> an action holding an exclusive activity over
+ *       an entity re-fires on every stagger (no odds gate) and every other
+ *       action skips that entity — long-running scenarios stay coherent.</li>
  *   <li>Profile conditions gate evaluation; at most one action fires per
  *       entity event, dispatched in registration order.</li>
  *   <li>A nanotime budget defers remaining entities to the next run, and a
@@ -53,13 +60,80 @@ public final class MobBehaviorEngine {
     private final Plugin plugin;
     private final Map<EntityType, List<MobProfile>> profilesByType = new ConcurrentHashMap<>();
     private final Map<Plugin, List<MobProfile>> profilesByOwner = new ConcurrentHashMap<>();
+    private final Map<UUID, ActiveActivity> activities = new ConcurrentHashMap<>();
     private final BehaviorTelemetry telemetry = new BehaviorTelemetry();
     private final BehaviorContext evaluationContext = new BehaviorContext(this);
+    /** Long-distance walking state, owned by the engine so one runner serves every module. */
+    private final JourneyRunner journeys = new JourneyRunner();
+    /** Cached, cost-gated structure discovery (the village a pilgrim is looking for). */
+    private final StructureLookup structures = new StructureLookup();
+    /** Groups of mobs that move as one (a pilgrim crew, an escort). */
+    private final com.mineplus.infrastructure.mob.group.MobCrewService crews =
+            new com.mineplus.infrastructure.mob.group.MobCrewService();
+    private final java.util.concurrent.atomic.AtomicLong registrationSequence =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private volatile MobBehaviorSettings settings = MobBehaviorSettings.defaults();
     private volatile BukkitTask runTask;
     private volatile boolean running;
     private int runCounter;
+    /** Entities advanced by this run's sustained sweep, so the proximity sweep skips them. */
+    private final java.util.Set<UUID> sustainedThisRun = new java.util.HashSet<>();
+
+    /**
+     * Fixed dispatch order for profiles sharing one entity type: higher
+     * priority first, then registration order. Because the engine re-sorts on
+     * every registration, a module toggling a feature can never shuffle another
+     * module's profile into a different position than it had before.
+     */
+    private static final java.util.Comparator<MobProfile> DISPATCH_ORDER = (first, second) ->
+            first.priority() != second.priority()
+                    ? Integer.compare(second.priority(), first.priority())
+                    : Long.compare(first.sequence(), second.sequence());
+
+    /** Runs a claim may go unmatched to a loaded entity before it is treated as abandoned. */
+    private static final int CLAIM_UNRESOLVED_LIMIT = 20;
+
+    /**
+     * An exclusive, self-renewing activity one action holds over an entity:
+     * while it is active, the claiming action re-fires on every engine
+     * stagger (no odds gate — a running activity is a process, not a random
+     * event) and every other action skips the entity entirely. Long-running
+     * scenarios (journeys, camps, escorts) use this so showcases cannot
+     * interleave and pull one mob in two directions.
+     */
+    private static final class ActiveActivity {
+
+        private final String actionId;
+        private final long expiresAtGameTick;
+        private final Location anchor;
+        private final double anchorRadius;
+        /** Consecutive runs the entity could not be resolved (unloaded, not gone). */
+        private int unresolvedRuns;
+
+        ActiveActivity(String actionId, long expiresAtGameTick, Location anchor, double anchorRadius) {
+            this.actionId = actionId;
+            this.expiresAtGameTick = expiresAtGameTick;
+            this.anchor = anchor;
+            this.anchorRadius = anchorRadius;
+        }
+
+        String actionId() {
+            return actionId;
+        }
+
+        Location anchor() {
+            return anchor;
+        }
+
+        double anchorRadius() {
+            return anchorRadius;
+        }
+
+        boolean expired(long nowGameTick) {
+            return expiresAtGameTick >= 0 && nowGameTick >= expiresAtGameTick;
+        }
+    }
 
     /** Called by the Core's {@code PluginContext#bootstrap}; one engine per Core. */
     public MobBehaviorEngine(Plugin plugin) {
@@ -75,18 +149,62 @@ public final class MobBehaviorEngine {
         return telemetry;
     }
 
+    /** The engine's shared long-walk runner. */
+    JourneyRunner journeys() {
+        return journeys;
+    }
+
+    /** The engine's shared structure-discovery cache. */
+    StructureLookup structures() {
+        return structures;
+    }
+
+    /** The engine's shared crew (group-movement) registry. */
+    public com.mineplus.infrastructure.mob.group.MobCrewService crews() {
+        return crews;
+    }
+
+    /**
+     * Grants a bounded world-work allowance for a scenario that outlives one
+     * evaluation (a build spread over scheduled ticks, the summon at its end).
+     * Both budgets are capped by the engine's per-run limits —
+     * {@link MobBehaviorSettings#maxBlockEditsPerRun()} and
+     * {@link MobBehaviorSettings#maxEntitySpawnsPerRun()} — so no module can ask
+     * its way out of the subsystem's limits.
+     */
+    MobEditSession openEditSession(int editBudget, int spawnBudget) {
+        int editCap = Math.max(1, settings.maxBlockEditsPerRun());
+        int spawnCap = Math.max(1, settings.maxEntitySpawnsPerRun());
+        return new MobEditSession(Math.min(Math.max(0, editBudget), editCap),
+                Math.min(Math.max(0, spawnBudget), spawnCap), telemetry);
+    }
+
     /** Registers a profile; starts the engine on the first registration. */
     void register(Plugin owner, MobProfile profile) {
         if (owner == null || profile == null) {
             throw new IllegalArgumentException("owner and profile are required");
         }
-        profilesByOwner.computeIfAbsent(owner, key -> Collections.synchronizedList(new ArrayList<>())).add(profile);
-        profilesByType.computeIfAbsent(profile.entityType(), key -> Collections.synchronizedList(new ArrayList<>())).add(profile);
+        profile.stampSequence(registrationSequence.incrementAndGet());
+        List<MobProfile> owned = ownedList(owner);
+        owned.add(profile);
+        List<MobProfile> byType = typedList(profile.entityType());
+        synchronized (byType) {
+            byType.add(profile);
+            byType.sort(DISPATCH_ORDER);
+        }
         ensureRunning();
         if (DebugLogger.isEnabled()) {
             plugin.getLogger().info("[mob-behavior] " + owner.getName() + " registered profile for "
                     + profile.entityType() + " (" + profilesByType.size() + " types active)");
         }
+    }
+
+    private List<MobProfile> ownedList(Plugin owner) {
+        return profilesByOwner.computeIfAbsent(owner, key -> Collections.synchronizedList(new ArrayList<>()));
+    }
+
+    private List<MobProfile> typedList(EntityType type) {
+        return profilesByType.computeIfAbsent(type, key -> Collections.synchronizedList(new ArrayList<>()));
     }
 
     /** Removes one specific profile from {@code owner}'s registrations. */
@@ -97,7 +215,9 @@ public final class MobBehaviorEngine {
         }
         List<MobProfile> list = profilesByType.get(profile.entityType());
         if (list != null) {
-            list.remove(profile);
+            synchronized (list) {
+                list.remove(profile);
+            }
             if (list.isEmpty()) {
                 profilesByType.remove(profile.entityType(), list);
             }
@@ -113,7 +233,9 @@ public final class MobBehaviorEngine {
         for (MobProfile profile : owned) {
             List<MobProfile> list = profilesByType.get(profile.entityType());
             if (list != null) {
-                list.remove(profile);
+                synchronized (list) {
+                    list.remove(profile);
+                }
                 if (list.isEmpty()) {
                     profilesByType.remove(profile.entityType(), list);
                 }
@@ -138,7 +260,130 @@ public final class MobBehaviorEngine {
 
     /** Applies new settings (config reload). Safe while running. */
     void updateSettings(MobBehaviorSettings newSettings) {
+        MobBehaviorSettings previous = this.settings;
         this.settings = newSettings == null ? MobBehaviorSettings.defaults() : newSettings;
+        BukkitTask task = runTask;
+        if (task != null && previous.intervalTicks() != this.settings.intervalTicks()) {
+            // The cadence is a schedule property, not a loop property: re-arm,
+            // otherwise a reload leaves the engine on the old interval forever.
+            running = false;
+            task.cancel();
+            runTask = null;
+            if (this.settings.enabled() && !profilesByType.isEmpty()) {
+                ensureRunning();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Activity claims (exclusive ownership of one entity's behavior)
+    // ------------------------------------------------------------------
+
+    /**
+     * Claims or renews the entity's exclusive activity for one action id.
+     * A live claim owned by a different action id is never overridden; the
+     * claiming action renews its own claim each execution. Negative
+     * {@code durationTicks} means "until released" — modules normally renew
+     * a bounded claim each fire so a crashed scenario self-expires.
+     */
+    void claimActivity(LivingEntity entity, String actionId, Location anchor, double anchorRadius,
+                       long durationTicks) {
+        if (entity == null || entity.isDead() || !entity.isValid()
+                || actionId == null || actionId.isBlank()) {
+            return;
+        }
+        ActiveActivity current = activities.get(entity.getUniqueId());
+        if (current != null && !current.actionId().equals(actionId)
+                && !activityExpired(current, entity)) {
+            return; // another activity owns the entity
+        }
+        long now = entity.getWorld().getGameTime();
+        long expiry = durationTicks > 0 ? now + durationTicks : -1L;
+        activities.put(entity.getUniqueId(),
+                new ActiveActivity(actionId, expiry, anchor, Math.max(0.0, anchorRadius)));
+    }
+
+    /** Drops the entity's claim when owned by {@code actionId}; {@code true} when dropped. */
+    boolean releaseActivity(LivingEntity entity, String actionId) {
+        if (entity == null || actionId == null) {
+            return false;
+        }
+        ActiveActivity current = activities.get(entity.getUniqueId());
+        if (current == null || !current.actionId().equals(actionId)) {
+            return false;
+        }
+        return activities.remove(entity.getUniqueId(), current);
+    }
+
+    /** The action id holding the entity's live claim, or {@code null}. */
+    String activityIdOf(LivingEntity entity) {
+        ActiveActivity activity = activityOf(entity);
+        return activity == null ? null : activity.actionId();
+    }
+
+    /** The entity's live claim, pruned when expired or the entity is gone. */
+    private ActiveActivity activityOf(LivingEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        if (entity.isDead() || !entity.isValid()) {
+            activities.remove(entity.getUniqueId());
+            return null;
+        }
+        ActiveActivity activity = activities.get(entity.getUniqueId());
+        if (activity != null && activityExpired(activity, entity)) {
+            activities.remove(entity.getUniqueId(), activity);
+            return null;
+        }
+        return activity;
+    }
+
+    private boolean activityExpired(ActiveActivity activity, LivingEntity entity) {
+        return activity.expired(entity.getWorld().getGameTime());
+    }
+
+    /** The anchor of the entity's live claim, or {@code null}. Package view for the context. */
+    Location activityAnchorOf(LivingEntity entity) {
+        ActiveActivity activity = activityOf(entity);
+        return activity == null ? null : activity.anchor();
+    }
+
+    /** The entity's activity anchor radius, or {@code -1.0} when unclaimed. */
+    double activityAnchorRadiusOf(LivingEntity entity) {
+        ActiveActivity activity = activityOf(entity);
+        return activity == null ? -1.0 : activity.anchorRadius();
+    }
+
+    /**
+     * Frees claims whose entity is gone or whose duration ran out.
+     *
+     * <p>An unresolved UUID is ambiguous: the entity is dead and despawned, or
+     * it simply walked outside anyone's view distance and its chunk unloaded.
+     * Dropping the claim on the first miss would delete a journey the moment a
+     * pilgrim villager walked out of render distance, so a miss only counts —
+     * the claim survives until it has gone unresolved for
+     * {@link #CLAIM_UNRESOLVED_LIMIT} runs, which a despawn cannot recover from
+     * and an unloaded chunk does as soon as it loads again.
+     */
+    private void pruneActivities() {
+        if (activities.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<UUID, ActiveActivity> entry : activities.entrySet()) {
+            ActiveActivity claim = entry.getValue();
+            Entity entity = Bukkit.getEntity(entry.getKey());
+            if (entity == null) {
+                if (++claim.unresolvedRuns >= CLAIM_UNRESOLVED_LIMIT) {
+                    activities.remove(entry.getKey());
+                }
+                continue;
+            }
+            claim.unresolvedRuns = 0;
+            if (!(entity instanceof LivingEntity living) || living.isDead() || !living.isValid()
+                    || activityExpired(claim, living)) {
+                activities.remove(entry.getKey());
+            }
+        }
     }
 
     /** Cancels the run task. Idempotent; called from the Core's disable path. */
@@ -146,6 +391,7 @@ public final class MobBehaviorEngine {
         running = false;
         BukkitTask task = runTask;
         runTask = null;
+        activities.clear();
         if (task != null) {
             task.cancel();
             DebugLogger.info("[mob-behavior] Engine stopped.");
@@ -167,17 +413,31 @@ public final class MobBehaviorEngine {
         if (!snapshot.enabled() || profilesByType.isEmpty()) {
             return;
         }
+        pruneActivities();
         telemetry.runDone();
+        journeys.step();
+        crews.step();
         long deadline = System.nanoTime() + snapshot.budgetMillisPerRun() * 1_000_000L;
+        int buckets = Math.max(1, snapshot.staggerBuckets());
+        int runIndex = runCounter++;
+        RunGuard guard = new RunGuard(snapshot.maxBlockEditsPerRun(), snapshot.maxEntitySpawnsPerRun());
+
+        // Running scenarios first: a claimed entity is a process, and a process
+        // that only advances while a player stands next to it never finishes.
+        sustainedThisRun.clear();
+        advanceSustained(snapshot, guard, deadline);
+
         List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
         if (players.isEmpty()) {
             return;
         }
-        int buckets = Math.max(1, snapshot.staggerBuckets());
-        int runIndex = runCounter++;
         int chunkParity = runIndex & 1;
+        // Only chunks of one parity are swept per run, so a chunk is seen on
+        // runs runIndex, runIndex+2, ... — whose scan ordinal is runIndex >> 1.
+        // Staggering against the run index itself would silently starve every
+        // entity whose bucket disagrees with its chunk's parity.
+        int bucketTarget = (int) Math.floorMod(runIndex >> 1, buckets);
         LongOpenHashSet seen = new LongOpenHashSet(64);
-        RunGuard guard = new RunGuard(snapshot.maxBlockEditsPerRun());
 
         outer:
         for (Player player : players) {
@@ -214,26 +474,106 @@ public final class MobBehaviorEngine {
                         if (candidates == null || candidates.isEmpty()) {
                             continue;
                         }
-                        if ((entity.getEntityId() % buckets) != (runIndex % buckets)) {
+                        if (sustainedThisRun.contains(living.getUniqueId())) {
                             continue;
                         }
-                        evaluate(living, type, candidates, ThreadLocalRandom.current(), guard, deadline);
+                        if (Math.floorMod(entity.getEntityId(), buckets) != bucketTarget) {
+                            continue;
+                        }
+                        evaluate(living, type, candidates, snapshot, guard, deadline);
                     }
                 }
             }
         }
     }
 
+    /**
+     * Advances every activity-claimed entity once, wherever it is. Claims are
+     * bounded by {@code MAX_SUSTAINED_PER_RUN} and share the run's time budget,
+     * so a hundred journeys still cost one controlled slice of the tick.
+     */
+    private void advanceSustained(MobBehaviorSettings snapshot, RunGuard guard, long deadline) {
+        if (activities.isEmpty()) {
+            return;
+        }
+        int cap = Math.max(0, snapshot.maxSustainedPerRun());
+        int processed = 0;
+        for (Map.Entry<UUID, ActiveActivity> entry : activities.entrySet()) {
+            if (processed >= cap) {
+                telemetry.budgetDeferred();
+                return;
+            }
+            if (System.nanoTime() >= deadline) {
+                telemetry.budgetDeferred();
+                return;
+            }
+            // An unloaded entity resolves to nothing: its claim survives (see
+            // pruneActivities) and the scenario resumes when the chunk returns.
+            if (!(Bukkit.getEntity(entry.getKey()) instanceof LivingEntity living)
+                    || living.isDead() || !living.isValid()) {
+                continue;
+            }
+            List<MobProfile> candidates = profilesByType.get(living.getType());
+            if (candidates == null || candidates.isEmpty()) {
+                continue;
+            }
+            processed++;
+            sustainedThisRun.add(living.getUniqueId());
+            evaluate(living, living.getType(), candidates, snapshot, guard, deadline);
+        }
+    }
+
     private void evaluate(LivingEntity entity, EntityType type, List<MobProfile> candidates,
-                          ThreadLocalRandom random, RunGuard guard, long deadline) {
+                          MobBehaviorSettings snapshot, RunGuard guard, long deadline) {
         telemetry.candidateSeen();
-        double checksPerSecond = settings.checksPerSecond();
+        evaluationContext.refresh(entity, ThreadLocalRandom.current(), guard);
+
+        // A claimed entity belongs to one running activity: the owning action
+        // re-fires on every stagger (no odds roll) and nothing else touches
+        // the entity. If the owning action vanished (its profile was
+        // unregistered), the claim is dropped so the entity returns to normal.
+        ActiveActivity activity = activityOf(entity);
+        if (activity != null) {
+            if (System.nanoTime() >= deadline) {
+                telemetry.budgetDeferred();
+                return;
+            }
+            boolean found = false;
+            for (MobProfile profile : candidates) {
+                if (!conditionsPass(profile)) {
+                    continue;
+                }
+                for (MobProfile.ActionEntry entry : profile.actions()) {
+                    if (!entry.action().id().equals(activity.actionId())) {
+                        continue;
+                    }
+                    found = true;
+                    evaluationContext.bindAction(entry.action().id());
+                    try {
+                        if (entry.action().execute(evaluationContext)) {
+                            telemetry.eventFired(entry.action().id());
+                        }
+                    } catch (Throwable throwable) {
+                        plugin.getLogger().warning("[mob-behavior] activity '" + entry.action().id()
+                                + "' threw on " + type + ": " + throwable);
+                    }
+                    return;
+                }
+            }
+            if (!found) {
+                // The owning profile was unregistered: the claim is stale.
+                activities.remove(entity.getUniqueId());
+            }
+            return;
+        }
+
+        double checksPerSecond = snapshot.checksPerSecond();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         for (MobProfile profile : candidates) {
             if (System.nanoTime() >= deadline) {
                 telemetry.budgetDeferred();
                 return;
             }
-            evaluationContext.refresh(entity, random, guard);
             if (!conditionsPass(profile)) {
                 continue;
             }
@@ -243,17 +583,25 @@ public final class MobBehaviorEngine {
                 if (random.nextDouble() > odds) {
                     continue;
                 }
+                evaluationContext.bindAction(entry.action().id());
+                boolean fired;
                 try {
-                    if (entry.action().execute(evaluationContext)) {
-                        telemetry.eventFired(entry.action().id());
-                    }
+                    fired = entry.action().execute(evaluationContext);
                 } catch (Throwable throwable) {
                     // One broken action must never kill the run loop: isolate,
                     // log, and keep the engine alive.
                     plugin.getLogger().warning("[mob-behavior] action '" + entry.action().id()
                             + "' threw on " + type + ": " + throwable);
+                    continue;
                 }
-                return;
+                if (fired) {
+                    telemetry.eventFired(entry.action().id());
+                    return;
+                }
+                // Declined: the mob had nothing to do on this spot (no plant to
+                // eat, no space to build). Keeping the roll spent would starve
+                // every other profile of the same type — a four-profile
+                // villager would only ever run the first one that rolled.
             }
         }
     }
@@ -262,7 +610,8 @@ public final class MobBehaviorEngine {
      * Forces one direct firing pass on a specific entity: every action
      * registered by {@code owner} for the entity's type runs immediately with
      * the odds gate bypassed, unlike the regular one-action-per-evaluation
-     * loop. Profile conditions still gate the actions unless
+     * loop. Activity claims do not gate a forced pass (forcing is an explicit
+     * test hook). Profile conditions still gate the actions unless
      * {@code ignoreConditions} is set, so the report shows why an action
      * would not fire naturally. Works even when the loop is disabled by
      * settings; every action still runs through the edit budget. Main thread.
@@ -278,7 +627,7 @@ public final class MobBehaviorEngine {
         }
         BehaviorFireResult.Builder result = new BehaviorFireResult.Builder();
         // Fresh per-call budget: a forced pass never inherits lifetime edits.
-        RunGuard guard = new RunGuard(settings.maxBlockEditsPerRun());
+        RunGuard guard = new RunGuard(settings.maxBlockEditsPerRun(), settings.maxEntitySpawnsPerRun());
         // Same reusable evaluation context the run loop uses; forceFire is
         // main-thread-only (enforced by the API), and the context binds one
         // entity per call anyway.
@@ -294,6 +643,7 @@ public final class MobBehaviorEngine {
                     continue;
                 }
                 boolean fired = false;
+                evaluationContext.bindAction(entry.action().id());
                 try {
                     fired = entry.action().execute(evaluationContext);
                 } catch (Throwable throwable) {
@@ -326,21 +676,33 @@ public final class MobBehaviorEngine {
         return true;
     }
 
-    /** Per-run edit guard enforcing {@code MobBehaviorSettings#maxBlockEditsPerRun}. */
+    /** Per-run budget guard for world edits and entity spawns. */
     private static final class RunGuard implements BehaviorContext.EditRunGuard {
-        private final int limit;
-        private int used;
+        private final int editLimit;
+        private final int spawnLimit;
+        private int edits;
+        private int spawns;
 
-        RunGuard(int limit) {
-            this.limit = limit;
+        RunGuard(int editLimit, int spawnLimit) {
+            this.editLimit = editLimit;
+            this.spawnLimit = spawnLimit;
         }
 
         @Override
         public boolean tryConsume(MobBehaviorEngine engine) {
-            if (used >= limit) {
+            if (edits >= editLimit) {
                 return false;
             }
-            used++;
+            edits++;
+            return true;
+        }
+
+        @Override
+        public boolean tryConsumeSpawn(MobBehaviorEngine engine) {
+            if (spawns >= spawnLimit) {
+                return false;
+            }
+            spawns++;
             return true;
         }
     }

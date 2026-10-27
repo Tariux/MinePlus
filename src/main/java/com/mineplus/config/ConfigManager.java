@@ -43,6 +43,7 @@ public class ConfigManager {
                     MineplusConfig.parsePack(yamlConfig, com.mineplus.pack.PackSettings.defaults()),
                     MineplusConfig.parseRenderPolicy(yamlConfig, com.mineplus.infrastructure.render.RenderPolicy.defaults()),
                     MineplusConfig.parseMobBehavior(yamlConfig, com.mineplus.infrastructure.mob.MobBehaviorSettings.defaults()),
+                    MineplusConfig.parseCombat(yamlConfig, com.mineplus.infrastructure.combat.CombatSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -284,6 +285,34 @@ public class ConfigManager {
                       #   FULLBRIGHT: always (15, 15) — the legacy fully-lit look.
                       LIGHTING: AUTO
 
+                    # Combat services: the Core's simulated projectile engine
+                    # and the particle budgets that make gameplay legible. Both
+                    # are shared by modules (guns, throwables, machines firing
+                    # rounds) so no module writes its own ballistic loop.
+                    BALLISTICS:
+                      # Master switch; false makes every shot a no-op that the
+                      # firing module handles (never an exception).
+                      ENABLED: true
+                      # Rounds simulated concurrently. Over the cap a shot
+                      # degrades to one instant trace over its full range: same
+                      # hit, same damage, no simulation backlog.
+                      MAX_ACTIVE_ROUNDS: 128
+                      # Draw the dashed tracer along each round's path.
+                      TRACERS: true
+                      # Server ticks between simulation steps (1 = every tick;
+                      # the finest a server-side renderer can update).
+                      INTERVAL_TICKS: 1
+
+                    PARTICLE_FX:
+                      # Confirmation effects (muzzle flash, impact) budget per
+                      # tick. This channel is never starved by decoration.
+                      CRITICAL_PER_TICK: 96
+                      # Decorative effects (tracers, smoke, rings) budget per
+                      # tick — the channel that degrades under load.
+                      AMBIENT_PER_TICK: 128
+                      # Ceiling a single emission request may spend.
+                      MAX_PER_EMIT: 32
+
                     # Mob behavior engine: budgeted, distance-gated execution of
                     # entity behavior profiles registered by modules (actions like
                     # grazing, planting, or torch lighting around moving mobs).
@@ -303,6 +332,13 @@ public class ConfigManager {
                       BUDGET_MILLIS_PER_RUN: 5
                       # Hard ceiling of world block changes per run.
                       MAX_BLOCK_EDITS_PER_RUN: 96
+                      # Hard ceiling of entities summoned per run. Mob scenarios
+                      # spawn minions, golems and horses; an unbounded summon is
+                      # the one way this subsystem can flood a tick.
+                      MAX_ENTITY_SPAWNS_PER_RUN: 8
+                      # Cap on scenario-claimed entities the engine advances per
+                      # run even when no player is near them (journeys, camps).
+                      MAX_SUSTAINED_PER_RUN: 64
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

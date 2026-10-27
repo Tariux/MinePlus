@@ -48,6 +48,8 @@ What does that mean for your server?
 - ⏱️ **Timed crafting processes** — restart-safe, chunk-aware processes (vanilla furnace parity: paused in unloaded chunks, resumed on load), scaled by per-level `speed` multipliers.
 - 🔗 **Linking & signals** — pipe-network style auto-linking (`autoLinkNeighbors`) plus directed signal propagation between machines.
 - 💾 **SQLite persistence, off the main thread** — HikariCP-pooled connections with an asynchronous write-behind queue; gameplay never blocks on disk I/O.
+- 🔫 **Shared combat services** — a Core-side projectile simulation (spread, drop, drag, falloff, penetration, ricochet, headshots) with budgeted particles and sound resolution, a held-item input seam that routes presses and freezes vanilla interactions for the items a module owns, and a deferred magazine model so a gun never rewrites the held stack mid-fire. Modules ship weapon definitions, not physics loops.
+- 🐄 **Budgeted mob behavior engine** — per-entity-type profiles of interval-gated actions, arbitrated by anchored activity claims so scenarios can't fight over one mob or wander outside their area; ground-probed navigation, leg-by-leg journeys with stall recovery, crew cohesion, and hard per-run caps on time, block edits and spawns. Lazy: it costs nothing until a module registers a profile.
 - 🖥️ **Built-in admin CLI** — inspect, respawn, reload, and diagnose every instance live.
 
 ---
@@ -86,6 +88,7 @@ Everything below is a **module feature**, built entirely outside the core with J
 | **Break it** | Your leftover TNT drops back out — nothing is ever silently destroyed |
 
 ▸ **Explore the code:** [`examples/mineplus-fun`](examples/mineplus-fun/README.md) — hook, GUI, ballistics, placement rotation, and the [module development guide](examples/mineplus-fun/DEVELOPMENT_PROMPT.md).
+▸ **More complete modules:** [`examples/mineplus-gun`](examples/mineplus-gun/README.md) — firearms, melee and reload animation on the Core's combat services; [`examples/mineplus-mobfun`](examples/mineplus-mobfun/README.md) — nine smart mobs, golem builders and pilgrim villagers on the Core's mob behavior engine.
 
 ---
 
@@ -118,7 +121,7 @@ The tiers stack: a JSON-defined machine can be driven by a Tier-3 module (see [`
 
 ## ⚙️ Configuration
 
-`plugins/Mineplus/settings.mp.yml` is auto-generated on first start and controls the rendering engine — collision mode, rotation snapping, per-face rendering, and the anchor convention:
+`plugins/Mineplus/settings.mp.yml` is auto-generated on first start and controls the rendering engine plus the runtime services — the excerpt below covers collision mode, rotation snapping, per-face rendering, and the anchor convention; pack delivery, ballistics, particle budgets and the mob behavior engine are in the [configuration reference](docs/config-reference.md#settingsmpyml-engine--runtime-services):
 
 ```yaml
 VIRTUAL_RENDERING:

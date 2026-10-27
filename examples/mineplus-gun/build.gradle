@@ -36,8 +36,7 @@ dependencies {
 
     // Optional, soft-dependencies: none at compile time (resolved reflectively at
     // runtime so their absence is never a build or load failure).
-    //   - Vault        -> shop economy
-    //   - packetevents -> true hold-to-fire input
+    //   - Vault -> shop economy (the shop delivers free without it)
 }
 
 tasks.withType(JavaCompile).configureEach {

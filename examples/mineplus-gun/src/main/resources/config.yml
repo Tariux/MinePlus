@@ -48,9 +48,11 @@ ammo:
   material: GOLD_NUGGET
   items-per-round: 1
 
-ballistics:
-  max-active-bullets: 128      # bullets simulated per tick; overflow resolves instantly
-  max-particles-per-tick: 240
+# The round budget (BALLISTICS.MAX_ACTIVE_ROUNDS) and the particle budgets
+# (PARTICLE_FX) are Core engine settings in plugins/Mineplus/settings.mp.yml:
+# they meter every module on the server, so a plugin cannot silently double the
+# server's per-tick cost. Per-weapon ballistics (damage, velocity, spread…) are
+# configured in each weapon's own `ballistics:` section below.
 
 economy:
   mode: VAULT                  # VAULT | FREE

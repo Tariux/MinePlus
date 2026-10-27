@@ -11,6 +11,11 @@ import org.bukkit.entity.EntityType;
  * evaluation (first eligible wins), mirroring the reference mod's
  * single-action-per-event dispatch. Conditions gate the whole profile.
  *
+ * <p>Several modules can profile the same entity type. The engine dispatches
+ * their profiles in a fixed order — {@code priority} descending, then
+ * registration order ascending — so a profile's position never depends on
+ * which module happened to toggle a feature last.
+ *
  * <p>Build via {@link #builder(EntityType)}; register through
  * {@link MobBehaviorApi#register}.
  */
@@ -21,17 +26,27 @@ public final class MobProfile {
     }
 
     private final EntityType entityType;
+    private final int priority;
     private final List<ActionEntry> actions;
     private final List<Predicate<BehaviorContext>> conditions;
+    /** Stamped once by the engine at registration; the tie-break of the dispatch order. */
+    private long sequence;
 
-    private MobProfile(EntityType entityType, List<ActionEntry> actions, List<Predicate<BehaviorContext>> conditions) {
+    private MobProfile(EntityType entityType, int priority, List<ActionEntry> actions,
+                       List<Predicate<BehaviorContext>> conditions) {
         this.entityType = entityType;
+        this.priority = priority;
         this.actions = List.copyOf(actions);
         this.conditions = List.copyOf(conditions);
     }
 
     public EntityType entityType() {
         return entityType;
+    }
+
+    /** Dispatch weight against other profiles of the same type; higher runs first. */
+    public int priority() {
+        return priority;
     }
 
     public List<ActionEntry> actions() {
@@ -43,12 +58,21 @@ public final class MobProfile {
         return conditions;
     }
 
+    long sequence() {
+        return sequence;
+    }
+
+    void stampSequence(long registrationSequence) {
+        this.sequence = registrationSequence;
+    }
+
     public static Builder builder(EntityType entityType) {
         return new Builder(entityType);
     }
 
     public static final class Builder {
         private final EntityType entityType;
+        private int priority;
         private final List<ActionEntry> actions = new ArrayList<>();
         private final List<Predicate<BehaviorContext>> conditions = new ArrayList<>();
 
@@ -57,6 +81,12 @@ public final class MobProfile {
                 throw new IllegalArgumentException("MobProfile requires a living, spawnable entity type: " + entityType);
             }
             this.entityType = entityType;
+        }
+
+        /** A profile that outranks other modules' profiles of the same type when both match. */
+        public Builder priority(int priority) {
+            this.priority = priority;
+            return this;
         }
 
         /** Appends an action expected to fire about once per {@code intervalSeconds}. */
@@ -80,7 +110,7 @@ public final class MobProfile {
             if (actions.isEmpty()) {
                 throw new IllegalStateException("MobProfile for " + entityType + " has no actions");
             }
-            return new MobProfile(entityType, actions, conditions);
+            return new MobProfile(entityType, priority, actions, conditions);
         }
     }
 }

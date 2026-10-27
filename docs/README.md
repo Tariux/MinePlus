@@ -15,8 +15,10 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | Build a **small add-on plugin** | [Developer API](developer-api.md#tier-2-basic-infrastructure-api) → [Basic Add-on Workflow](extension-workflows.md#b-basic-add-on-developers) |
 | Build a **full machine framework** | [Developer API](developer-api.md) → [Advanced Workflow](extension-workflows.md#c-advanced-framework-developers) |
 | See a **complete working module** | [MineplusFun (Juicer + Cannon)](../examples/mineplus-fun/README.md) |
-| Tune the **rendering engine** | [Configuration Reference → settings.mp.yml](config-reference.md#settingsmpyml-rendering-engine) |
+| Tune the **rendering engine** | [Configuration Reference → settings.mp.yml](config-reference.md#settingsmpyml-engine--runtime-services) |
 | Add **pack-based custom content** | [Resource Pack System](pack-system.md) |
+| Give weapons **real ballistics** | [Developer API → Combat Services](developer-api.md#combat-services) |
+| Make mobs **do things** | [Developer API → Mob Behavior API](developer-api.md#mob-behavior-api) |
 | **Upgrade** from an older release | [Migration Guide](migration-guide.md) |
 | Just **administer a server** | [Command Reference](config-reference.md#admin-command-reference) |
 
@@ -28,7 +30,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 The complete data-format encyclopedia: multiblock JSON schema, machine recipe JSON schema, `.bbmodel` model handling, per-model `.meta.json` overrides, the `settings.mp.yml` rendering-engine keys, the full texture-name catalog, and the Blockbench designer guidelines.
 
 ### [Developer API](developer-api.md)
-The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, and how the core runtime behaves under your feature code.
+The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, the shared combat services (ballistics, held-item input, magazines, particle budgets), the mob behavior engine (profiles, conditions, journeys, crews, world-edit grants), and how the core runtime behaves under your feature code.
 
 ### [Extension Workflows](extension-workflows.md)
 The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced framework) plus runtime administration and model-debugging tips.
@@ -53,8 +55,9 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`code-based/BasicPlacementExample.java`](../examples/code-based/BasicPlacementExample.java) | Basic | Create / place / query / remove via API |
 | [`code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) | Advanced | Hooks, lifecycle, signals |
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
-| [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon) |
-| [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms, melee, grenades, scopes and a Vault shop |
+| [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon + Gear + Wine + Cabinet + pack showcases) |
+| [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms, melee, grenades, scopes and a Vault shop on the Core's ballistics, held-item input and magazine services |
+| [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch and pilgrim villagers on the Core's mob behavior engine |
 
 For building your own module, follow the canonical recipe in
 [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md).

@@ -206,13 +206,12 @@ public final class GunSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.GOLD + "MineplusGun stats:");
         sender.sendMessage(ChatColor.YELLOW + "Weapons: " + ChatColor.WHITE + services.registry().size());
         if (services.runtime() != null) {
-            sender.sendMessage(ChatColor.YELLOW + "Shooters: " + ChatColor.WHITE + services.runtime().activeSessions()
-                    + ChatColor.YELLOW + "  Bullets: " + ChatColor.WHITE + services.runtime().activeBullets());
-            sender.sendMessage(ChatColor.YELLOW + "Shots: " + ChatColor.WHITE + services.runtime().totalShots()
-                    + ChatColor.YELLOW + "  Hits: " + ChatColor.WHITE + services.runtime().totalHits()
-                    + ChatColor.YELLOW + "  Instant traces: " + ChatColor.WHITE
-                    + services.runtime().instantTraces());
+            sender.sendMessage(ChatColor.YELLOW + "Combat: " + ChatColor.WHITE + services.runtime().telemetry());
         }
+        sender.sendMessage(ChatColor.YELLOW + "Particle budget: " + ChatColor.WHITE
+                + "emitted=" + services.context().particleFx().emitted()
+                + " dropped=" + services.context().particleFx().dropped()
+                + ChatColor.GRAY + " (shared Core meter)");
     }
 
     private void debug(CommandSender sender, String[] args) {
@@ -229,10 +228,11 @@ public final class GunSubCommand implements SubCommand {
             return;
         }
         String mode = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "trace";
+        var engine = services.ballistics();
         player.sendMessage(ChatColor.GOLD + "Ballistics debug (" + mode + "):");
-        player.sendMessage(ChatColor.YELLOW + "Active bullets: " + ChatColor.WHITE
-                + services.runtime().activeBullets() + ChatColor.YELLOW + "  Instant traces: " + ChatColor.WHITE
-                + services.runtime().instantTraces());
+        player.sendMessage(ChatColor.YELLOW + "Rounds in flight: " + ChatColor.WHITE
+                + engine.activeRounds() + "/" + engine.settings().maxActiveRounds()
+                + ChatColor.YELLOW + "  Instant traces: " + ChatColor.WHITE + engine.degradedShots());
         WeaponDefinition held = services.runtime().resolve(player.getInventory().getItemInMainHand());
         if (held == null) {
             player.sendMessage(ChatColor.GRAY + "No weapon in hand.");

@@ -44,11 +44,6 @@ public final class WeaponConfigLoader {
                 config.getBoolean("settings.pvp-only", false)
         );
 
-        GunConfig.Ballistics ballistics = new GunConfig.Ballistics(
-                (int) clamp(config.getDouble("ballistics.max-active-bullets", 96), 1, 4096),
-                (int) clamp(config.getDouble("ballistics.max-particles-per-tick", 240), 0, 4096)
-        );
-
         Material ammoMaterial = material(config.getString("ammo.material", "GOLD_NUGGET"),
                 Material.GOLD_NUGGET, "ammo.material");
         GunConfig.Ammo ammo = new GunConfig.Ammo(
@@ -81,7 +76,7 @@ public final class WeaponConfigLoader {
                 }
             }
         }
-        return new GunConfig(settings, ballistics, ammo, economy, shop, weapons);
+        return new GunConfig(settings, ammo, economy, shop, weapons);
     }
 
     private static WeaponDefinition parseWeapon(String rawId, ConfigurationSection parent) {

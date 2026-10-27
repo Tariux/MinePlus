@@ -1,6 +1,8 @@
 package com.mineplus.gun.weapon;
 
 import com.mineplus.gun.MineplusGunPlugin;
+import com.mineplus.infrastructure.PluginContext;
+import com.mineplus.infrastructure.registry.ItemMagazine;
 import com.mineplus.infrastructure.registry.ItemRegistry;
 import com.mineplus.infrastructure.registry.ItemState;
 import java.util.ArrayList;
@@ -10,8 +12,14 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * Builds the {@link ItemStack} for a weapon: Core pack-item identity via the
- * pack API, plus the module's runtime state through the Core
- * {@link ItemState} slots (weapon id, live rounds, per-stack identity tag).
+ * pack API, plus the module's runtime state through the Core primitives —
+ * {@link ItemState} for the weapon-id stamp and {@link ItemMagazine} for the
+ * live round count and per-stack identity.
+ *
+ * <p>The module keeps no ammo or identity tags of its own: every read and write
+ * of a round count goes through the Core magazine, so the in-memory
+ * authoritative value while a gun is in the hand and the PDC value that survives
+ * a log-out are one and the same mechanism, not two that can drift apart.
  *
  * <p>Lore is the weapon's stat block; the Core content layer supplies the
  * display name already. With {@code PACK.ENABLED: false} the Core returns
@@ -21,24 +29,25 @@ public final class WeaponItemFactory {
 
     public static final String NAMESPACE = "mineplusgun";
 
+    /** The Core magazine slot name this module's rounds persist under. */
+    public static final String AMMO_SLOT = "ammo";
+
     private final MineplusGunPlugin plugin;
     private final ItemRegistry itemRegistry;
     private final com.mineplus.pack.PackApi packApi;
 
     private final ItemState weaponState;
-    private final ItemState ammoState;
-    private final ItemState identityTag;
+    private final ItemMagazine magazine;
 
-    public WeaponItemFactory(MineplusGunPlugin plugin, ItemRegistry itemRegistry, com.mineplus.pack.PackApi packApi) {
+    public WeaponItemFactory(MineplusGunPlugin plugin, PluginContext context) {
         this.plugin = plugin;
-        this.itemRegistry = itemRegistry;
-        this.packApi = packApi;
+        this.itemRegistry = context.itemRegistry();
+        this.packApi = context.packApi();
         this.weaponState = new ItemState(plugin, "weapon");
-        this.ammoState = new ItemState(plugin, "ammo");
-        this.identityTag = ItemState.identityTag(plugin);
+        this.magazine = context.magazine(plugin, AMMO_SLOT);
     }
 
-    /** A fresh weapon stack with a full magazine. */
+    /** A fresh weapon stack with a full magazine and its own identity tag. */
     public ItemStack create(WeaponDefinition definition) {
         ItemStack stack = packApi.createItem(NAMESPACE, definition.id());
         if (stack == null || stack.getType().isAir()) {
@@ -52,16 +61,13 @@ public final class WeaponItemFactory {
             stack = new ItemStack(definition.backingMaterial());
             var meta = stack.getItemMeta();
             if (meta != null) {
-                meta.setDisplayName(org.bukkit.ChatColor.translateAlternateColorCodes('&', definition.displayName()));
+                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', definition.displayName()));
                 stack.setItemMeta(meta);
             }
         }
 
         weaponState.setString(stack, definition.id());
-        identityTag.getOrCreateIdentity(stack);
-        if (definition.usesAmmo()) {
-            ammoState.set(stack, definition.magazine());
-        }
+        magazine.issue(stack, capacity(definition));
 
         // The stat block lore is weapon gameplay, not content presentation.
         var meta = stack.getItemMeta();
@@ -71,6 +77,16 @@ public final class WeaponItemFactory {
         }
         applyInitialFrame(stack, definition);
         return stack;
+    }
+
+    /** The Core magazine service this module's stacks are read through. */
+    public ItemMagazine magazine() {
+        return magazine;
+    }
+
+    /** The round capacity of a weapon — zero for a melee item, which carries none. */
+    public static int capacity(WeaponDefinition definition) {
+        return definition.usesAmmo() ? Math.max(0, definition.magazine()) : 0;
     }
 
     /**
@@ -125,32 +141,23 @@ public final class WeaponItemFactory {
         return id == null || id.isBlank() ? null : id;
     }
 
-    /** Rounds currently in the stack, or {@code -1} when it carries no ammo tag. */
-    public int readAmmo(ItemStack stack) {
-        Integer ammo = ammoState.read(stack);
-        return ammo == null ? -1 : ammo;
+    /** Rounds persisted on the stack (a full magazine when it carries no tag yet). */
+    public int rounds(ItemStack stack, WeaponDefinition definition) {
+        return magazine.rounds(stack, capacity(definition));
     }
 
-    /** Writes the rounds carried by the stack (clamped at zero). */
-    public void writeAmmo(ItemStack stack, int rounds) {
-        ammoState.set(stack, Math.max(0, rounds));
+    /** Writes a round count straight onto a stack (shop, command, migration). */
+    public void setRounds(ItemStack stack, int rounds, WeaponDefinition definition) {
+        magazine.setRounds(stack, rounds, capacity(definition));
     }
 
-    /**
-     * The stable per-stack identity used to key the in-memory magazine, or
-     * {@code null} when the stack carries none.
-     */
-    public String readUid(ItemStack stack) {
-        String uid = identityTag.readString(stack);
-        return uid == null || uid.isBlank() ? null : uid;
+    /** The stable per-stack identity, or {@code null} when the stack carries none. */
+    public String uid(ItemStack stack) {
+        return magazine.uid(stack);
     }
 
-    /** Stamps an identity tag for a legacy stack; the caller must write the stack back. */
-    public void writeUid(ItemStack stack, String uid) {
-        identityTag.setString(stack, uid);
-    }
-
-    public MineplusGunPlugin plugin() {
-        return plugin;
+    /** Carries one stack's identity onto another (an arsenal migration swap). */
+    public void transferUid(ItemStack from, ItemStack to) {
+        magazine.transferUid(from, to);
     }
 }
