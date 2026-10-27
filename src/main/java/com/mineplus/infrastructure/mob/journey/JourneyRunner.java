@@ -86,9 +86,17 @@ public final class JourneyRunner {
             maxStuckStrikes = Math.max(1, maxStuckStrikes);
         }
 
-        /** A sane long march: one block of speed, a 48-block leg, generous patience. */
+        /**
+         * A sane long march: one block of speed, a 32-block leg, generous
+         * patience.
+         *
+         * <p>The leg stays well inside the mob's own path range. Vanilla
+         * navigation resolves a path of roughly three dozen blocks; a waypoint
+         * at the edge of that range is a waypoint the mob frequently cannot
+         * path to, and a leg it cannot walk is a mob that stands still.
+         */
         public static Options defaults() {
-            return new Options(1.0, 6.0, 8.0, 48, 40L, 60L, 2.0, 6, 0.0);
+            return new Options(1.0, 6.0, 8.0, 32, 40L, 60L, 2.0, 6, 0.0);
         }
     }
 
@@ -127,7 +135,11 @@ public final class JourneyRunner {
         }
         World world = mob.getWorld();
         Options settings = options == null ? Options.defaults() : options;
-        long now = world.getFullTime();
+        // The world age, not the time of day: the cooldowns below are
+        // durations, and a /time set must not push a repath into the future
+        // (or hold one there) — a mob whose repath clock jumps backwards
+        // stands still until the world catches up again.
+        long now = world.getGameTime();
         UUID id = mob.getUniqueId();
 
         Journey journey = journeys.get(id);
@@ -264,7 +276,7 @@ public final class JourneyRunner {
             return false;
         }
         JourneyStatus status = checkProgress(journey, mob.getLocation(),
-                mob.getWorld().getFullTime(), settings);
+                mob.getWorld().getGameTime(), settings);
         return status == JourneyStatus.DETOURING || status == JourneyStatus.STUCK;
     }
 

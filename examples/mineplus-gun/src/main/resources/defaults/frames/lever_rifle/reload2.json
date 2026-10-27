@@ -1,4 +1,4 @@
-﻿{
+{
     "textures":  {
                      "0":  "mineplusgun:item/lever_rifle",
                      "particle":  "mineplusgun:item/lever_rifle"
@@ -869,14 +869,14 @@
     "display":  {
                     "thirdperson_righthand":  {
                                                   "rotation":  [
-                                                                   20,
-                                                                   -10,
-                                                                   50
+                                                                   14,
+                                                                   -13,
+                                                                   20
                                                                ],
                                                   "translation":  [
-                                                                      -2.25,
-                                                                      4.75,
-                                                                      -4.5
+                                                                      0.3,
+                                                                      4.6,
+                                                                      -5.4
                                                                   ],
                                                   "scale":  [
                                                                 0.85,
@@ -886,14 +886,14 @@
                                               },
                     "thirdperson_lefthand":  {
                                                  "rotation":  [
-                                                                  20,
-                                                                  -10,
-                                                                  50
+                                                                  14,
+                                                                  -13,
+                                                                  20
                                                               ],
                                                  "translation":  [
-                                                                     -2.25,
-                                                                     4.75,
-                                                                     -4.5
+                                                                     0.3,
+                                                                     4.6,
+                                                                     -5.4
                                                                  ],
                                                  "scale":  [
                                                                0.85,
@@ -903,14 +903,14 @@
                                              },
                     "firstperson_righthand":  {
                                                   "rotation":  [
-                                                                   15,
-                                                                   -35,
-                                                                   45
+                                                                   4.2,
+                                                                   -20,
+                                                                   17.4
                                                                ],
                                                   "translation":  [
-                                                                      -4.5,
+                                                                      -0.99,
                                                                       8.75,
-                                                                      -7.25
+                                                                      -2.9
                                                                   ],
                                                   "scale":  [
                                                                 0.9,
@@ -920,14 +920,14 @@
                                               },
                     "firstperson_lefthand":  {
                                                  "rotation":  [
-                                                                  5,
-                                                                  -35,
-                                                                  35
+                                                                  0.8,
+                                                                  -14,
+                                                                  14
                                                               ],
                                                  "translation":  [
-                                                                     -4.5,
-                                                                     7.5,
-                                                                     -3
+                                                                     -7.2,
+                                                                     8.25,
+                                                                     -1.2
                                                                  ],
                                                  "scale":  [
                                                                0.9,

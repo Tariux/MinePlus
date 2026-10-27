@@ -13,13 +13,21 @@ import org.bukkit.entity.Player;
  * (action bar / boss bar / off, per-player toggle, bar tones). The module
  * owns only the template placeholder values and the bar semantics — the
  * generic presentation machinery lives in the Core.
+ *
+ * <p>The Core service is shared by the whole server, so this module works in
+ * its own slot: another module's HUD mode or template never leaks into the
+ * ammo bar, and this module never overwrites theirs.</p>
  */
 public final class AmmoHud {
 
-    private final HudService hud = new HudService();
+    /** The slot this module owns in the shared Core HUD service. */
+    private static final String SLOT = "mineplusgun";
+
+    private final HudService hud;
     private volatile GunConfig config;
 
-    public AmmoHud(GunConfig config) {
+    public AmmoHud(HudService hud, GunConfig config) {
+        this.hud = hud;
         this.config = config;
         applySettings(config);
     }
@@ -55,22 +63,38 @@ public final class AmmoHud {
         HudService.Tone tone = reloading ? HudService.Tone.BUSY
                 : mag <= current.settings().lowAmmoThreshold() ? HudService.Tone.LOW
                 : HudService.Tone.NORMAL;
-        hud.update(player, title, progress, tone);
+        hud.update(player, SLOT, title, progress, tone);
     }
 
-    /** Flashes the HUD red for a dry fire; names the nugget supply when there is none. */
-    public void flashEmpty(Player player, WeaponDefinition weapon, int reserve) {
+    /**
+     * Flashes the HUD red for a dry fire; names the reserve supply when there
+     * is nothing left to load.
+     *
+     * @param reserve how many rounds the reserve can still supply
+     * @param supply  the reserve supply's display name
+     */
+    public void flashEmpty(Player player, WeaponDefinition weapon, int reserve, String supply) {
         String suffix = reserve <= 0
-                ? ChatColor.DARK_GRAY + " | " + ChatColor.RED + "no gold nuggets"
+                ? ChatColor.DARK_GRAY + " | " + ChatColor.RED + "no " + supply
                 : ChatColor.DARK_GRAY + " | " + ChatColor.GRAY + "swap hands to reload";
-        hud.flash(player, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
+        hud.flash(player, SLOT, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
                 + ChatColor.RED + "EMPTY" + suffix);
     }
 
     /** Flashes the HUD when a reload cannot start: the reserve supply is gone. */
-    public void flashNoReserve(Player player) {
-        hud.flash(player, ChatColor.RED + "NO AMMUNITION" + ChatColor.DARK_GRAY + " | "
-                + ChatColor.GRAY + "gold nuggets required");
+    public void flashNoReserve(Player player, String supply) {
+        hud.flash(player, SLOT, ChatColor.RED + "NO AMMUNITION" + ChatColor.DARK_GRAY + " | "
+                + ChatColor.GRAY + supply + " required");
+    }
+
+    /**
+     * Flashes the HUD when a reload is asked for on an already loaded weapon:
+     * the gesture was consumed, so the player needs to know why nothing
+     * happened instead of watching a reload that never started.
+     */
+    public void flashFull(Player player, WeaponDefinition weapon) {
+        hud.flash(player, SLOT, ChatColor.RED + weapon.displayName() + ChatColor.DARK_GRAY + " | "
+                + ChatColor.GREEN + "ALREADY LOADED");
     }
 
     /** Removes any boss bar tied to the player (on quit / world switch). */
@@ -86,7 +110,7 @@ public final class AmmoHud {
         if (config == null) {
             return;
         }
-        hud.apply(new HudService.Settings(
+        hud.apply(SLOT, new HudService.Settings(
                 toMode(config.settings().hudMode()),
                 config.settings().hudTemplate()));
     }

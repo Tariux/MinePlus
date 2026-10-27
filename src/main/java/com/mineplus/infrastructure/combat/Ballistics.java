@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.combat;
 
 import com.mineplus.infrastructure.fx.ParticleFx;
 import com.mineplus.infrastructure.fx.Sounds;
+import com.mineplus.util.DebugLogger;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -150,7 +151,7 @@ public final class Ballistics {
         CombatSettings value = newSettings == null ? CombatSettings.defaults() : newSettings;
         this.enabled = value.enabled();
         particles.configure(value.criticalParticlesPerTick(), value.ambientParticlesPerTick(),
-                value.particlesPerEmit());
+                value.particlesPerEmit(), value.particleRadius());
         configure(value.ballistics());
     }
 
@@ -172,13 +173,46 @@ public final class Ballistics {
                 || aimDirection == null || aimDirection.lengthSquared() < 1.0e-8) {
             return false;
         }
-        ProjectileHandler sink = handler == null ? ProjectileHandler.STANDARD : handler;
         Vector unit = aimDirection.clone().normalize();
         Vector velocity = applySpread(unit, profile.spreadDegrees()).multiply(profile.velocity());
+        emitLaunchFx(shooter, origin, unit, profile);
+        return launchRound(shooter, origin, unit, velocity, profile, handler);
+    }
+
+    /**
+     * Launches a whole weapon shot: {@code profile.pellets()} independent rounds
+     * down the same cone, each with its own spread sample.
+     *
+     * <p>The muzzle effect belongs to the <em>shot</em>, not to the round: one
+     * flash and one report per trigger pull, however many pellets leave the
+     * barrel. Emitting it per pellet made a shotgun fire six flashes and six
+     * reports, and burned six times the particle budget for one pull.</p>
+     */
+    public int fireWeapon(Player shooter, Location origin, Vector aimDirection, BallisticProfile profile,
+                          ProjectileHandler handler) {
+        if (profile == null || !enabled || origin == null || origin.getWorld() == null
+                || aimDirection == null || aimDirection.lengthSquared() < 1.0e-8) {
+            return 0;
+        }
+        Vector unit = aimDirection.clone().normalize();
+        emitLaunchFx(shooter, origin, unit, profile);
+        int launched = 0;
+        for (int pellet = 0; pellet < profile.pellets(); pellet++) {
+            Vector velocity = applySpread(unit, profile.spreadDegrees()).multiply(profile.velocity());
+            if (launchRound(shooter, origin, unit, velocity, profile, handler)) {
+                launched++;
+            }
+        }
+        return launched;
+    }
+
+    /** Launches one round without the muzzle effect (the shot already spent it). */
+    private boolean launchRound(Player shooter, Location origin, Vector unit, Vector velocity,
+                                BallisticProfile profile, ProjectileHandler handler) {
+        ProjectileHandler sink = handler == null ? ProjectileHandler.STANDARD : handler;
         Location start = origin.clone();
 
-        emitLaunchFx(shooter, start, unit, profile);
-        sink.onLaunch(shooter, start, unit, profile);
+        safeLaunch(sink, shooter, start, unit, profile);
 
         if (rounds.size() >= settings.maxActiveRounds()) {
             // Over budget: resolve the whole path now instead of growing the
@@ -192,24 +226,6 @@ public final class Ballistics {
         totalRounds++;
         start();
         return true;
-    }
-
-    /**
-     * Launches a whole weapon shot: {@code profile.pellets()} independent rounds
-     * down the same cone, each with its own spread sample.
-     */
-    public int fireWeapon(Player shooter, Location origin, Vector aimDirection, BallisticProfile profile,
-                          ProjectileHandler handler) {
-        if (profile == null) {
-            return 0;
-        }
-        int launched = 0;
-        for (int pellet = 0; pellet < profile.pellets(); pellet++) {
-            if (fire(shooter, origin, aimDirection, profile, handler)) {
-                launched++;
-            }
-        }
-        return launched;
     }
 
     // ------------------------------------------------------------------
@@ -287,7 +303,7 @@ public final class Ballistics {
                 FluidCollisionMode.NEVER, true);
         RayTraceResult entityHit = world.rayTraceEntities(start, direction, distance,
                 profile.hitboxExpansion(),
-                candidate -> round.allows(candidate) && round.handler.allowTarget(candidate, shooter));
+                candidate -> round.allows(candidate) && allows(round.handler, candidate, shooter));
 
         double blockDistance = blockHit == null ? Double.MAX_VALUE
                 : start.toVector().distance(blockHit.getHitPosition());
@@ -329,7 +345,7 @@ public final class Ballistics {
             damage *= profile.headshotMultiplier();
         }
 
-        boolean withheld = !round.handler.onEntityHit(new ProjectileHit(at, target, hit.getHitBlock(),
+        boolean withheld = !safeEntityHit(round.handler, new ProjectileHit(at, target, hit.getHitBlock(),
                 hit.getHitBlockFace(), impactDistance, damage, headshot, shooter, profile));
         emitImpactFx(at, profile);
         if (!withheld && damage > 0.0) {
@@ -351,10 +367,9 @@ public final class Ballistics {
         Block block = hit.getHitBlock();
         BlockFace face = hit.getHitBlockFace();
         Location at = hit.getHitPosition().toLocation(round.world());
-        round.handler.onBlockHit(new ProjectileHit(at, null, block, face,
+        safeBlockHit(round.handler, new ProjectileHit(at, null, block, face,
                 round.travelled + hitDistance, 0.0, false, shooter, profile));
         emitImpact(at, profile);
-
         if (face != null && round.ricochetLeft > 0
                 && ThreadLocalRandom.current().nextDouble() < profile.ricochetChance()) {
             Vector normal = new Vector(face.getModX(), face.getModY(), face.getModZ());
@@ -391,7 +406,7 @@ public final class Ballistics {
             return;
         }
         round.alive = false;
-        round.handler.onExpired(player(round.shooterId), round.position.clone(), round.profile);
+        safeExpired(round.handler, player(round.shooterId), round.position.clone(), round.profile);
     }
 
     /** The over-budget path: one trace over the whole remaining range. */
@@ -405,7 +420,7 @@ public final class Ballistics {
         RayTraceResult blockHit = world.rayTraceBlocks(origin, direction, profile.range(),
                 FluidCollisionMode.NEVER, true);
         RayTraceResult entityHit = world.rayTraceEntities(origin, direction, profile.range(),
-                profile.hitboxExpansion(), candidate -> handler.allowTarget(candidate, shooter));
+                profile.hitboxExpansion(), candidate -> allows(handler, candidate, shooter));
         double blockDistance = blockHit == null ? Double.MAX_VALUE
                 : origin.toVector().distance(blockHit.getHitPosition());
         double entityDistance = entityHit == null || entityHit.getHitEntity() == null ? Double.MAX_VALUE
@@ -423,7 +438,7 @@ public final class Ballistics {
             boolean headshot = isHeadshot(living, entityHit);
             double damage = profile.damageAt(entityDistance) * (headshot ? profile.headshotMultiplier() : 1.0);
             Location at = entityHit.getHitPosition().toLocation(world);
-            boolean withheld = !handler.onEntityHit(new ProjectileHit(at, living, entityHit.getHitBlock(),
+            boolean withheld = !safeEntityHit(handler, new ProjectileHit(at, living, entityHit.getHitBlock(),
                     entityHit.getHitBlockFace(), entityDistance, damage, headshot, shooter, profile));
             emitImpactFx(at, profile);
             if (!withheld && damage > 0.0) {
@@ -433,9 +448,70 @@ public final class Ballistics {
         }
         if (blockHit != null) {
             Location at = blockHit.getHitPosition().toLocation(world);
-            handler.onBlockHit(new ProjectileHit(at, null, blockHit.getHitBlock(), blockHit.getHitBlockFace(),
+            safeBlockHit(handler, new ProjectileHit(at, null, blockHit.getHitBlock(), blockHit.getHitBlockFace(),
                     blockDistance, 0.0, false, shooter, profile));
             emitImpact(at, profile);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Module callback isolation
+    // ------------------------------------------------------------------
+
+    /**
+     * A module's handler is the enrichment of a shot, never its condition: a
+     * handler that throws must not delete the round, hide the impact or
+     * withhold the damage the engine computed. Every callback therefore runs
+     * behind a guard, and a broken one degrades to "no extra behaviour".
+     */
+
+    private void safeLaunch(ProjectileHandler handler, Player shooter, Location origin, Vector direction,
+                             BallisticProfile profile) {
+        try {
+            handler.onLaunch(shooter, origin, direction, profile);
+        } catch (Throwable failure) {
+            DebugLogger.warning("[combat] launch handler failed: " + failure);
+        }
+    }
+
+    /** @return the handler's verdict; a broken handler does not withhold damage */
+    private boolean safeEntityHit(ProjectileHandler handler, ProjectileHit hit) {
+        try {
+            return handler.onEntityHit(hit);
+        } catch (Throwable failure) {
+            DebugLogger.warning("[combat] entity-hit handler failed: " + failure);
+            return true;
+        }
+    }
+
+    private void safeBlockHit(ProjectileHandler handler, ProjectileHit hit) {
+        try {
+            handler.onBlockHit(hit);
+        } catch (Throwable failure) {
+            DebugLogger.warning("[combat] block-hit handler failed: " + failure);
+        }
+    }
+
+    private void safeExpired(ProjectileHandler handler, Player shooter, Location at, BallisticProfile profile) {
+        try {
+            handler.onExpired(shooter, at, profile);
+        } catch (Throwable failure) {
+            DebugLogger.warning("[combat] expiry handler failed: " + failure);
+        }
+    }
+
+    /**
+     * The targeting filter, guarded: a filter that throws must not abort the
+     * whole ray trace (which would silently delete the shot). A broken filter
+     * admits the candidate — the engine's own hit rules still decide what a
+     * round may damage.
+     */
+    private boolean allows(ProjectileHandler handler, Entity candidate, Player shooter) {
+        try {
+            return handler.allowTarget(candidate, shooter);
+        } catch (Throwable failure) {
+            DebugLogger.warning("[combat] target filter failed: " + failure);
+            return true;
         }
     }
 
@@ -443,15 +519,44 @@ public final class Ballistics {
     // Effects
     // ------------------------------------------------------------------
 
+    /**
+     * The shot's muzzle effect: a bright flash, the burning powder it throws
+     * off, the smoke behind it, and the report.
+     *
+     * <p>The flash sits at the barrel — forward of the eye and below it, where
+     * the weapon actually is. A burst at the camera is invisible to the
+     * shooter and reads as a puff hanging in the crosshair, and that is what a
+     * shot looked like before this was placed.</p>
+     *
+     * <p>The three layers are ordered by how long they live: the flash blooms
+     * in place, the sparks are thrown out of the barrel at speed, and the
+     * smoke lingers. A single grey cloud reads as a puff; three layers read
+     * as gunpowder.</p>
+     */
     private void emitLaunchFx(Player shooter, Location origin, Vector unit, BallisticProfile profile) {
-        Location muzzle = origin.clone().add(unit.clone().multiply(0.6));
-        particles.muzzle(muzzle, ParticleFx.particle(profile.muzzleParticle(), Particle.SMOKE), 8);
+        Location muzzle = origin.clone().add(unit.clone().multiply(0.8)).add(0.0, -0.35, 0.0);
+        Particle flash = ParticleFx.particle(profile.flashParticle(), Particle.FLAME);
+        Particle smoke = ParticleFx.particle(profile.smokeParticle(), Particle.LARGE_SMOKE);
+        Particle sparks = ParticleFx.particle(profile.sparkParticle(), Particle.FLAME);
+        ParticleFx.Tier tier = ParticleFx.Tier.CRITICAL;
+        particles.burst(tier, muzzle, flash, 10, 0.10, 0.10, 0.10, 0.02);
+        particles.burst(tier, muzzle, sparks, 7, 0.06, 0.06, 0.06, 0.16);
+        particles.burst(tier, muzzle, smoke, 6, 0.18, 0.18, 0.18, 0.01);
+        particles.burst(tier, muzzle, ParticleFx.particle(profile.muzzleParticle(), Particle.SMOKE),
+                5, 0.22, 0.22, 0.22, 0.0);
         Sounds.play(origin, profile.fireSound(), profile.soundVolume(),
                 Sounds.variance(1.0f, 0.06f), org.bukkit.Sound.ENTITY_ARROW_SHOOT);
     }
 
+    /** The impact: a burst of sparks plus the dust the strike throws up. */
     private void emitImpactFx(Location at, BallisticProfile profile) {
-        particles.impact(at, ParticleFx.particle(profile.impactParticle(), Particle.CRIT), 6);
+        ParticleFx.Tier tier = ParticleFx.Tier.CRITICAL;
+        particles.burst(tier, at, ParticleFx.particle(profile.impactParticle(), Particle.CRIT),
+                8, 0.14, 0.14, 0.14, 0.01);
+        particles.burst(tier, at, ParticleFx.particle(profile.sparkParticle(), Particle.FLAME),
+                5, 0.05, 0.05, 0.05, 0.09);
+        particles.burst(tier, at, ParticleFx.particle(profile.impactSmokeParticle(), Particle.CLOUD),
+                5, 0.20, 0.20, 0.20, 0.0);
     }
 
     /**

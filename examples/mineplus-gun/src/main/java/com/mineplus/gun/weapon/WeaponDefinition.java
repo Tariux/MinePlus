@@ -50,8 +50,12 @@ public final class WeaponDefinition {
     private final double scopeSpreadMultiplier;
 
     private final String muzzleParticle;
+    private final String flashParticle;
+    private final String smokeParticle;
     private final String tracerParticle;
     private final String impactParticle;
+    private final String impactSmokeParticle;
+    private final String sparkParticle;
     private final String soundFire;
     private final String soundReload;
     private final String soundEmpty;
@@ -96,8 +100,12 @@ public final class WeaponDefinition {
         this.scope = b.scope;
         this.scopeSpreadMultiplier = b.scopeSpreadMultiplier;
         this.muzzleParticle = b.muzzleParticle;
+        this.flashParticle = b.flashParticle;
+        this.smokeParticle = b.smokeParticle;
         this.tracerParticle = b.tracerParticle;
         this.impactParticle = b.impactParticle;
+        this.impactSmokeParticle = b.impactSmokeParticle;
+        this.sparkParticle = b.sparkParticle;
         this.soundFire = b.soundFire;
         this.soundReload = b.soundReload;
         this.soundEmpty = b.soundEmpty;
@@ -136,6 +144,8 @@ public final class WeaponDefinition {
                 // gun gets one.
                 .ricochet(ricochet, ricochet > 0.0 ? 1 : 0)
                 .particles(muzzleParticle, tracerParticle, impactParticle)
+                .effectParticles(flashParticle, smokeParticle, impactSmokeParticle)
+                .sparkParticle(sparkParticle)
                 .sounds(soundFire, null, "block.note_block.basedrum", 1.0f)
                 .build();
     }
@@ -215,8 +225,12 @@ public final class WeaponDefinition {
     public double scopeSpreadMultiplier() { return scopeSpreadMultiplier; }
 
     public String muzzleParticle() { return muzzleParticle; }
+    public String flashParticle() { return flashParticle; }
+    public String smokeParticle() { return smokeParticle; }
     public String tracerParticle() { return tracerParticle; }
     public String impactParticle() { return impactParticle; }
+    public String impactSmokeParticle() { return impactSmokeParticle; }
+    public String sparkParticle() { return sparkParticle; }
     public String soundFire() { return soundFire; }
     public String soundReload() { return soundReload; }
     public String soundEmpty() { return soundEmpty; }
@@ -270,8 +284,12 @@ public final class WeaponDefinition {
         private double scopeSpreadMultiplier = 0.35;
 
         private String muzzleParticle = "SMOKE";
+        private String flashParticle = "FLAME";
+        private String smokeParticle = "LARGE_SMOKE";
         private String tracerParticle = "CRIT";
         private String impactParticle = "CRIT";
+        private String impactSmokeParticle = "CLOUD";
+        private String sparkParticle = "SMALL_FLAME";
         private String soundFire = "mineplusgun:shot";
         private String soundReload = "mineplusgun:reload";
         private String soundEmpty = "mineplusgun:empty";
@@ -313,8 +331,12 @@ public final class WeaponDefinition {
         public Builder scopeSpreadMultiplier(double v) { this.scopeSpreadMultiplier = v; return this; }
 
         public Builder muzzleParticle(String v) { this.muzzleParticle = v; return this; }
+        public Builder flashParticle(String v) { this.flashParticle = v; return this; }
+        public Builder smokeParticle(String v) { this.smokeParticle = v; return this; }
         public Builder tracerParticle(String v) { this.tracerParticle = v; return this; }
         public Builder impactParticle(String v) { this.impactParticle = v; return this; }
+        public Builder impactSmokeParticle(String v) { this.impactSmokeParticle = v; return this; }
+        public Builder sparkParticle(String v) { this.sparkParticle = v; return this; }
         public Builder soundFire(String v) { this.soundFire = v; return this; }
         public Builder soundReload(String v) { this.soundReload = v; return this; }
         public Builder soundEmpty(String v) { this.soundEmpty = v; return this; }

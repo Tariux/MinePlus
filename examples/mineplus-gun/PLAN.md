@@ -1,8 +1,13 @@
 # MineplusGun — Unified Combat Engine (Design Plan)
 
-> **Status:** planning only. No wiring code exists yet. This document is the
-> contract the implementation prompt ([`DEVELOPMENT_PROMPT.md`](DEVELOPMENT_PROMPT.md))
-> is built from.
+> **Status: historical.** This is the **v1 design** the module was built from.
+> The shipped architecture moved on: the combat runtime (input adapter, ballistics,
+> magazine model, particle budgets) is now **Core-owned**, and the module keeps
+> only the content — arsenal, shop, HUD, ammo supply, reload economy, frame
+> presentation. Where this document and the code disagree, the code is right.
+>
+> The current contract is [`DEVELOPMENT_PROMPT.md`](DEVELOPMENT_PROMPT.md);
+> the shipped behavior is documented in [`README.md`](README.md).
 >
 > Sibling module: [`examples/mineplus-fun`](../mineplus-fun/README.md). The Gun
 > module depends on the [Mineplus Core](../../README.md) exactly like Fun does

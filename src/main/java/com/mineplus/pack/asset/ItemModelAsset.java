@@ -14,10 +14,13 @@ import org.bukkit.Material;
  * carrier — vanilla items never carry Mineplus state, so they render and
  * behave completely vanilla (vanilla preservation contract).
  *
- * <p>The modern representation references the geometry at
- * {@code <namespace>:item/<id>} via the {@code item_model} component; the
- * legacy representation allocates a stable predicate
- * {@code custom_model_data} value derived from the item id.</p>
+ * <p>The modern representation resolves this item's definition through the
+ * {@code item_model} component ({@code <namespace>:<id>} →
+ * {@code assets/<ns>/items/<id>.json}); the definition in turn points at the
+ * geometry model {@code <namespace>:item/<id>}
+ * ({@code assets/<ns>/models/item/<id>.json}). The legacy representation
+ * allocates a stable predicate {@code custom_model_data} value derived from
+ * the item id.</p>
  *
  * <p>Frames are one feature across both representations: modern (1.21.4+)
  * serializes a {@code range_dispatch} over the frame states keyed by the
@@ -107,16 +110,6 @@ public final class ItemModelAsset extends PackAsset {
     /** Dispatch frames of this item, threshold-sorted; empty on plain items. */
     public List<Frame> frames() {
         return frames;
-    }
-
-    /** The staged (animation) frames: every dispatch frame but the final loaded one. */
-    public List<Frame> reloadFrames() {
-        return frames.size() <= 1 ? List.of() : frames.subList(0, frames.size() - 1);
-    }
-
-    /** The loaded-state model reference (the max-threshold frame), or null when unframed. */
-    public String loadedModelReference() {
-        return frames.isEmpty() ? null : frames.get(frames.size() - 1).modelReference();
     }
 
     /** Model rendered at the resting state of a framed item; {@code null} on plain items. */

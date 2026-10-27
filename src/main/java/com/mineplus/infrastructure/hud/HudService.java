@@ -26,8 +26,17 @@ import net.md_5.bungee.api.chat.TextComponent;
  * <p>Functionality every module kept re-rolling; presentation state stays
  * owned here (hidden players, boss bar lifecycle, cleanup on quit is the
  * caller's job via {@link #clear}).</p>
+ *
+ * <p><b>One service, many modules.</b> The service is shared by the whole
+ * server, so each module owns a <em>slot</em>: its own mode and template. Two
+ * modules showing an action bar at the same time still fight over the single
+ * action bar line — that is the client's limit, not the service's — but they
+ * no longer fight over the mode or the template.</p>
  */
 public final class HudService {
+
+    /** The slot used when a caller does not name one. */
+    public static final String DEFAULT_SLOT = "default";
 
     /** Where the HUD renders. */
     public enum Mode { ACTIONBAR, BOSSBAR, OFF }
@@ -51,17 +60,36 @@ public final class HudService {
             BarColor.YELLOW,  // Tone.BUSY
     };
 
+    private static final Settings DEFAULT_SETTINGS = new Settings(Mode.ACTIONBAR, null);
+
     private final Set<UUID> hidden = ConcurrentHashMap.newKeySet();
     private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
-    private volatile Settings settings = new Settings(Mode.ACTIONBAR, null);
+    private final Map<String, Settings> slots = new ConcurrentHashMap<>();
 
     /** Applies new HUD settings (mode + template); players keep their toggle. */
     public void apply(Settings settings) {
-        this.settings = settings == null ? new Settings(Mode.ACTIONBAR, null) : settings;
+        apply(DEFAULT_SLOT, settings);
+    }
+
+    /**
+     * Applies the settings of one slot. A slot that was never configured falls
+     * back to the built-in defaults (action bar, plain title), never to another
+     * module's slot.
+     */
+    public void apply(String slot, Settings settings) {
+        String key = slot == null || slot.isBlank() ? DEFAULT_SLOT : slot;
+        slots.put(key, settings == null ? DEFAULT_SETTINGS : settings);
     }
 
     public Settings settings() {
-        return settings;
+        return settings(DEFAULT_SLOT);
+    }
+
+    /** The settings of one slot, or the built-in defaults when it has none. */
+    public Settings settings(String slot) {
+        String key = slot == null || slot.isBlank() ? DEFAULT_SLOT : slot;
+        Settings current = slots.get(key);
+        return current == null ? DEFAULT_SETTINGS : current;
     }
 
     /** Toggles the HUD for one player; returns the new enabled state. */
@@ -83,7 +111,12 @@ public final class HudService {
      * ({@code 0..1}); a negative value keeps the bar at its last fill.
      */
     public void update(Player player, String title, float progress, Tone tone) {
-        Settings current = settings;
+        update(player, DEFAULT_SLOT, title, progress, tone);
+    }
+
+    /** Pushes one HUD frame into a slot, using that slot's mode and template. */
+    public void update(Player player, String slot, String title, float progress, Tone tone) {
+        Settings current = settings(slot);
         if (current.mode() == Mode.OFF || hidden.contains(player.getUniqueId())) {
             return;
         }
@@ -97,7 +130,12 @@ public final class HudService {
 
     /** Pushes a transient emphasized frame (dry fire, warnings) in red. */
     public void flash(Player player, String text) {
-        update(player, ChatColor.RED + text, 0.0f, Tone.LOW);
+        flash(player, DEFAULT_SLOT, text);
+    }
+
+    /** Pushes a transient emphasized frame into a slot, in red. */
+    public void flash(Player player, String slot, String text) {
+        update(player, slot, ChatColor.RED + text, 0.0f, Tone.LOW);
     }
 
     /** Removes any boss bar tied to one player. */
@@ -108,12 +146,16 @@ public final class HudService {
         }
     }
 
+    /**
+     * Removes every boss bar this service owns. The per-player toggles are
+     * preferences, not state: one module shutting down must not re-enable the
+     * HUD of another one that the player had turned off.
+     */
     public void clearAll() {
         for (BossBar bar : bars.values()) {
             bar.removeAll();
         }
         bars.clear();
-        hidden.clear();
     }
 
     private void bossBar(Player player, String title, float progress, Tone tone) {

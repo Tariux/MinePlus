@@ -28,6 +28,7 @@ import org.bukkit.configuration.ConfigurationSection;
  *   frames:                       # frame-animated content (raw pack JSONs)
  *     idle: idle
  *     loaded: ready               # optional
+ *     fire: fire                  # optional (the pose shown while in use)
  *     reload: [reload0, reload1]  # optional, in play order
  *     texture: colt_peacemaker.png
  *   description: ["line one", "line two"]   # optional static lore
@@ -52,12 +53,13 @@ public final class ContentItems {
      * mis-cancelled interaction (or a pack-less client) can never produce an
      * accidental vanilla action. Anything outside this set is substituted.
      *
-     * <p>{@code BOW}/{@code CROSSBOW} are deliberately usable carriers: the
-     * client only enters its draw state for items with a vanilla use gesture,
-     * which is what powers held-right-click load animations (and a reliable
-     * activation hook). Modules banking on them must cancel every vanilla use
-     * of the weapon (interact, entity interact, attack) — the frame pipeline
-     * consumers do.</p>
+     * <p>A carrier with a vanilla use action (bow, crossbow, food) is
+     * deliberately excluded: the client puts itself into its "using item"
+     * state for such an item and then stops repeating the use packet, which
+     * silently changes how a hold-to-fire trigger behaves. The Core's trigger
+     * model hides most of that, but the carrier still decides whether the
+     * client keeps the gesture alive, so a presented item always rides a
+     * neutral carrier.</p>
      */
     private static final Set<Material> SAFE_CARRIERS = Set.of(
             Material.IRON_INGOT, Material.GOLD_INGOT, Material.COPPER_INGOT, Material.NETHERITE_INGOT,
@@ -69,8 +71,7 @@ public final class ContentItems {
             Material.QUARTZ, Material.CHARCOAL, Material.COAL, Material.NETHER_STAR, Material.NETHERITE_SCRAP,
             Material.RAW_IRON, Material.RAW_COPPER, Material.RAW_GOLD, Material.LEATHER, Material.RABBIT_HIDE,
             Material.SLIME_BALL, Material.MAGMA_CREAM, Material.GHAST_TEAR, Material.BRICK, Material.NETHER_BRICK,
-            Material.CLAY_BALL, Material.INK_SAC, Material.GLOW_INK_SAC,
-            Material.BOW, Material.CROSSBOW);
+            Material.CLAY_BALL, Material.INK_SAC, Material.GLOW_INK_SAC);
 
     private ContentItems() {
     }
@@ -117,8 +118,9 @@ public final class ContentItems {
 
     /**
      * The {@code frames} block, or null. The idle stem is required whenever
-     * any other stem (or the texture) is present; loaded and reload stems are
-     * optional. References resolve to {@code <namespace>:item/<id>/<stem>}.
+     * any other stem (or the texture) is present; loaded, fire and reload
+     * stems are optional. References resolve to
+     * {@code <namespace>:item/<id>/<stem>}.
      */
     private static ContentModel frames(String namespace, String id, ConfigurationSection section) {
         ConfigurationSection frames = section.getConfigurationSection("frames");
@@ -127,6 +129,7 @@ public final class ContentItems {
         }
         String idle = trim(frames.getString("idle"));
         String loaded = trim(frames.getString("loaded"));
+        String fire = trim(frames.getString("fire"));
         String texture = trim(frames.getString("texture"));
         List<String> reload = new ArrayList<>();
         for (String stem : frames.getStringList("reload")) {
@@ -135,7 +138,7 @@ public final class ContentItems {
             }
         }
         if (idle == null) {
-            if (loaded != null || !reload.isEmpty() || texture != null) {
+            if (loaded != null || fire != null || !reload.isEmpty() || texture != null) {
                 DebugLogger.warning("Item '" + id + "' declares frames but no 'idle' model; frames ignored.");
             }
             return null;
@@ -146,18 +149,36 @@ public final class ContentItems {
         if (loaded != null) {
             stems.add(loaded);
         }
+        if (fire != null) {
+            stems.add(fire);
+        }
         stems.addAll(reload);
 
-        ItemFrames spec = ItemFrames.with(
-                reference(namespace, id, idle),
-                loaded == null ? null : reference(namespace, id, loaded),
-                reload.stream().map(stem -> reference(namespace, id, stem)).toList());
+        ItemFrames spec = fire == null
+                ? ItemFrames.with(
+                        reference(namespace, id, idle),
+                        loaded == null ? null : reference(namespace, id, loaded),
+                        reload.stream().map(stem -> reference(namespace, id, stem)).toList())
+                : ItemFrames.withFire(
+                        reference(namespace, id, idle),
+                        loaded == null ? null : reference(namespace, id, loaded),
+                        reload.stream().map(stem -> reference(namespace, id, stem)).toList(),
+                        reference(namespace, id, fire));
         return ContentModel.ofFrames(spec, List.copyOf(stems), texture);
     }
 
     /** The pack model reference of one frame stem: {@code <namespace>:item/<id>/<stem>}. */
     private static String reference(String namespace, String id, String stem) {
         return namespace + ":item/" + id + "/" + stem.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * True when the material is a carrier with no vanilla use action: holding
+     * it produces no client-side gesture, no accidental vanilla behavior, and
+     * no change to how the Core's trigger model behaves.
+     */
+    public static boolean isNeutralCarrier(Material material) {
+        return material != null && SAFE_CARRIERS.contains(material);
     }
 
     /**

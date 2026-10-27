@@ -42,6 +42,8 @@ public final class BehaviorContext {
     private BehaviorContext.EditRunGuard editGuard;
     /** The id of the action being evaluated — the namespace scenario state is keyed under. */
     private String actionId;
+    /** The priority of the profile being evaluated; arbitrates competing claims. */
+    private int profilePriority;
 
     BehaviorContext(MobBehaviorEngine engine) {
         this.engine = engine;
@@ -58,6 +60,7 @@ public final class BehaviorContext {
         // Conditions are profile-level, so no action scope exists yet; leaving a
         // previous action's id in place would let one action read another's crew.
         this.actionId = null;
+        this.profilePriority = 0;
     }
 
     /**
@@ -67,6 +70,20 @@ public final class BehaviorContext {
      */
     void bindAction(String actionId) {
         this.actionId = actionId;
+    }
+
+    /**
+     * Binds the profile the action belongs to. The profile's priority is what
+     * lets a scenario take an entity away from another one that claimed it
+     * first, so the claim has to know who is asking.
+     */
+    void bindProfile(MobProfile profile) {
+        this.profilePriority = profile == null ? 0 : profile.priority();
+    }
+
+    /** The priority of the profile being evaluated. */
+    public int profilePriority() {
+        return profilePriority;
     }
 
     /** The evaluated living entity. */
@@ -235,6 +252,11 @@ public final class BehaviorContext {
      * assigned goal's area; negative {@code durationTicks} means until
      * released.
      *
+     * <p>The claim carries the priority of the profile that took it, so a
+     * scenario with a higher priority can take the entity over — a villager
+     * under attack belongs to its guardian, not to the pilgrimage it was
+     * walking.
+     *
      * @return {@code true} when the claim was taken or renewed
      */
     public boolean claimActivity(String activityId, Location anchor, double anchorRadius, long durationTicks) {
@@ -242,7 +264,7 @@ public final class BehaviorContext {
                 || entity.isDead() || !entity.isValid()) {
             return false;
         }
-        engine.claimActivity(entity, activityId, anchor, anchorRadius, durationTicks);
+        engine.claimActivity(entity, activityId, anchor, anchorRadius, durationTicks, profilePriority);
         return true;
     }
 
@@ -443,6 +465,10 @@ public final class BehaviorContext {
      * Crew membership lives in the engine, not in the mob's PDC: it is runtime
      * state, and a restart should not resurrect a march nobody remembers.
      *
+     * <p>A crew is local: a mob that is not in one joins the nearest crew of
+     * that name within reach, or founds its own where it stands. Walking away
+     * never costs a mob its crew.
+     *
      * @param crew   the scenario's crew name, namespaced by this action id
      * @param leader the mob to follow, or {@code null} to join without naming one
      * @param goal   the place the crew is heading, or {@code null} to leave it
@@ -459,6 +485,11 @@ public final class BehaviorContext {
      * strays become a convoy in one call instead of a radius scan that also
      * recruits someone else's scenario.
      *
+     * <p>A mob that is already crewed is left alone: recruiting it would pull a
+     * mob that is walking a pilgrimage (or building a guardian) into this
+     * crew, which is how two showcases end up fighting over the same
+     * villager.
+     *
      * @param radius how far the call reaches
      * @return how many mobs joined
      */
@@ -468,51 +499,146 @@ public final class BehaviorContext {
         }
         List<Mob> nearby = new ArrayList<>();
         for (org.bukkit.entity.Entity candidate : leader.getNearbyEntities(radius, radius, radius)) {
-            if (candidate instanceof Mob mob && mob != leader && mob.getType() == leader.getType()
-                    && !mob.isDead() && mob.isValid()) {
-                nearby.add(mob);
+            if (!(candidate instanceof Mob mob) || mob == leader || mob.getType() != leader.getType()
+                    || mob.isDead() || !mob.isValid()) {
+                continue;
             }
+            if (engine.crews().crewOf(mob.getUniqueId()) != null) {
+                continue; // already crewed: a mob in a group is never poached
+            }
+            String activity = engine.activityIdOf(mob);
+            if (activity != null && !activity.equals(actionId)) {
+                continue; // another scenario owns this mob right now
+            }
+            nearby.add(mob);
         }
         return engine.crews().recruitAll(actionScope(), crew, leader, nearby, goal);
     }
 
     /**
-     * Where this member should walk to stay with its crew, or {@code null} when
-     * it is already close enough to the leader — or is the leader.
+     * Joins the nearest existing crew of this name, without founding one.
      *
-     * <p>A crew that marches without this rule stretches into a column and the
-     * stragglers effectively never arrive; the cohesion check is what makes a
-     * group arrival look like a group arrival.
+     * <p>{@code false} means there is no company within reach — the caller
+     * then has to find a goal of its own rather than wait for one.
      */
-    public Location crewFocus(String crew, double cohesionRadius) {
+    public boolean joinNearestCrew(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return false;
+        }
+        return engine.crews().joinNearest(actionScope(), crew, member);
+    }
+
+    /**
+     * The waypoint this member should walk toward to reach its crew's
+     * formation point, or {@code null} when it is already close enough.
+     *
+     * <p>The waypoint is bounded by the mob's path range, so a member whose
+     * crew is far ahead is handed a walk it can make instead of a target whose
+     * path never resolves — the difference between a group that marches and a
+     * group that stands still.
+     *
+     * @param cohesionRadius how close is close enough
+     * @param maxReach       the mob's own path range, in blocks
+     */
+    public Location crewRejoin(String crew, double cohesionRadius, double maxReach) {
         if (!(entity instanceof Mob member)) {
             return null;
         }
-        return engine.crews().focusOf(actionScope(), crew, member, cohesionRadius);
+        return engine.crews().rejoinWaypoint(actionScope(), crew, member, cohesionRadius, maxReach);
+    }
+
+    /** The crew's formation point — where the group is expected to be now. */
+    public Location crewRally(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return null;
+        }
+        return engine.crews().rally(actionScope(), crew, member);
+    }
+
+    /**
+     * Moves the crew's formation point. The march advances it along the route
+     * once the crew has caught up; at night it is pinned to the camp site.
+     */
+    public void setCrewRally(String crew, Location point) {
+        if (entity instanceof Mob member) {
+            engine.crews().setRally(actionScope(), crew, member, point);
+        }
+    }
+
+    /**
+     * How far the crew is spread around its formation point: the greatest
+     * distance from it to any live member. Zero for a crew of one.
+     *
+     * <p>A member another scenario has taken over is not part of the
+     * formation any more: a villager a guardian pulled out of the march is
+     * not coming, and counting it would make the crew wait for it forever.
+     */
+    public double crewSpread(String crew) {
+        Location rally = crewRally(crew);
+        if (rally == null) {
+            return 0.0;
+        }
+        if (!(entity instanceof Mob member)) {
+            return 0.0;
+        }
+        return engine.crews().spread(actionScope(), crew, member, rally, this::stillInFormation);
+    }
+
+    /** {@code true} while this member still belongs to the scenario's formation. */
+    private boolean stillInFormation(org.bukkit.entity.Mob member) {
+        String claim = engine.activityIdOf(member);
+        return claim == null || actionId == null || claim.equals(actionId);
     }
 
     /** The crew's live leader, or {@code null}; a dead leader is replaced automatically. */
     public Mob crewLeader(String crew) {
-        return engine.crews().leader(actionScope(), crew);
+        if (!(entity instanceof Mob member)) {
+            return null;
+        }
+        return engine.crews().leader(actionScope(), crew, member);
     }
 
-    /** The crew's shared goal, or {@code null}. */
-    public Location crewGoal(String crew) {
-        return engine.crews().goal(actionScope(), crew);
-    }
-
-    /** The live members of a crew. */
-    public List<Mob> crewMembers(String crew) {
-        return engine.crews().members(actionScope(), crew);
-    }
-
-    /** {@code true} when this entity is the crew's leader (or no leader is set). */
+    /** {@code true} when this entity leads its crew (or is free to found one). */
     public boolean isCrewLeader(String crew) {
         if (!(entity instanceof Mob member)) {
             return false;
         }
-        Mob leader = engine.crews().leader(actionScope(), crew);
-        return leader == null || leader.getUniqueId().equals(member.getUniqueId());
+        return engine.crews().isLeader(actionScope(), crew, member);
+    }
+
+    /** The crew's shared goal, or {@code null}. */
+    public Location crewGoal(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return null;
+        }
+        return engine.crews().goal(actionScope(), crew, member);
+    }
+
+    /** Replaces the crew's shared goal (a freshly located structure). */
+    public void setCrewGoal(String crew, Location goal) {
+        if (entity instanceof Mob member) {
+            engine.crews().setGoal(actionScope(), crew, member, goal);
+        }
+    }
+
+    /**
+     * The identity of this member's crew — two local crews of one scenario
+     * share a name but not an identity, and per-crew state (a camp, a
+     * patience counter) has to be keyed on the identity.
+     */
+    public String crewId(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return null;
+        }
+        return engine.crews().crewKeyOf(member.getUniqueId());
+    }
+
+    /** The live members of this member's crew. */
+    public List<Mob> crewMembers(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return List.of();
+        }
+        return engine.crews().members(actionScope(), crew, member);
     }
 
     /** Removes this entity from its crew (arrival, death, a scenario ending). */
@@ -522,9 +648,11 @@ public final class BehaviorContext {
         }
     }
 
-    /** Drops the whole crew. */
+    /** Drops this entity's whole crew. */
     public void disbandCrew(String crew) {
-        engine.crews().disband(actionScope(), crew);
+        if (entity instanceof Mob member) {
+            engine.crews().disband(actionScope(), crew, member);
+        }
     }
 
     private String actionScope() {

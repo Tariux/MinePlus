@@ -108,18 +108,26 @@ public final class MobBehaviorEngine {
         private final long expiresAtGameTick;
         private final Location anchor;
         private final double anchorRadius;
+        /** The priority of the profile that owns the claim; arbitrates takeovers. */
+        private final int priority;
         /** Consecutive runs the entity could not be resolved (unloaded, not gone). */
         private int unresolvedRuns;
 
-        ActiveActivity(String actionId, long expiresAtGameTick, Location anchor, double anchorRadius) {
+        ActiveActivity(String actionId, long expiresAtGameTick, Location anchor, double anchorRadius,
+                       int priority) {
             this.actionId = actionId;
             this.expiresAtGameTick = expiresAtGameTick;
             this.anchor = anchor;
             this.anchorRadius = anchorRadius;
+            this.priority = priority;
         }
 
         String actionId() {
             return actionId;
+        }
+
+        int priority() {
+            return priority;
         }
 
         Location anchor() {
@@ -281,26 +289,29 @@ public final class MobBehaviorEngine {
 
     /**
      * Claims or renews the entity's exclusive activity for one action id.
-     * A live claim owned by a different action id is never overridden; the
-     * claiming action renews its own claim each execution. Negative
+     * A live claim owned by a different action id is never overridden — unless
+     * the claimant outranks the owner, which is how a scenario with a higher
+     * priority takes a mob over from one that claimed it first (a guardian
+     * taking a villager out of a pilgrimage because it is under attack).
+     * The claiming action renews its own claim each execution. Negative
      * {@code durationTicks} means "until released" — modules normally renew
      * a bounded claim each fire so a crashed scenario self-expires.
      */
     void claimActivity(LivingEntity entity, String actionId, Location anchor, double anchorRadius,
-                       long durationTicks) {
+                       long durationTicks, int priority) {
         if (entity == null || entity.isDead() || !entity.isValid()
                 || actionId == null || actionId.isBlank()) {
             return;
         }
         ActiveActivity current = activities.get(entity.getUniqueId());
         if (current != null && !current.actionId().equals(actionId)
-                && !activityExpired(current, entity)) {
-            return; // another activity owns the entity
+                && !activityExpired(current, entity) && current.priority() >= priority) {
+            return; // another activity owns the entity and outranks the claimant
         }
         long now = entity.getWorld().getGameTime();
         long expiry = durationTicks > 0 ? now + durationTicks : -1L;
         activities.put(entity.getUniqueId(),
-                new ActiveActivity(actionId, expiry, anchor, Math.max(0.0, anchorRadius)));
+                new ActiveActivity(actionId, expiry, anchor, Math.max(0.0, anchorRadius), priority));
     }
 
     /** Drops the entity's claim when owned by {@code actionId}; {@code true} when dropped. */
@@ -527,6 +538,8 @@ public final class MobBehaviorEngine {
                           MobBehaviorSettings snapshot, RunGuard guard, long deadline) {
         telemetry.candidateSeen();
         evaluationContext.refresh(entity, ThreadLocalRandom.current(), guard);
+        double checksPerSecond = snapshot.checksPerSecond();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
 
         // A claimed entity belongs to one running activity: the owning action
         // re-fires on every stagger (no odds roll) and nothing else touches
@@ -538,6 +551,47 @@ public final class MobBehaviorEngine {
                 telemetry.budgetDeferred();
                 return;
             }
+            // A scenario with a higher priority may take the entity over: the
+            // guardian of a villager under attack outranks the pilgrimage it
+            // was walking. The challenger plays the odds like any other action
+            // and keeps the mob only by claiming it — a challenger that
+            // declines leaves the running scenario untouched.
+            MobProfile challenger = challengerFor(activity, candidates);
+            if (challenger != null) {
+                boolean tookTurn = false;
+                for (MobProfile.ActionEntry entry : challenger.actions()) {
+                    if (System.nanoTime() >= deadline) {
+                        telemetry.budgetDeferred();
+                        return;
+                    }
+                    double seconds = Math.max(0.25, entry.intervalSeconds());
+                    double odds = Math.min(1.0, 1.0 / (seconds * checksPerSecond));
+                    if (random.nextDouble() > odds) {
+                        continue;
+                    }
+                    tookTurn = true;
+                    evaluationContext.bindProfile(challenger);
+                    evaluationContext.bindAction(entry.action().id());
+                    boolean fired;
+                    try {
+                        fired = entry.action().execute(evaluationContext);
+                    } catch (Throwable throwable) {
+                        plugin.getLogger().warning("[mob-behavior] action '" + entry.action().id()
+                                + "' threw on " + type + ": " + throwable);
+                        fired = false;
+                    }
+                    if (fired) {
+                        telemetry.eventFired(entry.action().id());
+                        return;
+                    }
+                    // Declined: the challenger's next action gets its turn, and
+                    // the running scenario keeps the mob until one of them
+                    // claims it.
+                }
+                if (tookTurn) {
+                    return;
+                }
+            }
             boolean found = false;
             for (MobProfile profile : candidates) {
                 if (!conditionsPass(profile)) {
@@ -548,6 +602,7 @@ public final class MobBehaviorEngine {
                         continue;
                     }
                     found = true;
+                    evaluationContext.bindProfile(profile);
                     evaluationContext.bindAction(entry.action().id());
                     try {
                         if (entry.action().execute(evaluationContext)) {
@@ -567,8 +622,6 @@ public final class MobBehaviorEngine {
             return;
         }
 
-        double checksPerSecond = snapshot.checksPerSecond();
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         for (MobProfile profile : candidates) {
             if (System.nanoTime() >= deadline) {
                 telemetry.budgetDeferred();
@@ -577,6 +630,7 @@ public final class MobBehaviorEngine {
             if (!conditionsPass(profile)) {
                 continue;
             }
+            evaluationContext.bindProfile(profile);
             for (MobProfile.ActionEntry entry : profile.actions()) {
                 double seconds = Math.max(0.25, entry.intervalSeconds());
                 double odds = Math.min(1.0, 1.0 / (seconds * checksPerSecond));
@@ -604,6 +658,24 @@ public final class MobBehaviorEngine {
                 // villager would only ever run the first one that rolled.
             }
         }
+    }
+
+    /**
+     * The profile allowed to try to take a claimed entity over: the
+     * highest-priority one whose conditions pass and whose priority beats the
+     * claim's owner. {@code candidates} is already sorted by priority, so the
+     * first match is the strongest.
+     */
+    private MobProfile challengerFor(ActiveActivity activity, List<MobProfile> candidates) {
+        for (MobProfile profile : candidates) {
+            if (profile.priority() <= activity.priority()) {
+                break; // the list is ordered, so nothing below can outrank it
+            }
+            if (conditionsPass(profile)) {
+                return profile;
+            }
+        }
+        return null;
     }
 
     /**

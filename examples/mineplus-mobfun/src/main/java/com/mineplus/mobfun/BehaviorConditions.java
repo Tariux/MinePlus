@@ -49,12 +49,18 @@ final class BehaviorConditions {
 
     /**
      * Prey or predator: a villager in sight within {@code villagerRadius}, or a
-     * golem within {@code golemRadius}. This is the witch's exhibited trigger —
-     * she hunts villagers, and holds her ground (potions flying) when a golem
-     * closes in.
+     * hostile within {@code threatRadius}. This is the witch's exhibited
+     * trigger — she hunts villagers, and holds her ground (potions flying) when
+     * something heavy closes in.
+     *
+     * <p>The threat half matches what the action itself reads out of the
+     * neighbourhood ({@code Monster} or {@code Golem}); a narrower gate here
+     * would let a husk walk in unchallenged while the action stood ready to
+     * answer it.
      */
-    static Predicate<BehaviorContext> threatOrPrey(double villagerRadius, double golemRadius) {
+    static Predicate<BehaviorContext> threatOrPrey(double villagerRadius, double threatRadius) {
         return BehaviorContext.Conditions.visibleEntity(villagerRadius, entity -> entity instanceof Villager)
-                .or(BehaviorContext.Conditions.nearbyEntity(golemRadius, entity -> entity instanceof Golem));
+                .or(BehaviorContext.Conditions.nearbyEntity(threatRadius,
+                        entity -> entity instanceof Golem || entity instanceof Monster));
     }
 }

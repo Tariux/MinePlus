@@ -339,7 +339,8 @@ otherwise re-implement badly. The pieces are:
 | `ProjectileHandler` | interface | Per-fire callbacks: targeting gate, launch/hit/expire notifications |
 | `DamageTransactions` | static | Damage attribution that cannot double-count: `apply(victim, amount, attacker)` and the re-entrancy guard for melee |
 | `ItemMagazine` / `ItemState` | registry | Countable item state (rounds) live in memory while held, persisted to PDC when the stack leaves the hand |
-| `ItemFrames` | pack item | Idle / loaded / reload frame math for `item_model` presentation |
+| `ItemFrames` / `ItemFrameWriter` | pack item | Idle / loaded / reload / fire frame math for `item_model` presentation, and the writer that puts one state on the stack |
+| `TriggerState` | input | The per-player press state: one physical click resolves to one press, however many packets the client sent for it |
 
 ```java
 // 1. Describe the round (WeaponDefinition in mineplus-gun does exactly this).
@@ -349,6 +350,7 @@ BallisticProfile profile = BallisticProfile.builder()
         .falloff(28, 0.06).minDamageFraction(0.35)
         .headshotMultiplier(1.8).penetration(1)
         .particles("minecraft: muzzle", "tracer", "impact")   // tolerant names
+        .sparkParticle("SMALL_FLAME")                            // muzzle + impact sparks
         .sounds("gun.fire", "impact", "ENTITY_ARROW_SHOOT", 1.0f)
         .build();
 
@@ -386,6 +388,19 @@ DamageTransactions.apply(victim, 6.0, player);
   world/player leaves the carrier fully vanilla (no frozen placement, no
   swallowed press). `suppressVanillaMelee` defaults to `true` but is never
   consulted for damage the module applied itself.
+- **One physical click is one press.** A modern client answers a click on a
+  block with two packets (use-on-block, then use-in-hand) and keeps sending
+  use packets while the button is held, so the raw event stream is not a
+  trigger. `TriggerState` folds it: a press inside the 150 ms click window of
+  the previous one continues the same click, and a release always ends it.
+  A handler therefore acts on a *gesture*, not on a packet — a semi-automatic
+  weapon fires once per click, and an automatic one keeps firing while the
+  trigger is held.
+- **A frame state is one number on the stack.** The modern item model reads
+  the `custom_model_data` component's float list, the legacy representation
+  reads the integer, and `ItemFrameWriter` writes both (probing both accessor
+  spellings — the API declares a primitive getter and a boxed setter). A
+  framed item that wrote only the integer rendered its resting pose forever.
 - **Magazines are not rewritten per shot.** Rewriting a held stack's components
   20 times a second re-triggers the client's equip animation and spams slot
   packets; `ItemMagazine` keeps the live count in memory and flushes one silent
@@ -417,7 +432,7 @@ free when no module uses it.
 MobBehaviorApi mob = context.mobBehaviorApi();
 
 MobProfile cow = MobProfile.builder(EntityType.COW)
-        .priority(10)                                  // lower wins an arbitration tie
+        .priority(10)                                  // higher wins a scenario conflict
         .action(new EatPlantsAction(), 12.0)           // once per ~12s of eligible checks
         .action(new GrowPlantsAction(), 30.0)
         .condition(BehaviorContext.Conditions.adultOnly())
@@ -426,8 +441,17 @@ mob.register(this, cow);                               // main thread only
 ```
 
 At most **one** action fires per entity evaluation, with the reference-mod odds
-`1 / (intervalSeconds * checksPerSecond)`; `MobProfile` entries are tried in
-declaration order.
+`1 / (intervalSeconds * checksPerSecond)`. Profiles for the same entity type
+are dispatched **priority first** (higher first), then in registration order —
+so the ordering of `register(...)` calls only breaks ties between equal
+priorities.
+
+`priority` is also the tie-breaker of the **scenario arbitration**: an activity
+claim remembers the priority of the profile that took it, and a profile with a
+strictly higher priority whose conditions pass may take the mob over — a
+guardian answers an attack on a villager even while it is walking a pilgrimage.
+A challenger still plays the odds gate and keeps the mob only by claiming it, so
+a higher priority never steals a mob on its own.
 
 ### What `BehaviorContext` gives an action
 
@@ -439,7 +463,7 @@ declaration order.
 | Confinement | `confinementCenter()`, `confinementRadius()`, `withinConfinement()` — the claimed anchor is what keeps a scenario mob inside the area it belongs to |
 | Navigation | `navigateTo(target, speed)`, `navigateToWithin(target, stopDistance, speed)`, `stopNavigation()` — through `MobNavigator`, which tries Paper's public `Pathfinder` API first and falls back to the reflective NMS/Brain channel on Spigot. It never teleports and never spawns: movement is always the entity's own vanilla walk, so the client's motion stays authoritative. |
 | Journeys | `advanceJourney(...)`, `abandonJourney()`, `isJourneying()`, `journeyDestination()`, `journeys()` |
-| Crews | `joinCrew(crew, leader, goal)`, `rallyCrew`, `crewFocus`, `crewLeader`, `crewGoal`, `crewMembers`, `isCrewLeader`, `leaveCrew`, `disbandCrew` |
+| Crews | `joinCrew(crew, leader, goal)`, `rallyCrew`, `crewRejoin`, `crewRally`, `setCrewRally`, `crewSpread`, `crewLeader`, `crewGoal`, `crewMembers`, `isCrewLeader`, `leaveCrew`, `disbandCrew` |
 | Structures | `nearestStructure(key, maxRadiusChunks)` — async-chunk-safe lookup through `StructureLookup`, cached per region |
 
 `BehaviorContext.Conditions` is the shared predicate vocabulary: `inWorld`,
@@ -459,6 +483,8 @@ BehaviorAction pilgrim = JourneyToStructureAction.builder()
         .crewName("pilgrims")                 // group travel: leader + recruited stragglers
         .searchRadiusChunks(64).arrivalDistance(24)
         .cohesionRadius(8).recruitRadius(16)
+        .marchLeg(24)                         // how far the formation point advances per step
+        .gatherRadius(6)                      // how close the crew must be to camp
         .restAtNight(true)
         .callbacks(new JourneyToStructureAction.Callbacks() {
             @Override public boolean onNight(BehaviorContext ctx, Location campSite) {
@@ -482,6 +508,34 @@ runs under an exclusive activity claim so no other profile can steer the same
 mob mid-march. Journey and crew state is runtime-only inside the engine — PDC is
 never used for it, so a restart cleanly forgets a half-finished march.
 
+#### How a crew actually moves
+
+A distant goal is not something a mob can walk to: vanilla pathing reaches
+roughly 48 blocks and simply reports "no path" beyond it, so a villager handed
+a village 300 blocks away stands still forever. The Core therefore never hands
+a mob a distant target:
+
+- The crew keeps a **formation point** (`crewRally`) — a place on the route,
+  not a person. The leader advances it one `marchLeg` toward the goal, and only
+  **once the whole crew has reached it** (a straggler is waited for, with a
+  patience counter so one stuck member cannot freeze the march forever).
+- Every member is handed **one bounded step** toward the formation point
+  (`crewRejoin`), capped at its own path range — a waypoint it can actually
+  path to. Chasing the leader's live position instead would mean the target
+  moves as fast as the chaser and the gap never closes.
+- At night the formation point is **pinned**: the crew closes ranks around it
+  and the leader only raises the camp once everyone is gathered
+  (`gatherRadius`). The camp callback receives the camp site, and returning
+  `false` retries on the next roll of the same night instead of writing the
+  night's camp off.
+- Arrival is a **group** arrival: the leader waits at the goal for the members
+  still on the road.
+
+Day and night are read through `WorldTimes` (`isNight`, `dayIndex`,
+`timeOfDay`), so every scenario agrees with the sky instead of each reading
+`World#getTime()` / `getFullTime()` its own way. `JourneyRunner`'s internal
+cooldowns use `World#getGameTime()`, which `/time set` cannot stall.
+
 ### Budgets, arbitration and testing
 
 - The engine sweeps chunks around online players with **alternating parity**,
@@ -499,7 +553,11 @@ never used for it, so a restart cleanly forgets a half-finished march.
   claimed by an action refuses other claims, an anchored claim drags the mob
   back toward its area (and abandons the scenario past the leash), and claims
   expire on their duration. `activeActivity(entity)` reads the current holder,
-  `clearActivity(entity, actionId)` releases it.
+  `clearActivity(entity, actionId)` releases it. A claim also remembers the
+  **priority** of the profile that took it: a strictly higher-priority profile
+  whose conditions pass becomes a *challenger* that plays the odds gate and
+  keeps the mob only by claiming it — so a guardian can pull a villager out of
+  a pilgrimage, and a pilgrim can never pull a builder out of its column.
 - `forceFire(plugin, entity, ignoreConditions)` runs one profile against a real
   entity right now and returns the per-action `BehaviorFireResult`
   (`FIRED` / `DECLINED` / `CONDITION_FAILED`) — the test hook behind

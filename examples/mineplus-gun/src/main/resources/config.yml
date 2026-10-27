@@ -9,16 +9,21 @@
 # framed-item infrastructure. Stems resolve to the raw pack models the module
 # installs from defaults/frames/<weapon-id>/<stem>.json; state 0 is idle,
 # 1..N play the reload animation, N+1 is the loaded state (the `loaded`
-# stem). `texture` names the per-weapon texture file the frame models sample.
+# stem) and N+2 is the fire state (the `fire` stem) — the pose the weapon
+# shows for a few ticks after it shoots. `texture` names the per-weapon
+# texture file the frame models sample.
 #
 # `backing-material` is the vanilla carrier item the item model replaces.
-# CROSSBOW is the default carrier on purpose: a usable item is the only way
-# the client enters its draw gesture, which powers the held-right-click load
-# animation (each staged pose plays over the pull progress across both the
-# modern item definitions and legacy pulling overrides). The module cancels
-# every vanilla use of the gun — the crossbow never charges or fires an arrow.
+# It must be a NEUTRAL carrier (no vanilla use action): a bow, a crossbow or
+# food would put the client into its own "using item" state, the client would
+# then stop sending further use packets, and the Core would read the press as
+# a single shot instead of a hold. A neutral carrier (ingot, stick) keeps the
+# vanilla interaction inert, so the Core owns the whole trigger stream. The
+# Core resolves that stream once for every module: a modern client answers a
+# click on a block with two packets (use-on-block, then use-in-hand) and the
+# Core folds them into one press — a weapon never fires twice for one click.
 # With PACK.ENABLED: false (or a client that has not applied the pack) the
-# weapon degrades to the bare crossbow.
+# weapon degrades to the bare carrier.
 #
 # `aim.scope: true` marks a weapon as scoped: while the trigger is held its
 # spread is multiplied by `aim.spread-multiplier` and the HUD shows SCOPE.
@@ -31,6 +36,14 @@
 # Sandbox (per shot): damage is per pellet; pellets x damage grow with
 # `fire.pellets`. Flintlocks take one shot and a long, exposed reload;
 # repeaters trade capacity for steady aim; scatter guns only pay off close.
+#
+# Effects (`fx:`): the Core emits the whole shot effect from one profile:
+# `flash` the bright muzzle burst, `sparks` the burning embers the shot
+# throws off, `smoke` the powder smoke that hangs at the barrel, `muzzle` the
+# slow cloud that lingers, `tracer` the streak of the round in flight and
+# `impact`/`impact-smoke` the hit confirmation. Every name is a vanilla
+# particle; an unknown one degrades to the default instead of silencing the
+# weapon.
 
 settings:
   language: en
@@ -43,7 +56,8 @@ settings:
 
 # The reload economy: one reload round consumes `items-per-round` items of
 # `material` from the player's inventory (gold nuggets by default — pan for
-# gold, hoard your shots). An empty supply means no reload.
+# gold, hoard your shots). A supply too small for one whole round means no
+# reload, and the HUD counts the reserve in rounds, like the magazine.
 ammo:
   material: GOLD_NUGGET
   items-per-round: 1
@@ -69,132 +83,141 @@ weapons:
   western_pistol:
     display-name: "&fWestern Pistol"
     type: PISTOL
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 500
     frames:
       idle: idle
       reload: [reload0, reload1, reload2, reload3, reload4]
       loaded: loaded
+      fire: fire
       texture: western_pistol.png
     ammo: { magazine: 6, reload-ticks: 50 }
-    ballistics: { damage: 7.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
+    ballistics: { damage: 10.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
     fire: { mode: SEMI, rpm: 280 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:shot" }
 
   western_rifle:
     display-name: "&fWestern Rifle"
     type: RIFLE
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 2600
     frames:
       idle: idle
       reload: [reload0, reload1, reload2, reload3, reload4, reload5]
       loaded: loaded
+      fire: fire
       texture: western_rifle.png
     ammo: { magazine: 5, reload-ticks: 65 }
-    ballistics: { damage: 11.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
+    ballistics: { damage: 16.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
     fire: { mode: BOLT, rpm: 47 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   # --- western_2 pack ------------------------------------------------------
   lever_rifle:
     display-name: "&fLever-Action Rifle"
     type: RIFLE
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 1800
     frames:
       idle: idle
       reload: [reload0, reload1, reload2, reload3, reload4]
       loaded: loaded
+      fire: fire
       texture: lever_rifle.png
     ammo: { magazine: 8, reload-ticks: 60 }
-    ballistics: { damage: 8.5, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
+    ballistics: { damage: 13.0, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
     fire: { mode: SEMI, rpm: 130 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   coach_shotgun:
     display-name: "&fCoach Shotgun"
     type: SHOTGUN
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 1400
     frames:
       idle: idle
       reload: [reload0, reload1, reload2, reload3, reload4, reload5, reload6, reload7]
       loaded: loaded
+      fire: fire
       texture: coach_shotgun.png
     ammo: { magazine: 6, reload-ticks: 80 }
-    ballistics: { damage: 5.5, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
+    ballistics: { damage: 7.0, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
     fire: { mode: PUMP, rpm: 75, pellets: 4 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   # --- western_3 pack (musketmod flintlocks) -------------------------------
   flintlock_pistol:
     display-name: "&fFlintlock Pistol"
     type: PISTOL
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 350
     frames:
       idle: idle
       loaded: loaded
+      fire: fire
       texture: flintlock_pistol.png
     ammo: { magazine: 1, reload-ticks: 90 }
-    ballistics: { damage: 12.0, headshot-multiplier: 2.5, velocity: 3.4, gravity: 0.04, drag: 0.015, range: 60, spread-degrees: 2.5, falloff-start: 25, falloff-per-block: 0.045 }
+    ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 3.4, gravity: 0.04, drag: 0.015, range: 60, spread-degrees: 2.5, falloff-start: 25, falloff-per-block: 0.045 }
     fire: { mode: SEMI, rpm: 120 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:shot" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:shot" }
 
   flintlock_musket:
     display-name: "&fFlintlock Musket"
     type: RIFLE
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 2800
     frames:
       idle: idle
       loaded: loaded
+      fire: fire
       texture: flintlock_musket.png
     ammo: { magazine: 1, reload-ticks: 100 }
-    ballistics: { damage: 16.0, headshot-multiplier: 2.4, velocity: 4.6, gravity: 0.02, drag: 0.01, penetration: 1, range: 180, spread-degrees: 1.5, falloff-start: 60, falloff-per-block: 0.02 }
+    ballistics: { damage: 23.0, headshot-multiplier: 2.4, velocity: 4.6, gravity: 0.02, drag: 0.01, penetration: 1, range: 180, spread-degrees: 1.5, falloff-start: 60, falloff-per-block: 0.02 }
     fire: { mode: SEMI, rpm: 55 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   bayonet_musket:
     display-name: "&fBayoneted Musket"
     type: RIFLE
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 3200
     frames:
       idle: idle
       loaded: loaded
+      fire: fire
       texture: bayonet_musket.png
     ammo: { magazine: 1, reload-ticks: 100 }
-    ballistics: { damage: 15.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
+    ballistics: { damage: 22.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
     fire: { mode: SEMI, rpm: 60 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   scope_musket:
     display-name: "&fMarksman's Musket"
     type: RIFLE
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 3600
     frames:
       idle: idle
       loaded: loaded
+      fire: fire
       texture: scope_musket.png
     ammo: { magazine: 1, reload-ticks: 110 }
-    ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.008, penetration: 2, range: 200, spread-degrees: 0.9, falloff-start: 80, falloff-per-block: 0.012 }
+    ballistics: { damage: 25.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.008, penetration: 2, range: 200, spread-degrees: 0.9, falloff-start: 80, falloff-per-block: 0.012 }
     fire: { mode: BOLT, rpm: 50 }
     aim: { scope: true, spread-multiplier: 0.35 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
 
   blunderbuss:
     display-name: "&fBlunderbuss"
     type: SHOTGUN
-    backing-material: CROSSBOW
+    backing-material: IRON_INGOT
     price: 1150
     frames:
       idle: idle
       loaded: loaded
+      fire: fire
       texture: blunderbuss.png
     ammo: { magazine: 2, reload-ticks: 70 }
-    ballistics: { damage: 4.0, headshot-multiplier: 1.5, velocity: 2.6, gravity: 0.06, drag: 0.03, range: 18, spread-degrees: 9.0, falloff-start: 8, falloff-per-block: 0.1 }
+    ballistics: { damage: 5.0, headshot-multiplier: 1.5, velocity: 2.6, gravity: 0.06, drag: 0.03, range: 18, spread-degrees: 9.0, falloff-start: 8, falloff-per-block: 0.1 }
     fire: { mode: PUMP, rpm: 60, pellets: 6 }
-    fx: { muzzle: SMOKE, tracer: CRIT, impact: CRIT, sound-fire: "mineplusgun:heavy" }
+    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }

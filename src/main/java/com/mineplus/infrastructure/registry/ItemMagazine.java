@@ -135,24 +135,34 @@ public final class ItemMagazine {
             return false;
         }
         PlayerInventory inventory = player.getInventory();
+        // Every branch writes the stack back into its slot: an inventory
+        // accessor may hand out a detached copy, and a count written only into
+        // that copy is silently dropped — the magazine would then read as full
+        // again on the next open, and the weapon would "refuse to reload".
         ItemStack cursor = player.getItemOnCursor();
-        ItemStack[] carried = {
-                inventory.getItemInMainHand(), inventory.getItemInOffHand(), cursor
-        };
-        for (ItemStack candidate : carried) {
-            if (matches(candidate, magazine.uid)) {
-                roundsSlot.set(candidate, magazine.rounds);
-                if (candidate == cursor) {
-                    // The cursor stack is a detached clone: hand it back so the
-                    // write actually lands.
-                    player.setItemOnCursor(candidate);
-                }
-                return true;
-            }
+        if (matches(cursor, magazine.uid)) {
+            roundsSlot.set(cursor, magazine.rounds);
+            player.setItemOnCursor(cursor);
+            return true;
         }
-        for (ItemStack candidate : inventory.getContents()) {
+        ItemStack held = inventory.getItemInMainHand();
+        if (matches(held, magazine.uid)) {
+            roundsSlot.set(held, magazine.rounds);
+            inventory.setItemInMainHand(held);
+            return true;
+        }
+        ItemStack off = inventory.getItemInOffHand();
+        if (matches(off, magazine.uid)) {
+            roundsSlot.set(off, magazine.rounds);
+            inventory.setItemInOffHand(off);
+            return true;
+        }
+        ItemStack[] contents = inventory.getContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack candidate = contents[slot];
             if (matches(candidate, magazine.uid)) {
                 roundsSlot.set(candidate, magazine.rounds);
+                inventory.setItem(slot, candidate);
                 return true;
             }
         }

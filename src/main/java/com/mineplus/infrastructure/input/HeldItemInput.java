@@ -2,6 +2,9 @@ package com.mineplus.infrastructure.input;
 
 import com.mineplus.infrastructure.combat.DamageTransactions;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -29,6 +32,7 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.scheduler.BukkitTask;
 
 /**
  * The Core's held-item input service: turns "the player is holding one of my
@@ -55,6 +59,59 @@ import org.bukkit.plugin.PluginManager;
  * the main thread and may touch the world directly.
  */
 public final class HeldItemInput implements Listener {
+
+    /**
+     * The gap inside which a second press continues the click the client
+     * already started.
+     *
+     * <p>A modern client answers one physical click with up to two packets:
+     * a click on a block sends the "use item on block" packet, and the client
+     * follows it with the "use item in hand" packet when the block did not
+     * consume the interaction. Both reach the server in the same tick, so the
+     * second one is a continuation of the click — not a second click. A
+     * module that cannot tell them apart fires twice per click, dry-fires a
+     * weapon that is already reloading and spends two rounds where the player
+     * pulled one.</p>
+     *
+     * <p>The window is deliberately short. It has to cover the round trip
+     * between the two packets, and nothing more: a wider window would swallow
+     * a fast, deliberate second click, and a weapon whose rate of fire is
+     * quicker than that window would silently lose shots — a 280 rpm weapon
+     * needs 214 ms between rounds.</p>
+     */
+    private static final long CLICK_WINDOW_MILLIS = 150L;
+
+    /**
+     * How long a hold survives without a new press packet. The client stops
+     * sending when the button is released, so the silence is the release
+     * signal for a carrier with no vanilla use action — the server never sees
+     * one.
+     *
+     * <p>The window must comfortably exceed the pace of a deliberate click
+     * stream: a player clicking faster than this would look like silence
+     * between presses, and the hold would end under their fingers. 450 ms
+     * covers a fast click stream while still ending the hold promptly enough
+     * that a released trigger stops an automatic weapon almost immediately
+     * instead of trailing half a second of extra rounds.</p>
+     *
+     * <p>It must also stay above the {@link #CLICK_WINDOW_MILLIS}, or a click
+     * whose second packet arrives late would restart the hold instead of
+     * continuing it.</p>
+     */
+    private static final long RELEASE_GRACE_MILLIS = 450L;
+
+    /**
+     * The longest a single hold may last before the Core ends it anyway.
+     *
+     * <p>The release is inferred from silence, so a client that keeps sending
+     * repeats (a stuck button, a modded client, a packet flood) would hold a
+     * trigger forever. This is the Core's backstop for the input layer, so a
+     * module never has to invent its own hold cap.</p>
+     */
+    private static final long MAX_HOLD_MILLIS = 60_000L;
+
+    /** Ticks between two scans of the trigger states. */
+    private static final long TRIGGER_SCAN_TICKS = 1L;
 
     /**
      * The gameplay surface a module exposes for the items it owns.
@@ -88,9 +145,22 @@ public final class HeldItemInput implements Listener {
 
         /**
          * The item left the hand by any route (slot switch, drop, sneak, quit,
-         * death, inventory close). Use it to stop hold-to-fire state.
+         * death, inventory close). Use it to stop hold-to-fire state and to
+         * persist whatever the item was counting.
          */
         default void onRelease(Player player) {
+        }
+
+        /**
+         * The activation gesture ended while the item stayed in the hand: the
+         * player let go of the trigger, or the client reported the end of a
+         * use gesture. Automatic fire stops here; a semi-automatic action
+         * simply waits for the next press.
+         *
+         * <p>Distinct from {@link #onRelease(Player)}, which means the item
+         * itself is gone.</p>
+         */
+        default void onTriggerRelease(Player player) {
         }
 
         /**
@@ -125,8 +195,10 @@ public final class HeldItemInput implements Listener {
 
     private final Plugin plugin;
     private final List<HeldItemHandler> handlers = new CopyOnWriteArrayList<>();
+    private final Map<UUID, TriggerState> triggers = new ConcurrentHashMap<>();
     private final Listener paperStopUsing;
     private boolean registered;
+    private BukkitTask triggerTask;
 
     public HeldItemInput(Plugin plugin) {
         this.plugin = plugin;
@@ -168,6 +240,12 @@ public final class HeldItemInput implements Listener {
 
     /** Unregisters every listener this service installed. Idempotent. */
     public void shutdown() {
+        BukkitTask current = triggerTask;
+        triggerTask = null;
+        if (current != null) {
+            current.cancel();
+        }
+        triggers.clear();
         if (!registered) {
             return;
         }
@@ -211,6 +289,99 @@ public final class HeldItemInput implements Listener {
     }
 
     // ------------------------------------------------------------------
+    // Trigger state
+    // ------------------------------------------------------------------
+
+    /**
+     * The Core-owned trigger state of one player: whether the activation
+     * gesture is held down, and whether the last activation was a fresh press
+     * or the client repeating the one it already sent. Never null.
+     *
+     * <p>Modules read this instead of inferring the trigger from the raw
+     * interaction events, so the trigger behaves the same whatever carrier
+     * item the content happens to use.</p>
+     */
+    public TriggerState trigger(Player player) {
+        return triggers.computeIfAbsent(player.getUniqueId(), ignored -> new TriggerState());
+    }
+
+    /** Records an activation on the player's trigger state. */
+    private void recordPress(Player player) {
+        trigger(player).press(now(), CLICK_WINDOW_MILLIS);
+        armTriggerTask();
+    }
+
+    /** Ends the hold and tells the owning handler the gesture ended. */
+    private void recordRelease(Player player) {
+        TriggerState state = triggers.get(player.getUniqueId());
+        if (state == null || !state.release(now())) {
+            return;
+        }
+        notifyTriggerRelease(player);
+    }
+
+    /**
+     * Ends every stale hold: the client stopped repeating the press, so the
+     * player let go of the button. The task is armed only while somebody holds
+     * a trigger and retires as soon as nobody does.
+     */
+    private void scanTriggers() {
+        long now = now();
+        boolean anyHeld = false;
+        for (Map.Entry<UUID, TriggerState> entry : triggers.entrySet()) {
+            TriggerState state = entry.getValue();
+            if (!state.held()) {
+                continue;
+            }
+            boolean expired = state.expire(now, RELEASE_GRACE_MILLIS);
+            if (!expired && now - state.heldSince() > MAX_HOLD_MILLIS) {
+                // The client never stopped repeating. Cut the hold anyway so a
+                // stuck button cannot pin a trigger down forever.
+                state.release(now);
+                expired = true;
+            }
+            if (expired) {
+                Player player = plugin.getServer().getPlayer(entry.getKey());
+                if (player != null) {
+                    notifyTriggerRelease(player);
+                }
+            }
+            anyHeld |= state.held();
+        }
+        if (!anyHeld) {
+            BukkitTask current = triggerTask;
+            triggerTask = null;
+            if (current != null) {
+                current.cancel();
+            }
+        }
+    }
+
+    private void notifyTriggerRelease(Player player) {
+        HeldItemHandler handler = owner(player, player.getInventory().getItemInMainHand());
+        if (handler == null) {
+            return;
+        }
+        try {
+            handler.onTriggerRelease(player);
+        } catch (Throwable failure) {
+            logFailure("trigger release handling", failure);
+        }
+    }
+
+    private void armTriggerTask() {
+        if (triggerTask != null || !plugin.isEnabled()) {
+            return;
+        }
+        triggerTask = plugin.getServer().getScheduler()
+                .runTaskTimer(plugin, this::scanTriggers, TRIGGER_SCAN_TICKS, TRIGGER_SCAN_TICKS);
+    }
+
+    private static long now() {
+        return System.nanoTime() / 1_000_000L;
+    }
+
+    // ------------------------------------------------------------------
     // Events
     // ------------------------------------------------------------------
 
@@ -245,6 +416,7 @@ public final class HeldItemInput implements Listener {
             return;
         }
         boolean handled = false;
+        recordPress(player);
         try {
             handled = handler.onPress(player, main);
         } catch (Throwable failure) {
@@ -279,6 +451,7 @@ public final class HeldItemInput implements Listener {
             return;
         }
         cancel.set(true);
+        recordPress(player);
         try {
             handler.onPress(player, main);
         } catch (Throwable failure) {
@@ -390,6 +563,8 @@ public final class HeldItemInput implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onQuit(PlayerQuitEvent event) {
         releaseAll(event.getPlayer());
+        // The player is gone: its trigger state is dead weight in the map.
+        triggers.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
@@ -407,6 +582,12 @@ public final class HeldItemInput implements Listener {
     }
 
     private void releaseAll(Player player) {
+        TriggerState state = triggers.get(player.getUniqueId());
+        if (state != null) {
+            // The item is gone: the hold ends with it. The handler learns
+            // about it through onRelease, which is the stronger signal.
+            state.release(now());
+        }
         for (HeldItemHandler handler : handlers) {
             try {
                 handler.onRelease(player);
@@ -439,6 +620,7 @@ public final class HeldItemInput implements Listener {
             if (handler == null) {
                 return;
             }
+            recordRelease(player);
             try {
                 handler.onRelease(player);
             } catch (Throwable failure) {
