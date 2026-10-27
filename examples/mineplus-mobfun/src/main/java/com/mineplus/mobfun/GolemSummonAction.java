@@ -69,6 +69,8 @@ public final class GolemSummonAction implements BehaviorAction {
     private static final int BUILD_STEP_DELAY_TICKS = 6;
     private static final int GOLEM_CAP = 1;
     private static final long COOLDOWN_TICKS = 900L;
+    /** How long the builder keeps the mob while its column goes up. */
+    private static final long BUILD_CLAIM_TICKS = 240L;
     private static final int THREAT_TARGET_RADIUS = 10;
     /** base + torso + head placed, then the same three cleared to free the golem. */
     private static final int COLUMN_EDITS = 6;
@@ -95,7 +97,12 @@ public final class GolemSummonAction implements BehaviorAction {
         this.plugin = plugin;
         this.api = api;
         this.fx = fx;
-        this.cooldownKey = new NamespacedKey(plugin, "mobfun_golem_cd");
+        // One cooldown per guardian kind: the iron builder and the frost
+        // builder are different villagers with different posts, and a shared
+        // cooldown meant whichever built first silenced the other for the
+        // whole raid.
+        this.cooldownKey = new NamespacedKey(plugin,
+                "mobfun_golem_cd_" + golemType.name().toLowerCase(java.util.Locale.ROOT));
         this.builderKey = new NamespacedKey(plugin, BUILDER_TAG_KEY);
         this.id = id;
         this.golemName = golemName;
@@ -137,6 +144,11 @@ public final class GolemSummonAction implements BehaviorAction {
             if (!startColumn(world, api.openEditSession(COLUMN_EDITS, COLUMN_SPAWNS), base)) {
                 continue;
             }
+            // The builder keeps the mob while the column goes up. Without the
+            // claim the builder is only a priority on paper: a scenario that
+            // already owns the mob (a villager on its way to the village)
+            // would keep walking it away from the post it is defending.
+            context.claimActivity(id, builder.getLocation(), 0.0, BUILD_CLAIM_TICKS);
             builder.getPersistentDataContainer().set(builderKey, PersistentDataType.BYTE, (byte) 1);
             builder.getPersistentDataContainer().set(cooldownKey, PersistentDataType.LONG,
                     now + COOLDOWN_TICKS);

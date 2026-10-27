@@ -66,7 +66,7 @@ public final class MineplusGunPlugin extends JavaPlugin {
         registry.reload(config.weapons());
         services.setRegistry(registry);
         services.setItemFactory(new WeaponItemFactory(this, context));
-        services.setAmmoHud(new AmmoHud(config));
+        services.setAmmoHud(new AmmoHud(context.hud(), config));
 
         EconomyBridge economy = new EconomyBridge();
         services.setEconomy(economy);

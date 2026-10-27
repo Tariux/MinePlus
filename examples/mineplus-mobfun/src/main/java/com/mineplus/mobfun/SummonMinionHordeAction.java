@@ -36,8 +36,10 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
 /**
- * The Necromancer Witch: she fields a small mixed horde against nearby
- * villagers, and she fights back when a golem comes for her.
+ * The Necromancer Witch: she fields a mixed horde against nearby villagers,
+ * and she keeps fielding it — a witch that stops calling minions the moment
+ * an iron golem walks into the wasteland is a witch that dies to the first
+ * golem, and the showcase lasts three seconds.
  *
  * <p>How a raid plays out:
  * <ul>
@@ -49,13 +51,13 @@ import org.bukkit.util.Vector;
  *       so a 1-block jungle cave gap only ever receives a small mob. Dense
  *       canopy or broken terrain can starve a roll entirely instead of
  *       producing mobs stuck in leaves.</li>
- *   <li><b>Mixed, light horde</b> - one melee body, one flanker, one ranged
+ *   <li><b>Mixed, light horde</b> - a melee body, a flanker and a ranged
  *       shooter across her rolls (husk in deserts, strays in the cold,
  *       drowned in swamps, cave spiders flanking in jungles), none of which a
  *       golem can sweep with a single swing. Every fifth minion - when the
  *       ground allows - is a <b>skeleton horseman</b>: a tamed skeleton horse
  *       with an archer in the saddle, both charging the same victim.</li>
- *   <li><b>Spawned through the engine's budget</b> - every minion goes out
+ *   <li><b>Summoned through the engine's budget</b> - every minion goes out
  *       through {@link BehaviorContext#trySpawn}, so summons are counted and
  *       capped by the same per-run limit as block edits and arrive with the
  *       reason the server's own cleanup needs to tell plugin mobs apart.</li>
@@ -66,12 +68,18 @@ import org.bukkit.util.Vector;
  *       prey past {@link #LEASH_RADIUS} from the witch is walked home instead
  *       of allowed to drain into the world; a straggler's victim is somebody
  *       else's problem, and a horde that disperses is not a horde.</li>
- *   <li><b>Fights back, no spam</b> - when a golem (or a monster she did not
- *       summon) closes within 8 blocks, the witch switches to retaliation: she
- *       targets it and hurls potions (her vanilla AI does the throwing) while
- *       her crew keeps the distance. Summons themselves are gated by a
- *       per-witch PDC cooldown and a hard horde cap, so neither side can flood
- *       the field.</li>
+ *   <li><b>She never stops calling</b> - the waves come on a short cooldown and
+ *       the horde keeps refilling while it lives. When something heavy is
+ *       swinging at her the cooldown is shorter still: the horde is what buys
+ *       her the time to run, so a golem walking into the raid is the moment
+ *       she needs it most.</li>
+ *   <li><b>Fights back, and keeps the golem busy</b> - when a golem (or a
+ *       monster she did not summon) closes within {@link #THREAT_CLOSE_RADIUS}
+ *       blocks, the whole horde retargets onto it: her minions body-block the
+ *       iron golem instead of chasing a villager past her, which is the only
+ *       reason she survives the exchange at all. She keeps her distance,
+ *       hurls potions (her vanilla AI does the throwing) and wears a short
+ *       resistance ward.</li>
  *   <li><b>Hide behind the horde</b> - after each summon, the witch takes a
  *       short speed surge and retreat hops away from the nearest real threat,
  *       ending up behind the screen she just raised. Her own minions are
@@ -85,12 +93,20 @@ import org.bukkit.util.Vector;
  */
 public final class SummonMinionHordeAction implements BehaviorAction {
 
-    private static final int HORDE_CAP = 5;
-    private static final int MINIONS_PER_SUMMON = 2;
+    private static final int HORDE_CAP = 8;
+    private static final int MINIONS_PER_SUMMON = 3;
     private static final int SPOT_SEARCH_RADIUS = 3;
-    private static final long SUMMON_COOLDOWN_TICKS = 500L;
+    /** Ticks between two summon waves while she is only hunting. */
+    private static final long SUMMON_COOLDOWN_TICKS = 60L;
+    /** Ticks between two summon waves while something is swinging at her. */
+    private static final long DESPERATE_COOLDOWN_TICKS = 20L;
     private static final int HORSEMAN_EVERY = 5;
-    private static final int THREAT_CLOSE_RADIUS = 8;
+    /** How close a golem has to be before she treats the fight as personal. */
+    private static final int THREAT_CLOSE_RADIUS = 10;
+    /** How far she wants to keep from a golem that is swinging at her. */
+    private static final double KITE_DISTANCE = 9.0;
+    /** How fast she backs away when she breaks contact. */
+    private static final double KITE_SPEED = 1.25;
     private static final int RETREAT_HOPS = 4;
     private static final int RETREAT_HOP_DELAY_TICKS = 3;
     /** How far a minion may be dragged off before it is walked back to her. */
@@ -130,46 +146,55 @@ public final class SummonMinionHordeAction implements BehaviorAction {
                             + " golem/monster nearby (scanned=%d)", witch.getUniqueId(), raid.scanned());
             return false;
         }
-        if (raid.threat() != null && raid.threatDistanceSquared() <= THREAT_CLOSE_RADIUS * THREAT_CLOSE_RADIUS) {
-            DebugLogger.debug("[MobFun] necromancer %s retaliates against %s at %.1f blocks (no summons"
-                    + " while the threat is this close)", witch.getUniqueId(), raid.threat().getType(),
-                    Math.sqrt(raid.threatDistanceSquared()));
-            retaliate(witch, raid.threat());
-            retargetCrew(witch, raid.minions(), raid.threat());
-            return true;
-        }
-        if (raid.victim() == null) {
-            return false;
-        }
-        if (raid.minions().size() >= HORDE_CAP) {
-            DebugLogger.debug("[MobFun] necromancer %s holds: horde cap %d reached (owned=%d)",
-                    witch.getUniqueId(), HORDE_CAP, raid.minions().size());
-            return false;
-        }
+        boolean threatened = raid.threat() != null
+                && raid.threatDistanceSquared() <= (double) THREAT_CLOSE_RADIUS * THREAT_CLOSE_RADIUS;
         long now = context.world().getGameTime();
-        Long cooldownUntil = witch.getPersistentDataContainer().get(summonCooldownKey, PersistentDataType.LONG);
-        if (cooldownUntil != null && now < cooldownUntil) {
-            DebugLogger.debug("[MobFun] necromancer %s holds: summon cooldown active (%d ticks left,"
-                    + " prey found)", witch.getUniqueId(), cooldownUntil - now);
-            retargetCrew(witch, raid.minions(), raid.victim());
-            return false;
+
+        // What the horde answers: a golem that is already swinging is a better
+        // target than the villager she was hunting, and her minions body-block
+        // it between her and the fist that would end her.
+        LivingEntity focus = threatened ? raid.threat() : raid.victim();
+        if (focus != null) {
+            retargetCrew(witch, raid.minions(), focus);
+            // She aims herself at it too: without a target the witch's own
+            // potion AI has nothing to throw at, and a necromancer that only
+            // spawns minions but never attacks is a spectator, not a threat.
+            witch.setTarget(focus);
         }
-        int summoned = summonScreen(context, witch, raid);
-        if (summoned == 0) {
-            DebugLogger.debug("[MobFun] necromancer %s found prey but no valid spawn spot in rings 1-%d",
-                    witch.getUniqueId(), SPOT_SEARCH_RADIUS);
-            return false;
+
+        // She keeps summoning - that is the whole point of a necromancer. The
+        // horde is what buys her the time to run from the golem the horde
+        // cannot kill.
+        int summoned = 0;
+        if (focus != null && raid.minions().size() < HORDE_CAP && summonReady(witch, now)) {
+            summoned = summonScreen(context, witch, raid, focus);
+            if (summoned > 0) {
+                long cooldown = threatened ? DESPERATE_COOLDOWN_TICKS : SUMMON_COOLDOWN_TICKS;
+                witch.getPersistentDataContainer().set(summonCooldownKey, PersistentDataType.LONG,
+                        now + cooldown);
+                DebugLogger.debug("[MobFun] necromancer %s summoned %d minion(s) against a %s at %.1f blocks"
+                                + " (owned %d, cap %d)", witch.getUniqueId(), summoned, focus.getType(),
+                        Math.sqrt(focus.getLocation().distanceSquared(witch.getLocation())),
+                        raid.minions().size() + summoned, HORDE_CAP);
+            }
         }
-        DebugLogger.debug("[MobFun] necromancer %s summoned %d minion(s) against a %s at %.1f blocks"
-                        + " (owned %d, cap %d)", witch.getUniqueId(), summoned, raid.victim().getType(),
-                Math.sqrt(raid.victim().getLocation().distanceSquared(witch.getLocation())),
-                raid.minions().size() + summoned, HORDE_CAP);
-        witch.getPersistentDataContainer().set(summonCooldownKey, PersistentDataType.LONG,
-                now + SUMMON_COOLDOWN_TICKS);
-        Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE.name(), 1.0f, 1.2f);
-        retargetCrew(witch, raid.minions(), raid.victim());
-        startRetreat(witch, raid.threat() != null ? raid.threat().getLocation() : raid.victim().getLocation());
+
+        if (threatened) {
+            ward(witch);
+            retaliate(witch, raid.threat());
+            kite(witch, raid.threat());
+        } else if (summoned > 0) {
+            Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE.name(), 1.0f, 1.2f);
+            startRetreat(witch, focus.getLocation());
+        }
         return true;
+    }
+
+    /** {@code true} when the summon cooldown has run out. */
+    private boolean summonReady(Mob witch, long now) {
+        Long cooldownUntil = witch.getPersistentDataContainer()
+                .get(summonCooldownKey, PersistentDataType.LONG);
+        return cooldownUntil == null || now >= cooldownUntil;
     }
 
     /**
@@ -181,6 +206,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
     private Raid readRaid(Mob witch) {
         List<Mob> minions = new ArrayList<>(HORDE_CAP);
         LivingEntity victim = null;
+        double victimDistance = Double.MAX_VALUE;
         LivingEntity threat = null;
         double threatDistance = Double.MAX_VALUE;
         int scanned = 0;
@@ -191,8 +217,10 @@ public final class SummonMinionHordeAction implements BehaviorAction {
                 continue;
             }
             double distance = entity.getLocation().distanceSquared(witch.getLocation());
-            if (victim == null && entity instanceof Villager && witch.hasLineOfSight(entity)) {
+            if (entity instanceof Villager && witch.hasLineOfSight(entity) && distance < victimDistance) {
+                // The nearest visible villager is the one she goes for.
                 victim = (LivingEntity) entity;
+                victimDistance = distance;
             }
             boolean hostile = entity instanceof Monster || entity instanceof org.bukkit.entity.Golem;
             if (hostile && distance < threatDistance) {
@@ -220,10 +248,47 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.SMOKE, 5, 0.2, 0.3, 0.2, 0.01);
     }
 
-    /** Spawns up to {@link #MINIONS_PER_SUMMON} minions between the witch and the victim. */
-    private int summonScreen(BehaviorContext context, Mob witch, Raid raid) {
+    /**
+     * A short protective ward while something heavy is swinging at her. It
+     * does not make her a tank - it buys the three seconds she needs to get
+     * her horde between herself and the iron golem.
+     */
+    private void ward(Mob witch) {
+        witch.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 60, 0, false, false, true));
+    }
+
+    /**
+     * Keeps her distance from the golem that is swinging at her. An iron golem
+     * reaches three blocks and hits for five; a witch that stands still under
+     * that dies before her second potion lands. Backing out of its reach is
+     * what makes the fight a fight instead of an execution.
+     *
+     * <p>The break of contact has to be immediate: the witch's own brain owns
+     * her walk target and would cancel a path request on its next tick, so
+     * the retreat also carries a velocity hop and a speed boost. Nine blocks
+     * is outside the golem's reach and still inside her own throwing range.
+     */
+    private void kite(Mob witch, LivingEntity threat) {
+        Vector away = witch.getLocation().toVector().subtract(threat.getLocation().toVector()).setY(0);
+        if (away.lengthSquared() < 1.0E-4) {
+            away = new Vector(0, 0, 1);
+        }
+        away.normalize();
+        Location here = witch.getLocation();
+        Location spot = new Location(here.getWorld(),
+                here.getX() + away.getX() * KITE_DISTANCE,
+                here.getY(),
+                here.getZ() + away.getZ() * KITE_DISTANCE);
+        MobNavigator.moveTo(witch, spot, KITE_SPEED);
+        witch.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 60, 1, false, false, true));
+        Vector push = away.multiply(0.32);
+        witch.setVelocity(new Vector(push.getX(), 0.10, push.getZ()));
+    }
+
+    /** Spawns up to {@link #MINIONS_PER_SUMMON} minions between the witch and her focus. */
+    private int summonScreen(BehaviorContext context, Mob witch, Raid raid, LivingEntity focus) {
         Block foot = context.footBlock();
-        Vector approach = raid.victim().getLocation().toVector()
+        Vector approach = focus.getLocation().toVector()
                 .subtract(witch.getLocation().toVector()).setY(0);
         approach = approach.lengthSquared() < 1.0E-4 ? new Vector(0, 0, 1) : approach.normalize();
         List<Block> spots = findSpots(foot, approach);
@@ -238,8 +303,8 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             int clearance = clearanceOf(feet);
             Location spawnLocation = feet.getLocation().add(0.5, 0, 0.5);
             if (horsemanTurn && clearance >= 3
-                    && raid.victim().getLocation().distance(witch.getLocation()) > 6) {
-                if (spawnHorseman(context, spawnLocation, raid.victim()) != null) {
+                    && focus.getLocation().distance(witch.getLocation()) > 6) {
+                if (spawnHorseman(context, spawnLocation, focus) != null) {
                     summoned++;
                     horsemanTurn = false;
                 }
@@ -249,7 +314,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             if (type == null) {
                 continue;
             }
-            Mob minion = spawnMinion(context, spawnLocation, type, raid.victim());
+            Mob minion = spawnMinion(context, spawnLocation, type, focus);
             if (minion != null) {
                 summoned++;
             }

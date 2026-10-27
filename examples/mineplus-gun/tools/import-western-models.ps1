@@ -17,6 +17,10 @@
 #   - Blockbench/vanilla-decoration keys stripped (format_version, credit,
 #     texture_size, groups) and mod-item "overrides" dropped (the plugin
 #     drives frame switching itself via custom_model_data)
+#
+# The packs carry no shooting pose: the "fire" frame is authored on top of
+# the imported frames and is deliberately NOT produced here, so an import
+# never overwrites it.
 
 $ErrorActionPreference = "Stop"
 

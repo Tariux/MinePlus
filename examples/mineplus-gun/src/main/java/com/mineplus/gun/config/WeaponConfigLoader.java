@@ -121,8 +121,12 @@ public final class WeaponConfigLoader {
                 .scope(s.getBoolean("aim.scope", false))
                 .scopeSpreadMultiplier(clamp(s.getDouble("aim.spread-multiplier", 0.35), 0.0, 1.0))
                 .muzzleParticle(s.getString("fx.muzzle", "SMOKE"))
+                .flashParticle(s.getString("fx.flash", "FLAME"))
+                .smokeParticle(s.getString("fx.smoke", "LARGE_SMOKE"))
                 .tracerParticle(s.getString("fx.tracer", "CRIT"))
                 .impactParticle(s.getString("fx.impact", "CRIT"))
+                .impactSmokeParticle(s.getString("fx.impact-smoke", "CLOUD"))
+                .sparkParticle(s.getString("fx.spark", "SMALL_FLAME"))
                 .soundFire(s.getString("fx.sound-fire", defaultSound(type)))
                 .soundReload(s.getString("fx.sound-reload", "mineplusgun:reload"))
                 .soundEmpty(s.getString("fx.sound-empty", "mineplusgun:empty"))
@@ -144,12 +148,12 @@ public final class WeaponConfigLoader {
 
     private static double defaultDamage(WeaponType type) {
         return switch (type) {
-            case PISTOL -> 7.0;
-            case SMG -> 4.0;
-            case RIFLE -> 8.0;
-            case SHOTGUN -> 5.0;
-            case SNIPER -> 15.0;
-            case MELEE -> 6.0;
+            case PISTOL -> 9.0;
+            case SMG -> 5.0;
+            case RIFLE -> 11.0;
+            case SHOTGUN -> 6.0;
+            case SNIPER -> 20.0;
+            case MELEE -> 7.0;
         };
     }
 

@@ -9,6 +9,7 @@ import com.mineplus.infrastructure.core.api.BasicInfrastructureApi;
 import com.mineplus.infrastructure.core.api.InfrastructureApi;
 import com.mineplus.infrastructure.core.api.JsonInfrastructureApi;
 import com.mineplus.infrastructure.fx.ParticleFx;
+import com.mineplus.infrastructure.hud.HudService;
 import com.mineplus.infrastructure.input.HeldItemInput;
 import com.mineplus.infrastructure.mob.MineplusMobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobBehaviorApi;
@@ -40,6 +41,7 @@ public final class PluginContext {
     private final ParticleFx particleFx;
     private final Ballistics ballistics;
     private final HeldItemInput heldItemInput;
+    private final HudService hud;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -58,7 +60,8 @@ public final class PluginContext {
             MobBehaviorApi mobBehaviorApi,
             ParticleFx particleFx,
             Ballistics ballistics,
-            HeldItemInput heldItemInput
+            HeldItemInput heldItemInput,
+            HudService hud
     ) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
@@ -75,6 +78,7 @@ public final class PluginContext {
         this.particleFx = particleFx;
         this.ballistics = ballistics;
         this.heldItemInput = heldItemInput;
+        this.hud = hud;
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -126,6 +130,7 @@ public final class PluginContext {
         ParticleFx particleFx = new ParticleFx();
         Ballistics ballistics = new Ballistics(plugin, particleFx);
         HeldItemInput heldItemInput = new HeldItemInput(plugin);
+        HudService hud = new HudService();
 
         return new PluginContext(
                 plugin,
@@ -142,7 +147,8 @@ public final class PluginContext {
                 mobBehaviorApi,
                 particleFx,
                 ballistics,
-                heldItemInput
+                heldItemInput,
+                hud
         );
     }
 
@@ -245,6 +251,15 @@ public final class PluginContext {
      */
     public HeldItemInput heldItemInput() {
         return heldItemInput;
+    }
+
+    /**
+     * The shared HUD bar (action bar / boss bar / off, per-player toggle).
+     * One instance for the whole server: a module that kept its own would
+     * fight over the action bar with every other module that shows one.
+     */
+    public HudService hud() {
+        return hud;
     }
 
     /**

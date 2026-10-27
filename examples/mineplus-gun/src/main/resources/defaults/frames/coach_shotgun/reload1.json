@@ -1,4 +1,4 @@
-﻿{
+{
     "textures":  {
                      "0":  "mineplusgun:item/coach_shotgun",
                      "particle":  "mineplusgun:item/coach_shotgun"
@@ -1197,13 +1197,13 @@
                                              },
                     "firstperson_righthand":  {
                                                   "rotation":  [
-                                                                   15,
-                                                                   5,
-                                                                   0
+                                                                   16.25,
+                                                                   5.5,
+                                                                   1.25
                                                                ],
                                                   "translation":  [
-                                                                      0.5,
-                                                                      6,
+                                                                      -1.0625,
+                                                                      6.25,
                                                                       -3
                                                                   ],
                                                   "scale":  [
@@ -1214,13 +1214,13 @@
                                               },
                     "firstperson_lefthand":  {
                                                  "rotation":  [
-                                                                  15,
-                                                                  5,
-                                                                  0
+                                                                  16.25,
+                                                                  5.25,
+                                                                  1.25
                                                               ],
                                                  "translation":  [
-                                                                     0.5,
-                                                                     6,
+                                                                     -1.0625,
+                                                                     6.25,
                                                                      -3
                                                                  ],
                                                  "scale":  [

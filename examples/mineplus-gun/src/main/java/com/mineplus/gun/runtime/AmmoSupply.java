@@ -27,6 +27,17 @@ public final class AmmoSupply {
     }
 
     /**
+     * How many <b>rounds</b> the player's reserve can supply. The magazine
+     * counts rounds and the HUD reads rounds, so the raw material count is
+     * only meaningful once it has been divided by the cost of a round: a
+     * player holding two nuggets of a three-nugget round owns no round at
+     * all, and a reload that starts for them would load nothing.
+     */
+    public static int rounds(Player player, Material material, int itemsPerRound) {
+        return count(player, material) / Math.max(1, itemsPerRound);
+    }
+
+    /**
      * Removes up to {@code amount} nuggets of the ammo material, lowest slots
      * first. Returns the number actually removed (stacks shrink cleanly, empty
      * stacks become air).
@@ -45,6 +56,11 @@ public final class AmmoSupply {
                 player.getInventory().setItem(slot, null);
             } else {
                 item.setAmount(item.getAmount() - used);
+                // The stack came from the inventory accessor, which may hand
+                // out a detached copy: without the write-back the stack keeps
+                // its old amount and the shooter pays for rounds he still
+                // carries.
+                player.getInventory().setItem(slot, item);
             }
         }
         return amount - remaining;

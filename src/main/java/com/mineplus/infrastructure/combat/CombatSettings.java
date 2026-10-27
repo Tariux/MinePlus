@@ -22,6 +22,9 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param ambientParticlesPerTick   per-tick budget for decoration (tracers,
  *                              smoke, rings) — the channel that degrades first
  * @param particlesPerEmit      ceiling a single emission request may spend
+ * @param particleRadius        how far a particle packet reaches, in blocks;
+ *                              the vanilla world-wide broadcast is the single
+ *                              largest client cost of a shot
  */
 public record CombatSettings(
         boolean enabled,
@@ -30,11 +33,12 @@ public record CombatSettings(
         int intervalTicks,
         int criticalParticlesPerTick,
         int ambientParticlesPerTick,
-        int particlesPerEmit
+        int particlesPerEmit,
+        double particleRadius
 ) {
 
     public static CombatSettings defaults() {
-        return new CombatSettings(true, 128, true, 1, 96, 128, 32);
+        return new CombatSettings(true, 128, true, 1, 96, 128, 32, 48.0);
     }
 
     /** The ballistics-only slice of these settings. */
@@ -72,7 +76,10 @@ public record CombatSettings(
                         : clamp(particles.getInt("AMBIENT_PER_TICK", defaults.ambientParticlesPerTick()), 0, 4096),
                 particles == null
                         ? defaults.particlesPerEmit()
-                        : clamp(particles.getInt("MAX_PER_EMIT", defaults.particlesPerEmit()), 1, 256)
+                        : clamp(particles.getInt("MAX_PER_EMIT", defaults.particlesPerEmit()), 1, 256),
+                particles == null
+                        ? defaults.particleRadius()
+                        : Math.max(1.0, particles.getDouble("RADIUS", defaults.particleRadius()))
         );
     }
 

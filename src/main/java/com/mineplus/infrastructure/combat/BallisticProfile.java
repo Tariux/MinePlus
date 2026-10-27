@@ -10,11 +10,12 @@ package com.mineplus.infrastructure.combat;
  * per-tick fraction of speed lost, and every distance ({@code range},
  * {@code falloffStart}) is in blocks.
  *
- * <p>The three visual fields ({@code muzzleParticle}, {@code tracerParticle},
- * {@code impactParticle}) and two audio fields are names, resolved lazily and
- * tolerantly by {@link Ballistics}: an unknown particle degrades to the
- * documented default, an unknown sound event degrades to {@code fallbackSound}
- * instead of throwing.
+ * <p>The visual fields ({@code muzzleParticle}, {@code flashParticle},
+ * {@code smokeParticle}, {@code sparkParticle}, {@code tracerParticle},
+ * {@code impactParticle}, {@code impactSmokeParticle}) and the audio fields
+ * are names, resolved lazily and tolerantly by {@link Ballistics}: an unknown
+ * particle degrades to the documented default, an unknown sound event
+ * degrades to {@code fallbackSound} instead of throwing.
  */
 public final class BallisticProfile {
 
@@ -38,8 +39,12 @@ public final class BallisticProfile {
     private final double hitboxExpansion;
     private final double tracerSpacing;
     private final String muzzleParticle;
+    private final String flashParticle;
+    private final String smokeParticle;
+    private final String sparkParticle;
     private final String tracerParticle;
     private final String impactParticle;
+    private final String impactSmokeParticle;
     private final String fireSound;
     private final String impactSound;
     private final String fallbackSound;
@@ -63,8 +68,12 @@ public final class BallisticProfile {
         this.hitboxExpansion = builder.hitboxExpansion;
         this.tracerSpacing = builder.tracerSpacing;
         this.muzzleParticle = builder.muzzleParticle;
+        this.flashParticle = builder.flashParticle;
+        this.smokeParticle = builder.smokeParticle;
+        this.sparkParticle = builder.sparkParticle;
         this.tracerParticle = builder.tracerParticle;
         this.impactParticle = builder.impactParticle;
+        this.impactSmokeParticle = builder.impactSmokeParticle;
         this.fireSound = builder.fireSound;
         this.impactSound = builder.impactSound;
         this.fallbackSound = builder.fallbackSound;
@@ -153,12 +162,38 @@ public final class BallisticProfile {
         return muzzleParticle;
     }
 
+    /** The bright flash at the muzzle; defaults to a flame-coloured burst. */
+    public String flashParticle() {
+        return flashParticle;
+    }
+
+    /** The smoke that lingers at the muzzle; defaults to a dark cloud. */
+    public String smokeParticle() {
+        return smokeParticle;
+    }
+
+    /**
+     * The burning sparks the shot throws off; defaults to a bright ember.
+     *
+     * <p>They are the fastest-moving part of the muzzle effect: the flash
+     * blooms, the sparks leave the barrel, and only then does the smoke hang
+     * there. Without them a shot reads as a grey cloud instead of fire.</p>
+     */
+    public String sparkParticle() {
+        return sparkParticle;
+    }
+
     public String tracerParticle() {
         return tracerParticle;
     }
 
     public String impactParticle() {
         return impactParticle;
+    }
+
+    /** The dust cloud an impact leaves behind; defaults to a pale puff. */
+    public String impactSmokeParticle() {
+        return impactSmokeParticle;
     }
 
     public String fireSound() {
@@ -210,8 +245,12 @@ public final class BallisticProfile {
         private double hitboxExpansion = DEFAULT_HITBOX_EXPANSION;
         private double tracerSpacing = 5.0;
         private String muzzleParticle = "SMOKE";
+        private String flashParticle = "FLAME";
+        private String smokeParticle = "LARGE_SMOKE";
+        private String sparkParticle = "SMALL_FLAME";
         private String tracerParticle = "CRIT";
         private String impactParticle = "CRIT";
+        private String impactSmokeParticle = "CLOUD";
         private String fireSound;
         private String impactSound;
         private String fallbackSound = "block.note_block.basedrum";
@@ -293,6 +332,27 @@ public final class BallisticProfile {
             this.muzzleParticle = muzzle;
             this.tracerParticle = tracer;
             this.impactParticle = impact;
+            return this;
+        }
+
+        /**
+         * The layered effect particles of a shot: the bright flash at the
+         * muzzle, the smoke that follows it, and the dust an impact leaves
+         * behind. A blank name falls back to the built-in default.
+         */
+        public Builder effectParticles(String flash, String smoke, String impactSmoke) {
+            this.flashParticle = flash;
+            this.smokeParticle = smoke;
+            this.impactSmokeParticle = impactSmoke;
+            return this;
+        }
+
+        /**
+         * The burning sparks a shot throws off; a blank name falls back to
+         * the built-in default.
+         */
+        public Builder sparkParticle(String spark) {
+            this.sparkParticle = spark;
             return this;
         }
 

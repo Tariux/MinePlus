@@ -82,6 +82,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Generic sensing conditions** — `BehaviorContext.Conditions.belowHealth`,
   `nearbyEntity(radius, matcher)` and `visibleEntity(radius, matcher)`, so
   module gates compose Core primitives instead of re-scanning entity lists.
+- **`WorldTimes`** — one owner for the world's three clocks. `timeOfDay`,
+  `isNight`, `isDay`, `dayIndex` and `nightIndex` answer "is it night" the way
+  the sky does, so no scenario has to guess whether `getTime()`,
+  `getFullTime()` or `getGameTime()` is the clock it wanted.
+- **Crew formation points** — `MobCrewService` now owns a crew's *formation
+  point* (`rally`, `setRally`) and hands each member the one bounded step it
+  should take toward it (`rejoinWaypoint`), with `spread` measuring how far
+  the group is scattered. `BehaviorContext` exposes them as `crewRally`,
+  `setCrewRally`, `crewRejoin` and `crewSpread` (replacing `crewFocus`).
+  A crew now walks as one: the formation point advances along the route only
+  once everybody has reached it, and no member is ever handed a target beyond
+  its own path range — the two rules that turn "a column of villagers a
+  hundred blocks apart" into a march.
+- **A shared trigger state** — `HeldItemInput.trigger(player)` hands a module
+  the Core's own view of the activation gesture: `held()` (the button is down)
+  and `freshPress()` (this activation is a new press, not the client repeating
+  the one it already sent). The Core resolves the press stream once, for every
+  module: a modern client answers one physical click with up to two packets —
+  a click on a block sends "use item on block" and, when the block did not
+  consume the interaction, follows it with "use item in hand" — and the two
+  must not read as two clicks. A press inside `CLICK_WINDOW_MILLIS` (150 ms) of
+  the previous one continues the same click; a press outside it is a new
+  gesture. The window is deliberately narrow: it has to cover the round trip
+  between the two packets and nothing more, or a fast, deliberate second click
+  is swallowed (a 280 rpm weapon needs 214 ms between rounds).
 
 #### Changed
 
@@ -89,6 +114,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stragglers back to the crew focus *before* halting the crew for the night, and
   `Callbacks.onNight` now returns `boolean`: returning `false` (e.g. the edit
   budget refused a write) retries inside the same night instead of burning it.
+- **Activity claims carry a priority** — a claim remembers the priority of the
+  profile that took it, and a strictly higher-priority profile whose conditions
+  pass may take the entity over (a guardian answers an attack on a villager
+  mid-pilgrimage). The challenger still plays the odds gate and keeps the mob
+  only by claiming it, so a higher priority never steals a mob on its own, and
+  a lower-priority scenario can never interrupt one.
+- **Profiles dispatch by priority first** — `MobProfile.priority()` orders the
+  profiles of one entity type (higher first, registration order breaks ties),
+  and the engine re-sorts on every registration.
+- **`JourneyRunner` legs stay inside the path range** — the default leg is 32
+  blocks (vanilla navigation resolves roughly three dozen) and the runner's
+  internal cooldowns use `World#getGameTime()`, which `/time set` cannot stall.
+- **A crew member another scenario took over is not part of the formation** —
+  `crewSpread` ignores a member another action has claimed, so a rescued
+  villager cannot freeze the march it was walking.
+- **A spark channel on the shot profile** — `BallisticProfile.sparkParticle`
+  (default `SMALL_FLAME`) adds the burning embers a shot throws off: the muzzle
+  gets a spark burst beside the flash, and an impact gets one beside the dust.
+  The gun module exposes it per weapon as `fx.spark`.
+- **A journey member that fell behind is never lost** — a crew member that
+  falls more than `detachRadius` (64 blocks) behind the formation point stops
+  chasing it and walks the goal on its own; beyond that distance the formation
+  is a guide the member cannot follow, and a pilgrim that keeps chasing it is a
+  pilgrim that never arrives. It rejoins the formation when it catches up.
+- **A journey's stride is the caller's business** — `JourneyToStructureAction`
+  takes a `JourneyRunner.Options` (speed, arrival distance, leg length, the
+  repath/progress cooldowns and the stall tolerance), so a scenario that has
+  to cross a wasteland in a hurry can march faster without re-implementing the
+  runner.
+
+### Core engine (`Mineplus`) — Pack item frames
+
+#### Fixed
+
+- **Framed items never changed pose** — a frame state is written into the
+  stack's `custom_model_data`, and on 1.21.4+ the client reads the
+  *component's float list*, not the legacy integer. `ItemFrameWriter` now
+  writes both representations (the legacy integer for the legacy host-file
+  predicates, the float list for the modern `range_dispatch`), and the
+  accessor seam is probed against both spellings the API has used: `ItemMeta`
+  declares the getter as `int getCustomModelData()` and the setter as
+  `void setCustomModelData(Integer)`, and a lookup that asks for the boxed
+  return type finds nothing and silently disables the whole pipeline. A server
+  that refuses the write is reported once instead of leaving the item on its
+  resting pose forever.
+- **The pack assets carried a UTF-8 BOM** — the byte order mark is invisible in
+  an editor and fatal to the client: the vanilla model loader rejects the file
+  and the item renders its bare carrier. `PackAsset.fileBytes()` strips it from
+  every asset it serves.
+- **A frame could not be told from the state below it** — the generated
+  `assets/<ns>/items/<id>.json` now lists the resting model as an explicit
+  `range_dispatch` entry (and keeps it as the fallback), so the item shows its
+  idle pose instead of the bare material when the stack carries no frame value.
 
 ### Modules (`mineplus-gun`, `mineplus-mobfun`)
 
@@ -110,6 +188,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builders, pilgrim) could steer the same mob at once. Journeys now hold an
   exclusive anchored activity claim, builders tag themselves so they are never
   marched away, and summoning scenarios are leashed to their own area.
+- **The pilgrim camp was never raised** — the fire-site search accepted the
+  leader's own cell (a formation point is air on solid ground, which is
+  exactly what "buildable" means), found it first and then discarded it, so
+  the crew spent every night without a campfire. The search now excludes the
+  anchor, and the bed row counts only the crew's own beds (tagged through the
+  bed block's persistent data) — a village's beds are no longer mistaken for
+  the camp's, which had made the crew lay no beds at all.
+- **Guardians could not hold their post** — a builder claimed its mob only
+  after the column was finished, so a pilgrim walked the builder away from the
+  site while it worked. The builder now claims the mob for the build, and each
+  guardian kind keeps its own cooldown so the iron and snow builders no longer
+  silence each other.
+- **A reload that could load nothing** — the reserve is counted in nuggets
+  while the magazine is counted in rounds, so a player holding fewer nuggets
+  than one round costs started a reload that ended with an empty magazine, and
+  the HUD's `{reserve}` did not match `{mag}`. The reserve is now counted in
+  rounds everywhere, a reload that cannot supply one round never starts, and
+  the HUD reads one unit.
+- **One click fired the gun twice** — the Core's repeat detection was dead
+  code (`lastWasRepeat` could never become true), so every activation packet
+  read as a fresh press. On a modern client a right-click on a block produces
+  two packets, so the weapon fired twice per click, a queued second shot fired
+  right behind the first, and a reloading weapon clicked empty while it was
+  loading. The Core now folds the two packets of one click into one press
+  (see the trigger state above), and a melee swing answers a click once too.
+- **A dry click during a reload** — pulling the trigger while the magazine was
+  loading reported the weapon as EMPTY, although the magazine is empty
+  precisely because the reload is running. A pull during a reload now neither
+  fires nor clicks empty.
+- **The magazine and the ammo supply were written to a copy** — an inventory
+  accessor may hand out a detached stack, and a count written only into that
+  copy is silently dropped: the magazine read as full again on the next open
+  (so the weapon refused to reload as "already loaded") and the shooter paid
+  for rounds he still carried. `ItemMagazine.flush` and the module's ammo
+  supply now write the stack back into its slot.
+- **A gun left in the inventory on its recoil frame** — the weapon rests on its
+  own pose when it leaves the hand and when another gun takes its place, so a
+  shooter carrying several guns never sees one of them frozen on its fire pose.
+- **Two guns had no recoil at all** — the packs ship no shooting pose, and for
+  the western pistol and the lever rifle the authored fire frame was a copy of
+  the idle frame, so the shot played its sound and particles over a weapon that
+  did not move. The recoil is now authored on top of the imported geometry: the
+  pistol's barrel swings up around the frame, the lever rifle's receiver,
+  barrel and front sight kick up around the grip.
+
+#### Changed
+
+- **More damage, more particles** — the arsenal was tuned up a little: the
+  pistols 9/15 → 10/17, the rifles 11/14/19/20/22 → 13/16/22/23/25, the
+  scatter guns 6/4.5 → 7/5 per pellet. Every weapon also gained a `spark`
+  channel (`fx.spark`): the Core throws burning embers at the muzzle and at the
+  impact, next to the flash, the barrel smoke and the dust.
+- **The carrier note in the config was wrong** — it described the four-tick
+  use-item repeat, which no modern client sends. The carrier still has to be
+  neutral (a bow or a crossbow would put the client into its own "using item"
+  state), but the reason is now the client's use state, not a repeat.
+- **The necromancer never stopped calling** — the witch summoned on a 25 s
+  cooldown with a five-minion cap, so an iron golem walked through the raid
+  and killed her before the next wave. The horde is what buys her the time to
+  run from a golem she cannot kill: the wave now comes every **3 s** (every
+  **1 s** while a golem is swinging at her), three minions per wave, a horde
+  cap of **8**, and the profile's own interval dropped from 12 s to 2 s so the
+  engine evaluates her twice a second instead of twice a minute.
+- **The pilgrims march instead of loitering** — the journey runs on a longer
+  leg (32 blocks), recruits from twice the radius (24), gathers tighter (8) and
+  walks on a faster stride (1.15×). A member that falls 64 blocks behind stops
+  waiting for the formation and walks the village on its own, so one villager
+  that cannot keep up no longer holds the whole crew in the wasteland.
 
 #### Added
 

@@ -79,8 +79,31 @@ public abstract class PackAsset {
     /** The cheap, identity-defining bytes this asset is hashed over. */
     protected abstract byte[] hashSource() throws IOException;
 
+    /**
+     * The bytes of a verbatim file, with a leading UTF-8 byte-order mark
+     * removed.
+     *
+     * <p>A BOM is invisible in an editor and fatal to the client: the vanilla
+     * resource loader parses every JSON model with a strict reader that
+     * rejects a leading mark, so a model file saved by a Windows tool loads as
+     * a <em>missing</em> model and the item that referenced it renders as
+     * nothing at all. Stripping it here — at the one place every verbatim
+     * file enters the pack — fixes every module at once.</p>
+     *
+     * <p>It cannot touch a binary asset: no PNG, OGG or font starts with the
+     * mark's three bytes.</p>
+     */
     protected static byte[] fileBytes(java.io.File file) throws IOException {
-        return Files.readAllBytes(file.toPath());
+        byte[] bytes = Files.readAllBytes(file.toPath());
+        if (bytes.length >= 3
+                && (bytes[0] & 0xFF) == 0xEF
+                && (bytes[1] & 0xFF) == 0xBB
+                && (bytes[2] & 0xFF) == 0xBF) {
+            byte[] stripped = new byte[bytes.length - 3];
+            System.arraycopy(bytes, 3, stripped, 0, stripped.length);
+            return stripped;
+        }
+        return bytes;
     }
 
     static String sha256Hex(byte[] data) {

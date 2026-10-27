@@ -11,6 +11,7 @@ import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
+import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Bukkit;
@@ -122,6 +123,7 @@ public final class MobFunPlugin extends JavaPlugin {
                 .build()));
         showcases.add(new MobFunShowcase(this, "lamplighter", "Lamplighter Villager", EntityType.VILLAGER,
                 mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .priority(BehaviorPriority.LAMPLIGHTER)
                 .action(new TorchPlaceAction(4), 10.0)
                 .build()));
         showcases.add(new MobFunShowcase(this, "florist", "Florist Bee", EntityType.BEE,
@@ -130,6 +132,7 @@ public final class MobFunPlugin extends JavaPlugin {
                 .build()));
         showcases.add(new MobFunShowcase(this, "golem", "Golem Guardian Villager", EntityType.VILLAGER,
                 mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .priority(BehaviorPriority.GUARDIAN)
                 .action(new GolemSummonAction(this, mobApi, fx, "summon_iron_golem",
                         "Summoned Iron Guardian", Material.IRON_BLOCK, EntityType.IRON_GOLEM,
                         IronGolem.class, Sound.BLOCK_METAL_PLACE, Sound.ENTITY_IRON_GOLEM_REPAIR), 30.0)
@@ -137,6 +140,7 @@ public final class MobFunPlugin extends JavaPlugin {
                 .build()));
         showcases.add(new MobFunShowcase(this, "snowgolem", "Frost Builder Villager", EntityType.VILLAGER,
                 mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .priority(BehaviorPriority.GUARDIAN)
                 .action(new GolemSummonAction(this, mobApi, fx, "summon_snow_golem",
                         "Summoned Snow Guardian", Material.SNOW_BLOCK, EntityType.SNOW_GOLEM,
                         Snowman.class, Sound.BLOCK_SNOW_PLACE, Sound.BLOCK_SNOW_BREAK), 30.0)
@@ -144,24 +148,32 @@ public final class MobFunPlugin extends JavaPlugin {
                 .build()));
         showcases.add(new MobFunShowcase(this, "necromancer", "Necromancer Witch", EntityType.WITCH,
                 mobApi, () -> MobProfile.builder(EntityType.WITCH)
-                .action(new SummonMinionHordeAction(this, fx), 12.0)
-                .condition(BehaviorConditions.threatOrPrey(12.0, 10.0))
+                .action(new SummonMinionHordeAction(this, fx), 2.0)
+                .condition(BehaviorConditions.threatOrPrey(20.0, 18.0))
                 .build()));
         // One shared journey instance: its scenario state (crews, camps, the
         // not-found report) lives on the engine's services and in itself, so a
         // profile rebuild on toggle never strands a march halfway across a map.
+        // The stride walks a little faster than a villager's ordinary amble —
+        // a pilgrim with a destination is in a hurry, and the wasteland is
+        // meant to be crossed, not loitered in.
         JourneyToStructureAction pilgrim = JourneyToStructureAction.builder()
                 .id("village_journey")
                 .structure("village")
                 .crewName(PilgrimCamp.CREW)
                 .searchRadiusChunks(64)
                 .arrivalDistance(24)
-                .cohesionRadius(8)
-                .recruitRadius(16)
-                .callbacks(new PilgrimCamp(fx))
+                .cohesionRadius(10)
+                .recruitRadius(24)
+                .marchLeg(32)
+                .gatherRadius(8)
+                .detachRadius(64)
+                .stride(new JourneyRunner.Options(1.15, 8.0, 8.0, 32, 40L, 60L, 2.0, 6, 0.0))
+                .callbacks(new PilgrimCamp(this, fx))
                 .build();
         showcases.add(new MobFunShowcase(this, "pilgrim", "Pilgrim Villager", EntityType.VILLAGER,
                 mobApi, () -> MobProfile.builder(EntityType.VILLAGER)
+                .priority(BehaviorPriority.PILGRIM)
                 .action(pilgrim, 2.0)
                 .condition(BehaviorConditions.notBuilder(this))
                 .build()));

@@ -312,6 +312,11 @@ public class ConfigManager {
                       AMBIENT_PER_TICK: 128
                       # Ceiling a single emission request may spend.
                       MAX_PER_EMIT: 32
+                      # How far a particle packet reaches, in blocks. The
+                      # vanilla broadcast reaches every player in the world;
+                      # this keeps a shot's cost proportional to who can
+                      # actually see it.
+                      RADIUS: 48
 
                     # Mob behavior engine: budgeted, distance-gated execution of
                     # entity behavior profiles registered by modules (actions like

@@ -1,4 +1,4 @@
-﻿{
+{
     "textures":  {
                      "0":  "mineplusgun:item/western_rifle",
                      "particle":  "mineplusgun:item/western_rifle"
@@ -1011,14 +1011,14 @@
     "display":  {
                     "thirdperson_righthand":  {
                                                   "rotation":  [
-                                                                   20,
-                                                                   -10,
-                                                                   50
+                                                                   133.3333,
+                                                                   100,
+                                                                   170
                                                                ],
                                                   "translation":  [
-                                                                      -2.25,
-                                                                      4.75,
-                                                                      -4.5
+                                                                      -0.9167,
+                                                                      4.25,
+                                                                      -6.5
                                                                   ],
                                                   "scale":  [
                                                                 0.85,
@@ -1028,14 +1028,14 @@
                                               },
                     "thirdperson_lefthand":  {
                                                  "rotation":  [
-                                                                  20,
-                                                                  -10,
-                                                                  50
+                                                                  133.3333,
+                                                                  100,
+                                                                  170
                                                               ],
                                                  "translation":  [
-                                                                     -2.25,
-                                                                     4.75,
-                                                                     -4.5
+                                                                     -0.9167,
+                                                                     4.25,
+                                                                     -6.5
                                                                  ],
                                                  "scale":  [
                                                                0.85,
@@ -1045,14 +1045,14 @@
                                              },
                     "firstperson_righthand":  {
                                                   "rotation":  [
-                                                                   5,
+                                                                   3,
                                                                    -35,
-                                                                   35
+                                                                   34.3333
                                                                ],
                                                   "translation":  [
-                                                                      -4.5,
-                                                                      7.5,
-                                                                      -3
+                                                                      -2.2667,
+                                                                      10,
+                                                                      -2.3333
                                                                   ],
                                                   "scale":  [
                                                                 0.9,
@@ -1067,9 +1067,9 @@
                                                                   35
                                                               ],
                                                  "translation":  [
-                                                                     -4.5,
-                                                                     7.5,
-                                                                     -3
+                                                                     -9.5,
+                                                                     10,
+                                                                     -1.6667
                                                                  ],
                                                  "scale":  [
                                                                0.9,

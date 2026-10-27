@@ -10,13 +10,18 @@ import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.Tag;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.block.TileState;
 import org.bukkit.block.data.type.Bed;
 import org.bukkit.entity.Mob;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
 /**
  * The pilgrim's night and arrival — the part of the journey that is content
@@ -50,15 +55,20 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
     /** The crew name handed to the journey builder, and read back here. */
     static final String CREW = "pilgrims";
 
+    /** Marks a bed as belonging to this crew's camp. */
+    private static final String BED_TAG = "pilgrim_bed";
+
     private static final int BED_CAP = 8;
     private static final int CAMP_GUARD_RADIUS = 6;
     private static final List<BlockFace> FACES =
             List.of(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST);
 
     private final ParticleFx fx;
+    private final NamespacedKey bedKey;
 
-    public PilgrimCamp(ParticleFx fx) {
+    public PilgrimCamp(Plugin plugin, ParticleFx fx) {
         this.fx = fx;
+        this.bedKey = new NamespacedKey(plugin, BED_TAG);
     }
 
     @Override
@@ -104,9 +114,9 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
     /**
      * The campfire's block: the fire itself if one already stands beside the
      * crew (so a second night tops up the camp instead of lighting a parallel
-     * fire), else buildable ground one step away from the leader. Never the
-     * block she is standing on - a campfire under a villager is a camp she
-     * burns in, not a camp she sleeps beside.
+     * fire), else buildable ground beside the leader. Never the block she is
+     * standing on - a campfire under a villager is a camp she burns in, not a
+     * camp she sleeps beside.
      *
      * @return {@code null} when nothing around the crew can carry a camp
      */
@@ -115,10 +125,37 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
         if (standing != null) {
             return standing;
         }
-        for (BlockFace face : FACES) {
-            Block spot = GroundProbe.campGroundNear(anchor.getRelative(face), 2, 1);
-            if (spot != null && !spot.equals(anchor)) {
-                return spot;
+        return campGroundAround(context, anchor, 2, 1);
+    }
+
+    /**
+     * Buildable ground in a ring around {@code anchor}, with the anchor's own
+     * cell excluded.
+     *
+     * <p>The exclusion is not cosmetic. The formation point the Core hands
+     * over is a <em>standable</em> cell - air on solid ground - which is
+     * exactly what {@link GroundProbe#isCampGround} accepts. A plain radius
+     * search therefore finds the block the leader is standing on first, and
+     * either puts the fire under her feet or (when the result is thrown away)
+     * reports "no camp ground" on perfectly good terrain, so the crew spends
+     * the night with no camp at all.
+     */
+    private Block campGroundAround(BehaviorContext context, Block anchor, int radius, int verticalWindow) {
+        World world = context.world();
+        for (int ring = 1; ring <= radius; ring++) {
+            for (int dy = -verticalWindow; dy <= verticalWindow; dy++) {
+                for (int dx = -ring; dx <= ring; dx++) {
+                    for (int dz = -ring; dz <= ring; dz++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                            continue; // ring perimeter only; inner rings were checked
+                        }
+                        Block candidate = world.getBlockAt(anchor.getX() + dx, anchor.getY() + dy,
+                                anchor.getZ() + dz);
+                        if (!candidate.equals(anchor) && GroundProbe.isCampGround(candidate)) {
+                            return candidate;
+                        }
+                    }
+                }
             }
         }
         return null;
@@ -169,9 +206,14 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
      * one lateral axis and pointing away from it. Each facing is tried, both
      * ways, and the longest row wins: terrain that blocks one side of a
      * campfire still gives the crew a shared wall of beds on another.
+     *
+     * <p>Only the crew's <b>own</b> beds count as already laid. Counting every
+     * bed in the guard radius meant that a crew camping near a village found
+     * the village's beds, decided it already had a row, and laid none — the
+     * camp was a campfire in the middle of somebody else's bedroom.
      */
     private int layBedRow(BehaviorContext context, Block fireSpot, int bedsWanted) {
-        int already = context.countNearby(Tag.BEDS::isTagged, CAMP_GUARD_RADIUS, 1, bedsWanted);
+        int already = countCrewBeds(context, fireSpot, bedsWanted);
         int missing = bedsWanted - already;
         if (missing <= 0) {
             return already;
@@ -183,6 +225,52 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
             }
         }
         return best + already;
+    }
+
+    /** The crew's own beds within the guard radius of the fire. */
+    private int countCrewBeds(BehaviorContext context, Block fireSpot, int wanted) {
+        int count = 0;
+        int radius = CAMP_GUARD_RADIUS;
+        for (int ring = 0; ring <= radius && count < wanted; ring++) {
+            for (int dy = -1; dy <= 1 && count < wanted; dy++) {
+                for (int dx = -ring; dx <= ring && count < wanted; dx++) {
+                    for (int dz = -ring; dz <= ring && count < wanted; dz++) {
+                        if (ring > 0 && Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                            continue; // ring perimeter only; inner rings were counted
+                        }
+                        Block candidate = context.world().getBlockAt(fireSpot.getX() + dx,
+                                fireSpot.getY() + dy, fireSpot.getZ() + dz);
+                        if (isCrewBed(candidate)) {
+                            count++;
+                        }
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    /** {@code true} when the block is a bed this crew laid. */
+    private boolean isCrewBed(Block block) {
+        if (block == null || !Tag.BEDS.isTagged(block.getType())) {
+            return false;
+        }
+        if (!(block.getState() instanceof TileState tile)) {
+            return false;
+        }
+        return tile.getPersistentDataContainer().has(bedKey, PersistentDataType.BYTE);
+    }
+
+    /** Marks a freshly placed bed as this crew's. */
+    private void tagCrewBed(Block bed) {
+        if (!(bed.getState() instanceof TileState tile)) {
+            return;
+        }
+        tile.getPersistentDataContainer().set(bedKey, PersistentDataType.BYTE, (byte) 1);
+        // A block-entity state is a snapshot: without the write-back the tag
+        // lives in the snapshot only and the bed reads as a stranger's bed
+        // again the next time the camp is topped up.
+        tile.update();
     }
 
     /** Beds start two blocks out from the fire and run sideways from there. */
@@ -202,6 +290,8 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
                 context.tryBreak(foot, false);
                 break;
             }
+            tagCrewBed(foot);
+            tagCrewBed(head);
             placed++;
         }
         return placed;

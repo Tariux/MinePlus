@@ -90,18 +90,26 @@ public final class PackItemFactory {
 
     /**
      * The {@code item_model} component value for a definition — the asset
-     * identity {@code <namespace>:item/<id>} that also keys the generated
+     * identity {@code <namespace>:<id>} that also keys the generated
      * {@code assets/<ns>/items/<id>.json}.
+     *
+     * <p>The component resolves to {@code assets/<ns>/items/<path>.json}, so
+     * the path is the item id alone: the {@code item/} segment belongs to the
+     * <em>model</em> namespace ({@code assets/<ns>/models/item/<id>.json}),
+     * not to the item definition. Pointing the component at
+     * {@code ns:item/<id>} resolves to a file that does not exist, and the
+     * client silently falls back to the vanilla carrier — no custom model, no
+     * frames.</p>
      */
     @SuppressWarnings("deprecation")
     static NamespacedKey itemModelKey(PackItemDefinition definition) {
-        return new NamespacedKey(definition.namespace(), "item/" + definition.id());
+        return new NamespacedKey(definition.namespace(), definition.id());
     }
 
     /** Same component value for a registered asset. */
     @SuppressWarnings("deprecation")
     static NamespacedKey assetModelKey(ItemModelAsset item) {
-        return new NamespacedKey(item.namespace(), item.path());
+        return new NamespacedKey(item.namespace(), item.itemId());
     }
 
     /** Reflectively applies {@code ItemMeta#setItemModel(NamespacedKey)} (Paper 1.21.2+). */
