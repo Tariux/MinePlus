@@ -74,6 +74,7 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
     @Override
     public String telemetrySummary() {
         return engine.telemetry().summary() + "\nregistered types=" + engine.profileTypeCount()
+                + ", custom ids=" + engine.profileCustomIdCount()
                 + "\njourneys=" + engine.journeys().activeCount()
                 + ", crews=" + engine.crews().activeCount()
                 + ", pipelines=" + engine.pipelines().activeCount()

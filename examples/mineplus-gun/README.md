@@ -35,7 +35,7 @@ retired nine-gun Western arsenal) is deleted, not deprecated. What is left:
 | Input | the Core's held-item seam: right-click fires, left-click scopes and is otherwise swallowed, swap-hands reloads |
 | Presentation | Core `ItemFrames` + `ItemFrameAnimator`, states discovered from `defaults/guns/<id>/models/` |
 | Economy | Vault; all prices config-driven; admins/bypass-permission never charged |
-| Assets | 4 guns (`pistol`, `shotgun`, `rifle`, `battle_rifle`) with 28 frame models, 4 sprites and 21 sound samples under the `mineplusgun` namespace |
+| Assets | 4 guns (`pistol`, `shotgun`, `rifle`, `battle_rifle`) with 28 authored frame models, densified at install to 51–53 frame states per gun, 4 sprites and 21 sound samples under the `mineplusgun` namespace |
 
 ## Controls
 
@@ -55,10 +55,10 @@ button. Everything that shoots lives on right-click.
 
 The scope is an aiming state, not a camera change: `aim.spread-multiplier`
 tightens the cone, `aim.move-multiplier` punishes moving while aimed,
-`aim.recoil-multiplier` softens recoil, the HUD reads `SCOPE` and a `scope_in`
-/ `scope_hold` / `scope_out` frame sequence plays when the gun ships one. A
-true client zoom needs a per-version packet (Spigot 1.21.1 exposes no FOV API),
-so it is deliberately not faked here.
+`aim.recoil-multiplier` softens recoil, the HUD reads `SCOPE` and the gun rises
+into a held sights pose (generated if the pack has none) and lowers when you
+leave it. A true client zoom needs a per-version packet (Spigot 1.21.1 exposes
+no FOV API), so it is deliberately not faked here.
 
 ## Recoil is dispersion
 
@@ -88,26 +88,59 @@ name suffix after `<id>_`:
 | `cycle`, `bolt`, `pump`, `rack`, `rechamber` | post-shot action cycle |
 | `equip`, `draw`, `raise` | draw pose |
 
-**Every one of them is optional.** The shipped packs only author `idle`,
-`primed` and `loading_N`, so these four guns reload with animation and hold
-their resting pose while firing and scoping — and they still fire, reload,
-scope and sell. A folder with a single `idle` model is a valid gun. A gun with
-no models at all is a valid gun on its vanilla carrier. Adding a weapon is a
-folder plus a config entry; no code, no frame list, no per-gun pose authoring.
+**Every one of them is optional.** The shipped packs author `idle`, `primed`
+and `loading_N`; install-time densification (below) fills in the rest, so these
+four guns animate a reload, a shot, an action cycle, a draw and a scope — and
+they still fire, reload, scope and sell even if a folder has only `idle`. A
+folder with a single `idle` model is a valid gun. A gun with no models at all
+is a valid gun on its vanilla carrier. Adding a weapon is a folder plus a
+config entry; no code, no frame list, no per-gun pose authoring.
 
 An explicit `frames:` block in the config overrides discovery for that weapon,
 so a server owner can retime or re-skin a gun without rebuilding the jar.
+
+## Animation: densified at install, played on the client clock
+
+A pack authors a handful of keyframes — a pistol reload is five models over a
+36-tick reload. Played by a server loop that is a pose every ~7 ticks, which is
+what "the reload stutters and the shot does nothing" looked like.
+`WeaponAnimations` fixes both halves of that at install time:
+
+- **densification** — every gap between two authored reload keyframes is
+  filled with interpolated frames (`loading_0_t1 … loading_0_t9`), blending the
+  item's own `display` transforms (shortest-arc rotation) and, when the two
+  keyframes describe the same elements, their geometry. 42–44 frames per
+  reload;
+- **completion** — a gun whose pack has no `fire`, `equip`, `cycle` or `scope`
+  pose gets generated ones derived from its own loaded/idle pose: a recoil
+  kick, a lowered draw that rises, a four-step "work the action" motion, and a
+  held "down the sights" pose with in/out approaches.
+
+Generated files carry a `mineplus_generated` marker, are excluded from the
+next run's keyframe set (densification is idempotent), and a file the current
+run did not produce is deleted.
+
+On 1.21.4+ the pack serialises each multi-frame clip as a nested
+`range_dispatch` on `minecraft:cooldown`, and the runtime starts it with one
+state write plus one `Player#setCooldown` of exactly the clip's length. The
+client then walks the frames **every rendered frame** with no further packets.
+Framed items also ship `hand_animation_on_swap: false`, so the vanilla
+down-and-up equip bob never replays when a pose or gate changes. On older
+servers the same densified frame set is played by the Core's server animator.
+
+`/mpgun debug anim` prints, for the held gun, which clock is driving it and
+how many frames each clip has.
 
 ## The arsenal
 
 Cadence is `⌈1200 / fire.rpm⌉` ticks; `PUMP`/`BOLT` wait for
 `fire.cycle-ticks` instead when it is larger.
 
-| Weapon | Type / action | Magazine / reload | Damage | Frames shipped |
+| Weapon | Type / action | Magazine / reload | Damage | Authored frames |
 |---|---|---|---|---|
 | `pistol` | PISTOL, SEMI, 320 rpm | 12 / 36 t | 7.5 | idle, primed, 5 × loading |
 | `shotgun` | SHOTGUN, PUMP, 70 rpm, cycle 14 t | 4 ×8 pellets / 60 t | 5.0 ×8 | idle, primed, 8 × loading |
-| `rifle` | RIFLE, BOLT, 40 rpm, cycle 20 t, scoped | 5 / 44 t | 18.0 (+1 penetration) | idle, primed, 5 × loading |
+| `rifle` | RIFLE, BOLT, 40 rpm, cycle 24 t, scoped | 5 / 44 t | 18.0 (+1 penetration) | idle, primed, 6 × loading |
 | `battle_rifle` | RIFLE, AUTO, 420 rpm, scoped | 20 / 48 t | 9.5 | idle, primed, 6 × loading |
 
 Each round carries per-weapon velocity, gravity, drag, range, spread,
@@ -135,13 +168,35 @@ counts `{reserve}` in rounds, so `{mag}/{reserve}` is one coherent fraction.
 
 ## Carriers
 
-Every gun's `backing-material` is **IRON_INGOT** — a neutral carrier with no
-vanilla use action. That is the requirement, not a taste: a carrier with its
-own use behaviour (bow, crossbow, food, spyglass) puts the client into a
-"using item" state, the client stops repeating the use packet, and the Core's
-trigger never sees the hold. A neutral carrier keeps the whole trigger stream
-server-side, so the Core can fold the two packets of one click into one press
-and report a genuine hold.
+Every gun's `backing-material` is a **neutral** vanilla item with no use action
+(an ingot). That is the requirement, not a taste: a carrier with its own use
+behaviour (bow, crossbow, food, spyglass) puts the client into a "using item"
+state, the client stops repeating the use packet, and the Core's trigger never
+sees the hold. A neutral carrier keeps the whole trigger stream server-side, so
+the Core can fold the two packets of one click into one press and report a
+genuine hold.
+
+The carriers are **distinct per gun** — `IRON_INGOT`, `GOLD_INGOT`,
+`COPPER_INGOT`, `NETHERITE_INGOT`. On 1.21.4+ the client keeps an item's
+cooldown per material, and the animation clock *is* that cooldown: two guns on
+the same material would animate each other. A configuration that reuses a
+carrier is logged as a warning.
+
+## Events
+
+```java
+@EventHandler
+public void onFire(WeaponFireEvent event) {   // cancellable: no round is spent
+    if (inSpawn(event.player())) event.setCancelled(true);
+}
+
+@EventHandler
+public void onReload(WeaponReloadEvent event) { ... }  // cancellable, has ticks()/automatic()
+@EventHandler
+public void onHit(WeaponHitEvent event) { ... }        // cancellable: withholds round damage
+```
+
+All three fire on the server thread; none is async.
 
 ## Build
 
@@ -208,7 +263,9 @@ instead of breaking the module.
 
 `/mpgun shop` · `/mpgun hud` · `/mpgun give <weapon> [player]` ·
 `/mpgun ammo [player] [amount]` · `/mpgun reload` · `/mpgun stats` ·
-`/mpgun debug <hitbox|trace>` (the last five need `mineplusgun.admin`).
+`/mpgun debug <anim|fx|trace|hitbox>` (the last five need `mineplusgun.admin`).
+`/mpgun debug anim` prints the held gun's clock, frame plan and clip lengths;
+`/mpgun debug fx` fires one test burst and reports the shared particle meter.
 `/mineplus gun …` is the same tree. `/mpgun reload` re-installs assets,
 re-discovers frames, re-registers items, recompiles the pack and refreshes
 every live session.
@@ -219,8 +276,9 @@ every live session.
 |---|---|
 | `MineplusGunPlugin` | bootstrap: install assets → register assets → parse config → build services → start features → one `reloadAll()` → register commands |
 | `config` | `GunConfig` + `WeaponConfigLoader` (tolerant parse, clamps, type defaults) |
-| `weapon` | `WeaponDefinition` (gameplay record + compiled ballistic profiles), `WeaponFrames` (file-name discovery), `WeaponAssets` (jar → staging → pack registration), `WeaponItemFactory`, `WeaponRegistry` |
+| `weapon` | `WeaponDefinition` (gameplay record + compiled ballistic profiles), `WeaponFrames` (file-name discovery), `WeaponAnimations` (install-time densification and generated poses), `WeaponAssets` (jar → staging → pack registration), `WeaponItemFactory`, `WeaponRegistry` |
 | `runtime` | `WeaponRuntime` (sessions, firing, reloading, poses, HUD), `FireMode`, `AmmoSupply` |
+| `event` | `WeaponFireEvent`, `WeaponReloadEvent`, `WeaponHitEvent` (cancellable seams, all main-thread) |
 | `feature` | `WeaponFeature` (items + reload), `CombatFeature` (runtime + held-item handler + stack-change listeners), `HudFeature`, `ShopFeature` |
 | `hud`, `shop`, `command` | the module's adapters over the Core `HudService`, the Vault bridge and the shared command tree |
 

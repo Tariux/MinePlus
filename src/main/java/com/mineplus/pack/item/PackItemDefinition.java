@@ -50,6 +50,7 @@ public final class PackItemDefinition implements ItemDefinition {
     private final String modelKey;
     private final String fallbackModelReference;
     private final List<Frame> frames;
+    private final ItemFrames.ClipPlan plan;
     private final String displayName;
     private final ItemCategory category;
     private final String linkedBlockKey;
@@ -72,6 +73,24 @@ public final class PackItemDefinition implements ItemDefinition {
             org.bukkit.inventory.EquipmentSlot equipmentSlot,
             List<String> descriptionLines
     ) {
+        this(namespace, id, backingMaterial, modelKey, fallbackModelReference, frames,
+                ItemFrames.ClipPlan.NONE, displayName, category, linkedBlockKey, equipmentSlot, descriptionLines);
+    }
+
+    public PackItemDefinition(
+            String namespace,
+            String id,
+            Material backingMaterial,
+            String modelKey,
+            String fallbackModelReference,
+            List<Frame> frames,
+            ItemFrames.ClipPlan plan,
+            String displayName,
+            ItemCategory category,
+            String linkedBlockKey,
+            org.bukkit.inventory.EquipmentSlot equipmentSlot,
+            List<String> descriptionLines
+    ) {
         this.namespace = normalizeToken(namespace);
         this.id = normalizeToken(id);
         this.backingMaterial = Objects.requireNonNull(backingMaterial, "backingMaterial");
@@ -82,6 +101,7 @@ public final class PackItemDefinition implements ItemDefinition {
                 ? null
                 : fallbackModelReference;
         this.frames = frames == null ? List.of() : List.copyOf(frames);
+        this.plan = plan == null ? ItemFrames.ClipPlan.NONE : plan;
         this.displayName = displayName == null ? "" : displayName;
         this.category = category == null ? ItemCategory.UTILITY : category;
         this.linkedBlockKey = linkedBlockKey == null ? "" : linkedBlockKey;
@@ -139,6 +159,17 @@ public final class PackItemDefinition implements ItemDefinition {
     /** Frame dispatch entries of a framed item, in registration order; empty on plain items. */
     public List<Frame> frames() {
         return frames;
+    }
+
+    /**
+     * The client-clock sequences of a framed item (reload, shot, equip and
+     * every other multi-frame clip), or {@link ItemFrames.ClipPlan#NONE}. The
+     * pack serializes them as nested cooldown dispatches; the legacy
+     * representation ignores the plan and renders every state as its own
+     * override.
+     */
+    public ItemFrames.ClipPlan plan() {
+        return plan;
     }
 
     /** True when the item dispatches over module-registered frame states. */
@@ -216,6 +247,7 @@ public final class PackItemDefinition implements ItemDefinition {
         private final String modelKey;
         private String fallbackModelReference;
         private List<Frame> frames = List.of();
+        private ItemFrames.ClipPlan plan = ItemFrames.ClipPlan.NONE;
         private String displayName = "";
         private ItemCategory category = ItemCategory.UTILITY;
         private String linkedBlockKey = "";
@@ -238,6 +270,7 @@ public final class PackItemDefinition implements ItemDefinition {
         public Builder frames(String fallbackModelReference, List<Frame> value) {
             this.fallbackModelReference = fallbackModelReference;
             this.frames = value == null ? List.of() : new ArrayList<>(value);
+            this.plan = ItemFrames.ClipPlan.NONE;
             return this;
         }
 
@@ -251,10 +284,12 @@ public final class PackItemDefinition implements ItemDefinition {
             if (value == null) {
                 this.fallbackModelReference = null;
                 this.frames = List.of();
+                this.plan = ItemFrames.ClipPlan.NONE;
                 return this;
             }
             this.fallbackModelReference = value.idleReference();
             this.frames = new ArrayList<>(value.dispatch());
+            this.plan = value.plan();
             return this;
         }
 
@@ -284,7 +319,7 @@ public final class PackItemDefinition implements ItemDefinition {
                         "Pack item '" + id + "' needs a modelKey or a frames() fallback reference");
             }
             return new PackItemDefinition(namespace, id, backingMaterial, modelKey,
-                    fallbackModelReference, frames,
+                    fallbackModelReference, frames, plan,
                     displayName, category, linkedBlockKey, equipmentSlot, descriptionLines);
         }
     }

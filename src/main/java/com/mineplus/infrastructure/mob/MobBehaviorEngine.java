@@ -59,7 +59,16 @@ public final class MobBehaviorEngine {
 
     private final Plugin plugin;
     private final Map<EntityType, List<MobProfile>> profilesByType = new ConcurrentHashMap<>();
+    /** Profiles bound to a custom identity ({@code namespace:path}), never consulted for vanilla entities. */
+    private final Map<String, List<MobProfile>> profilesByCustomId = new ConcurrentHashMap<>();
     private final Map<Plugin, List<MobProfile>> profilesByOwner = new ConcurrentHashMap<>();
+    /**
+     * Resolver that reveals a Mineplus custom identity. Installed by the custom
+     * mob manager; while unset, only vanilla type dispatch exists. A resolved id
+     * selects that id's profiles <em>instead of</em> the type's, so a custom mob
+     * can never inherit vanilla behavior.
+     */
+    private volatile MobIdentityResolver identityResolver;
     private final Map<UUID, ActiveActivity> activities = new ConcurrentHashMap<>();
     private final BehaviorTelemetry telemetry = new BehaviorTelemetry();
     private final BehaviorContext evaluationContext = new BehaviorContext(this);
@@ -174,6 +183,44 @@ public final class MobBehaviorEngine {
         return plugin;
     }
 
+    /**
+     * Installs (or clears) the custom-identity resolver. While installed, an
+     * entity carrying a custom id is evaluated against that id's profiles only;
+     * its vanilla type's profiles are never consulted. {@code null} restores
+     * pure vanilla-type dispatch for every entity.
+     */
+    public void setIdentityResolver(MobIdentityResolver resolver) {
+        this.identityResolver = resolver;
+    }
+
+    /**
+     * The profiles that apply to {@code entity}: a custom identity's profiles
+     * when the entity carries one, otherwise the profiles registered for its
+     * vanilla {@link EntityType}. The two sets never mix.
+     */
+    private List<MobProfile> candidatesFor(LivingEntity entity) {
+        MobIdentityResolver resolver = identityResolver;
+        if (resolver != null) {
+            String customId;
+            try {
+                customId = resolver.customMobId(entity);
+            } catch (Throwable throwable) {
+                // A broken resolver must not stall the whole sweep.
+                customId = null;
+            }
+            if (customId != null) {
+                List<MobProfile> custom = profilesByCustomId.get(customId);
+                return custom == null ? List.of() : custom;
+            }
+        }
+        List<MobProfile> typed = profilesByType.get(entity.getType());
+        return typed == null ? List.of() : typed;
+    }
+
+    private boolean hasAnyProfiles() {
+        return !profilesByType.isEmpty() || !profilesByCustomId.isEmpty();
+    }
+
     /** The engine's shared long-walk runner. */
     public JourneyRunner journeys() {
         return journeys;
@@ -242,15 +289,19 @@ public final class MobBehaviorEngine {
         profile.stampSequence(registrationSequence.incrementAndGet());
         List<MobProfile> owned = ownedList(owner);
         owned.add(profile);
-        List<MobProfile> byType = typedList(profile.entityType());
-        synchronized (byType) {
-            byType.add(profile);
-            byType.sort(DISPATCH_ORDER);
+        List<MobProfile> bucket = profile.isCustom()
+                ? customList(profile.customId())
+                : typedList(profile.entityType());
+        synchronized (bucket) {
+            bucket.add(profile);
+            bucket.sort(DISPATCH_ORDER);
         }
         ensureRunning();
         if (DebugLogger.isEnabled()) {
             plugin.getLogger().info("[mob-behavior] " + owner.getName() + " registered profile for "
-                    + profile.entityType() + " (" + profilesByType.size() + " types active)");
+                    + (profile.isCustom() ? profile.customId() + " (" + profile.entityType() + ")" : profile.entityType())
+                    + " (" + profilesByType.size() + " types, " + profilesByCustomId.size()
+                    + " custom ids active)");
         }
     }
 
@@ -262,20 +313,33 @@ public final class MobBehaviorEngine {
         return profilesByType.computeIfAbsent(type, key -> Collections.synchronizedList(new ArrayList<>()));
     }
 
+    private List<MobProfile> customList(String customId) {
+        return profilesByCustomId.computeIfAbsent(customId,
+                key -> Collections.synchronizedList(new ArrayList<>()));
+    }
+
     /** Removes one specific profile from {@code owner}'s registrations. */
     void unregister(Plugin owner, MobProfile profile) {
         List<MobProfile> owned = owner == null || profile == null ? null : profilesByOwner.get(owner);
         if (owned == null || !owned.remove(profile)) {
             return;
         }
-        List<MobProfile> list = profilesByType.get(profile.entityType());
-        if (list != null) {
-            synchronized (list) {
-                list.remove(profile);
-            }
-            if (list.isEmpty()) {
-                profilesByType.remove(profile.entityType(), list);
-            }
+        removeFromBucket(profile);
+    }
+
+    /** Removes {@code profile} from whichever dispatch bucket registered it. */
+    private void removeFromBucket(MobProfile profile) {
+        Map<?, List<MobProfile>> index = profile.isCustom() ? profilesByCustomId : profilesByType;
+        Object key = profile.isCustom() ? profile.customId() : profile.entityType();
+        List<MobProfile> list = index.get(key);
+        if (list == null) {
+            return;
+        }
+        synchronized (list) {
+            list.remove(profile);
+        }
+        if (list.isEmpty()) {
+            index.remove(key, list);
         }
     }
 
@@ -286,15 +350,7 @@ public final class MobBehaviorEngine {
             return;
         }
         for (MobProfile profile : owned) {
-            List<MobProfile> list = profilesByType.get(profile.entityType());
-            if (list != null) {
-                synchronized (list) {
-                    list.remove(profile);
-                }
-                if (list.isEmpty()) {
-                    profilesByType.remove(profile.entityType(), list);
-                }
-            }
+            removeFromBucket(profile);
         }
         if (DebugLogger.isEnabled()) {
             plugin.getLogger().info("[mob-behavior] " + owner.getName() + " unregistered "
@@ -313,6 +369,11 @@ public final class MobBehaviorEngine {
         return profilesByType.size();
     }
 
+    /** Number of distinct custom identities with at least one active profile. */
+    int profileCustomIdCount() {
+        return profilesByCustomId.size();
+    }
+
     /** Applies new settings (config reload). Safe while running. */
     void updateSettings(MobBehaviorSettings newSettings) {
         MobBehaviorSettings previous = this.settings;
@@ -324,7 +385,7 @@ public final class MobBehaviorEngine {
             running = false;
             task.cancel();
             runTask = null;
-            if (this.settings.enabled() && !profilesByType.isEmpty()) {
+            if (this.settings.enabled() && hasAnyProfiles()) {
                 ensureRunning();
             }
         }
@@ -469,7 +530,7 @@ public final class MobBehaviorEngine {
 
     private void run() {
         MobBehaviorSettings snapshot = settings;
-        if (!snapshot.enabled() || profilesByType.isEmpty()) {
+        if (!snapshot.enabled() || !hasAnyProfiles()) {
             return;
         }
         pruneActivities();
@@ -532,8 +593,8 @@ public final class MobBehaviorEngine {
                             continue;
                         }
                         EntityType type = living.getType();
-                        List<MobProfile> candidates = profilesByType.get(type);
-                        if (candidates == null || candidates.isEmpty()) {
+                        List<MobProfile> candidates = candidatesFor(living);
+                        if (candidates.isEmpty()) {
                             continue;
                         }
                         if (sustainedThisRun.contains(living.getUniqueId())) {
@@ -575,8 +636,8 @@ public final class MobBehaviorEngine {
                     || living.isDead() || !living.isValid()) {
                 continue;
             }
-            List<MobProfile> candidates = profilesByType.get(living.getType());
-            if (candidates == null || candidates.isEmpty()) {
+            List<MobProfile> candidates = candidatesFor(living);
+            if (candidates.isEmpty()) {
                 continue;
             }
             // Pipelines already advanced this entity in this run.
@@ -756,9 +817,9 @@ public final class MobBehaviorEngine {
         if (owner == null || entity == null || entity.isDead() || !entity.isValid()) {
             return BehaviorFireResult.EMPTY;
         }
-        List<MobProfile> candidates = profilesByType.get(entity.getType());
+        List<MobProfile> candidates = candidatesFor(entity);
         List<MobProfile> owned = profilesByOwner.get(owner);
-        if (candidates == null || candidates.isEmpty() || owned == null || owned.isEmpty()) {
+        if (candidates.isEmpty() || owned == null || owned.isEmpty()) {
             return BehaviorFireResult.EMPTY;
         }
         BehaviorFireResult.Builder result = new BehaviorFireResult.Builder();

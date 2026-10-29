@@ -446,6 +446,18 @@ MOB_BEHAVIOR:
   MAX_SUSTAINED_PER_RUN: 64
   MAX_PIPELINES_PER_RUN: 64
 
+# Custom mobs: vanilla base entities carrying a Mineplus identity, behaviour
+# profile and (optionally) a per-part display rig. These keys bound only the
+# visual cost; behaviour runs on the shared MOB_BEHAVIOR engine. Lazy: costs
+# nothing until a module registers a definition.
+CUSTOM_MOBS:
+  ENABLED: true
+  RENDERING: true
+  RENDER_INTERVAL_TICKS: 2
+  RENDER_DISTANCE: 48
+  MAX_RIGGED_PER_WORLD: 96
+  REMOVE_UNKNOWN_ON_LOAD: true
+
 ```
 
 | Key | Values | Effect |
@@ -505,6 +517,12 @@ MOB_BEHAVIOR:
 | `MOB_BEHAVIOR.MAX_ENTITY_SPAWNS_PER_RUN` | spawns 0-256 | Hard ceiling of entities summoned per run (default 8). Mob scenarios summon minions, golems and horses; an unbounded summon is the one way this subsystem can flood a tick |
 | `MOB_BEHAVIOR.MAX_SUSTAINED_PER_RUN` | entities 0-512 | Cap on scenario-claimed entities the sustained sweep advances per run even with no player near them — journeys and camps tick on (default 64) |
 | `MOB_BEHAVIOR.MAX_PIPELINES_PER_RUN` | pipelines 0-512 | Cap on multi-stage mob pipelines (locate → march → act) advanced per run, sharing the same processing budget (default 64). `0` pauses pipeline progress without detaching them |
+| `CUSTOM_MOBS.ENABLED` | `true` / `false` | Custom-mob subsystem master switch (default `true`). `false` makes registration and spawning no-ops; already-registered behavior profiles keep running, rigs detach on the next refresh |
+| `CUSTOM_MOBS.RENDERING` | `true` / `false` | Create per-part display rigs at all (default `true`). `false` leaves the base entity visible — identity, AI isolation, attributes and behavior are unaffected |
+| `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 2). The pose task exists only while a rig is attached |
+| `CUSTOM_MOBS.RENDER_DISTANCE` | blocks 8-256 | Distance beyond which a rig stops receiving pose updates (default 48); the client still culls by its own view range |
+| `CUSTOM_MOBS.MAX_RIGGED_PER_WORLD` | rigs 1-4096 | Hard ceiling of rigged custom mobs per world (default 96). Past it, newly spawned mobs stay visible as their vanilla base |
+| `CUSTOM_MOBS.REMOVE_UNKNOWN_ON_LOAD` | `true` / `false` | Remove a custom-tagged entity whose definition is no longer registered when its chunk loads (default `true`). Unknown entities are AI-isolated either way, never turned back into vanilla mobs |
 
 ---
 

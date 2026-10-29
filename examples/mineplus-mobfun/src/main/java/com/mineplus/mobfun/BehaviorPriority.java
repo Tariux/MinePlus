@@ -36,6 +36,12 @@ final class BehaviorPriority {
     static final int PILGRIM = 60;
     /** The lamplighter: a small errand that never claims the mob. */
     static final int LAMPLIGHTER = 10;
+    /**
+     * The Evil Pig: a custom mob, so its profile never competes with a vanilla
+     * mob's profile. The value only orders it against another profile a module
+     * might bind to the same custom id.
+     */
+    static final int EVIL_PIG = 50;
 
     private BehaviorPriority() {
     }

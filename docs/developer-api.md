@@ -704,6 +704,133 @@ marches there and raids it as a pipeline, and the pilgrim villagers above.
 
 ---
 
+## Custom Mobs
+
+`context.customMobs()` registers a **new mob**, not a new behavior on a vanilla
+one. A custom mob is an ordinary vanilla base entity (`PIG`, `ZOMBIE`, …) that
+carries a Mineplus identity, its own visual model, its own attributes and its
+own behavior profile. Vanilla mobs of the same base type are untouched in both
+directions: custom profiles are dispatched by custom id, never by entity type.
+
+```java
+CustomMobApi mobs = context.customMobs();
+
+CustomMobDefinition evilPig = CustomMobDefinition.builder(
+                "mymod:evil_pig", EntityType.PIG,
+                CustomMobModel.vanilla(EntityType.PIG, texturePng))   // reuse the pig model
+        .displayName("Evil Pig").showName(true)
+        .attributes(CustomMobAttributes.builder()
+                .maxHealth(12).movementSpeed(0.28).attackDamage(4).followRange(24).build())
+        .behavior(profile -> profile
+                .priority(50)
+                .action(AttackNearestAction.builder().searchRadius(18).damage(4).build(), 1.0))
+        .build();
+
+mobs.register(this, evilPig);                        // main thread only
+LivingEntity pig = mobs.spawn(location, "mymod:evil_pig");
+```
+
+### The isolation contract
+
+- **No vanilla AI.** On spawn and on every chunk restore the Core clears the
+  entity's goal and target selectors through `MobAiIsolation` while leaving AI
+  enabled — the navigator still ticks the mob's own vanilla walk, but nothing
+  in the mob decides anything. Every action comes from the definition's
+  behavior profile, evaluated by the mob behavior engine.
+- **Identity is persisted, not positional.** The id lives in PDC
+  (`custom_mob_id`), with a scoreboard tag as the cheap discovery path and a
+  live `UUID → id` cache for the engine sweep. A definition registered later
+  picks its already-loaded mobs back up; a chunk reload re-applies identity,
+  attributes (health is clamped, not refilled) and isolation.
+- **Unknown ids never fall back to vanilla.** A tagged entity whose definition
+  is not registered is still isolated, and — once at least one definition
+  exists — removed on chunk load (`CUSTOM_MOBS.REMOVE_UNKNOWN_ON_LOAD`). This
+  keeps a module's not-yet-registered mobs from being deleted by another
+  module's startup order.
+- **Owner-scoped registration.** One owner per id; a second owner claiming the
+  same id is an error, re-registering the same definition is idempotent, and
+  `unregisterAll(this)` on module disable removes definitions, profiles and
+  live mobs.
+
+### Rendering: a model is per-part displays, not a client entity
+
+`CustomMobModel.vanilla(type, png)` reuses a published vanilla model and swaps
+only the texture — the Evil Pig path. `CustomMobModel.builderFor(type, png)`
+starts from the same descriptor and lets you replace or add `MobPart`s, and
+`CustomMobModel.builder(w, h, png)` authors a silhouette from scratch. Each
+part is a box set with an absolute pivot and a `MobPart.Role` (`HEAD`, `BODY`,
+the four `LEG_*` roles, `STATIC`) that tells the rig which vanilla pose applies,
+so head tracking and leg swing follow the entity while parts stay independently
+animated.
+
+The Core compiles the model into pack assets (`MobRigAssetWriter`): one texture
+PNG, one item model per part, one item definition per part — the vanilla box-UV
+cross layout is converted to element face windows exactly as Blockbench derives
+it. `MobRigRenderer` then hides the base entity and presents every part as an
+`ItemDisplay` carrying that part's `item_model`, driven on
+`CUSTOM_MOBS.RENDER_INTERVAL_TICKS`. When the pack subsystem is unavailable (or
+the server has no `item_model` support) the base entity simply stays visible:
+behavior, identity and persistence are unaffected, so a custom mob is always
+testable without the visual layer.
+
+Rig cost is bounded by `RENDER_DISTANCE` (no pose pushes past it),
+`MAX_RIGGED_PER_WORLD`, and a pose task that only exists while at least one rig
+is attached. `refreshRendering()` re-evaluates every live custom mob after a
+pack reload; `/mineplus pack recompile` and a settings reload call it for you.
+
+### Attributes and spawning
+
+`CustomMobAttributes` states only what differs from the base entity —
+`maxHealth`, `movementSpeed`, `attackDamage`, `followRange`, `armor`,
+`knockbackResistance`. Health is applied as a ceiling and filled on a fresh
+spawn, clamped on restore. `spawn(location, id)` loads the chunk if needed and
+returns `null` (never throws) when the subsystem is off, the id is unknown or
+the server refused the entity. `spawnConfigurator(...)` runs last, after
+identity, attributes and isolation, for module-specific setup.
+
+### Dispatched by custom id
+
+The profile a definition builds is registered under its custom id
+(`MobProfile.builder(baseType, customId)`), and the engine resolves every
+entity through `MobIdentityResolver` before dispatch. Consequences worth
+knowing:
+
+- A vanilla pig keeps running vanilla AI and never sees a custom pig's actions,
+  and a custom pig never matches a `MobProfile.builder(EntityType.PIG)` —
+  including `forceFire`, which resolves identity the same way.
+- A custom mob with no behavior consumer gets an idle profile: it stands
+  still. That is the correct default for a mob whose AI was cleared.
+- Priorities, claims, pipelines, journeys, crews and edit budgets are the same
+  engine primitives, so a custom mob can join a crew or run a pipeline exactly
+  like a showcase villager.
+
+### Bundled action: `AttackNearestAction`
+
+The first gameplay action written against this surface — find the nearest
+eligible player or villager, path to it, strike on reach with a cooldown:
+
+```java
+AttackNearestAction.builder()
+        .searchRadius(18).reach(2.5).speed(1.2)
+        .damage(4).cooldownTicks(20).knockback(0.4)
+        .target(e -> e instanceof Player || e instanceof Villager)   // default
+        .build();
+```
+
+It keeps a sticky target for 60 ticks so a mob does not flicker between two
+players, skips creative/spectator players, re-paths on a throttle instead of
+every evaluation, checks line of sight before striking, and applies damage
+through `DamageTransactions` so a module's own suppression listener cannot eat
+mob damage.
+
+**Complete working module:** the Evil Pig in
+[`examples/mineplus-mobfun`](../examples/mineplus-mobfun/README.md) is the
+minimal custom mob — one vanilla model, one texture, one action.
+
+Full guide: [Custom Mobs](custom-mobs.md).
+
+---
+
 ## Timed Crafting Processes
 
 `startProcess(instanceId, recipeId)` runs a recipe as a timed process on an ACTIVE machine:

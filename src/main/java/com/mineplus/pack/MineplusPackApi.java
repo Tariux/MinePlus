@@ -27,6 +27,11 @@ public final class MineplusPackApi implements PackApi {
     }
 
     @Override
+    public boolean usesModernItemModels() {
+        return isAvailable() && system.usesModernItemModels();
+    }
+
+    @Override
     public void registerItem(PackItemDefinition definition) {
         system.registerItem(definition);
     }
@@ -52,8 +57,23 @@ public final class MineplusPackApi implements PackApi {
     }
 
     @Override
+    public void registerGeneratedAsset(String namespace, String path, byte[] bytes) {
+        system.registerGeneratedAsset(namespace, path, bytes);
+    }
+
+    @Override
     public ItemStack createItem(String namespace, String id) {
         return system.createItem(namespace, id);
+    }
+
+    @Override
+    public boolean supportsGeneratedModelDisplay() {
+        return isAvailable() && system.supportsGeneratedModelDisplay();
+    }
+
+    @Override
+    public ItemStack createModelDisplay(org.bukkit.Material material, String namespace, String componentPath) {
+        return isAvailable() ? system.createModelDisplay(material, namespace, componentPath) : null;
     }
 
     @Override

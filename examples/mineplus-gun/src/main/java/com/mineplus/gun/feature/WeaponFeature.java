@@ -8,6 +8,9 @@ import com.mineplus.gun.weapon.WeaponAssets;
 import com.mineplus.gun.weapon.WeaponDefinition;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.module.ModuleFeature;
+import java.util.HashMap;
+import java.util.Map;
+import org.bukkit.Material;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -75,7 +78,17 @@ public final class WeaponFeature extends ModuleFeature {
      */
     public void registerItems() {
         int registered = 0;
+        Map<Material, String> carriers = new HashMap<>();
         for (WeaponDefinition weapon : services.config().weapons()) {
+            String previous = carriers.putIfAbsent(weapon.backingMaterial(), weapon.id());
+            if (previous != null) {
+                // The client keeps an item's cooldown per material, and the
+                // animation clock is that cooldown: two guns on one carrier
+                // would play each other's clips.
+                plugin.getLogger().warning("[MineplusGun] Weapons '" + previous + "' and '"
+                        + weapon.id() + "' share the carrier " + weapon.backingMaterial()
+                        + "; give each weapon its own backing-material or their animations bleed.");
+            }
             var definition = weapon.base().toPackItem();
             if (definition == null) {
                 plugin.getLogger().warning("[MineplusGun] Weapon '" + weapon.id()

@@ -43,6 +43,7 @@ public class ConfigManager {
                     MineplusConfig.parsePack(yamlConfig, com.mineplus.pack.PackSettings.defaults()),
                     MineplusConfig.parseRenderPolicy(yamlConfig, com.mineplus.infrastructure.render.RenderPolicy.defaults()),
                     MineplusConfig.parseMobBehavior(yamlConfig, com.mineplus.infrastructure.mob.MobBehaviorSettings.defaults()),
+                    MineplusConfig.parseCustomMobs(yamlConfig, com.mineplus.infrastructure.mob.custom.CustomMobSettings.defaults()),
                     MineplusConfig.parseCombat(yamlConfig, com.mineplus.infrastructure.combat.CombatSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
@@ -348,6 +349,28 @@ public class ConfigManager {
                       # march, raid) advanced per run. A pipeline owns a mob's
                       # whole scenario rather than one roll of the odds.
                       MAX_PIPELINES_PER_RUN: 64
+
+                    # Custom mobs: vanilla base entities carrying a Mineplus
+                    # identity, their own visual model and Core-driven behavior.
+                    # A custom mob never runs vanilla AI; its behavior comes from
+                    # profiles bound to its id, never to the base entity type.
+                    CUSTOM_MOBS:
+                      # Master switch; false makes registration and spawning
+                      # no-ops (existing custom mobs keep their profiles).
+                      ENABLED: true
+                      # Build per-part visual rigs (hidden base + ItemDisplays).
+                      # Rigs need the pack subsystem and the item_model component;
+                      # otherwise the base entity stays visible.
+                      RENDERING: true
+                      # Server ticks between rig pose pushes.
+                      RENDER_INTERVAL_TICKS: 2
+                      # Blocks beyond which a rig stops receiving pose updates.
+                      RENDER_DISTANCE: 48
+                      # Hard ceiling of rigged custom mobs per world.
+                      MAX_RIGGED_PER_WORLD: 96
+                      # Remove a custom-tagged entity whose definition is not
+                      # registered when its chunk loads.
+                      REMOVE_UNKNOWN_ON_LOAD: true
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

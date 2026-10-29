@@ -45,6 +45,7 @@ public final class ItemModelAsset extends PackAsset {
     private final String displayName;
     private final String fallbackModelReference;
     private final List<Frame> frames;
+    private final com.mineplus.pack.item.ItemFrames.ClipPlan clipPlan;
     private final boolean geometryBound;
 
     /**
@@ -61,6 +62,14 @@ public final class ItemModelAsset extends PackAsset {
     /** Framed variant: raw model references dispatched by custom-model-data. */
     public ItemModelAsset(String namespace, String id, String owner, Material backingMaterial, String displayName,
                           String fallbackModelReference, List<Frame> frames) {
+        this(namespace, id, owner, backingMaterial, displayName, fallbackModelReference, frames,
+                com.mineplus.pack.item.ItemFrames.ClipPlan.NONE);
+    }
+
+    /** Framed variant with the client-driven reload/shot sequences of the spec. */
+    public ItemModelAsset(String namespace, String id, String owner, Material backingMaterial, String displayName,
+                          String fallbackModelReference, List<Frame> frames,
+                          com.mineplus.pack.item.ItemFrames.ClipPlan clipPlan) {
         super(namespace, "item/" + requireItemToken(id), owner);
         this.backingMaterial = Objects.requireNonNull(backingMaterial, "backingMaterial");
         this.displayName = displayName == null ? "" : displayName;
@@ -68,6 +77,7 @@ public final class ItemModelAsset extends PackAsset {
                 ? null
                 : fallbackModelReference;
         this.frames = frames == null ? List.of() : List.copyOf(sanitize(frames));
+        this.clipPlan = clipPlan == null ? com.mineplus.pack.item.ItemFrames.ClipPlan.NONE : clipPlan;
         // A geometry-bound asset owns a registered virtual model; raw-model
         // items (fallback reference set — with or without dispatch frames,
         // e.g. a plain imported model) don't and reduce to a single
@@ -122,6 +132,11 @@ public final class ItemModelAsset extends PackAsset {
         return !frames.isEmpty();
     }
 
+    /** The client-driven reload/shot sequences of this item, never null. */
+    public com.mineplus.pack.item.ItemFrames.ClipPlan clipPlan() {
+        return clipPlan;
+    }
+
     /** True when the item's models are raw references registered by the module (no virtual geometry). */
     public boolean isRawModel() {
         return fallbackModelReference != null;
@@ -139,7 +154,7 @@ public final class ItemModelAsset extends PackAsset {
      * {@code floorMod} avoids the {@code Math.abs(Integer#MIN_VALUE)}
      * overflow that would produce an invalid negative predicate. This is also
      * the base of a framed item's state values. Must stay in sync with
-     * {@code PackItemFactory.stableCustomModelData}.
+     * {@code PackItemFactory}'s legacy custom-model-data base.
      */
     public int customModelData() {
         return frameBase(namespace(), itemId());
@@ -196,6 +211,12 @@ public final class ItemModelAsset extends PackAsset {
             builder.append("|").append(fallbackModelReference);
             for (Frame frame : frames) {
                 builder.append("|").append(frame.threshold()).append("=").append(frame.modelReference());
+            }
+            for (com.mineplus.pack.item.ItemFrames.Sequence sequence : clipPlan.sequences()) {
+                builder.append("|seq:").append(sequence.name())
+                        .append('@').append(sequence.gateState())
+                        .append('=').append(String.join(",", sequence.frames()))
+                        .append("->").append(sequence.fallbackReference());
             }
             framePart = builder.toString();
         }

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * The frame choreography of one framed item — the declarative version of
@@ -88,6 +89,106 @@ public final class ItemFrames {
         }
     }
 
+    /**
+     * One clip a client can play on its own clock.
+     *
+     * <p>A server tick is too coarse a clock for a fast hand animation: writing
+     * one model per tick caps the pose at 20 Hz and costs one stack rewrite per
+     * frame — and every rewrite of a held stack replays the client's equip
+     * bob. The pack therefore serializes a sequence as a nested dispatch over
+     * the client's own {@code minecraft:cooldown} property, and the runtime
+     * only writes the {@link #gateState()} once and starts a cooldown of the
+     * clip's length ({@link org.bukkit.entity.Player#setCooldown}); the client
+     * then selects a frame every rendered frame with no further packets.</p>
+     *
+     * <p>{@code gateState} is the stack state whose dispatch entry owns the
+     * sequence. It is normally the first frame's own state, so a server that
+     * writes states per frame (the legacy representation, or a modern client
+     * the plan cannot help) still renders the exact same poses.
+     * {@code fallbackReference} is the model shown when the cooldown is not
+     * running — the pose the item settles into.</p>
+     */
+    public record Sequence(String name, int gateState, List<String> frames, String fallbackReference) {
+
+        public Sequence {
+            name = normalizeName(name);
+            frames = frames == null ? List.of() : List.copyOf(frames);
+            fallbackReference = fallbackReference == null
+                    ? null
+                    : requireReference(fallbackReference, "sequence '" + name + "' fallback");
+        }
+
+        /** True when this sequence has something to animate. */
+        public boolean animates() {
+            return gateState >= 0 && !frames.isEmpty();
+        }
+
+        /**
+         * A one-frame sequence holds that pose for the whole cooldown: its
+         * entry threshold is a hair above zero so the fallback still wins once
+         * the cooldown has fully elapsed.
+         */
+        public boolean holdsSingleFrame() {
+            return frames.size() == 1;
+        }
+    }
+
+    /**
+     * Every client-clock sequence of this spec, keyed by name ({@code reload},
+     * {@code shot}, {@code equip}, {@code cycle}, {@code scope_in},
+     * {@code scope_out}). Only sequences with a usable gate are present.
+     */
+    public record ClipPlan(List<Sequence> sequences) {
+
+        public static final ClipPlan NONE = new ClipPlan(List.of());
+
+        public ClipPlan {
+            sequences = sequences == null ? List.of() : List.copyOf(sequences);
+        }
+
+        /** The sequence with this name, or {@code null}. */
+        public Sequence sequence(String name) {
+            if (name == null) {
+                return null;
+            }
+            String key = name.trim().toLowerCase(Locale.ROOT);
+            for (Sequence sequence : sequences) {
+                if (sequence.name().equals(key)) {
+                    return sequence;
+                }
+            }
+            return null;
+        }
+
+        public Sequence reload() {
+            return sequence("reload");
+        }
+
+        public Sequence shot() {
+            return sequence("fire");
+        }
+
+        public Sequence equip() {
+            return sequence("equip");
+        }
+
+        public Sequence cycle() {
+            return sequence("cycle");
+        }
+
+        public Sequence scopeIn() {
+            return sequence("scope_in");
+        }
+
+        public Sequence scopeOut() {
+            return sequence("scope_out");
+        }
+
+        public boolean isEmpty() {
+            return sequences.isEmpty();
+        }
+    }
+
     private final String idleReference;
     private final String loadedReference;
     private final String fireReference;
@@ -97,6 +198,7 @@ public final class ItemFrames {
     private final Map<String, Integer> states;
     private final Map<Integer, String> models;
     private final List<PackItemDefinition.Frame> dispatch;
+    private final ClipPlan plan;
 
     private ItemFrames(String idleReference, String loadedReference, String fireReference,
                        List<String> reloadReferences, List<Clip> namedClips) {
@@ -166,6 +268,64 @@ public final class ItemFrames {
             }
         }
         this.dispatch = List.copyOf(entries);
+
+        // Client-clock sequences. Every sequence is gated on a state the
+        // runtime writes once; a state carries at most one sequence, so the
+        // legacy per-frame writes (and a client that ignores the plan) render
+        // exactly the same poses in the same order.
+        String restReference = this.loadedReference != null ? this.loadedReference : idleReference;
+        List<Sequence> planSequences = new ArrayList<>();
+        Set<Integer> gatedStates = new LinkedHashSet<>();
+
+        Clip declaredReload = clipsByName.get("reload");
+        List<String> reloadFrames = declaredReload != null ? declaredReload.references() : reload;
+        if (!reloadFrames.isEmpty()) {
+            int gate = stateOf(reloadFrames.get(0));
+            if (gate >= 0 && gatedStates.add(gate)) {
+                planSequences.add(new Sequence("reload", gate, reloadFrames, restReference));
+            }
+        }
+
+        // A shot is gated on the resting state: the gun is already in it when
+        // it fires, so starting the sequence costs no stack rewrite, and the
+        // fallback is where the recoil settles.
+        Clip declaredFire = clipsByName.get("fire");
+        List<String> shotFrames = declaredFire != null
+                ? declaredFire.references()
+                : (this.fireReference == null ? List.of() : List.of(this.fireReference));
+        if (!shotFrames.isEmpty()) {
+            int gate = stateOf(restReference);
+            boolean onlyRest = shotFrames.size() == 1 && restReference.equals(shotFrames.get(0));
+            if (!onlyRest && gate >= 0 && gatedStates.add(gate)) {
+                String name = declaredFire != null ? declaredFire.name() : "fire";
+                planSequences.add(new Sequence(name, gate, shotFrames, restReference));
+            }
+        }
+
+        addClipSequence(planSequences, gatedStates, "equip", restReference);
+        addClipSequence(planSequences, gatedStates, "cycle", restReference);
+        String holdReference = firstReferenceOf("scope_hold");
+        addClipSequence(planSequences, gatedStates, "scope_in",
+                holdReference != null ? holdReference : restReference);
+        addClipSequence(planSequences, gatedStates, "scope_out", restReference);
+        this.plan = new ClipPlan(planSequences);
+    }
+
+    private void addClipSequence(List<Sequence> out, Set<Integer> gated, String name, String fallback) {
+        Clip clip = clipsByName.get(name);
+        if (clip == null || clip.frameCount() < 2) {
+            return;
+        }
+        int gate = stateOf(clip.references().get(0));
+        if (gate < 0 || !gated.add(gate)) {
+            return;
+        }
+        out.add(new Sequence(name, gate, clip.references(), fallback));
+    }
+
+    private String firstReferenceOf(String clipName) {
+        Clip clip = clipsByName.get(clipName);
+        return clip == null ? null : clip.references().get(0);
     }
 
     private static void allocate(Map<String, Integer> allocation, Map<Integer, String> reverse,
@@ -340,6 +500,16 @@ public final class ItemFrames {
             return loadedState();
         }
         return stateOf(fireReference);
+    }
+
+    /**
+     * The client-clock sequences of this spec: the reload, the shot recoil,
+     * the equip pose and every other multi-frame clip, each behind the state
+     * the runtime writes to start it. Empty when nothing can run on the
+     * client's clock (single-pose items).
+     */
+    public ClipPlan plan() {
+        return plan;
     }
 
     /** The state number of one model reference, or {@code -1} when unknown. */

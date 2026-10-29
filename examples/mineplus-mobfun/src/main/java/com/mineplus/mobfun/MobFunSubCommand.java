@@ -48,10 +48,10 @@ public final class MobFunSubCommand implements SubCommand {
     private static final int STATUS_LINES = 12;
 
     private final MobFunPlugin plugin;
-    private final List<MobFunShowcase> showcases;
+    private final List<MobFunShowcaseEntry> showcases;
     private final Set<UUID> spawnedTestMobs = new HashSet<>();
 
-    public MobFunSubCommand(MobFunPlugin plugin, List<MobFunShowcase> showcases) {
+    public MobFunSubCommand(MobFunPlugin plugin, List<MobFunShowcaseEntry> showcases) {
         this.plugin = plugin;
         this.showcases = showcases;
     }
@@ -110,7 +110,7 @@ public final class MobFunSubCommand implements SubCommand {
     }
 
     private boolean toggleShowcase(CommandSender sender, String idToken, String[] args) {
-        MobFunShowcase showcase = findShowcase(idToken);
+        MobFunShowcaseEntry showcase = findShowcase(idToken);
         if (showcase == null) {
             sender.sendMessage(ChatColor.RED + "Unknown showcase '" + idToken + "'. Use " + idList()
                     + ", or the commands: spawn, fire, despawn.");
@@ -141,7 +141,7 @@ public final class MobFunSubCommand implements SubCommand {
 
     /** {@code /mobfun spawn <id> [force]}: spawn in front of the player, force-fire, report. */
     private boolean spawn(CommandSender sender, String idToken, boolean ignoreConditions) {
-        MobFunShowcase showcase = findShowcase(idToken);
+        MobFunShowcaseEntry showcase = findShowcase(idToken);
         if (showcase == null) {
             sender.sendMessage(ChatColor.RED + "Unknown showcase '" + idToken + "'. Use " + idList() + ".");
             return true;
@@ -154,7 +154,7 @@ public final class MobFunSubCommand implements SubCommand {
             showcase.enable();
             sender.sendMessage(ChatColor.YELLOW + showcase.label() + " was off; auto-enabled for this test.");
         }
-        LivingEntity entity = spawnInFront(player, showcase.entityType());
+        LivingEntity entity = showcase.spawn(spawnLocation(player));
         if (entity == null) {
             sender.sendMessage(ChatColor.RED + "Failed to spawn a " + showcase.entityType().name()
                     .toLowerCase(Locale.ROOT) + ".");
@@ -173,7 +173,7 @@ public final class MobFunSubCommand implements SubCommand {
 
     /** {@code /mobfun fire <id> [force]}: force-fire on the nearest matching mob. */
     private boolean fire(CommandSender sender, String idToken, boolean ignoreConditions) {
-        MobFunShowcase showcase = findShowcase(idToken);
+        MobFunShowcaseEntry showcase = findShowcase(idToken);
         if (showcase == null) {
             sender.sendMessage(ChatColor.RED + "Unknown showcase '" + idToken + "'. Use " + idList() + ".");
             return true;
@@ -263,7 +263,8 @@ public final class MobFunSubCommand implements SubCommand {
         }
     }
 
-    private LivingEntity spawnInFront(Player player, EntityType type) {
+    /** A safe spot two blocks in front of the player, on the surface if needed. */
+    private Location spawnLocation(Player player) {
         World world = player.getWorld();
         Location base = player.getLocation();
         Vector direction = base.getDirection().setY(0);
@@ -275,8 +276,7 @@ public final class MobFunSubCommand implements SubCommand {
                 target = target.getRelative(org.bukkit.block.BlockFace.UP);
             }
         }
-        Entity spawned = world.spawnEntity(target.getLocation().add(0.5, 0, 0.5), type);
-        return spawned instanceof LivingEntity living ? living : null;
+        return target.getLocation().add(0.5, 0, 0.5);
     }
 
     private LivingEntity nearestMob(Player player, EntityType type) {
@@ -308,7 +308,7 @@ public final class MobFunSubCommand implements SubCommand {
 
     private void sendStatus(CommandSender sender) {
         sender.sendMessage(ChatColor.DARK_GREEN + "MobFun showcases");
-        for (MobFunShowcase showcase : showcases) {
+        for (MobFunShowcaseEntry showcase : showcases) {
             sender.sendMessage(ChatColor.GREEN + showcase.statusLine());
         }
         if (plugin.context() != null) {
@@ -362,8 +362,8 @@ public final class MobFunSubCommand implements SubCommand {
         return claimed + " of " + spawnedTestMobs.size() + " test mob(s)";
     }
 
-    private MobFunShowcase findShowcase(String token) {
-        for (MobFunShowcase showcase : showcases) {
+    private MobFunShowcaseEntry findShowcase(String token) {
+        for (MobFunShowcaseEntry showcase : showcases) {
             if (showcase.id().equalsIgnoreCase(token)) {
                 return showcase;
             }
@@ -373,7 +373,7 @@ public final class MobFunSubCommand implements SubCommand {
 
     private String idList() {
         StringBuilder sb = new StringBuilder();
-        for (MobFunShowcase showcase : showcases) {
+        for (MobFunShowcaseEntry showcase : showcases) {
             if (sb.length() > 0) {
                 sb.append('|');
             }
@@ -390,13 +390,13 @@ public final class MobFunSubCommand implements SubCommand {
             completions.add("spawn");
             completions.add("fire");
             completions.add("despawn");
-            for (MobFunShowcase showcase : showcases) {
+            for (MobFunShowcaseEntry showcase : showcases) {
                 completions.add(showcase.id());
             }
             return filter(completions, args[0]);
         }
         if ((args[0].equalsIgnoreCase("spawn") || args[0].equalsIgnoreCase("fire")) && args.length == 2) {
-            for (MobFunShowcase showcase : showcases) {
+            for (MobFunShowcaseEntry showcase : showcases) {
                 completions.add(showcase.id());
             }
             return filter(completions, args[1]);
