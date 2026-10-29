@@ -1,6 +1,8 @@
 package com.mineplus.infrastructure.mob;
 
 import com.mineplus.infrastructure.mob.navigation.MobNavigator;
+import com.mineplus.infrastructure.mob.pipeline.MobPipeline;
+import com.mineplus.infrastructure.mob.pipeline.MobPipelineHandle;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -138,6 +140,11 @@ public final class BehaviorContext {
     /** Block-light level at the entity's foot block (torches, lanterns, glowstone). */
     public int footBlockLight() {
         return footBlock.getLightFromBlocks();
+    }
+
+    /** {@code true} when this run can still afford {@code edits} more block writes. */
+    public boolean hasEditBudget(int edits) {
+        return editGuard != null && editGuard.remainingEdits() >= Math.max(1, edits);
     }
 
     /**
@@ -367,6 +374,28 @@ public final class BehaviorContext {
         if (entity instanceof Mob mob) {
             engine.journeys().abandon(mob);
         }
+    }
+
+    /**
+     * Attaches a multi-stage {@link MobPipeline} to this entity — the scenario
+     * form of behavior: locate, march, act, with per-stage timeouts and
+     * hand-off. While the pipeline runs the engine advances it every pass and
+     * skips every ordinary action on this entity, so a raid is not interrupted
+     * by grazing or torch-lighting.
+     *
+     * @return the pipeline handle, or {@code null} when this entity is not a
+     *         live mob or a pipeline is already attached
+     */
+    public MobPipelineHandle startPipeline(MobPipeline pipeline) {
+        if (!(entity instanceof Mob mob) || pipeline == null) {
+            return null;
+        }
+        return engine.pipelines().assign(engine.plugin(), mob, pipeline);
+    }
+
+    /** {@code true} when a pipeline currently owns this entity. */
+    public boolean isPipelined() {
+        return entity != null && engine.pipelines().owns(entity);
     }
 
     /** {@code true} when this entity is mid-journey. */
@@ -633,6 +662,56 @@ public final class BehaviorContext {
         return engine.crews().crewKeyOf(member.getUniqueId());
     }
 
+    /**
+     * Sets how this member's crew arranges itself around its formation point:
+     * a wedge behind the leader on the march, a pincer around a village, a ring
+     * around a gate. Slots are offsets from the formation point, so the crew
+     * still walks one route — only the shape changes.
+     *
+     * @return {@code true} when the member belonged to a crew to shape
+     */
+    public boolean setCrewFormation(String crew, com.mineplus.infrastructure.mob.group.Formation formation) {
+        String key = squadKey();
+        if (key == null) {
+            return false;
+        }
+        engine.squads().setFormation(key, formation);
+        return true;
+    }
+
+    /** The crew's formation ({@code NONE} when unset or the member is crewless). */
+    public com.mineplus.infrastructure.mob.group.Formation crewFormation(String crew) {
+        String key = squadKey();
+        return key == null ? com.mineplus.infrastructure.mob.group.Formation.NONE
+                : engine.squads().formation(key);
+    }
+
+    /** Gives this member a role in its squad (tank, flanker, sniper), or clears it with {@code null}. */
+    public boolean setCrewRole(String crew, com.mineplus.infrastructure.mob.group.SquadRole role) {
+        if (!(entity instanceof Mob member)) {
+            return false;
+        }
+        String key = squadKey();
+        if (key == null) {
+            return false;
+        }
+        engine.squads().assignRole(key, member.getUniqueId(), role);
+        return true;
+    }
+
+    /** This member's squad role, or {@code null} when it has none. */
+    public com.mineplus.infrastructure.mob.group.SquadRole crewRole(String crew) {
+        if (!(entity instanceof Mob member)) {
+            return null;
+        }
+        String key = squadKey();
+        return key == null ? null : engine.squads().role(key, member.getUniqueId());
+    }
+
+    private String squadKey() {
+        return entity instanceof Mob member ? engine.crews().crewKeyOf(member.getUniqueId()) : null;
+    }
+
     /** The live members of this member's crew. */
     public List<Mob> crewMembers(String crew) {
         if (!(entity instanceof Mob member)) {
@@ -655,6 +734,15 @@ public final class BehaviorContext {
         }
     }
 
+    /** Ends this activity for every live member before the crew is dropped. */
+    public void stopCrew(String crew, String activityId) {
+        for (Mob member : crewMembers(crew)) {
+            engine.releaseActivity(member, activityId);
+            engine.journeys().abandon(member);
+            MobNavigator.stop(member);
+        }
+    }
+
     private String actionScope() {
         return actionId == null ? "unscoped" : actionId;
     }
@@ -671,6 +759,9 @@ public final class BehaviorContext {
 
         /** Attempts to consume one entity-spawn slot. */
         boolean tryConsumeSpawn(MobBehaviorEngine engine);
+
+        /** Edit slots still available in this run. */
+        int remainingEdits();
     }
 
     /** Condition helper factory predicates used with {@link MobProfile.Builder#condition(Predicate)}. */
@@ -738,8 +829,12 @@ public final class BehaviorContext {
             }
             double reach = Math.max(1.0, radius);
             for (Entity candidate : self.getNearbyEntities(reach, reach, reach)) {
-                if (candidate instanceof LivingEntity && matcher.test(candidate)
-                        && (!requiresSight || self.hasLineOfSight(candidate))) {
+                if (!(candidate instanceof LivingEntity living) || living.isDead() || !living.isValid()) {
+                    // A corpse still in the entity list is not a reason to act:
+                    // it kept a threat condition true for the tick it lingered.
+                    continue;
+                }
+                if (matcher.test(living) && (!requiresSight || self.hasLineOfSight(living))) {
                     return true;
                 }
             }

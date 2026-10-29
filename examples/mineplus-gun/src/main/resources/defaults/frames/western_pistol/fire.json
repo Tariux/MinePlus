@@ -214,12 +214,12 @@
         9
       ],
       "rotation": {
-        "angle": 12,
-        "axis": "x",
+        "angle": 0,
+        "axis": "y",
         "origin": [
-          8,
-          5.25,
-          9
+          7,
+          4,
+          1
         ]
       },
       "faces": {
@@ -599,8 +599,8 @@
     "thirdperson_righthand": {
       "translation": [
         0,
-        4.25,
-        -0.75
+        3.75,
+        -0.25
       ],
       "scale": [
         0.85,
@@ -611,8 +611,8 @@
     "thirdperson_lefthand": {
       "translation": [
         0,
-        4.25,
-        -0.75
+        3.75,
+        -0.25
       ],
       "scale": [
         0.85,
@@ -622,14 +622,14 @@
     },
     "firstperson_righthand": {
       "rotation": [
-        -15,
-        5,
-        0
+        29,
+        8.5,
+        5
       ],
       "translation": [
-        0.5,
-        3.5,
-        -3
+        -6,
+        6,
+        -2
       ],
       "scale": [
         0.9,
@@ -639,14 +639,14 @@
     },
     "firstperson_lefthand": {
       "rotation": [
-        -15,
-        5,
-        0
+        29,
+        7.5,
+        5
       ],
       "translation": [
-        0.5,
-        3.5,
-        -3
+        -6,
+        6,
+        -2
       ],
       "scale": [
         0.9,
@@ -655,20 +655,15 @@
       ]
     },
     "ground": {
-      "rotation": [
-        0,
-        90,
-        0
-      ],
       "translation": [
         0,
-        2,
-        1
+        4,
+        0
       ],
       "scale": [
-        0.7,
-        0.7,
-        0.7
+        0.8,
+        0.8,
+        0.8
       ]
     },
     "gui": {
@@ -693,23 +688,6 @@
         2.75,
         4,
         -0.25
-      ]
-    },
-    "on_shelf": {
-      "rotation": [
-        90,
-        45,
-        -90
-      ],
-      "translation": [
-        1.5,
-        1.75,
-        -0.75
-      ],
-      "scale": [
-        0.75,
-        0.75,
-        0.75
       ]
     }
   }

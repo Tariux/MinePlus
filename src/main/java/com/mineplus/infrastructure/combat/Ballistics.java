@@ -219,6 +219,7 @@ public final class Ballistics {
             // simulation. Same damage, same hit, one tick earlier than a
             // stepped round would reach it.
             degradedShots++;
+            totalRounds++;
             instantTrace(shooter, start, velocity, profile, sink);
             return true;
         }
@@ -293,43 +294,83 @@ public final class Ballistics {
             expire(round);
             return;
         }
-        Vector direction = round.velocity.clone().normalize();
-        Location start = round.position;
-        double remaining = profile.range() - round.travelled;
-        double distance = Math.min(stepLength, remaining);
+        double budget = Math.min(stepLength, profile.range() - round.travelled);
         Player shooter = player(round.shooterId);
+        Location cursor = round.position.clone();
 
-        RayTraceResult blockHit = world.rayTraceBlocks(start, direction, distance,
-                FluidCollisionMode.NEVER, true);
-        RayTraceResult entityHit = world.rayTraceEntities(start, direction, distance,
-                profile.hitboxExpansion(),
-                candidate -> round.allows(candidate) && allows(round.handler, candidate, shooter));
+        // Resolve impacts in distance order over the remaining segment. A
+        // penetrating round must advance only to what it struck, then trace
+        // the rest of the segment; moving the full original distance after an
+        // impact both overshot the hit and skipped geometry behind it.
+        while (round.alive && budget > 1.0e-6) {
+            Vector direction = round.velocity.clone().normalize();
+            RayTraceResult blockHit = world.rayTraceBlocks(cursor, direction, budget,
+                    FluidCollisionMode.NEVER, true);
+            RayTraceResult entityHit = world.rayTraceEntities(cursor, direction, budget,
+                    profile.hitboxExpansion(),
+                    candidate -> candidate instanceof LivingEntity
+                            && round.allows(candidate) && allows(round.handler, candidate, shooter));
 
-        double blockDistance = blockHit == null ? Double.MAX_VALUE
-                : start.toVector().distance(blockHit.getHitPosition());
-        double entityDistance = entityHit == null || entityHit.getHitEntity() == null ? Double.MAX_VALUE
-                : start.toVector().distance(entityHit.getHitPosition());
+            double blockDistance = blockHit == null ? Double.MAX_VALUE
+                    : cursor.toVector().distance(blockHit.getHitPosition());
+            double entityDistance = entityHit == null || entityHit.getHitEntity() == null ? Double.MAX_VALUE
+                    : cursor.toVector().distance(entityHit.getHitPosition());
 
-        if (entityDistance <= blockDistance && entityHit != null && entityHit.getHitEntity() != null) {
-            resolveEntityHit(round, entityHit, entityDistance, shooter);
-            if (!round.alive) {
-                return;
-            }
-        } else if (blockHit != null) {
-            resolveBlockHit(round, blockHit, blockDistance, shooter);
-            if (!round.alive) {
+            if (entityDistance <= blockDistance && entityHit != null
+                    && entityHit.getHitEntity() != null) {
+                emitTracer(round, cursor, entityDistance);
+                round.travelled += entityDistance;
+                cursor = entityHit.getHitPosition().toLocation(round.world());
+                round.position.setX(cursor.getX());
+                round.position.setY(cursor.getY());
+                round.position.setZ(cursor.getZ());
+                resolveEntityHit(round, entityHit, shooter);
+                if (!round.alive) {
+                    return;
+                }
+                budget -= entityDistance;
+                cursor.add(direction.multiply(1.0e-4));
+            } else if (blockHit != null) {
+                emitTracer(round, cursor, blockDistance);
+                round.travelled += blockDistance;
+                cursor = blockHit.getHitPosition().toLocation(round.world());
+                round.position.setX(cursor.getX());
+                round.position.setY(cursor.getY());
+                round.position.setZ(cursor.getZ());
+                if (!resolveBlockHit(round, blockHit, shooter)) {
+                    return;
+                }
+                // A penetrating round must leave the struck block, or the next
+                // ray inside it hits the same face at distance zero forever.
+                Block pierced = blockHit.getHitBlock();
+                double through = pierced == null ? 0.0
+                        : exitDistance(pierced, cursor, direction);
+                if (through >= budget - blockDistance) {
+                    round.travelled += Math.max(0.0, budget - blockDistance);
+                    cursor.add(direction.multiply(Math.max(0.0, budget - blockDistance)));
+                    round.position.setX(cursor.getX());
+                    round.position.setY(cursor.getY());
+                    round.position.setZ(cursor.getZ());
+                    return;
+                }
+                round.travelled += through + 1.0e-4;
+                budget -= blockDistance + through + 1.0e-4;
+                cursor.add(direction.multiply(through + 1.0e-4));
+                round.position.setX(cursor.getX());
+                round.position.setY(cursor.getY());
+                round.position.setZ(cursor.getZ());
+            } else {
+                emitTracer(round, cursor, budget);
+                round.travelled += budget;
+                round.position.setX(cursor.getX() + direction.getX() * budget);
+                round.position.setY(cursor.getY() + direction.getY() * budget);
+                round.position.setZ(cursor.getZ() + direction.getZ() * budget);
                 return;
             }
         }
-
-        emitTracer(round, start, distance);
-        round.travelled += distance;
-        round.position.setX(start.getX() + direction.getX() * distance);
-        round.position.setY(start.getY() + direction.getY() * distance);
-        round.position.setZ(start.getZ() + direction.getZ() * distance);
     }
 
-    private void resolveEntityHit(Round round, RayTraceResult hit, double hitDistance, Player shooter) {
+    private void resolveEntityHit(Round round, RayTraceResult hit, Player shooter) {
         BallisticProfile profile = round.profile;
         Entity target = hit.getHitEntity();
         if (!(target instanceof LivingEntity living)) {
@@ -338,20 +379,25 @@ public final class Ballistics {
         totalHits++;
         round.lastHitId = target.getEntityId();
         Location at = hit.getHitPosition().toLocation(round.world());
-        double impactDistance = round.travelled + hitDistance;
+        double impactDistance = round.travelled;
         double damage = profile.damageAt(impactDistance) * round.damageScale;
         boolean headshot = isHeadshot(living, hit);
         if (headshot) {
             damage *= profile.headshotMultiplier();
         }
+        Vector direction = round.velocity.lengthSquared() > 1.0e-8
+                ? round.velocity.clone().normalize() : new Vector(0, 0, 1);
 
         boolean withheld = !safeEntityHit(round.handler, new ProjectileHit(at, target, hit.getHitBlock(),
-                hit.getHitBlockFace(), impactDistance, damage, headshot, shooter, profile));
+                hit.getHitBlockFace(), impactDistance, damage, headshot, shooter, profile, direction));
         emitImpactFx(at, profile);
         if (!withheld && damage > 0.0) {
             // Transactional: the shooter's own melee-suppression listener is
             // told not to cancel a hit the engine computed.
             DamageTransactions.apply(living, damage, shooter);
+        }
+        if (!withheld) {
+            applyKnockback(living, profile, direction);
         }
 
         if (round.penetrationLeft > 0) {
@@ -362,13 +408,36 @@ public final class Ballistics {
         }
     }
 
-    private void resolveBlockHit(Round round, RayTraceResult hit, double hitDistance, Player shooter) {
+    /**
+     * Pushes a struck target along the round's travel vector. The lift is what
+     * separates a visible impact from a target that only slides along the
+     * ground; it is proportional to the configured push so a heavy round also
+     * lifts more.
+     */
+    private static void applyKnockback(LivingEntity target, BallisticProfile profile, Vector direction) {
+        double strength = profile.knockback();
+        if (strength <= 0.0 || target.isDead() || !target.isValid()) {
+            return;
+        }
+        Vector push = direction.clone().setY(0.0);
+        if (push.lengthSquared() < 1.0e-8) {
+            return;
+        }
+        push.normalize().multiply(strength);
+        push.setY(Math.max(0.18, strength * 0.35));
+        target.setVelocity(target.getVelocity().add(push));
+    }
+
+    /** @return {@code true} when the round keeps flying in this same step. */
+    private boolean resolveBlockHit(Round round, RayTraceResult hit, Player shooter) {
         BallisticProfile profile = round.profile;
         Block block = hit.getHitBlock();
         BlockFace face = hit.getHitBlockFace();
         Location at = hit.getHitPosition().toLocation(round.world());
+        Vector direction = round.velocity.lengthSquared() > 1.0e-8
+                ? round.velocity.clone().normalize() : new Vector(0, 0, 1);
         safeBlockHit(round.handler, new ProjectileHit(at, null, block, face,
-                round.travelled + hitDistance, 0.0, false, shooter, profile));
+                round.travelled, 0.0, false, shooter, profile, direction));
         emitImpact(at, profile);
         if (face != null && round.ricochetLeft > 0
                 && ThreadLocalRandom.current().nextDouble() < profile.ricochetChance()) {
@@ -378,27 +447,19 @@ public final class Ballistics {
                 round.velocity = round.velocity.clone().subtract(normal.multiply(dot)).multiply(0.8);
                 round.ricochetLeft--;
                 round.damageScale *= 0.8;
-                advanceTo(round, at, hitDistance);
-                return;
+                // The reflected direction belongs to the next step: finish the
+                // current segment at the impact instead of spending the original
+                // direction's remaining distance after the bounce.
+                return false;
             }
         }
         if (round.penetrationLeft > 0) {
-            // Penetration applies to geometry too: a round that punches a wall
-            // keeps flying, with its energy reduced.
             round.penetrationLeft--;
             round.damageScale *= 0.8;
-            advanceTo(round, at, hitDistance);
-            return;
+            return true;
         }
         round.alive = false;
-    }
-
-    /** Moves a round to the point where it struck and accounts for the distance. */
-    private static void advanceTo(Round round, Location at, double hitDistance) {
-        round.travelled += hitDistance;
-        round.position.setX(at.getX());
-        round.position.setY(at.getY());
-        round.position.setZ(at.getZ());
+        return false;
     }
 
     private void expire(Round round) {
@@ -420,7 +481,8 @@ public final class Ballistics {
         RayTraceResult blockHit = world.rayTraceBlocks(origin, direction, profile.range(),
                 FluidCollisionMode.NEVER, true);
         RayTraceResult entityHit = world.rayTraceEntities(origin, direction, profile.range(),
-                profile.hitboxExpansion(), candidate -> allows(handler, candidate, shooter));
+                profile.hitboxExpansion(),
+                candidate -> candidate instanceof LivingEntity && allows(handler, candidate, shooter));
         double blockDistance = blockHit == null ? Double.MAX_VALUE
                 : origin.toVector().distance(blockHit.getHitPosition());
         double entityDistance = entityHit == null || entityHit.getHitEntity() == null ? Double.MAX_VALUE
@@ -439,17 +501,20 @@ public final class Ballistics {
             double damage = profile.damageAt(entityDistance) * (headshot ? profile.headshotMultiplier() : 1.0);
             Location at = entityHit.getHitPosition().toLocation(world);
             boolean withheld = !safeEntityHit(handler, new ProjectileHit(at, living, entityHit.getHitBlock(),
-                    entityHit.getHitBlockFace(), entityDistance, damage, headshot, shooter, profile));
+                    entityHit.getHitBlockFace(), entityDistance, damage, headshot, shooter, profile, direction));
             emitImpactFx(at, profile);
             if (!withheld && damage > 0.0) {
                 DamageTransactions.apply(living, damage, shooter);
+            }
+            if (!withheld) {
+                applyKnockback(living, profile, direction);
             }
             return;
         }
         if (blockHit != null) {
             Location at = blockHit.getHitPosition().toLocation(world);
             safeBlockHit(handler, new ProjectileHit(at, null, blockHit.getHitBlock(), blockHit.getHitBlockFace(),
-                    blockDistance, 0.0, false, shooter, profile));
+                    blockDistance, 0.0, false, shooter, profile, direction));
             emitImpact(at, profile);
         }
     }
@@ -602,6 +667,26 @@ public final class Ballistics {
         round.reset(position, velocity, profile, shooterId, handler);
         rounds.add(round);
         return round;
+    }
+
+    /** Remaining distance from an impact point to the far side of a block. */
+    private static double exitDistance(Block block, Location at, Vector direction) {
+        org.bukkit.util.BoundingBox box = block.getBoundingBox();
+        return Math.min(
+                axisExit(at.getX(), direction.getX(), box.getMinX(), box.getMaxX()),
+                Math.min(
+                        axisExit(at.getY(), direction.getY(), box.getMinY(), box.getMaxY()),
+                        axisExit(at.getZ(), direction.getZ(), box.getMinZ(), box.getMaxZ())));
+    }
+
+    private static double axisExit(double start, double direction, double min, double max) {
+        if (direction > 1.0e-8) {
+            return Math.max(0.0, (max - start) / direction);
+        }
+        if (direction < -1.0e-8) {
+            return Math.max(0.0, (min - start) / direction);
+        }
+        return Double.MAX_VALUE;
     }
 
     private static boolean isHeadshot(LivingEntity living, RayTraceResult hit) {

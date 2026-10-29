@@ -24,9 +24,12 @@ import org.bukkit.configuration.file.FileConfiguration;
  *                            actions summon minions and golems, and an
  *                            unbounded spawn is the one way this subsystem can
  *                            flood the tick
- * @param maxSustainedPerRun  cap on activity-claimed entities the sustained
- *                            sweep advances per run (journeys and camps tick
- *                            even when no player is near them)
+ * @param maxSustainedPerRun    cap on activity-claimed entities the sustained
+ *                              sweep advances per run (journeys and camps tick
+ *                              even when no player is near them)
+ * @param maxPipelinesPerRun    cap on multi-stage pipeline scenarios advanced
+ *                              per run, so a village of raiders cannot spend the
+ *                              whole tick on their own pathing
  */
 public record MobBehaviorSettings(
         boolean enabled,
@@ -36,11 +39,12 @@ public record MobBehaviorSettings(
         long budgetMillisPerRun,
         int maxBlockEditsPerRun,
         int maxEntitySpawnsPerRun,
-        int maxSustainedPerRun
+        int maxSustainedPerRun,
+        int maxPipelinesPerRun
 ) {
 
     public static MobBehaviorSettings defaults() {
-        return new MobBehaviorSettings(true, 3, 4, 2, 5L, 96, 8, 64);
+        return new MobBehaviorSettings(true, 3, 4, 2, 5L, 96, 8, 64, 64);
     }
 
     /**
@@ -71,7 +75,8 @@ public record MobBehaviorSettings(
                 Math.max(0L, section.getLong("BUDGET_MILLIS_PER_RUN", defaults.budgetMillisPerRun())),
                 clamp(section.getInt("MAX_BLOCK_EDITS_PER_RUN", defaults.maxBlockEditsPerRun()), 0, 4096),
                 clamp(section.getInt("MAX_ENTITY_SPAWNS_PER_RUN", defaults.maxEntitySpawnsPerRun()), 0, 256),
-                clamp(section.getInt("MAX_SUSTAINED_PER_RUN", defaults.maxSustainedPerRun()), 0, 512)
+                clamp(section.getInt("MAX_SUSTAINED_PER_RUN", defaults.maxSustainedPerRun()), 0, 512),
+                clamp(section.getInt("MAX_PIPELINES_PER_RUN", defaults.maxPipelinesPerRun()), 0, 512)
         );
     }
 

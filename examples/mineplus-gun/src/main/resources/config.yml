@@ -1,72 +1,64 @@
-# MineplusGun — Western module configuration.
+# MineplusGun — the final gun system.
 #
-# The arsenal is the imported Western gunpacks: two pack-1 guns (pistol and
-# rifle), two pack-2 guns (lever rifle and coach shotgun) and the five
-# musketmod flintlocks (pistol, musket, bayoneted, scoped, blunderbuss).
-# Every weapon is data-driven: add an entry to add a weapon, never code.
+# One weapon entry = one gun. Presentation is discovered, not configured: the
+# module ships a folder per gun under defaults/guns/<id>/ inside its jar, and
+# every model file name says what the frame is. On first enable the files are
+# mirrored into the Core's pack staging area
+# (plugins/Mineplus/pack/mineplusgun/models/item/<id>/), the frame classifier
+# reads the installed folder, and the gun gets its animation. Adding a gun is
+# dropping a folder in the jar and a weapon entry here; no code, no frame list.
 #
-# Presentation axis (`frames:`): the weapon renders through the Core's
-# framed-item infrastructure. Stems resolve to the raw pack models the module
-# installs from defaults/frames/<weapon-id>/<stem>.json; state 0 is idle,
-# 1..N play the reload animation, N+1 is the loaded state (the `loaded`
-# stem) and N+2 is the fire state (the `fire` stem) — the pose the weapon
-# shows for a few ticks after it shoots. `texture` names the per-weapon
-# texture file the frame models sample.
+# Recognised model suffixes (after "<id>_"):
+#   idle | rest | base                 resting pose
+#   primed | loaded | ready            loaded pose (shown while rounds remain)
+#   loading_N | reload_N | load_N      reload frames, sorted numerically
+#   fire | shoot | shot                shot pose
+#   scope_in | scope_hold | scope_out  scope poses
+#   cycle | bolt | pump | rack         action cycle after a shot
+#   equip | draw | raise               draw pose
+# Everything is optional: a gun with only <id>_idle fires, reloads and scopes
+# without ever changing pose. A weapon with no models at all still works on its
+# vanilla carrier. An explicit `frames:` block (same schema as Core content)
+# overrides discovery for that weapon.
 #
-# `backing-material` is the vanilla carrier item the item model replaces.
-# It must be a NEUTRAL carrier (no vanilla use action): a bow, a crossbow or
-# food would put the client into its own "using item" state, the client would
-# then stop sending further use packets, and the Core would read the press as
-# a single shot instead of a hold. A neutral carrier (ingot, stick) keeps the
-# vanilla interaction inert, so the Core owns the whole trigger stream. The
-# Core resolves that stream once for every module: a modern client answers a
-# click on a block with two packets (use-on-block, then use-in-hand) and the
-# Core folds them into one press — a weapon never fires twice for one click.
-# With PACK.ENABLED: false (or a client that has not applied the pack) the
-# weapon degrades to the bare carrier.
+# Controls
+#   RIGHT-CLICK   fire (hold for automatic fire)
+#   LEFT-CLICK    scope on/off; otherwise fully swallowed — never punches,
+#                 mines or interacts
+#   F (swap)      reload; an empty gun reloads itself shortly after the last shot
+#   Minecraft sends no event for an arbitrary key, so bind the reload key by
+#   rebinding "Swap Item With Offhand" to F; the gun consumes the swap so the
+#   item never leaves the hand.
 #
-# `aim.scope: true` marks a weapon as scoped: while the trigger is held its
-# spread is multiplied by `aim.spread-multiplier` and the HUD shows SCOPE.
+# Reload economy: one round consumes `ammo.items-per-round` items of
+# `ammo.material` from the player's inventory. A supply too small for one whole
+# round means no reload, and the HUD counts the reserve in rounds.
 #
-# Controls: RIGHT-click is the only action — firearms fire (hold for AUTO),
-# a scoped weapon scopes while held, melee swings. LEFT-click is inert.
-# Swapping hands reloads, drawing the rounds from the gold-nugget supply
-# (see `ammo` below).
+# The round budget (BALLISTICS.MAX_ACTIVE_ROUNDS) and particle budgets
+# (PARTICLE_FX) are Core engine settings in plugins/Mineplus/settings.mp.yml:
+# they meter every module on the server, so a plugin cannot silently double the
+# server's per-tick cost. Per-weapon ballistics live below.
 #
-# Sandbox (per shot): damage is per pellet; pellets x damage grow with
-# `fire.pellets`. Flintlocks take one shot and a long, exposed reload;
-# repeaters trade capacity for steady aim; scatter guns only pay off close.
-#
-# Effects (`fx:`): the Core emits the whole shot effect from one profile:
-# `flash` the bright muzzle burst, `sparks` the burning embers the shot
-# throws off, `smoke` the powder smoke that hangs at the barrel, `muzzle` the
-# slow cloud that lingers, `tracer` the streak of the round in flight and
-# `impact`/`impact-smoke` the hit confirmation. Every name is a vanilla
-# particle; an unknown one degrades to the default instead of silencing the
-# weapon.
+# Sound events are supplied by this module's own sounds.json
+# (mineplusgun:pistol_shot, shotgun_shot, rifle_shot, battle_rifle_shot,
+# reload_begin, reload_mid, reload_done, empty). An unknown custom event falls
+# back to a vanilla sound instead of silencing the weapon.
 
 settings:
   language: en
   hud:
     mode: ACTIONBAR            # ACTIONBAR | BOSSBAR | OFF
-    template: "&e{weapon} &7| &f{mag}&7/&f{reserve} &7| &b{mode}"
+    # One quiet line: loaded/reserve. `{mag}` is tinted white, red when low and
+    # grey while loading; `{weapon}` and `{mode}` are available for a custom
+    # template. RELOADING/SCOPE are appended automatically while true.
+    template: "{mag}&8/&7{reserve}"
     low-ammo-threshold: 2
   disabled-worlds: []          # gameplay (firing/shop use) disabled in these worlds
   pvp-only: false              # only damage players, never other living entities
 
-# The reload economy: one reload round consumes `items-per-round` items of
-# `material` from the player's inventory (gold nuggets by default — pan for
-# gold, hoard your shots). A supply too small for one whole round means no
-# reload, and the HUD counts the reserve in rounds, like the magazine.
 ammo:
   material: GOLD_NUGGET
   items-per-round: 1
-
-# The round budget (BALLISTICS.MAX_ACTIVE_ROUNDS) and the particle budgets
-# (PARTICLE_FX) are Core engine settings in plugins/Mineplus/settings.mp.yml:
-# they meter every module on the server, so a plugin cannot silently double the
-# server's per-tick cost. Per-weapon ballistics (damage, velocity, spread…) are
-# configured in each weapon's own `ballistics:` section below.
 
 economy:
   mode: VAULT                  # VAULT | FREE
@@ -79,145 +71,130 @@ shop:
   admin-bypass-payment: true   # ops (with the bypass permission) are never charged
 
 weapons:
-  # --- western_1 pack ------------------------------------------------------
-  western_pistol:
-    display-name: "&fWestern Pistol"
+
+  # --- Pistol ---------------------------------------------------------------
+  pistol:
+    display-name: "&fPistol"
+    category: WEAPON
     type: PISTOL
     backing-material: IRON_INGOT
     price: 500
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4]
-      loaded: loaded
-      fire: fire
-      texture: western_pistol.png
-    ammo: { magazine: 6, reload-ticks: 50 }
-    ballistics: { damage: 10.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
-    fire: { mode: SEMI, rpm: 280 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:shot" }
+    ammo: { magazine: 12, reload-ticks: 36, type: 9mm }
+    fire: { mode: SEMI, rpm: 320 }
+    ballistics:
+      damage: 7.5
+      headshot-multiplier: 2.0
+      velocity: 3.6
+      gravity: 0.03
+      drag: 0.015
+      range: 70
+      spread-degrees: 1.2
+      falloff-start: 25
+      falloff-per-block: 0.035
+      knockback: 0.25
+    accuracy: { move: 0.6, air: 2.5, sprint: 3.5, recoil-per-shot: 0.45, recoil-recovery: 0.3, recoil-max: 2.0 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:pistol_shot"
 
-  western_rifle:
-    display-name: "&fWestern Rifle"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 2600
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4, reload5]
-      loaded: loaded
-      fire: fire
-      texture: western_rifle.png
-    ammo: { magazine: 5, reload-ticks: 65 }
-    ballistics: { damage: 16.0, headshot-multiplier: 2.2, velocity: 4.2, gravity: 0.02, drag: 0.008, penetration: 1, range: 160, spread-degrees: 0.45, falloff-start: 70, falloff-per-block: 0.015 }
-    fire: { mode: BOLT, rpm: 47 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
-
-  # --- western_2 pack ------------------------------------------------------
-  lever_rifle:
-    display-name: "&fLever-Action Rifle"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 1800
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4]
-      loaded: loaded
-      fire: fire
-      texture: lever_rifle.png
-    ammo: { magazine: 8, reload-ticks: 60 }
-    ballistics: { damage: 13.0, headshot-multiplier: 2.0, velocity: 3.6, gravity: 0.025, drag: 0.012, range: 110, spread-degrees: 0.8, falloff-start: 45, falloff-per-block: 0.025 }
-    fire: { mode: SEMI, rpm: 130 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
-
-  coach_shotgun:
-    display-name: "&fCoach Shotgun"
+  # --- Shotgun --------------------------------------------------------------
+  shotgun:
+    display-name: "&fShotgun"
+    category: WEAPON
     type: SHOTGUN
     backing-material: IRON_INGOT
     price: 1400
-    frames:
-      idle: idle
-      reload: [reload0, reload1, reload2, reload3, reload4, reload5, reload6, reload7]
-      loaded: loaded
-      fire: fire
-      texture: coach_shotgun.png
-    ammo: { magazine: 6, reload-ticks: 80 }
-    ballistics: { damage: 7.0, headshot-multiplier: 1.5, velocity: 2.8, gravity: 0.05, drag: 0.03, range: 26, spread-degrees: 6.5, falloff-start: 10, falloff-per-block: 0.08 }
-    fire: { mode: PUMP, rpm: 75, pellets: 4 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
+    ammo: { magazine: 4, reload-ticks: 60, type: 12g }
+    fire: { mode: PUMP, rpm: 70, cycle-ticks: 14, pellets: 8 }
+    ballistics:
+      damage: 5.0
+      headshot-multiplier: 1.5
+      velocity: 2.8
+      gravity: 0.045
+      drag: 0.03
+      range: 28
+      spread-degrees: 7.5
+      falloff-start: 10
+      falloff-per-block: 0.09
+      knockback: 0.55
+    accuracy: { move: 0.6, air: 2.5, sprint: 3.5, recoil-per-shot: 1.2, recoil-recovery: 0.35, recoil-max: 4.0 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:shotgun_shot"
 
-  # --- western_3 pack (musketmod flintlocks) -------------------------------
-  flintlock_pistol:
-    display-name: "&fFlintlock Pistol"
-    type: PISTOL
-    backing-material: IRON_INGOT
-    price: 350
-    frames:
-      idle: idle
-      loaded: loaded
-      fire: fire
-      texture: flintlock_pistol.png
-    ammo: { magazine: 1, reload-ticks: 90 }
-    ballistics: { damage: 17.0, headshot-multiplier: 2.5, velocity: 3.4, gravity: 0.04, drag: 0.015, range: 60, spread-degrees: 2.5, falloff-start: 25, falloff-per-block: 0.045 }
-    fire: { mode: SEMI, rpm: 120 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:shot" }
-
-  flintlock_musket:
-    display-name: "&fFlintlock Musket"
+  # --- Rifle (bolt-action, scoped) ------------------------------------------
+  rifle:
+    display-name: "&fRifle"
+    category: WEAPON
     type: RIFLE
     backing-material: IRON_INGOT
-    price: 2800
-    frames:
-      idle: idle
-      loaded: loaded
-      fire: fire
-      texture: flintlock_musket.png
-    ammo: { magazine: 1, reload-ticks: 100 }
-    ballistics: { damage: 23.0, headshot-multiplier: 2.4, velocity: 4.6, gravity: 0.02, drag: 0.01, penetration: 1, range: 180, spread-degrees: 1.5, falloff-start: 60, falloff-per-block: 0.02 }
-    fire: { mode: SEMI, rpm: 55 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
+    price: 2600
+    ammo: { magazine: 5, reload-ticks: 44, type: 7.62 }
+    fire: { mode: BOLT, rpm: 40, cycle-ticks: 20 }
+    ballistics:
+      damage: 18.0
+      headshot-multiplier: 2.2
+      velocity: 4.6
+      gravity: 0.02
+      drag: 0.008
+      penetration: 1
+      range: 180
+      spread-degrees: 0.45
+      falloff-start: 70
+      falloff-per-block: 0.015
+      knockback: 0.4
+    accuracy: { move: 1.4, air: 3.5, sprint: 5.0, recoil-per-shot: 0.5, recoil-recovery: 0.2, recoil-max: 3.0 }
+    aim: { scope: true, spread-multiplier: 0.35, move-multiplier: 2.0, recoil-multiplier: 0.6 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:rifle_shot"
 
-  bayonet_musket:
-    display-name: "&fBayoneted Musket"
+  # --- Battle rifle (automatic, scoped) -------------------------------------
+  battle_rifle:
+    display-name: "&fBattle Rifle"
+    category: WEAPON
     type: RIFLE
     backing-material: IRON_INGOT
     price: 3200
-    frames:
-      idle: idle
-      loaded: loaded
-      fire: fire
-      texture: bayonet_musket.png
-    ammo: { magazine: 1, reload-ticks: 100 }
-    ballistics: { damage: 22.0, headshot-multiplier: 2.4, velocity: 4.4, gravity: 0.02, drag: 0.01, penetration: 1, range: 170, spread-degrees: 1.2, falloff-start: 60, falloff-per-block: 0.02 }
-    fire: { mode: SEMI, rpm: 60 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
-
-  scope_musket:
-    display-name: "&fMarksman's Musket"
-    type: RIFLE
-    backing-material: IRON_INGOT
-    price: 3600
-    frames:
-      idle: idle
-      loaded: loaded
-      fire: fire
-      texture: scope_musket.png
-    ammo: { magazine: 1, reload-ticks: 110 }
-    ballistics: { damage: 25.0, headshot-multiplier: 2.5, velocity: 4.8, gravity: 0.018, drag: 0.008, penetration: 2, range: 200, spread-degrees: 0.9, falloff-start: 80, falloff-per-block: 0.012 }
-    fire: { mode: BOLT, rpm: 50 }
-    aim: { scope: true, spread-multiplier: 0.35 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
-
-  blunderbuss:
-    display-name: "&fBlunderbuss"
-    type: SHOTGUN
-    backing-material: IRON_INGOT
-    price: 1150
-    frames:
-      idle: idle
-      loaded: loaded
-      fire: fire
-      texture: blunderbuss.png
-    ammo: { magazine: 2, reload-ticks: 70 }
-    ballistics: { damage: 5.0, headshot-multiplier: 1.5, velocity: 2.6, gravity: 0.06, drag: 0.03, range: 18, spread-degrees: 9.0, falloff-start: 8, falloff-per-block: 0.1 }
-    fire: { mode: PUMP, rpm: 60, pellets: 6 }
-    fx: { muzzle: SMOKE, flash: FLAME, smoke: LARGE_SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:heavy" }
+    ammo: { magazine: 20, reload-ticks: 48, type: 7.62 }
+    fire: { mode: AUTO, rpm: 420 }
+    ballistics:
+      damage: 9.5
+      headshot-multiplier: 2.0
+      velocity: 4.2
+      gravity: 0.022
+      drag: 0.01
+      range: 130
+      spread-degrees: 1.1
+      falloff-start: 40
+      falloff-per-block: 0.03
+      knockback: 0.3
+    accuracy: { move: 1.2, air: 3.5, sprint: 5.0, recoil-per-shot: 0.35, recoil-recovery: 0.5, recoil-max: 3.0 }
+    aim: { scope: true, spread-multiplier: 0.5, move-multiplier: 2.0, recoil-multiplier: 0.75 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:battle_rifle_shot"

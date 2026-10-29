@@ -52,8 +52,9 @@ public final class TriggerState {
      * @param now               monotonic timestamp of the press
      * @param clickWindowMillis the gap inside which a press continues the
      *                           click the client already started
+     * @return {@code true} when this was a new gesture (not a continuation)
      */
-    void press(long now, long clickWindowMillis) {
+    boolean press(long now, long clickWindowMillis) {
         // One physical click is one press. The client answers a click on a
         // block with two packets and both arrive here; the second one
         // continues the gesture the client already started, so it must not
@@ -67,6 +68,7 @@ public final class TriggerState {
             held = true;
             heldSince = now;
         }
+        return freshPress;
     }
 
     /**

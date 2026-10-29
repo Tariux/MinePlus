@@ -97,7 +97,22 @@ public final class MobCrewService {
     private final Map<UUID, String> membership = new ConcurrentHashMap<>();
     /** Hands every crew its own identity, so two locals never share a state. */
     private final AtomicLong sequence = new AtomicLong();
+    /** Optional formations/roles; without it crews walk the plain formation point. */
+    private final SquadManager squads;
     private long steps;
+
+    /** A crew service without formations (the bare group-movement primitive). */
+    public MobCrewService() {
+        this(null);
+    }
+
+    /**
+     * @param squads the formation/role registry that shapes the group around
+     *               its formation point, or {@code null} for the plain point
+     */
+    public MobCrewService(SquadManager squads) {
+        this.squads = squads;
+    }
 
     /** One engine step; ages every crew and prunes the stale ones. */
     public void step() {
@@ -107,14 +122,20 @@ public final class MobCrewService {
         }
         crews.values().removeIf(crew -> {
             crew.members.entrySet().removeIf(entry -> {
-                boolean gone = steps - entry.getValue() > FORGET_AFTER_STEPS
-                        || resolve(entry.getKey()) == null;
+                // An unresolved entity is not proof of death: its chunk may
+                // simply be unloaded while the crew keeps marching. Only the
+                // unseen timeout may drop it.
+                boolean gone = steps - entry.getValue() > FORGET_AFTER_STEPS;
                 if (gone) {
                     membership.remove(entry.getKey(), crew.key);
                 }
                 return gone;
             });
-            return crew.members.isEmpty() && steps - crew.lastSeenStep > FORGET_AFTER_STEPS;
+            boolean empty = crew.members.isEmpty() && steps - crew.lastSeenStep > FORGET_AFTER_STEPS;
+            if (empty && squads != null) {
+                squads.forget(crew.key);
+            }
+            return empty;
         });
     }
 
@@ -349,6 +370,18 @@ public final class MobCrewService {
         if (target.getWorld() != here.getWorld()) {
             return null;
         }
+        List<Mob> live = resolveMembers(crew);
+        // Shape the group: the member walks to its own slot in the formation,
+        // and keeps a little room from its neighbours. Two villagers on the
+        // same block cannot both pass the same doorway, which is what a
+        // "column of one" looks like from the outside.
+        if (squads != null) {
+            Location slot = squads.slot(crew.key, member, target, resolve(crew.leaderId), live);
+            if (slot != null) {
+                target = slot;
+            }
+        }
+        target = FlockSteering.separated(member, target, live, SquadManager.DEFAULT_SEPARATION);
         double distance = distanceXZ(here, target);
         if (distance <= cohesionRadius) {
             return null;
@@ -423,7 +456,19 @@ public final class MobCrewService {
     /** The shared goal the crew was last given, or {@code null}. */
     public Location goal(String ownerKey, String name, Mob member) {
         Crew crew = crewOf(member == null ? null : member.getUniqueId(), base(ownerKey, name));
-        return crew == null || crew.goal == null ? null : crew.goal.clone();
+        if (crew == null) {
+            return null;
+        }
+        touch(crew, member);
+        return crew.goal == null ? null : crew.goal.clone();
+    }
+
+    private void touch(Crew crew, Mob member) {
+        if (crew == null || member == null) {
+            return;
+        }
+        crew.members.computeIfPresent(member.getUniqueId(), (ignored, seen) -> steps);
+        crew.lastSeenStep = steps;
     }
 
     /** Replaces the crew's shared goal (a freshly located village). */
@@ -496,6 +541,9 @@ public final class MobCrewService {
             membership.remove(id, crew.key);
         }
         crews.remove(crew.key, crew);
+        if (squads != null) {
+            squads.forget(crew.key);
+        }
     }
 
     /** Live crews — for status output and for bounding a runaway module. */

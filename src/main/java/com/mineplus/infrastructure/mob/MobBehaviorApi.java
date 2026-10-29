@@ -2,6 +2,8 @@ package com.mineplus.infrastructure.mob;
 
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import com.mineplus.infrastructure.mob.journey.StructureLookup;
+import com.mineplus.infrastructure.mob.pipeline.MobPipeline;
+import com.mineplus.infrastructure.mob.pipeline.MobPipelineHandle;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
 
@@ -93,11 +95,40 @@ public interface MobBehaviorApi {
     /** The engine's crew (group-movement) registry. */
     com.mineplus.infrastructure.mob.group.MobCrewService crews();
 
+    /**
+     * The engine's formation/role registry for crews: a crew's shape around its
+     * formation point (wedge, pincer, ring) and what each member does in it.
+     */
+    com.mineplus.infrastructure.mob.group.SquadManager squads();
+
     /** One line per live journey, for status commands. */
     java.util.List<String> journeySnapshot(int maxLines);
 
     /** One line per live crew, for status commands. */
     java.util.List<String> crewSnapshot(int maxLines);
+
+    // ------------------------------------------------------------------
+    // Pipelines (multi-stage scenarios attached to one mob)
+    // ------------------------------------------------------------------
+
+    /**
+     * Attaches a {@link MobPipeline} to {@code entity}: locate, march, act —
+     * the scenario form of behavior, with per-stage timeouts and a shared
+     * blackboard. While it runs, the pipeline advances every engine pass and
+     * every ordinary action skips the entity.
+     *
+     * <p>Assigning a pipeline to a mob that already runs one replaces it.
+     * Main thread only.
+     *
+     * @return the handle, or {@code null} when the entity is not a live mob
+     */
+    MobPipelineHandle assignPipeline(Plugin owner, LivingEntity entity, MobPipeline pipeline);
+
+    /** The pipeline currently driving {@code entity}, or {@code null}. */
+    MobPipelineHandle pipelineOf(LivingEntity entity);
+
+    /** One line per live pipeline (mob, scenario and current stage). */
+    java.util.List<String> pipelineSnapshot(int maxLines);
 
     /**
      * A bounded world-write allowance for a scenario that keeps building after

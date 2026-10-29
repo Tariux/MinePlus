@@ -74,7 +74,7 @@ public record GunConfig(
             language = language == null || language.isBlank() ? "en" : language;
             hudMode = hudMode == null ? HudMode.ACTIONBAR : hudMode;
             hudTemplate = hudTemplate == null || hudTemplate.isBlank()
-                    ? "&e{weapon} &7| &f{mag}&7/&f{reserve} &7| &b{mode}"
+                    ? "{mag}&8/&7{reserve}"
                     : hudTemplate;
             disabledWorlds = disabledWorlds == null ? Set.of() : Set.copyOf(disabledWorlds);
         }

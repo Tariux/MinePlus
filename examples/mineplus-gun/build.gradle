@@ -48,6 +48,11 @@ processResources {
     inputs.property("version", project.version)
     filteringCharset = 'UTF-8'
 
+    // The retired Western frame set is superseded by the shipped gun folders
+    // under defaults/guns/. It is excluded from the jar; the sources stay in
+    // the repository as reference art.
+    exclude 'defaults/frames/**'
+
     filesMatching("plugin.yml") {
         expand(version: project.version)
     }

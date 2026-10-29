@@ -47,10 +47,33 @@ final class NmsPathNavigationBackend implements NavigationBackend {
         if (plan == null || plan.getHandle == null) {
             return false;
         }
+        // Both channels path through the mob's own navigation, so both need the
+        // float flag: a long march crosses a river, and a villager whose
+        // navigation refuses water stands on the bank forever.
+        configureFloat(plan, mob);
         if (mob instanceof Villager && BrainWalkTarget.apply(plan, mob, target, speed)) {
             return true;
         }
         return moveToViaNavigation(plan, mob, target, speed);
+    }
+
+    /** Sets {@code canFloat} once per mob, for whichever channel walks it. */
+    private static void configureFloat(NmsEntityPlan plan, Mob mob) {
+        if (plan.navigationSetCanFloat == null || plan.getNavigation == null
+                || !floatConfigured.add(mob.getUniqueId())) {
+            return;
+        }
+        try {
+            Object handle = plan.getHandle.invoke(mob);
+            if (handle == null) {
+                return;
+            }
+            Object navigation = plan.getNavigation.invoke(handle);
+            if (navigation != null) {
+                plan.navigationSetCanFloat.invoke(navigation, true);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -109,14 +132,8 @@ final class NmsPathNavigationBackend implements NavigationBackend {
             if (navigation == null) {
                 return false;
             }
-            if (plan.navigationSetCanFloat != null && floatConfigured.add(mob.getUniqueId())) {
-                try {
-                    plan.navigationSetCanFloat.invoke(navigation, true);
-                } catch (Throwable ignored) {
-                }
-            }
-            plan.navigationMoveTo.invoke(navigation, target.getX(), target.getY(), target.getZ(), speed);
-            return true;
+            return Boolean.TRUE.equals(
+                    plan.navigationMoveTo.invoke(navigation, target.getX(), target.getY(), target.getZ(), speed));
         } catch (Throwable failure) {
             return false;
         }

@@ -11,6 +11,7 @@ import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
+import com.mineplus.infrastructure.mob.group.Formation;
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,13 +50,14 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       cooldown and a one-golem cap keep raids spam-free).</li>
  *   <li><b>Frost Builder Villager</b> — the same guardian pattern with a snow
  *       golem ({@code summon_snow_golem}).</li>
- *   <li><b>Necromancer Witch</b> — when prey (a villager in sight) or a
- *       predator (a golem within 10 blocks) is around, she fields a small,
- *       space-adaptive mixed horde (husks/strays/drowned/cave spiders per
- *       biome, occasional skeleton horseman) summoned through the engine's
- *       spawn budget, re-targeted from a single neighbourhood scan, leashed to
- *       her side, hurling potions at close golems and retreating behind her own
- *       minions ({@code summon_minions} + {@code threatOrPrey} condition).</li>
+ *   <li><b>Necromancer Witch</b> — a mob pipeline, not a single action: she
+ *       finds the nearest village (the Core anchors it to its bell), marches
+ *       there through the shared journey runner, then raids it — ringing the
+ *       bell, keeping every surviving minion aimed at the nearest villager,
+ *       fielding a biome-matched mixed horde through the engine's spawn budget
+ *       and breaking off when the village is empty. Between raids she falls
+ *       back to her ambient horde ({@code necromancer_raid} +
+ *       {@code summon_minions}).</li>
  *   <li><b>Pilgrim Villager</b> — the Core's {@code journey_to_structure}
  *       scenario with this module's camp and celebration: the village is found
  *       through the engine's structure cache, the crew marches through the
@@ -148,8 +150,9 @@ public final class MobFunPlugin extends JavaPlugin {
                 .build()));
         showcases.add(new MobFunShowcase(this, "necromancer", "Necromancer Witch", EntityType.WITCH,
                 mobApi, () -> MobProfile.builder(EntityType.WITCH)
+                .priority(BehaviorPriority.NECROMANCER_RAID)
+                .action(new NecromancerRaidAction(this, fx), 6.0)
                 .action(new SummonMinionHordeAction(this, fx), 2.0)
-                .condition(BehaviorConditions.threatOrPrey(20.0, 18.0))
                 .build()));
         // One shared journey instance: its scenario state (crews, camps, the
         // not-found report) lives on the engine's services and in itself, so a
@@ -168,6 +171,7 @@ public final class MobFunPlugin extends JavaPlugin {
                 .marchLeg(32)
                 .gatherRadius(8)
                 .detachRadius(64)
+                .formation(Formation.WEDGE)
                 .stride(new JourneyRunner.Options(1.15, 8.0, 8.0, 32, 40L, 60L, 2.0, 6, 0.0))
                 .callbacks(new PilgrimCamp(this, fx))
                 .build();

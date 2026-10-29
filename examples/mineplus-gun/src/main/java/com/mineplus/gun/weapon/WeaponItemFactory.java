@@ -19,10 +19,10 @@ import org.bukkit.inventory.ItemStack;
  * <p>The module keeps no ammo or identity tags of its own: every read and write
  * of a round count goes through the Core magazine, so the in-memory
  * authoritative value while a gun is in the hand and the PDC value that survives
- * a log-out are one and the same mechanism, not two that can drift apart.
+ * a log-out are one and the same mechanism, not two that can drift apart.</p>
  *
- * <p>Lore is the weapon's stat block; the Core content layer supplies the
- * display name already. With {@code PACK.ENABLED: false} the Core returns
+ * <p>Lore is the weapon's stat block plus its controls; the Core content layer
+ * supplies the display name. With {@code PACK.ENABLED: false} the Core returns
  * the vanilla carrier; identity and gameplay still work.</p>
  */
 public final class WeaponItemFactory {
@@ -59,11 +59,6 @@ public final class WeaponItemFactory {
                         + "' is not registered; issuing the vanilla carrier instead.");
             }
             stack = new ItemStack(definition.backingMaterial());
-            var meta = stack.getItemMeta();
-            if (meta != null) {
-                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', definition.displayName()));
-                stack.setItemMeta(meta);
-            }
         }
 
         weaponState.setString(stack, definition.id());
@@ -84,7 +79,7 @@ public final class WeaponItemFactory {
         return magazine;
     }
 
-    /** The round capacity of a weapon — zero for a melee item, which carries none. */
+    /** The round capacity of a weapon. */
     public static int capacity(WeaponDefinition definition) {
         return definition.usesAmmo() ? Math.max(0, definition.magazine()) : 0;
     }
@@ -101,7 +96,7 @@ public final class WeaponItemFactory {
         var frames = definition.frames();
         int state = frames.loadedState() > 0 && definition.magazine() > 0
                 ? frames.loadedState()
-                : 0;
+                : frames.idleState();
         com.mineplus.pack.item.ItemFrameWriter.apply(stack, definition.frameStackValue(state));
     }
 
@@ -110,7 +105,13 @@ public final class WeaponItemFactory {
         lore.add(ChatColor.DARK_GRAY + definition.type().categoryLabel());
         lore.add(ChatColor.GRAY + "Damage: " + ChatColor.WHITE + format(definition.damage()));
         if (definition.usesAmmo()) {
-            lore.add(ChatColor.GRAY + "Magazine: " + ChatColor.WHITE + definition.magazine());
+            lore.add(ChatColor.GRAY + "Magazine: " + ChatColor.WHITE + definition.magazine()
+                    + ChatColor.DARK_GRAY + "  ·  " + ChatColor.GRAY + definition.fireMode().name());
+        }
+        lore.add(ChatColor.DARK_GRAY + "Right-click: fire");
+        lore.add(ChatColor.DARK_GRAY + "F (swap hands): reload");
+        if (definition.scope()) {
+            lore.add(ChatColor.DARK_GRAY + "Left-click: scope");
         }
         return lore;
     }
@@ -133,31 +134,5 @@ public final class WeaponItemFactory {
         }
         int colon = coreKey.indexOf(':');
         return colon >= 0 ? coreKey.substring(colon + 1) : coreKey;
-    }
-
-    /** The module's own stamped weapon id — no Core-identity fallback — or {@code null}. */
-    public String readWeaponStamp(ItemStack stack) {
-        String id = weaponState.readString(stack);
-        return id == null || id.isBlank() ? null : id;
-    }
-
-    /** Rounds persisted on the stack (a full magazine when it carries no tag yet). */
-    public int rounds(ItemStack stack, WeaponDefinition definition) {
-        return magazine.rounds(stack, capacity(definition));
-    }
-
-    /** Writes a round count straight onto a stack (shop, command, migration). */
-    public void setRounds(ItemStack stack, int rounds, WeaponDefinition definition) {
-        magazine.setRounds(stack, rounds, capacity(definition));
-    }
-
-    /** The stable per-stack identity, or {@code null} when the stack carries none. */
-    public String uid(ItemStack stack) {
-        return magazine.uid(stack);
-    }
-
-    /** Carries one stack's identity onto another (an arsenal migration swap). */
-    public void transferUid(ItemStack from, ItemStack to) {
-        magazine.transferUid(from, to);
     }
 }

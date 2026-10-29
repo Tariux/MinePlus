@@ -55,26 +55,34 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
     /** The crew name handed to the journey builder, and read back here. */
     static final String CREW = "pilgrims";
 
-    /** Marks a bed as belonging to this crew's camp. */
-    private static final String BED_TAG = "pilgrim_bed";
+    /** Marks a campfire or bed as belonging to one crew's camp. */
+    private static final String CAMP_TAG = "pilgrim_camp";
 
-    private static final int BED_CAP = 8;
     private static final int CAMP_GUARD_RADIUS = 6;
     private static final List<BlockFace> FACES =
             List.of(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST);
 
     private final ParticleFx fx;
-    private final NamespacedKey bedKey;
+    private final NamespacedKey campKey;
+    /**
+     * The exact blocks each crew's camp is made of. A fixed-radius sweep is not
+     * enough: a bed row grows with the crew, and its far end can sit well
+     * outside the guard radius — those beds would survive dawn and litter the
+     * route. Runtime-only state, like the journey that owns it.
+     */
+    private final java.util.Map<String, List<Location>> campBlocks =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public PilgrimCamp(Plugin plugin, ParticleFx fx) {
         this.fx = fx;
-        this.bedKey = new NamespacedKey(plugin, BED_TAG);
+        this.campKey = new NamespacedKey(plugin, CAMP_TAG);
     }
 
     @Override
     public boolean onNight(BehaviorContext context, Location campSite) {
+        String crewTag = crewTag(context);
         Block anchor = campSite.getBlock();
-        Block fireSpot = campFireSpot(context, anchor);
+        Block fireSpot = campFireSpot(context, anchor, crewTag);
         if (fireSpot == null) {
             // No buildable ground at all: a rocky or canopy floor will not
             // change by morning, so spend the night instead of re-probing it
@@ -83,13 +91,49 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
                     anchor.getX(), anchor.getY(), anchor.getZ(), context.world().getFullTime() / 24000L);
             return true;
         }
-        if (!raiseCampfire(context, fireSpot)) {
+        if (!raiseCampfire(context, fireSpot, crewTag)) {
             return false;
         }
-        int crew = Math.min(BED_CAP, Math.max(1, context.crewMembers(CREW).size()));
-        int beds = layBedRow(context, fireSpot, crew);
+        int crew = Math.max(1, context.crewMembers(CREW).size());
+        int beds = layBedRow(context, fireSpot, crewTag, crew);
         DebugLogger.debug("[MobFun] crew camp at %d %d %d: crew=%d, beds=%d",
                 fireSpot.getX(), fireSpot.getY(), fireSpot.getZ(), crew, beds);
+        return beds >= crew;
+    }
+
+    @Override
+    public boolean onDawn(BehaviorContext context, Location campSite) {
+        String crewTag = crewTag(context);
+        List<Location> owned = campBlocks.get(crewTag);
+        if (owned != null) {
+            for (Location at : owned) {
+                Block block = context.world().getBlockAt(at);
+                if (!isCrewCampBlock(block, crewTag)) {
+                    continue;
+                }
+                if (!context.tryBreak(block, false)) {
+                    return false;
+                }
+            }
+            campBlocks.remove(crewTag, owned);
+        }
+        // Safety net for a camp whose record was never written (a half-finished
+        // retry): anything the crew still owns near the site goes as well.
+        Block anchor = campSite.getBlock();
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -CAMP_GUARD_RADIUS; dx <= CAMP_GUARD_RADIUS; dx++) {
+                for (int dz = -CAMP_GUARD_RADIUS; dz <= CAMP_GUARD_RADIUS; dz++) {
+                    Block block = context.world().getBlockAt(anchor.getX() + dx,
+                            anchor.getY() + dy, anchor.getZ() + dz);
+                    if (!isCrewCampBlock(block, crewTag)) {
+                        continue;
+                    }
+                    if (!context.tryBreak(block, false)) {
+                        return false;
+                    }
+                }
+            }
+        }
         return true;
     }
 
@@ -120,8 +164,8 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
      *
      * @return {@code null} when nothing around the crew can carry a camp
      */
-    private Block campFireSpot(BehaviorContext context, Block anchor) {
-        Block standing = nearestExistingCampfire(context, anchor);
+    private Block campFireSpot(BehaviorContext context, Block anchor, String crewTag) {
+        Block standing = nearestExistingCampfire(context, anchor, crewTag);
         if (standing != null) {
             return standing;
         }
@@ -161,7 +205,7 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
         return null;
     }
 
-    private Block nearestExistingCampfire(BehaviorContext context, Block anchor) {
+    private Block nearestExistingCampfire(BehaviorContext context, Block anchor, String crewTag) {
         int radius = CAMP_GUARD_RADIUS;
         for (int ring = 1; ring <= radius; ring++) {
             for (int dy = -2; dy <= 2; dy++) {
@@ -172,7 +216,8 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
                         }
                         Block candidate = context.world().getBlockAt(anchor.getX() + dx,
                                 anchor.getY() + dy, anchor.getZ() + dz);
-                        if (candidate.getType() == Material.CAMPFIRE) {
+                        if (candidate.getType() == Material.CAMPFIRE
+                                && isCrewCampBlock(candidate, crewTag)) {
                             return candidate;
                         }
                     }
@@ -187,18 +232,27 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
      * refused the write, which is a transient condition worth retrying inside
      * the same night.
      */
-    private boolean raiseCampfire(BehaviorContext context, Block fireSpot) {
+    private boolean raiseCampfire(BehaviorContext context, Block fireSpot, String crewTag) {
         Location at = fireSpot.getLocation().add(0.5, 0.7, 0.5);
         if (fireSpot.getType() == Material.CAMPFIRE) {
+            tagCrewCampBlock(fireSpot, crewTag);
+            rememberCampBlock(crewTag, fireSpot);
             fx.burst(ParticleFx.Tier.AMBIENT, at, Particle.CAMPFIRE_COSY_SMOKE, 4, 0.2, 0.3, 0.2, 0.0);
             return true;
         }
         boolean lit = context.trySetBlock(fireSpot, Bukkit.createBlockData(Material.CAMPFIRE));
         if (lit) {
+            tagCrewCampBlock(fireSpot, crewTag);
+            rememberCampBlock(crewTag, fireSpot);
             Sounds.play(at, Sound.BLOCK_CAMPFIRE_CRACKLE.name(), 0.9f, 1.0f);
             fx.burst(ParticleFx.Tier.AMBIENT, at, Particle.CAMPFIRE_SIGNAL_SMOKE, 8, 0.3, 0.4, 0.3, 0.0);
         }
         return lit;
+    }
+
+    private String crewTag(BehaviorContext context) {
+        String crew = context.crewId(CREW);
+        return crew != null ? crew : "solo:" + context.entity().getUniqueId();
     }
 
     /**
@@ -212,89 +266,123 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
      * the village's beds, decided it already had a row, and laid none — the
      * camp was a campfire in the middle of somebody else's bedroom.
      */
-    private int layBedRow(BehaviorContext context, Block fireSpot, int bedsWanted) {
-        int already = countCrewBeds(context, fireSpot, bedsWanted);
+    private int layBedRow(BehaviorContext context, Block fireSpot, String crewTag, int bedsWanted) {
+        int already = countCrewBeds(context, crewTag, bedsWanted);
         int missing = bedsWanted - already;
         if (missing <= 0) {
             return already;
         }
-        int best = 0;
+        // Plan every side first and commit only the longest row. Trying each
+        // direction by writing it laid up to eight overlapping rows around one
+        // fire whenever the terrain allowed more than one.
+        BedRow best = null;
         for (BlockFace out : FACES) {
             for (BlockFace lateral : List.of(turnLeft(out), turnRight(out))) {
-                best = Math.max(best, layRow(context, fireSpot, out, lateral, missing));
-            }
-        }
-        return best + already;
-    }
-
-    /** The crew's own beds within the guard radius of the fire. */
-    private int countCrewBeds(BehaviorContext context, Block fireSpot, int wanted) {
-        int count = 0;
-        int radius = CAMP_GUARD_RADIUS;
-        for (int ring = 0; ring <= radius && count < wanted; ring++) {
-            for (int dy = -1; dy <= 1 && count < wanted; dy++) {
-                for (int dx = -ring; dx <= ring && count < wanted; dx++) {
-                    for (int dz = -ring; dz <= ring && count < wanted; dz++) {
-                        if (ring > 0 && Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
-                            continue; // ring perimeter only; inner rings were counted
-                        }
-                        Block candidate = context.world().getBlockAt(fireSpot.getX() + dx,
-                                fireSpot.getY() + dy, fireSpot.getZ() + dz);
-                        if (isCrewBed(candidate)) {
-                            count++;
-                        }
-                    }
+                BedRow candidate = planRow(fireSpot, out, lateral, missing);
+                if (best == null || candidate.beds() > best.beds()) {
+                    best = candidate;
                 }
             }
         }
-        return count;
-    }
-
-    /** {@code true} when the block is a bed this crew laid. */
-    private boolean isCrewBed(Block block) {
-        if (block == null || !Tag.BEDS.isTagged(block.getType())) {
-            return false;
+        if (best == null || best.beds() == 0) {
+            return already;
         }
-        if (!(block.getState() instanceof TileState tile)) {
-            return false;
-        }
-        return tile.getPersistentDataContainer().has(bedKey, PersistentDataType.BYTE);
-    }
-
-    /** Marks a freshly placed bed as this crew's. */
-    private void tagCrewBed(Block bed) {
-        if (!(bed.getState() instanceof TileState tile)) {
-            return;
-        }
-        tile.getPersistentDataContainer().set(bedKey, PersistentDataType.BYTE, (byte) 1);
-        // A block-entity state is a snapshot: without the write-back the tag
-        // lives in the snapshot only and the bed reads as a stranger's bed
-        // again the next time the camp is topped up.
-        tile.update();
-    }
-
-    /** Beds start two blocks out from the fire and run sideways from there. */
-    private int layRow(BehaviorContext context, Block fireSpot, BlockFace out, BlockFace lateral, int wanted) {
-        Block start = fireSpot.getRelative(out, 2).getRelative(lateral);
         int placed = 0;
+        for (int i = 0; i < best.beds(); i++) {
+            // A bed is a pair: never spend the foot's edit without the head's.
+            if (!context.hasEditBudget(2)) {
+                break;
+            }
+            Block foot = best.start().getRelative(best.lateral(), i);
+            Block head = foot.getRelative(best.out());
+            if (!context.trySetBlock(foot, bedData(best.out(), Bed.Part.FOOT))) {
+                break;
+            }
+            if (!context.trySetBlock(head, bedData(best.out(), Bed.Part.HEAD))) {
+                context.tryBreak(foot, false);
+                break;
+            }
+            tagCrewCampBlock(foot, crewTag);
+            tagCrewCampBlock(head, crewTag);
+            rememberCampBlock(crewTag, foot);
+            rememberCampBlock(crewTag, head);
+            placed++;
+        }
+        return already + placed;
+    }
+
+    private BedRow planRow(Block fireSpot, BlockFace out, BlockFace lateral, int wanted) {
+        Block start = fireSpot.getRelative(out, 2).getRelative(lateral);
+        int fitting = 0;
         for (int i = 0; i < wanted; i++) {
             Block foot = start.getRelative(lateral, i);
             Block head = foot.getRelative(out);
             if (!isBedGround(foot) || !isBedGround(head)) {
                 break;
             }
-            if (!context.trySetBlock(foot, bedData(out, Bed.Part.FOOT))) {
-                break;
-            }
-            if (!context.trySetBlock(head, bedData(out, Bed.Part.HEAD))) {
-                context.tryBreak(foot, false);
-                break;
-            }
-            tagCrewBed(foot);
-            tagCrewBed(head);
-            placed++;
+            fitting++;
         }
-        return placed;
+        return new BedRow(start, out, lateral, fitting);
+    }
+
+    private record BedRow(Block start, BlockFace out, BlockFace lateral, int beds) {
+    }
+
+    /** The crew's own beds laid for this camp; its head halves are not counted. */
+    private int countCrewBeds(BehaviorContext context, String crewTag, int wanted) {
+        List<Location> owned = campBlocks.get(crewTag);
+        if (owned == null) {
+            return 0;
+        }
+        int count = 0;
+        for (Location at : owned) {
+            if (count >= wanted) {
+                break;
+            }
+            if (isCrewBed(context.world().getBlockAt(at), crewTag)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** {@code true} when the block is a bed this crew laid; its head half is not counted. */
+    private boolean isCrewBed(Block block, String crewTag) {
+        if (block == null || !Tag.BEDS.isTagged(block.getType())) {
+            return false;
+        }
+        if (!(block.getBlockData() instanceof Bed bed) || bed.getPart() != Bed.Part.FOOT) {
+            return false;
+        }
+        return isCrewCampBlock(block, crewTag);
+    }
+
+    /** {@code true} when this crew owns the campfire or bed. */
+    private boolean isCrewCampBlock(Block block, String crewTag) {
+        if (block == null || (block.getType() != Material.CAMPFIRE
+                && !Tag.BEDS.isTagged(block.getType()))) {
+            return false;
+        }
+        if (!(block.getState() instanceof TileState tile)) {
+            return false;
+        }
+        String owner = tile.getPersistentDataContainer().get(campKey, PersistentDataType.STRING);
+        return crewTag.equals(owner);
+    }
+
+    /** Marks a camp block as belonging to one crew. */
+    private void tagCrewCampBlock(Block block, String crewTag) {
+        if (!(block.getState() instanceof TileState tile)) {
+            return;
+        }
+        tile.getPersistentDataContainer().set(campKey, PersistentDataType.STRING, crewTag);
+        tile.update();
+    }
+
+    /** Records a block the crew's camp owns, so dawn can remove all of it. */
+    private void rememberCampBlock(String crewTag, Block block) {
+        Location at = block.getLocation();
+        campBlocks.computeIfAbsent(crewTag, ignored -> new java.util.ArrayList<>()).add(at);
     }
 
     private static Bed bedData(BlockFace facing, Bed.Part part) {

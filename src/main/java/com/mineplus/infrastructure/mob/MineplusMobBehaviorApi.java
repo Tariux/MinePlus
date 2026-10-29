@@ -2,6 +2,8 @@ package com.mineplus.infrastructure.mob;
 
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import com.mineplus.infrastructure.mob.journey.StructureLookup;
+import com.mineplus.infrastructure.mob.pipeline.MobPipeline;
+import com.mineplus.infrastructure.mob.pipeline.MobPipelineHandle;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
@@ -74,6 +76,7 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
         return engine.telemetry().summary() + "\nregistered types=" + engine.profileTypeCount()
                 + "\njourneys=" + engine.journeys().activeCount()
                 + ", crews=" + engine.crews().activeCount()
+                + ", pipelines=" + engine.pipelines().activeCount()
                 + ", cached regions=" + engine.structures().cachedRegions();
     }
 
@@ -93,6 +96,11 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
     }
 
     @Override
+    public com.mineplus.infrastructure.mob.group.SquadManager squads() {
+        return engine.squads();
+    }
+
+    @Override
     public java.util.List<String> journeySnapshot(int maxLines) {
         return engine.journeys().snapshot(maxLines);
     }
@@ -100,6 +108,22 @@ public final class MineplusMobBehaviorApi implements MobBehaviorApi {
     @Override
     public java.util.List<String> crewSnapshot(int maxLines) {
         return engine.crews().snapshot(maxLines);
+    }
+
+    @Override
+    public MobPipelineHandle assignPipeline(Plugin owner, LivingEntity entity, MobPipeline pipeline) {
+        requireMainThread();
+        return engine.pipelines().assign(owner, entity, pipeline);
+    }
+
+    @Override
+    public MobPipelineHandle pipelineOf(LivingEntity entity) {
+        return engine.pipelines().handle(entity);
+    }
+
+    @Override
+    public java.util.List<String> pipelineSnapshot(int maxLines) {
+        return engine.pipelines().snapshot(maxLines);
     }
 
     @Override

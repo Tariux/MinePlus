@@ -344,6 +344,10 @@ public class ConfigManager {
                       # Cap on scenario-claimed entities the engine advances per
                       # run even when no player is near them (journeys, camps).
                       MAX_SUSTAINED_PER_RUN: 64
+                      # Cap on multi-stage pipeline scenarios (find a village,
+                      # march, raid) advanced per run. A pipeline owns a mob's
+                      # whole scenario rather than one roll of the odds.
+                      MAX_PIPELINES_PER_RUN: 64
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

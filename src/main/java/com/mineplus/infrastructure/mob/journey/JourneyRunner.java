@@ -1,13 +1,16 @@
 package com.mineplus.infrastructure.mob.journey;
 
 import com.mineplus.infrastructure.mob.navigation.GroundProbe;
+import com.mineplus.infrastructure.mob.navigation.MobAttributes;
 import com.mineplus.infrastructure.mob.navigation.MobNavigator;
+import com.mineplus.infrastructure.mob.route.RoutePlanner;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Mob;
+import org.bukkit.plugin.Plugin;
 
 /**
  * Long-distance walking for the mob behavior subsystem: a journey is a
@@ -28,6 +31,13 @@ import org.bukkit.entity.Mob;
  *       the check window means the leg is re-issued around the obstacle,
  *       alternating sides, and after enough failed strikes the journey reports
  *       {@link JourneyStatus#STUCK} instead of standing there forever.</li>
+ *   <li><b>Path range</b> — the leg is clamped to the mob's own follow range
+ *       ({@link MobAttributes#pathRange}), not to a constant. Vanilla resolves
+ *       one path of roughly follow-range blocks, so a fixed 32-block leg makes
+ *       a villager (range 16) stand still while a zombie walks.</li>
+ *   <li><b>Unloaded terrain</b> — optionally holds a plugin chunk ticket for the
+ *       chunk the current leg crosses, so a march does not pause every time the
+ *       mob leaves player view distance ({@link ChunkLease}).</li>
  * </ul>
  *
  * <p><b>Confinement:</b> a caller may leash a journey to an area. Outside it, the
@@ -49,6 +59,12 @@ public final class JourneyRunner {
     private static final int MAX_JOURNEYS = 512;
     /** Advances nobody touched for this many engine steps are forgotten. */
     private static final long FORGET_AFTER_STEPS = 200L;
+    /**
+     * Chunks this runner may hold loaded at once for walking legs. One ticket
+     * per journey, so 64 journeys walk across unloaded terrain; the rest still
+     * work and simply pause when their chunk unloads.
+     */
+    private static final int MAX_CHUNK_LEASES = 64;
 
     /**
      * How one journey walks.
@@ -110,16 +126,44 @@ public final class JourneyRunner {
         private Location lastSample;
         private int strikes;
         private int detourSide = 1;
+        /**
+         * Whether the current stall already spent its one full reroute. A
+         * second consecutive stall after a replan is a genuinely stuck mob, not
+         * a leg that merely aimed at the wrong side of a wall.
+         */
+        private boolean rerouted;
         private long lastAdvancedAtStep;
+        /** The chunk currently held loaded for this journey's leg, when any. */
+        private World leasedWorld;
+        private int leasedChunkX;
+        private int leasedChunkZ;
+        private boolean hasLease;
     }
 
     private final Map<UUID, Journey> journeys = new ConcurrentHashMap<>();
+    /** The plugin whose chunk tickets keep a walking leg loaded; may be {@code null}. */
+    private final Plugin plugin;
+    /** Leases currently held, bounded by {@link #MAX_CHUNK_LEASES}. */
+    private int leases;
     /**
      * The runner's own clock: one step per engine run. Game time cannot be used
      * here — journeys span worlds whose clocks are unrelated, and a prune
      * comparing against another world's time silently forgets live journeys.
      */
     private long steps;
+
+    /** A runner without chunk tickets (used before the engine knows its plugin). */
+    public JourneyRunner() {
+        this(null);
+    }
+
+    /**
+     * @param plugin the plugin that owns walking-leg chunk tickets, or
+     *               {@code null} to leave chunks to vanilla loading
+     */
+    public JourneyRunner(Plugin plugin) {
+        this.plugin = plugin;
+    }
 
     /**
      * Advances one mob's journey by a step. Call it whenever the mob's owning
@@ -157,6 +201,7 @@ public final class JourneyRunner {
             journey.destination = destination.clone();
             journey.leg = null;
             journey.strikes = 0;
+            journey.rerouted = false;
             journey.lastSample = null;
             journey.nextRepathAt = 0L;
             journey.nextProgressCheckAt = now + settings.progressCheckTicks();
@@ -169,7 +214,7 @@ public final class JourneyRunner {
         boolean heightOk = settings.arrivalYTolerance() <= 0
                 || heightGap <= settings.arrivalYTolerance();
         if (arrivedHorizontally && heightOk) {
-            finish(id, mob);
+            finish(id, mob, journey);
             return JourneyStatus.ARRIVED;
         }
 
@@ -190,28 +235,33 @@ public final class JourneyRunner {
         // detour is decided before the next leg is issued, not after it.
         JourneyStatus progress = checkProgress(journey, here, now, settings);
         if (progress == JourneyStatus.STUCK) {
-            journeys.remove(id);
-            return JourneyStatus.STUCK;
+            if (!journey.rerouted) {
+                // One full replan before giving up. A stall usually means the
+                // leg crossed terrain the router can go around, and the detour
+                // above is only a sideways nudge; a replanned leg is a real
+                // route. A second consecutive stall is a genuinely stuck mob.
+                journey.rerouted = true;
+                journey.strikes = 0;
+                journey.leg = null;
+                journey.lastSample = null;
+                journey.nextRepathAt = 0L;
+                progress = JourneyStatus.DETOURING;
+            } else {
+                drop(id);
+                return JourneyStatus.STUCK;
+            }
         }
         if (progress == JourneyStatus.DETOURING && !leashed) {
             status = JourneyStatus.DETOURING;
         }
 
-        double aimDistance = distanceXZ(here, aim);
-        if (!leashed && aimDistance > settings.legBlocks()) {
-            // Only the next leg is named; a waypoint beyond the mob's path
-            // range is the reason long journeys silently stop moving.
-            double scale = settings.legBlocks() / aimDistance;
-            Location leg = new Location(world,
-                    here.getX() + (aim.getX() - here.getX()) * scale,
-                    here.getY(),
-                    here.getZ() + (aim.getZ() - here.getZ()) * scale);
-            aim = applyDetour(leg, aim, here, journey, settings);
-        }
-
-        // Reaching the current waypoint early means the next advance should
-        // immediately name a new one rather than wait out the cooldown.
+        // A leg longer than the mob's own path range is a leg it cannot path;
+        // vanilla resolves roughly follow-range blocks per search. The fixed
+        // option is a ceiling, not the length every mob gets.
+        double legLength = Math.min(settings.legBlocks(), MobAttributes.pathRange(mob));
         if (journey.leg != null && distanceXZ(here, journey.leg) <= settings.arrivalDistanceXZ() + 1.0) {
+            // Reaching the current waypoint early means the next advance should
+            // immediately name a new one rather than wait out the cooldown.
             journey.nextRepathAt = 0L;
         }
 
@@ -219,17 +269,41 @@ public final class JourneyRunner {
             return status;
         }
 
-        Location walkable = GroundProbe.standableNear(aim, 2, 6);
-        Location waypoint = walkable != null ? walkable : aim;
+        // Name the next leg. A straight line toward the goal is only correct
+        // on open ground; the planner routes the leg around water, cliffs and
+        // walls inside a bounded window, so the mob walks a walkable line
+        // instead of stalling against the first obstacle (it returns the
+        // straight leg when the line is already clear, costing a handful of
+        // block reads). A failed search leaves the straight leg in place.
+        Location routed = RoutePlanner.waypoint(world, here, aim, legLength);
+        Location leg = routed != null ? routed : pointTowards(world, here, aim, legLength);
+        if (journey.strikes > 0) {
+            leg = applyDetour(leg, aim, here, journey, settings);
+        }
+
+        // Hold the leg's chunk loaded before probing its ground: an unloaded
+        // chunk has no standable answer, and a raw aim point on unloaded
+        // terrain is exactly the waypoint a mob refuses to walk to.
+        leaseLegChunk(journey, world, leg);
+        Location walkable = GroundProbe.standableNear(leg, 2, 6);
+        Location waypoint = walkable != null ? walkable : leg;
+        if (distanceXZ(here, waypoint) < 1.5 && distanceXZ(here, aim) > 2.0) {
+            // The router landed the mob on the waypoint it is already standing
+            // on (a replan from a stall does this): nudge it toward the goal so
+            // the next navigation call is not a walk to the current spot.
+            waypoint = pointTowards(world, here, aim, Math.min(legLength, 6.0));
+        }
         journey.leg = waypoint;
         journey.nextRepathAt = now + settings.repathCooldownTicks();
         double stopDistance = Math.min(settings.arrivalDistanceXZ(),
                 Math.max(1.0, distanceXZ(here, waypoint)));
         boolean started = MobNavigator.moveToWithin(mob, waypoint, stopDistance, settings.speed());
-        if (!started) {
+        if (started) {
+            MobNavigator.lookToward(mob, waypoint);
+        } else {
             journey.strikes++;
             if (journey.strikes >= settings.maxStuckStrikes()) {
-                journeys.remove(id);
+                drop(id);
                 return JourneyStatus.STUCK;
             }
             journey.nextRepathAt = now + 5L; // try around it soon
@@ -252,6 +326,7 @@ public final class JourneyRunner {
         journey.nextProgressCheckAt = now + settings.progressCheckTicks();
         if (moved >= settings.minProgressBlocks()) {
             journey.strikes = 0;
+            journey.rerouted = false;
             return JourneyStatus.WALKING;
         }
         journey.strikes++;
@@ -280,12 +355,12 @@ public final class JourneyRunner {
         return status == JourneyStatus.DETOURING || status == JourneyStatus.STUCK;
     }
 
-    /** Drops the mob's journey state and stops it walking. */
+    /** Drops the mob's journey state, releases its chunk lease and stops it walking. */
     public void abandon(Mob mob) {
         if (mob == null) {
             return;
         }
-        journeys.remove(mob.getUniqueId());
+        releaseLease(journeys.remove(mob.getUniqueId()));
         MobNavigator.stop(mob);
     }
 
@@ -331,8 +406,12 @@ public final class JourneyRunner {
 
     /** Forgets journeys nobody advanced for a while. Called from {@link #step()}. */
     public void prune() {
-        journeys.entrySet().removeIf(entry ->
-                steps - entry.getValue().lastAdvancedAtStep > FORGET_AFTER_STEPS);
+        for (Map.Entry<UUID, Journey> entry : journeys.entrySet()) {
+            if (steps - entry.getValue().lastAdvancedAtStep > FORGET_AFTER_STEPS
+                    && journeys.remove(entry.getKey(), entry.getValue())) {
+                releaseLease(entry.getValue());
+            }
+        }
     }
 
     /**
@@ -360,9 +439,64 @@ public final class JourneyRunner {
         return id.toString().substring(0, 8);
     }
 
-    private void finish(UUID id, Mob mob) {
+    private void finish(UUID id, Mob mob, Journey journey) {
         journeys.remove(id);
+        releaseLease(journey);
         MobNavigator.stop(mob);
+    }
+
+    /** Removes a journey and releases whatever chunk ticket it held. */
+    private void drop(UUID id) {
+        releaseLease(journeys.remove(id));
+    }
+
+    /**
+     * Holds the chunk the next leg crosses loaded, within the runner's lease
+     * budget. Re-leasing the same chunk is a no-op; moving to a new leg swaps
+     * the ticket, so a journey never accumulates chunks.
+     */
+    private void leaseLegChunk(Journey journey, World world, Location point) {
+        if (plugin == null || point == null || !ChunkLease.available()) {
+            return;
+        }
+        int chunkX = point.getBlockX() >> 4;
+        int chunkZ = point.getBlockZ() >> 4;
+        if (journey.hasLease && journey.leasedWorld == world
+                && journey.leasedChunkX == chunkX && journey.leasedChunkZ == chunkZ) {
+            return;
+        }
+        if (!journey.hasLease && leases >= MAX_CHUNK_LEASES) {
+            return;
+        }
+        releaseLease(journey);
+        ChunkLease.add(world, chunkX, chunkZ, plugin);
+        journey.leasedWorld = world;
+        journey.leasedChunkX = chunkX;
+        journey.leasedChunkZ = chunkZ;
+        journey.hasLease = true;
+        leases++;
+    }
+
+    private void releaseLease(Journey journey) {
+        if (journey == null || !journey.hasLease) {
+            return;
+        }
+        ChunkLease.remove(journey.leasedWorld, journey.leasedChunkX, journey.leasedChunkZ, plugin);
+        journey.hasLease = false;
+        journey.leasedWorld = null;
+        leases = Math.max(0, leases - 1);
+    }
+
+    /** A point {@code distance} blocks along the straight line from {@code from} to {@code towards}. */
+    private static Location pointTowards(World world, Location from, Location towards, double distance) {
+        double dx = towards.getX() - from.getX();
+        double dz = towards.getZ() - from.getZ();
+        double length = Math.hypot(dx, dz);
+        if (length < 1.0e-4) {
+            return from.clone();
+        }
+        double scale = Math.min(distance, length) / length;
+        return new Location(world, from.getX() + dx * scale, from.getY(), from.getZ() + dz * scale);
     }
 
     /**

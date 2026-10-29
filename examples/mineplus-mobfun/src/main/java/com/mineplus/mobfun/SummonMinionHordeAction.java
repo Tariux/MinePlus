@@ -73,8 +73,8 @@ import org.bukkit.util.Vector;
  *       swinging at her the cooldown is shorter still: the horde is what buys
  *       her the time to run, so a golem walking into the raid is the moment
  *       she needs it most.</li>
- *   <li><b>Fights back, and keeps the golem busy</b> - when a golem (or a
- *       monster she did not summon) closes within {@link #THREAT_CLOSE_RADIUS}
+ *   <li><b>Fights back, and keeps the golem busy</b> - when a golem closes
+ *       within {@link #THREAT_CLOSE_RADIUS}
  *       blocks, the whole horde retargets onto it: her minions body-block the
  *       iron golem instead of chasing a villager past her, which is the only
  *       reason she survives the exchange at all. She keeps her distance,
@@ -96,6 +96,8 @@ public final class SummonMinionHordeAction implements BehaviorAction {
     private static final int HORDE_CAP = 8;
     private static final int MINIONS_PER_SUMMON = 3;
     private static final int SPOT_SEARCH_RADIUS = 3;
+    /** How far above/below the witch's feet a spawn spot may be. */
+    private static final int SPOT_SEARCH_VERTICAL = 2;
     /** Ticks between two summon waves while she is only hunting. */
     private static final long SUMMON_COOLDOWN_TICKS = 60L;
     /** Ticks between two summon waves while something is swinging at her. */
@@ -111,13 +113,14 @@ public final class SummonMinionHordeAction implements BehaviorAction {
     private static final int RETREAT_HOP_DELAY_TICKS = 3;
     /** How far a minion may be dragged off before it is walked back to her. */
     private static final int LEASH_RADIUS = 24;
-    /** The raid is read in one pass, so the pass has to reach past the leash. */
-    private static final int SCAN_RADIUS = LEASH_RADIUS;
-    private static final int SCAN_HEIGHT = 12;
+    /** The scan must see a horde that has chased past the leash. */
+    private static final int SCAN_RADIUS = 48;
+    private static final int SCAN_HEIGHT = 16;
 
     private final Plugin plugin;
     private final ParticleFx fx;
     private final NamespacedKey summonKey;
+    private final NamespacedKey summonOwnerKey;
     private final NamespacedKey summonCooldownKey;
     private final NamespacedKey minionCounterKey;
 
@@ -125,6 +128,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         this.plugin = plugin;
         this.fx = fx;
         this.summonKey = new NamespacedKey(plugin, "mobfun_summon");
+        this.summonOwnerKey = new NamespacedKey(plugin, "mobfun_summon_owner");
         this.summonCooldownKey = new NamespacedKey(plugin, "mobfun_raid_cd");
         this.minionCounterKey = new NamespacedKey(plugin, "mobfun_minion_no");
     }
@@ -143,17 +147,17 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         Raid raid = readRaid(witch);
         if (raid.victim() == null && raid.threat() == null) {
             DebugLogger.debug("[MobFun] necromancer %s stands down: no villager in sight and no"
-                            + " golem/monster nearby (scanned=%d)", witch.getUniqueId(), raid.scanned());
+                            + " golem nearby (scanned=%d)", witch.getUniqueId(), raid.scanned());
             return false;
         }
         boolean threatened = raid.threat() != null
                 && raid.threatDistanceSquared() <= (double) THREAT_CLOSE_RADIUS * THREAT_CLOSE_RADIUS;
         long now = context.world().getGameTime();
 
-        // What the horde answers: a golem that is already swinging is a better
-        // target than the villager she was hunting, and her minions body-block
-        // it between her and the fist that would end her.
-        LivingEntity focus = threatened ? raid.threat() : raid.victim();
+        // Any detected threat is worth a raid, not only one already within
+        // melee range: a golem at 15 blocks would otherwise pass the profile
+        // condition and produce neither a target nor a summon.
+        LivingEntity focus = raid.threat() != null ? raid.threat() : raid.victim();
         if (focus != null) {
             retargetCrew(witch, raid.minions(), focus);
             // She aims herself at it too: without a target the witch's own
@@ -162,11 +166,10 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             witch.setTarget(focus);
         }
 
-        // She keeps summoning - that is the whole point of a necromancer. The
-        // horde is what buys her the time to run from the golem the horde
-        // cannot kill.
+        // One wave at a time: replacements are called after the previous horde
+        // is wiped out, not while its last members are still fighting.
         int summoned = 0;
-        if (focus != null && raid.minions().size() < HORDE_CAP && summonReady(witch, now)) {
+        if (focus != null && raid.minions().isEmpty() && summonReady(witch, now)) {
             summoned = summonScreen(context, witch, raid, focus);
             if (summoned > 0) {
                 long cooldown = threatened ? DESPERATE_COOLDOWN_TICKS : SUMMON_COOLDOWN_TICKS;
@@ -202,6 +205,12 @@ public final class SummonMinionHordeAction implements BehaviorAction {
      * prey, the closest real threat. The scan used to run twice per roll (once
      * to count the horde, once to re-target it); the list it produces now feeds
      * both.
+     *
+     * <p>Only a golem is a threat. Every other monster — another witch, a
+     * zombie she did not summon, a skeleton that spawned in the same storm —
+     * is on her side of the field: classifying {@code Monster} as hostile made
+     * the horde turn on its own kind, including the necromancer who raised it.
+     * The horde exists to break villagers and to hold a golem, nothing else.
      */
     private Raid readRaid(Mob witch) {
         List<Mob> minions = new ArrayList<>(HORDE_CAP);
@@ -212,8 +221,11 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         int scanned = 0;
         for (Entity entity : witch.getNearbyEntities(SCAN_RADIUS, SCAN_HEIGHT, SCAN_RADIUS)) {
             scanned++;
-            if (entity instanceof Mob mob && isOwnMinion(entity)) {
-                minions.add(mob);
+            if (isSummonedMinion(entity)) {
+                if (entity instanceof Mob mob && isOwnMinion(witch, entity)
+                        && !mob.isDead() && mob.isValid()) {
+                    minions.add(mob);
+                }
                 continue;
             }
             double distance = entity.getLocation().distanceSquared(witch.getLocation());
@@ -222,8 +234,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
                 victim = (LivingEntity) entity;
                 victimDistance = distance;
             }
-            boolean hostile = entity instanceof Monster || entity instanceof org.bukkit.entity.Golem;
-            if (hostile && distance < threatDistance) {
+            if (entity instanceof org.bukkit.entity.Golem && distance < threatDistance) {
                 threat = (LivingEntity) entity;
                 threatDistance = distance;
             }
@@ -304,7 +315,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             Location spawnLocation = feet.getLocation().add(0.5, 0, 0.5);
             if (horsemanTurn && clearance >= 3
                     && focus.getLocation().distance(witch.getLocation()) > 6) {
-                if (spawnHorseman(context, spawnLocation, focus) != null) {
+                if (spawnHorseman(context, witch, spawnLocation, focus) != null) {
                     summoned++;
                     horsemanTurn = false;
                 }
@@ -314,7 +325,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             if (type == null) {
                 continue;
             }
-            Mob minion = spawnMinion(context, spawnLocation, type, focus);
+            Mob minion = spawnMinion(context, witch, spawnLocation, type, focus);
             if (minion != null) {
                 summoned++;
             }
@@ -328,9 +339,9 @@ public final class SummonMinionHordeAction implements BehaviorAction {
      * cannot be lost to a mob that despawned before a second write; the target
      * is set afterwards, because a mob with no world yet has no AI to aim.
      */
-    private Mob spawnMinion(BehaviorContext context, Location at, Class<? extends Mob> type,
+    private Mob spawnMinion(BehaviorContext context, Mob witch, Location at, Class<? extends Mob> type,
                             LivingEntity victim) {
-        LivingEntity born = context.trySpawn(at, type, this::tagMinion);
+        LivingEntity born = context.trySpawn(at, type, minion -> tagMinion(minion, witch));
         if (!(born instanceof Mob minion)) {
             return null;
         }
@@ -349,9 +360,10 @@ public final class SummonMinionHordeAction implements BehaviorAction {
      * budgeted summons and both carry her mark, so a horseman counts as the two
      * mobs it is and never reads to her as a monster closing in.
      */
-    private SkeletonHorse spawnHorseman(BehaviorContext context, Location at, LivingEntity victim) {
+    private SkeletonHorse spawnHorseman(BehaviorContext context, Mob witch, Location at,
+                                        LivingEntity victim) {
         LivingEntity born = context.trySpawn(at, SkeletonHorse.class, mount -> {
-            tagMinion(mount);
+            tagMinion(mount, witch);
             if (mount instanceof SkeletonHorse horse) {
                 horse.setTamed(true);
                 horse.setAdult();
@@ -360,7 +372,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         if (!(born instanceof SkeletonHorse mount)) {
             return null;
         }
-        LivingEntity rider = context.trySpawn(at, Skeleton.class, this::tagMinion);
+        LivingEntity rider = context.trySpawn(at, Skeleton.class, skeleton -> tagMinion(skeleton, witch));
         if (rider instanceof Mob skeleton) {
             skeleton.setTarget(victim);
             mount.addPassenger(rider);
@@ -384,13 +396,24 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         return count % HORSEMAN_EVERY == 0;
     }
 
-    private void tagMinion(Entity minion) {
+    private void tagMinion(Entity minion, Mob witch) {
         minion.getPersistentDataContainer().set(summonKey, PersistentDataType.BYTE, (byte) 1);
+        minion.getPersistentDataContainer().set(summonOwnerKey, PersistentDataType.STRING,
+                witch.getUniqueId().toString());
     }
 
-    private boolean isOwnMinion(Entity entity) {
+    private boolean isSummonedMinion(Entity entity) {
         Byte tagged = entity.getPersistentDataContainer().get(summonKey, PersistentDataType.BYTE);
         return tagged != null && tagged == (byte) 1;
+    }
+
+    private boolean isOwnMinion(Mob witch, Entity entity) {
+        if (!isSummonedMinion(entity)) {
+            return false;
+        }
+        String owner = entity.getPersistentDataContainer()
+                .get(summonOwnerKey, PersistentDataType.STRING);
+        return owner != null && owner.equals(witch.getUniqueId().toString());
     }
 
     /**
@@ -398,8 +421,14 @@ public final class SummonMinionHordeAction implements BehaviorAction {
      * targets - and a minion that has been dragged past the raid's edge is
      * walked home instead of lost to the world. Its assigned area is the witch;
      * its assigned goal is whoever she pointed it at.
+     *
+     * <p>A monster is never a valid target. The horde and the mobs around it
+     * are one side of this fight; a zombie turning on a second necromancer (or
+     * on a husk that happened to spawn nearby) is the exact betrayal this guard
+     * exists to make impossible, whatever the action decided to focus.
      */
     private void retargetCrew(Mob witch, List<Mob> minions, LivingEntity victim) {
+        LivingEntity focus = isFriendly(victim) ? null : victim;
         for (Mob minion : minions) {
             if (minion.isDead() || !minion.isValid()) {
                 continue;
@@ -410,31 +439,45 @@ public final class SummonMinionHordeAction implements BehaviorAction {
                 MobNavigator.moveTo(minion, witch.getLocation(), MobNavigator.NORMAL_SPEED);
                 continue;
             }
-            if (victim != null && !victim.equals(minion.getTarget())) {
-                minion.setTarget(victim);
+            if (focus != null && !focus.equals(minion.getTarget())) {
+                minion.setTarget(focus);
+            } else if (focus == null && isFriendly(minion.getTarget())) {
+                minion.setTarget(null);
             }
         }
+    }
+
+    /** {@code true} for the horde's own kind: undead, illagers, witches, minions. */
+    private static boolean isFriendly(Entity entity) {
+        return entity instanceof Monster;
     }
 
     /**
      * Valid spawn feet blocks in the rings around {@code foot}: the Core's
      * camp-ground rule (open, dry, solid non-leaf/non-log earth), ordered by
-     * ring (near first), then toward {@code approach}, then roomiest first. The
-     * height clearance of each spot is what makes dense jungle terrain work:
-     * spots are measured, not assumed, and small mobs peel off into small
-     * spaces.
+     * ring (near first), then by how close to the witch's own level, then
+     * toward {@code approach}, then roomiest first. The height clearance of
+     * each spot is what makes dense jungle terrain work: spots are measured,
+     * not assumed, and small mobs peel off into small spaces.
+     *
+     * <p>The search includes a small vertical window: a wasteland or a village
+     * edge is rarely level with the witch's feet, and a same-Y-only scan found
+     * nothing on a slope — the horde then never spawned even with open ground
+     * one block up.</p>
      */
     private List<Block> findSpots(Block foot, Vector approach) {
         List<Block> found = new ArrayList<>();
         for (int ring = 1; ring <= SPOT_SEARCH_RADIUS; ring++) {
-            for (int dx = -ring; dx <= ring; dx++) {
-                for (int dz = -ring; dz <= ring; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring || (dx == 0 && dz == 0)) {
-                        continue;
-                    }
-                    Block feet = foot.getRelative(dx, 0, dz);
-                    if (GroundProbe.isCampGround(feet)) {
-                        found.add(feet);
+            for (int dy = -SPOT_SEARCH_VERTICAL; dy <= SPOT_SEARCH_VERTICAL; dy++) {
+                for (int dx = -ring; dx <= ring; dx++) {
+                    for (int dz = -ring; dz <= ring; dz++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) != ring || (dx == 0 && dz == 0)) {
+                            continue;
+                        }
+                        Block feet = foot.getRelative(dx, dy, dz);
+                        if (GroundProbe.isCampGround(feet)) {
+                            found.add(feet);
+                        }
                     }
                 }
             }
@@ -442,6 +485,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         found.sort(Comparator
                 .comparingInt((Block block) -> Math.max(Math.abs(block.getX() - foot.getX()),
                         Math.abs(block.getZ() - foot.getZ())))
+                .thenComparingInt((Block block) -> Math.abs(block.getY() - foot.getY()))
                 .thenComparing((Block block) -> -orientationScore(block, foot, approach))
                 .thenComparing((Block block) -> -clearanceOf(block)));
         return found;

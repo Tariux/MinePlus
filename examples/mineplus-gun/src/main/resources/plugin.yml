@@ -3,7 +3,7 @@ version: ${version}
 main: com.mineplus.gun.MineplusGunPlugin
 api-version: '1.21'
 author: Tariux
-description: Western combat module for Mineplus - frame-animated firearms on the Core pack infrastructure, gold-nugget ammunition and a Vault shop.
+description: Firearms module for Mineplus - frame-discovered weapon animations, right-click shooting with left-click scopes, gold-nugget ammunition and a Vault shop, all on the Core's combat, input and pack services.
 website: https://github.com/Tariux/MinePlus
 
 # Hard dependency: the Core engine must be present and enabled first.

@@ -30,6 +30,11 @@ import org.bukkit.configuration.ConfigurationSection;
  *     loaded: ready               # optional
  *     fire: fire                  # optional (the pose shown while in use)
  *     reload: [reload0, reload1]  # optional, in play order
+ *     animations:                  # optional, any named clip
+ *       reload: [r0, r1, r2]       # shorthand: one tick per frame, one-shot
+ *       scope_in: {frames: [s0, s1], ticks: 6}
+ *       scope_hold: {frames: [s2], loop: true}
+ *       scope_out: {frames: [s1, s0], ticks: 5, next: idle_pose}
  *     texture: colt_peacemaker.png
  *   description: ["line one", "line two"]   # optional static lore
  * }</pre>
@@ -119,8 +124,8 @@ public final class ContentItems {
     /**
      * The {@code frames} block, or null. The idle stem is required whenever
      * any other stem (or the texture) is present; loaded, fire and reload
-     * stems are optional. References resolve to
-     * {@code <namespace>:item/<id>/<stem>}.
+     * stems are optional, and {@code animations} declares any further named
+     * clip. References resolve to {@code <namespace>:item/<id>/<stem>}.
      */
     private static ContentModel frames(String namespace, String id, ConfigurationSection section) {
         ConfigurationSection frames = section.getConfigurationSection("frames");
@@ -137,8 +142,9 @@ public final class ContentItems {
                 reload.add(stem.trim().toLowerCase(Locale.ROOT));
             }
         }
+        List<ItemFrames.Clip> clips = clips(namespace, id, frames.getConfigurationSection("animations"));
         if (idle == null) {
-            if (loaded != null || fire != null || !reload.isEmpty() || texture != null) {
+            if (loaded != null || fire != null || !reload.isEmpty() || !clips.isEmpty() || texture != null) {
                 DebugLogger.warning("Item '" + id + "' declares frames but no 'idle' model; frames ignored.");
             }
             return null;
@@ -153,18 +159,81 @@ public final class ContentItems {
             stems.add(fire);
         }
         stems.addAll(reload);
+        for (ItemFrames.Clip clip : clips) {
+            for (String reference : clip.references()) {
+                stems.add(reference.substring(reference.lastIndexOf('/') + 1));
+            }
+        }
 
-        ItemFrames spec = fire == null
-                ? ItemFrames.with(
-                        reference(namespace, id, idle),
-                        loaded == null ? null : reference(namespace, id, loaded),
-                        reload.stream().map(stem -> reference(namespace, id, stem)).toList())
-                : ItemFrames.withFire(
-                        reference(namespace, id, idle),
-                        loaded == null ? null : reference(namespace, id, loaded),
-                        reload.stream().map(stem -> reference(namespace, id, stem)).toList(),
-                        reference(namespace, id, fire));
-        return ContentModel.ofFrames(spec, List.copyOf(stems), texture);
+        ItemFrames.Builder builder = ItemFrames.builder(reference(namespace, id, idle));
+        if (loaded != null) {
+            builder.loaded(reference(namespace, id, loaded));
+        }
+        if (fire != null) {
+            builder.fire(reference(namespace, id, fire));
+        }
+        if (!reload.isEmpty()) {
+            builder.reload(reload.stream().map(stem -> reference(namespace, id, stem)).toList());
+        }
+        for (ItemFrames.Clip clip : clips) {
+            builder.clip(clip);
+        }
+        return ContentModel.ofFrames(builder.build(), List.copyOf(stems), texture);
+    }
+
+    /**
+     * The {@code frames.animations} block: one entry per clip, either a bare
+     * stem list (one tick per frame, one-shot) or a section with
+     * {@code frames}, {@code ticks}, {@code loop} and {@code next}. A bad
+     * clip is reported and skipped; it never disables the item.
+     */
+    private static List<ItemFrames.Clip> clips(String namespace, String id, ConfigurationSection section) {
+        if (section == null) {
+            return List.of();
+        }
+        List<ItemFrames.Clip> clips = new ArrayList<>();
+        for (String name : section.getKeys(false)) {
+            try {
+                List<String> stems = new ArrayList<>();
+                int ticks = 0;
+                boolean loop = false;
+                String next = null;
+                if (section.isConfigurationSection(name)) {
+                    ConfigurationSection clip = section.getConfigurationSection(name);
+                    if (clip == null) {
+                        continue;
+                    }
+                    for (String stem : clip.getStringList("frames")) {
+                        if (stem != null && !stem.isBlank()) {
+                            stems.add(stem.trim());
+                        }
+                    }
+                    ticks = Math.max(0, clip.getInt("ticks", 0));
+                    loop = clip.getBoolean("loop", false);
+                    String chain = trim(clip.getString("next"));
+                    next = chain == null ? null : chain.trim();
+                } else {
+                    for (String stem : section.getStringList(name)) {
+                        if (stem != null && !stem.isBlank()) {
+                            stems.add(stem.trim());
+                        }
+                    }
+                }
+                if (stems.isEmpty()) {
+                    DebugLogger.warning("Item '" + id + "' animation '" + name + "' has no frames; skipped.");
+                    continue;
+                }
+                List<String> references = new ArrayList<>(stems.size());
+                for (String stem : stems) {
+                    references.add(reference(namespace, id, stem));
+                }
+                clips.add(new ItemFrames.Clip(name, references, ticks, loop, next));
+            } catch (IllegalArgumentException invalid) {
+                DebugLogger.warning("Item '" + id + "' animation '" + name + "' is invalid: "
+                        + invalid.getMessage());
+            }
+        }
+        return clips;
     }
 
     /** The pack model reference of one frame stem: {@code <namespace>:item/<id>/<stem>}. */

@@ -1,28 +1,130 @@
-﻿{
+{
+  "pistol_shot": {
+    "sounds": [
+      {
+        "name": "mineplusgun:gun_bow"
+      }
+    ]
+  },
+  "shotgun_shot": {
+    "sounds": [
+      {
+        "name": "mineplusgun:gun_bow"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot4"
+      }
+    ]
+  },
+  "rifle_shot": {
+    "sounds": [
+      {
+        "name": "mineplusgun:crossbow_shoot1"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot2"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot3"
+      }
+    ]
+  },
+  "battle_rifle_shot": {
+    "sounds": [
+      {
+        "name": "mineplusgun:crossbow_shoot1"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot2"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot3"
+      },
+      {
+        "name": "mineplusgun:crossbow_shoot4"
+      }
+    ]
+  },
+  "reload_begin": {
+    "sounds": [
+      {
+        "name": "mineplusgun:crossbow_load_start"
+      },
+      {
+        "name": "mineplusgun:reload_start"
+      }
+    ]
+  },
+  "reload_mid": {
+    "sounds": [
+      {
+        "name": "mineplusgun:crossbow_load_mid1"
+      },
+      {
+        "name": "mineplusgun:crossbow_load_mid2"
+      },
+      {
+        "name": "mineplusgun:crossbow_load_mid3"
+      },
+      {
+        "name": "mineplusgun:crossbow_load_mid4"
+      }
+    ]
+  },
+  "reload_done": {
+    "sounds": [
+      {
+        "name": "mineplusgun:crossbow_load_end"
+      },
+      {
+        "name": "mineplusgun:reload_end"
+      }
+    ]
+  },
   "shot": {
     "sounds": [
-      { "name": "mineplusgun:shot1" },
-      { "name": "mineplusgun:shot2" },
-      { "name": "mineplusgun:shot3" },
-      { "name": "mineplusgun:shot4" }
+      {
+        "name": "mineplusgun:shot1"
+      },
+      {
+        "name": "mineplusgun:shot2"
+      },
+      {
+        "name": "mineplusgun:shot3"
+      },
+      {
+        "name": "mineplusgun:shot4"
+      }
     ]
   },
   "heavy": {
     "sounds": [
-      { "name": "mineplusgun:heavy1" },
-      { "name": "mineplusgun:heavy2" },
-      { "name": "mineplusgun:heavy3" }
+      {
+        "name": "mineplusgun:heavy1"
+      },
+      {
+        "name": "mineplusgun:heavy2"
+      },
+      {
+        "name": "mineplusgun:heavy3"
+      }
     ]
   },
   "reload": {
     "sounds": [
-      { "name": "mineplusgun:reload_start" },
-      { "name": "mineplusgun:reload_end" }
+      {
+        "name": "mineplusgun:reload_start"
+      },
+      {
+        "name": "mineplusgun:reload_end"
+      }
     ]
   },
   "empty": {
     "sounds": [
-      { "name": "mineplusgun:empty" }
+      {
+        "name": "mineplusgun:empty"
+      }
     ]
   }
 }

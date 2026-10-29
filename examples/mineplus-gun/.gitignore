@@ -1,11 +1,19 @@
-# Weapon assets are local-only authoring binaries (large .bbmodel/.png/.ogg
-# files), not source. They live in the author's library and are installed into
-# this resource tree for local builds; a fresh clone ships the placeholders
-# below instead. See PLACEHOLDER.md in each asset folder.
+# Weapon authoring binaries are local-only: the .bbmodel sources, the baked
+# legacy model trees and the sound samples live in the author's library and are
+# copied into this resource tree for local builds. A fresh clone ships the
+# PLACEHOLDER.md notes instead, and the module still enables — the guns just
+# render on their vanilla carrier and fire silently.
 src/main/resources/defaults/models/gun/*.bbmodel
 src/main/resources/defaults/models/gun/*.png
 src/main/resources/defaults/models/gun/*.meta.json
 src/main/resources/defaults/sounds/mineplusgun/*.ogg
 
-# Imported Western frame textures are local authoring binaries as well.
-src/main/resources/defaults/frames/**/*.png
+# The shipped gun tree is content, not authoring scratch: every model JSON and
+# every per-gun sprite under defaults/guns/<id>/ belongs in the jar, so undo
+# the repository-wide image exclusions for it.
+!src/main/resources/defaults/guns/**/*.json
+!src/main/resources/defaults/guns/**/*.png
+
+# The retired Western frame import (superseded by defaults/guns/) is excluded
+# from the jar by build.gradle; keep it out of the working tree's status too.
+src/main/resources/defaults/frames/
