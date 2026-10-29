@@ -4,7 +4,10 @@ import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobProfile;
 import java.util.Locale;
 import java.util.function.Supplier;
+import org.bukkit.Location;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -12,7 +15,7 @@ import org.bukkit.plugin.Plugin;
  * one mob type, can be toggled through {@code /mobfun}, and rebuilds its
  * profile on every enable so toggles are always clean.
  */
-public final class MobFunShowcase {
+public final class MobFunShowcase implements MobFunShowcaseEntry {
 
     private final Plugin plugin;
     private final String id;
@@ -46,6 +49,15 @@ public final class MobFunShowcase {
         return entityType;
     }
 
+    @Override
+    public LivingEntity spawn(Location location) {
+        if (location == null || location.getWorld() == null) {
+            return null;
+        }
+        Entity spawned = location.getWorld().spawnEntity(location, entityType);
+        return spawned instanceof LivingEntity living ? living : null;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -68,12 +80,14 @@ public final class MobFunShowcase {
     }
 
     /** Registers with the Core engine on module start. */
-    void start() {
+    @Override
+    public void start() {
         enable();
     }
 
     /** Unregisters from the Core engine on module stop. */
-    void stop() {
+    @Override
+    public void stop() {
         disable();
     }
 

@@ -43,6 +43,17 @@
 # (mineplusgun:pistol_shot, shotgun_shot, rifle_shot, battle_rifle_shot,
 # reload_begin, reload_mid, reload_done, empty). An unknown custom event falls
 # back to a vanilla sound instead of silencing the weapon.
+#
+# `backing-material` is the vanilla item the gun is built on. Keep it UNIQUE
+# per weapon: on 1.21.4+ the pack plays each clip on the item's own cooldown
+# clock, and the client keeps that cooldown per material — two guns sharing a
+# material would animate each other. A gun that also has no model still works
+# on its carrier.
+#
+# API: other plugins can veto or react to the flow through
+#   com.mineplus.gun.event.WeaponFireEvent   (cancellable, before a round is spent)
+#   com.mineplus.gun.event.WeaponReloadEvent (cancellable, before a reload starts)
+#   com.mineplus.gun.event.WeaponHitEvent    (cancellable, before round damage lands)
 
 settings:
   language: en
@@ -108,7 +119,7 @@ weapons:
     display-name: "&fShotgun"
     category: WEAPON
     type: SHOTGUN
-    backing-material: IRON_INGOT
+    backing-material: GOLD_INGOT
     price: 1400
     ammo: { magazine: 4, reload-ticks: 60, type: 12g }
     fire: { mode: PUMP, rpm: 70, cycle-ticks: 14, pellets: 8 }
@@ -139,10 +150,10 @@ weapons:
     display-name: "&fRifle"
     category: WEAPON
     type: RIFLE
-    backing-material: IRON_INGOT
+    backing-material: COPPER_INGOT
     price: 2600
     ammo: { magazine: 5, reload-ticks: 44, type: 7.62 }
-    fire: { mode: BOLT, rpm: 40, cycle-ticks: 20 }
+    fire: { mode: BOLT, rpm: 40, cycle-ticks: 24 }
     ballistics:
       damage: 18.0
       headshot-multiplier: 2.2
@@ -172,7 +183,7 @@ weapons:
     display-name: "&fBattle Rifle"
     category: WEAPON
     type: RIFLE
-    backing-material: IRON_INGOT
+    backing-material: NETHERITE_INGOT
     price: 3200
     ammo: { magazine: 20, reload-ticks: 48, type: 7.62 }
     fire: { mode: AUTO, rpm: 420 }

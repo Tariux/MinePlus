@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
 import com.mineplus.infrastructure.combat.CombatSettings;
 import com.mineplus.infrastructure.mob.MobBehaviorSettings;
+import com.mineplus.infrastructure.mob.custom.CustomMobSettings;
 import com.mineplus.infrastructure.render.RenderPolicy;
 import com.mineplus.pack.PackSettings;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -21,6 +22,7 @@ public class MineplusConfig {
     private final PackSettings pack;
     private final RenderPolicy renderPolicy;
     private final MobBehaviorSettings mobBehavior;
+    private final CustomMobSettings customMobs;
     private final CombatSettings combat;
     private final int updateCheckResourceId;
 
@@ -108,8 +110,8 @@ public class MineplusConfig {
             int updateCheckResourceId
     ) {
         this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
-                renderPolicy, MobBehaviorSettings.defaults(), CombatSettings.defaults(),
-                updateCheckResourceId);
+                renderPolicy, MobBehaviorSettings.defaults(), CustomMobSettings.defaults(),
+                CombatSettings.defaults(), updateCheckResourceId);
     }
 
     /** Canonical constructor; new settings groups thread through here. */
@@ -122,6 +124,7 @@ public class MineplusConfig {
             PackSettings pack,
             RenderPolicy renderPolicy,
             MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
             CombatSettings combat,
             int updateCheckResourceId
     ) {
@@ -136,6 +139,7 @@ public class MineplusConfig {
         this.pack = pack == null ? PackSettings.defaults() : pack;
         this.renderPolicy = renderPolicy == null ? RenderPolicy.defaults() : renderPolicy;
         this.mobBehavior = mobBehavior == null ? MobBehaviorSettings.defaults() : mobBehavior;
+        this.customMobs = customMobs == null ? CustomMobSettings.defaults() : customMobs;
         this.combat = combat == null ? CombatSettings.defaults() : combat;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
@@ -172,6 +176,11 @@ public class MineplusConfig {
     /** Mob behavior engine settings ({@code MOB_BEHAVIOR}). */
     public MobBehaviorSettings getMobBehavior() {
         return mobBehavior;
+    }
+
+    /** Custom-mob subsystem limits ({@code CUSTOM_MOBS}). */
+    public CustomMobSettings getCustomMobs() {
+        return customMobs;
     }
 
     /** Combat services settings ({@code BALLISTICS}, {@code PARTICLE_FX}). */
@@ -236,6 +245,10 @@ public class MineplusConfig {
 
     public static MobBehaviorSettings parseMobBehavior(FileConfiguration yaml, MobBehaviorSettings fallback) {
         return MobBehaviorSettings.parse(yaml, fallback);
+    }
+
+    public static CustomMobSettings parseCustomMobs(FileConfiguration yaml, CustomMobSettings fallback) {
+        return CustomMobSettings.parse(yaml, fallback);
     }
 
     public static CombatSettings parseCombat(FileConfiguration yaml, CombatSettings fallback) {

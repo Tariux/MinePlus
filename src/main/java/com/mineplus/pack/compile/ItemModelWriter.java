@@ -45,17 +45,25 @@ public final class ItemModelWriter {
      * reference; a framed item emits a {@code range_dispatch} over the item's
      * {@code custom_model_data} states, with the resting model as fallback.
      *
-     * <p>The frame state is <em>server-driven</em> on every server version:
-     * the runtime writes the state number onto the stack and the pack renders
-     * it. The alternative — a client-side ramp over the item's use gesture —
-     * ties the presentation to the carrier item's vanilla use action, which
-     * differs per material and per client version, and it cannot express a
-     * state the server did not ask for (a reload that aborts, a weapon that
-     * runs dry).</p>
+     * <p><b>Hierarchy.</b> The outer dispatch is the server's state channel:
+     * the runtime writes a state number onto the stack and the pack renders
+     * that state, on every representation. States that gate an animation
+     * ({@link com.mineplus.pack.item.ItemFrames.ClipPlan}) do not render one
+     * model, though — they render a nested dispatch over the client's
+     * {@code minecraft:cooldown} property. The runtime starts the sequence by
+     * setting a cooldown of exactly the clip's length, so the client walks the
+     * frames every rendered frame instead of the server writing one stack per
+     * tick. A state with no sequence renders its model directly, and the
+     * legacy representation keeps rendering the state-per-frame list.</p>
+     *
+     * <p>Framed items also set {@code hand_animation_on_swap: false}: their
+     * presentation changes through states and cooldowns, and the vanilla
+     * down-and-up equip bob would otherwise replay on every gate write.</p>
      */
     public static String modernDefinitionJson(ItemModelAsset item) {
         JsonObject root = new JsonObject();
         if (item.isFramed()) {
+            root.addProperty("hand_animation_on_swap", false);
             root.add("model", framedDispatch(item));
         } else {
             JsonObject model = new JsonObject();
@@ -91,24 +99,86 @@ public final class ItemModelWriter {
         String fallbackReference = item.fallbackModelReference() != null
                 ? item.fallbackModelReference()
                 : item.modelReference();
+        Map<Integer, JsonObject> sequences = sequenceDispatches(item, fallbackReference);
+
         JsonArray entries = new JsonArray();
-        entries.add(frameEntry(item.frameStackValue(0), fallbackReference));
+        entries.add(frameEntry(item.frameStackValue(0),
+                sequences.containsKey(0) ? sequences.get(0) : modelObject(fallbackReference)));
         for (ItemModelAsset.Frame frame : item.frames()) {
-            entries.add(frameEntry(item.frameStackValue(Math.round(frame.threshold())), frame.modelReference()));
+            int state = Math.round(frame.threshold());
+            entries.add(frameEntry(item.frameStackValue(state),
+                    sequences.containsKey(state) ? sequences.get(state) : modelObject(frame.modelReference())));
         }
         dispatch.add("entries", entries);
-        dispatch.add("fallback", frameEntry(0.0f, fallbackReference).getAsJsonObject("model"));
+        dispatch.add("fallback", modelObject(fallbackReference));
         return dispatch;
     }
 
-    private static JsonObject frameEntry(float threshold, String modelReference) {
+    /** One nested client-clock dispatch per gated state, keyed by state number. */
+    private static Map<Integer, JsonObject> sequenceDispatches(ItemModelAsset item, String restingReference) {
+        Map<Integer, JsonObject> byGate = new LinkedHashMap<>();
+        for (com.mineplus.pack.item.ItemFrames.Sequence sequence : item.clipPlan().sequences()) {
+            if (!sequence.animates() || byGate.containsKey(sequence.gateState())) {
+                continue;
+            }
+            byGate.put(sequence.gateState(), cooldownDispatch(sequence, restingReference));
+        }
+        return byGate;
+    }
+
+    /**
+     * One sequence over {@code minecraft:cooldown} (the remaining fraction of
+     * the player's cooldown on this item, {@code 1.0} when it starts, {@code 0.0}
+     * once finished).
+     *
+     * <p>Frame {@code i} of {@code n} occupies the interval
+     * {@code [1-(i+1)/n, 1-i/n)}, so its entry threshold is
+     * {@code 1-(i+1)/n} and entries are emitted in reverse play order
+     * (ascending thresholds). A one-frame sequence holds its pose above a
+     * threshold of one thousandth, so the fallback still wins at exactly
+     * zero.</p>
+     */
+    private static JsonObject cooldownDispatch(com.mineplus.pack.item.ItemFrames.Sequence sequence,
+                                               String restingReference) {
+        JsonObject dispatch = new JsonObject();
+        dispatch.addProperty("type", "minecraft:range_dispatch");
+        dispatch.addProperty("property", "minecraft:cooldown");
+
+        List<String> frames = sequence.frames();
+        int count = frames.size();
+        JsonArray entries = new JsonArray();
+        if (count == 1) {
+            entries.add(frameEntry(0.001f, modelObject(frames.get(0))));
+        } else {
+            for (int index = count - 1; index >= 0; index--) {
+                float threshold = (float) (1.0 - (index + 1) / (double) count);
+                entries.add(frameEntry(threshold, modelObject(frames.get(index))));
+            }
+        }
+        dispatch.add("entries", entries);
+        String fallback = sequence.fallbackReference() != null
+                ? sequence.fallbackReference()
+                : restingReference;
+        dispatch.add("fallback", modelObject(fallback));
+        return dispatch;
+    }
+
+    private static JsonObject modelObject(String modelReference) {
         JsonObject model = new JsonObject();
         model.addProperty("type", "minecraft:model");
         model.addProperty("model", modelReference);
+        return model;
+    }
+
+    private static JsonObject frameEntry(float threshold, JsonObject model) {
         JsonObject entry = new JsonObject();
         entry.addProperty("threshold", threshold);
         entry.add("model", model);
         return entry;
+    }
+
+    private static JsonObject frameEntry(float threshold, String modelReference) {
+        return frameEntry(threshold, modelObject(modelReference));
     }
 
     /**

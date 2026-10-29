@@ -48,7 +48,7 @@ public final class MineplusPlugin extends JavaPlugin {
 
         context = PluginContext.bootstrap(
                 this, virtualBlockManager, configManager.getConfig().getAnimation(),
-                configManager.getConfig().getPack());
+                configManager.getConfig().getPack(), configManager.getConfig().getCustomMobs());
         context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
         context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
         context.applyCombatSettings(configManager.getConfig().getCombat());
@@ -177,6 +177,7 @@ public final class MineplusPlugin extends JavaPlugin {
             context.infrastructureEngine().updateAnimationSettings(configManager.getConfig().getAnimation());
             context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
             context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
+            context.customMobs().updateSettings(configManager.getConfig().getCustomMobs());
             context.applyCombatSettings(configManager.getConfig().getCombat());
         }
         // Pack mode changes apply after restart (delivery binding, listeners);
@@ -236,5 +237,10 @@ public final class MineplusPlugin extends JavaPlugin {
     /** Mob behavior API (profiles, activity claims, navigation, journeys). */
     public com.mineplus.infrastructure.mob.MobBehaviorApi mobBehaviorApi() {
         return context == null ? null : context.mobBehaviorApi();
+    }
+
+    /** Custom-mob API (identity, spawning, rigs, Core-driven behavior). */
+    public com.mineplus.infrastructure.mob.custom.CustomMobApi customMobs() {
+        return context == null ? null : context.customMobs();
     }
 }

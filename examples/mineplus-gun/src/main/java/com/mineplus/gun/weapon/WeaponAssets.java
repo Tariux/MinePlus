@@ -61,6 +61,9 @@ public final class WeaponAssets {
             }
         }
         plugin.getLogger().info("[MineplusGun] Installed " + installed + " asset file(s).");
+        // Densify and complete the installed animation before anyone reads the
+        // folder: frame discovery and the pack both consume what is on disk.
+        WeaponAnimations.generateAll(plugin, context);
         return installed;
     }
 

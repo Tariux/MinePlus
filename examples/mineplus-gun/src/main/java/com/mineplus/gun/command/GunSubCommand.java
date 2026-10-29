@@ -84,7 +84,7 @@ public final class GunSubCommand implements SubCommand {
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " ammo [player] [amount]");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " reload");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " stats");
-            sender.sendMessage(ChatColor.YELLOW + "/" + label + " debug <hitbox|trace>");
+            sender.sendMessage(ChatColor.YELLOW + "/" + label + " debug <hitbox|trace|anim|fx>");
         }
         sender.sendMessage(ChatColor.YELLOW + "/" + label + " hud" + ChatColor.GRAY + " - toggle the ammo HUD");
     }
@@ -205,6 +205,8 @@ public final class GunSubCommand implements SubCommand {
         }
         sender.sendMessage(ChatColor.GOLD + "MineplusGun stats:");
         sender.sendMessage(ChatColor.YELLOW + "Weapons: " + ChatColor.WHITE + services.registry().size());
+        sender.sendMessage(ChatColor.YELLOW + "Item representation: " + ChatColor.WHITE
+                + (services.context().packApi().usesModernItemModels() ? "item_model (1.21.4+)" : "legacy predicates"));
         if (services.runtime() != null) {
             sender.sendMessage(ChatColor.YELLOW + "Combat: " + ChatColor.WHITE + services.runtime().telemetry());
         }
@@ -228,6 +230,14 @@ public final class GunSubCommand implements SubCommand {
             return;
         }
         String mode = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "trace";
+        if (mode.equals("anim") || mode.equals("animation")) {
+            animation(sender, player);
+            return;
+        }
+        if (mode.equals("fx")) {
+            effects(player);
+            return;
+        }
         var engine = services.ballistics();
         player.sendMessage(ChatColor.GOLD + "Ballistics debug (" + mode + "):");
         player.sendMessage(ChatColor.YELLOW + "Rounds in flight: " + ChatColor.WHITE
@@ -241,6 +251,53 @@ public final class GunSubCommand implements SubCommand {
         player.sendMessage(ChatColor.YELLOW + held.id() + " velocity=" + held.velocity()
                 + " gravity=" + held.gravity() + " drag=" + held.drag()
                 + " penetration=" + held.penetration() + " spread=" + held.spreadDegrees());
+    }
+
+    /**
+     * Prints the held weapon's animation plan: which clock drives it, how many
+     * frame states the pack compiled, and how many frames each clip plays.
+     * This is the fastest way to tell a configuration problem from a pack
+     * problem after a reload.
+     */
+    private void animation(CommandSender sender, Player player) {
+        WeaponDefinition held = services.runtime().resolve(player.getInventory().getItemInMainHand());
+        if (held == null) {
+            player.sendMessage(ChatColor.GRAY + "No weapon in hand.");
+            return;
+        }
+        player.sendMessage(ChatColor.GOLD + "Animation of " + held.id() + ":");
+        for (String line : services.runtime().animationReport(held)) {
+            player.sendMessage(ChatColor.YELLOW + "  " + line);
+        }
+        player.sendMessage(ChatColor.GRAY + "  carrier=" + held.backingMaterial()
+                + " reload=" + held.reloadTicks() + "t cycle=" + held.cycleTicks() + "t"
+                + " cadence=" + held.shotIntervalTicks() + "t");
+    }
+
+    /**
+     * Fires one test burst straight ahead so a server owner can confirm the
+     * particle path end to end (Core budget → per-viewer packets → client)
+     * without firing a gun. Prints the shared meter before and after.
+     */
+    private void effects(Player player) {
+        var fx = services.context().particleFx();
+        long before = fx.emitted();
+        long droppedBefore = fx.dropped();
+        var eye = player.getEyeLocation();
+        var direction = eye.getDirection();
+        var at = eye.clone().add(direction.clone().multiply(2.0));
+        fx.burst(com.mineplus.infrastructure.fx.ParticleFx.Tier.CRITICAL, at,
+                org.bukkit.Particle.FLAME, 12, 0.2, 0.2, 0.2, 0.02);
+        fx.burst(com.mineplus.infrastructure.fx.ParticleFx.Tier.CRITICAL, at,
+                org.bukkit.Particle.LARGE_SMOKE, 8, 0.3, 0.3, 0.3, 0.0);
+        fx.tracer(eye, eye.clone().add(direction.clone().multiply(24.0)),
+                org.bukkit.Particle.CRIT, 2.0);
+        player.sendMessage(ChatColor.GOLD + "Shot effects test:");
+        player.sendMessage(ChatColor.YELLOW + "  emitted=" + (fx.emitted() - before)
+                + " dropped=" + (fx.dropped() - droppedBefore)
+                + ChatColor.GRAY + " (a burst in flight costs ~20 critical + ~12 ambient)");
+        player.sendMessage(ChatColor.GRAY + "  nothing visible means the Core's PARTICLE_FX budget"
+                + " or BALLISTICS.ENABLED in settings.mp.yml is off.");
     }
 
     @Override

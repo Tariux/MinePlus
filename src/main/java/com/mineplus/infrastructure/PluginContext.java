@@ -14,6 +14,9 @@ import com.mineplus.infrastructure.input.HeldItemInput;
 import com.mineplus.infrastructure.mob.MineplusMobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobBehaviorEngine;
+import com.mineplus.infrastructure.mob.custom.CustomMobApi;
+import com.mineplus.infrastructure.mob.custom.CustomMobManager;
+import com.mineplus.infrastructure.mob.custom.CustomMobSettings;
 import com.mineplus.infrastructure.module.ModuleSupport;
 import com.mineplus.infrastructure.registry.ItemMagazine;
 import com.mineplus.infrastructure.registry.ItemRegistry;
@@ -38,6 +41,7 @@ public final class PluginContext {
     private final PackSystem packSystem;
     private final PackApi packApi;
     private final MobBehaviorApi mobBehaviorApi;
+    private final CustomMobManager customMobs;
     private final ParticleFx particleFx;
     private final Ballistics ballistics;
     private final HeldItemInput heldItemInput;
@@ -58,6 +62,7 @@ public final class PluginContext {
             PackSystem packSystem,
             PackApi packApi,
             MobBehaviorApi mobBehaviorApi,
+            CustomMobManager customMobs,
             ParticleFx particleFx,
             Ballistics ballistics,
             HeldItemInput heldItemInput,
@@ -75,6 +80,7 @@ public final class PluginContext {
         this.packSystem = packSystem;
         this.packApi = packApi;
         this.mobBehaviorApi = mobBehaviorApi;
+        this.customMobs = customMobs;
         this.particleFx = particleFx;
         this.ballistics = ballistics;
         this.heldItemInput = heldItemInput;
@@ -104,6 +110,24 @@ public final class PluginContext {
             AnimationSettings animationSettings,
             PackSettings packSettings
     ) {
+        return bootstrap(plugin, virtualBlockManager, animationSettings, packSettings,
+                CustomMobSettings.defaults());
+    }
+
+    /**
+     * @param packSettings      pack subsystem settings; when enabled, the
+     *                          subsystem starts here (renderer injection happens
+     *                          before the engine's restore pass in
+     *                          {@link #finalizeSetup()})
+     * @param customMobSettings custom-mob subsystem limits ({@code CUSTOM_MOBS})
+     */
+    public static PluginContext bootstrap(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            AnimationSettings animationSettings,
+            PackSettings packSettings,
+            CustomMobSettings customMobSettings
+    ) {
         ItemRegistry itemRegistry = new ItemRegistry(plugin);
         InfrastructureEngine infrastructureEngine = new InfrastructureEngine(
                 plugin, virtualBlockManager, itemRegistry, animationSettings);
@@ -123,6 +147,14 @@ public final class PluginContext {
         // registers its first behavior profile.
         MobBehaviorEngine mobBehaviorEngine = new MobBehaviorEngine(plugin);
         MobBehaviorApi mobBehaviorApi = new MineplusMobBehaviorApi(mobBehaviorEngine);
+
+        // Custom mobs: identity registry, spawn/restore lifecycle and the
+        // per-part visual rig. Installed as the engine's identity resolver so a
+        // custom id's profiles are the only ones its entities ever see.
+        CustomMobManager customMobs = new CustomMobManager(
+                plugin, packApi, mobBehaviorApi, customMobSettings);
+        mobBehaviorEngine.setIdentityResolver(customMobs);
+        customMobs.start();
 
         // Combat + input services. The ballistics task self-arms on the first
         // shot and retires when nothing is in flight; the held-item listener
@@ -145,6 +177,7 @@ public final class PluginContext {
                 packSystem,
                 packApi,
                 mobBehaviorApi,
+                customMobs,
                 particleFx,
                 ballistics,
                 heldItemInput,
@@ -228,6 +261,21 @@ public final class PluginContext {
     }
 
     /**
+     * Custom-mob API — never null. Lets modules register a vanilla-based mob
+     * with its own identity, visual model and Core-driven behavior; the Core
+     * owns spawning, chunk restore, vanilla-AI isolation and the visual rig.
+     * Inert when {@code CUSTOM_MOBS.ENABLED} is false.
+     */
+    public CustomMobApi customMobs() {
+        return customMobs;
+    }
+
+    /** Subsystem diagnostics: rigged mob count. */
+    public int riggedMobCount() {
+        return customMobs.riggedCount();
+    }
+
+    /**
      * Shared particle budget for gameplay feedback. Modules emit through this
      * instance so one tick-wide budget covers every effect on the server
      * instead of each plugin metering itself.
@@ -284,6 +332,7 @@ public final class PluginContext {
 
     /** Releases the Core-owned runtime services. Idempotent; called on disable. */
     public void shutdownServices() {
+        customMobs.shutdown();
         mobBehaviorApi.shutdown();
         ballistics.shutdown();
         heldItemInput.shutdown();

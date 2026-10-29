@@ -1,8 +1,13 @@
 package com.mineplus.infrastructure.mob.navigation;
 
 import java.lang.reflect.Field;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 
 /**
@@ -17,7 +22,9 @@ import org.bukkit.entity.Mob;
  * <p>The attribute constant was renamed in 1.21.3 ({@code GENERIC_FOLLOW_RANGE}
  * to {@code FOLLOW_RANGE}), so both spellings are resolved reflectively and the
  * surviving one is cached. Supplied games (Spigot 1.20-) still carry the
- * generic name.
+ * generic name. The same resolution also serves custom mob attribute tuning
+ * ({@link #set(LivingEntity, String, double)}), so no module has to know which
+ * attribute spelling its server uses.
  *
  * <p>Thread model: main thread only (attribute access is).
  */
@@ -30,6 +37,8 @@ public final class MobAttributes {
 
     private static volatile Attribute followRange;
     private static volatile boolean resolved;
+    /** Canonical name (without the GENERIC_ prefix) -> resolved attribute. */
+    private static final Map<String, Optional<Attribute>> ATTRIBUTES = new ConcurrentHashMap<>();
 
     private MobAttributes() {
     }
@@ -61,6 +70,60 @@ public final class MobAttributes {
      */
     public static double pathRange(Mob mob) {
         return Math.max(MIN_PATH_RANGE, Math.min(MAX_PATH_RANGE, followRange(mob) - 2.0));
+    }
+
+    /**
+     * Sets a base attribute value by canonical name ({@code MAX_HEALTH},
+     * {@code MOVEMENT_SPEED}, {@code ATTACK_DAMAGE}, {@code FOLLOW_RANGE},
+     * {@code ARMOR}, {@code KNOCKBACK_RESISTANCE}). The version-specific
+     * spelling ({@code GENERIC_X} on older servers, {@code X} on 1.21.3+) is
+     * resolved and cached. A type without that attribute is left untouched.
+     *
+     * @return {@code true} when the attribute existed and was set
+     */
+    public static boolean set(LivingEntity entity, String canonicalName, double value) {
+        if (entity == null || canonicalName == null || canonicalName.isBlank()) {
+            return false;
+        }
+        Attribute attribute = attribute(canonicalName);
+        if (attribute == null) {
+            return false;
+        }
+        AttributeInstance instance = entity.getAttribute(attribute);
+        if (instance == null) {
+            return false;
+        }
+        try {
+            instance.setBaseValue(value);
+            return true;
+        } catch (Throwable rejected) {
+            return false;
+        }
+    }
+
+    /** The current value of a canonical attribute, or {@code fallback} when unreadable. */
+    public static double get(LivingEntity entity, String canonicalName, double fallback) {
+        if (entity == null || canonicalName == null) {
+            return fallback;
+        }
+        Attribute attribute = attribute(canonicalName);
+        if (attribute == null) {
+            return fallback;
+        }
+        AttributeInstance instance = entity.getAttribute(attribute);
+        return instance == null ? fallback : instance.getValue();
+    }
+
+    /** Resolves a canonical attribute name, trying the GENERIC_ spelling first. */
+    private static Attribute attribute(String canonicalName) {
+        String key = canonicalName.trim().toUpperCase(Locale.ROOT);
+        return ATTRIBUTES.computeIfAbsent(key, name -> {
+            Attribute found = field("GENERIC_" + name);
+            if (found == null) {
+                found = field(name);
+            }
+            return Optional.ofNullable(found);
+        }).orElse(null);
     }
 
     private static Attribute followRangeAttribute() {

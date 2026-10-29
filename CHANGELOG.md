@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Core engine (`Mineplus`) — Custom mobs
+
+#### Added
+
+- **Custom mob API** — `context.customMobs()` (`CustomMobApi`) registers new
+  mobs without touching vanilla ones: a `CustomMobDefinition` (base `Mob` type,
+  `CustomMobModel`, `CustomMobAttributes`, display options and a behavior
+  consumer) is owner-scoped, idempotent, and spawns through
+  `spawn(location, id)`. Definitions, live mobs, chunk restore, death cleanup
+  and pack assets are all owned by the Core.
+- **Identity dispatch in the behavior engine** — `MobProfile.builder(type,
+  customId)` registers a profile under a custom id; `MobIdentityResolver`
+  (implemented by the custom-mob manager) routes evaluation through
+  `profilesByCustomId`, so a custom mob never matches a vanilla-type profile and
+  vanilla mobs never see custom actions. `forceFire` resolves identity the same
+  way.
+- **Vanilla-AI isolation** — spawn and every chunk restore clear the entity's
+  goal/target selectors while leaving AI enabled, so all behavior comes from the
+  profile and navigation still uses the mob's own vanilla walk. A definition
+  with no behavior gets an idle profile; unknown tagged ids stay isolated and are
+  removed on chunk load once any definition exists.
+- **Texture-extended and fully custom models** — `CustomMobModel.vanilla(type,
+  png)` reuses a published vanilla model with a replacement texture;
+  `builderFor(type, png)` / `builder(w, h, png)` author `MobPart`s (absolute
+  pivots, `Role`-driven head/leg posing) and `MobBox`es. `MobRigAssetWriter`
+  compiles the model into pack assets (texture, per-part item model + item
+  definition with vanilla box-UV windows), and `MobRigRenderer` renders each part
+  as an `ItemDisplay` under a lazy, self-retiring task; without the pack the base
+  entity stays visible and the mob remains fully playable.
+- **`AttackNearestAction`** — Core hostile action: nearest eligible
+  player/villager, sticky target, throttled re-path, line-of-sight strike
+  through `DamageTransactions.apply`, knockback and sounds.
+- **`CUSTOM_MOBS` settings** — `ENABLED`, `RENDERING`, `RENDER_INTERVAL_TICKS`,
+  `RENDER_DISTANCE`, `MAX_RIGGED_PER_WORLD`, `REMOVE_UNKNOWN_ON_LOAD`.
+
+### Modules (`mineplus-mobfun`)
+
+#### Added
+
+- **Evil Pig** — the first custom mob: `mobfun:evil_pig`, the vanilla pig model
+  with the module's embedded texture (`mobs/evil_pig.png`), attribute overrides
+  and a single `AttackNearestAction`. Exposed through the existing test bench
+  (`/mobfun evilpig on|off`, `/mobfun spawn evilpig`, `/mobfun fire evilpig
+  [force]`); the showcase list is now polymorphic (`MobFunShowcaseEntry`) so
+  vanilla showcases and custom mobs share the command surface.
+
 ### Core engine (`Mineplus`) — Unified Rendering Engine
 
 #### Added

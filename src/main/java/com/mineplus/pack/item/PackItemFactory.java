@@ -52,14 +52,10 @@ public final class PackItemFactory {
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, itemModelKey(definition));
         if (!applied) {
-            // Legacy fallback: geometry items carry their stable identity value;
-            // framed items carry their frame-state base (the resting state), so
-            // a pristine stack renders the idle model on pre-1.21.4 clients.
-            if (definition.modelKey() != null) {
-                meta.setCustomModelData(stableCustomModelData(definition));
-            } else if (definition.isFramed()) {
-                meta.setCustomModelData(definition.frameStackValue(0));
-            }
+            // Legacy fallback: every item owns the same stable base predicate
+            // (geometry models, raw models and framed items all serialize an
+            // override at this value; a frame state adds its index to it).
+            meta.setCustomModelData(ItemModelAsset.frameBase(definition.namespace(), definition.id()));
         }
         stack.setItemMeta(meta);
         return stack;
@@ -81,11 +77,45 @@ public final class PackItemFactory {
         }
         boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
         boolean applied = modern && applyItemModelComponent(meta, assetModelKey(item));
-        if (!applied && !item.isFramed()) {
+        if (!applied) {
             meta.setCustomModelData(item.customModelData());
         }
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    /**
+     * The display stack for a pack model at an arbitrary key path — the world
+     * rendering path for models that are not item definitions (an entity rig's
+     * per-part models live under {@code item/entity/...}, whose path contains
+     * a slash and therefore cannot be an {@link ItemModelAsset}).
+     *
+     * @param material        the invisible carrier item
+     * @param namespace       model namespace
+     * @param componentPath   {@code item_model} path, slashes allowed
+     */
+    public ItemStack createModelDisplay(org.bukkit.Material material, String namespace, String componentPath) {
+        ItemStack stack = new ItemStack(material);
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) {
+            return stack;
+        }
+        boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
+        boolean applied = modern && applyItemModelComponent(meta,
+                new NamespacedKey(namespace, componentPath));
+        if (!applied) {
+            // No legacy host override exists for an arbitrary model path; a
+            // custom-model-data value would resolve to a missing model, so the
+            // plain carrier is the honest fallback (rigs require the component).
+            return stack;
+        }
+        stack.setItemMeta(meta);
+        return stack;
+    }
+
+    /** True when this server exposes the modern {@code item_model} component. */
+    public boolean supportsItemModelComponent() {
+        return representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL && SET_ITEM_MODEL != null;
     }
 
     /**
@@ -135,17 +165,5 @@ public final class PackItemFactory {
         } catch (ReflectiveOperationException exception) {
             return null;
         }
-    }
-
-    /**
-     * Legacy predicate value, stable per item id (matches
-     * {@link ItemModelAsset#customModelData()}): never zero — zero would match
-     * every vanilla item — and deterministic across restarts so issued items
-     * keep rendering. {@code floorMod} avoids the {@code Math.abs(Integer#MIN_VALUE)}
-     * overflow that would produce an invalid negative predicate.
-     */
-    static int stableCustomModelData(PackItemDefinition definition) {
-        int hash = (definition.namespace() + ":" + definition.id()).hashCode();
-        return 1000 + Math.floorMod(hash, 900_000);
     }
 }

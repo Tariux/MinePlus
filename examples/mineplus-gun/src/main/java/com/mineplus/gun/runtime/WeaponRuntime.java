@@ -3,6 +3,9 @@ package com.mineplus.gun.runtime;
 import com.mineplus.gun.GunServices;
 import com.mineplus.gun.MineplusGunPlugin;
 import com.mineplus.gun.config.GunConfig;
+import com.mineplus.gun.event.WeaponFireEvent;
+import com.mineplus.gun.event.WeaponHitEvent;
+import com.mineplus.gun.event.WeaponReloadEvent;
 import com.mineplus.gun.weapon.WeaponDefinition;
 import com.mineplus.infrastructure.combat.BallisticProfile;
 import com.mineplus.infrastructure.combat.ProjectileHandler;
@@ -10,6 +13,7 @@ import com.mineplus.infrastructure.combat.ProjectileHit;
 import com.mineplus.infrastructure.fx.Sounds;
 import com.mineplus.infrastructure.input.HeldItemInput;
 import com.mineplus.infrastructure.registry.ItemMagazine;
+import com.mineplus.pack.item.ItemFrames;
 import com.mineplus.pack.item.ItemFrameAnimator;
 import com.mineplus.pack.item.ItemFrameWriter;
 import java.util.ArrayList;
@@ -59,7 +63,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     private static final int FIRE_POSE_TICKS = 4;
     private static final int SCOPE_IN_TICKS = 6;
     private static final int SCOPE_OUT_TICKS = 5;
-    private static final int EQUIP_TICKS = 6;
+    private static final int EQUIP_TICKS = 8;
     /** Minimum gap between two hit-marker sounds (a shotgun lands many pellets). */
     private static final long HITMARK_INTERVAL_MILLIS = 90L;
     private static final double RECOIL_EPSILON = 0.01;
@@ -69,27 +73,35 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     private final Map<UUID, Session> sessions = new HashMap<>();
     private final Map<UUID, Long> hitmarkAt = new HashMap<>();
     private final ProjectileHandler projectileHandler = new WeaponHitHandler();
+    /**
+     * True when the pack presents this item through a modern item-model
+     * definition, which is the only representation that can serialize a
+     * client-clock sequence (nested {@code range_dispatch} on the item's
+     * cooldown). Legacy predicate packs keep the server animator.
+     */
+    private boolean clientClock;
 
     private BukkitTask task;
 
     public WeaponRuntime(MineplusGunPlugin plugin, GunServices services) {
         this.plugin = plugin;
         this.services = services;
-    }
-
-    public void start() {
+        this.clientClock = services.context().packApi().usesModernItemModels();
+    }    public void start() {
         // Nothing to schedule; the first trigger arms the tick task.
     }
 
     /** Flushes every live magazine and stops the task. */
     public void stop() {
         for (Session session : sessions.values()) {
-            if (session.magazine != null) {
-                Player player = Bukkit.getPlayer(session.playerId);
-                if (player != null) {
-                    services.itemFactory().magazine().flush(player, session.magazine);
-                }
+            Player player = Bukkit.getPlayer(session.playerId);
+            if (player == null) {
+                continue;
             }
+            if (session.magazine != null) {
+                services.itemFactory().magazine().flush(player, session.magazine);
+            }
+            clearCooldown(player, session.weapon);
         }
         sessions.clear();
         hitmarkAt.clear();
@@ -102,7 +114,49 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
 
     /** The live-fire telemetry line printed by {@code /mpgun stats}. */
     public String telemetry() {
-        return "shooters=" + sessions.size() + " " + services.ballistics().telemetrySummary();
+        return "shooters=" + sessions.size()
+                + " animation=" + (clientClock ? "client-clock" : "server-frames")
+                + " " + services.ballistics().telemetrySummary();
+    }
+
+    /**
+     * True when this server's pack representation lets a clip play on the
+     * client's own clock (one state write plus one item cooldown, then the
+     * client walks the frames). Legacy predicate packs fall back to the server
+     * frame animator.
+     */
+    public boolean clientClock() {
+        return clientClock;
+    }
+
+    /**
+     * How the held weapon will animate, one line per clip — the diagnostic
+     * behind {@code /mpgun debug anim}.
+     */
+    public List<String> animationReport(WeaponDefinition weapon) {
+        List<String> lines = new ArrayList<>();
+        if (weapon == null) {
+            return lines;
+        }
+        ItemFrames frames = weapon.frames();
+        if (frames == null) {
+            lines.add("no model — the weapon renders on its vanilla carrier");
+            return lines;
+        }
+        lines.add("clock: " + (clientClock
+                ? "client (cooldown range_dispatch, no per-frame packets)"
+                : "server (legacy custom_model_data predicates)"));
+        lines.add("states: " + frames.references().size()
+                + " (idle=" + frames.idleState() + ", loaded=" + frames.loadedState() + ")");
+        for (ItemFrames.Sequence sequence : frames.plan().sequences()) {
+            lines.add("sequence " + sequence.name() + ": " + sequence.frames().size()
+                    + " frame(s), gate state " + sequence.gateState());
+        }
+        for (ItemFrames.Clip clip : frames.clips()) {
+            lines.add("clip " + clip.name() + ": " + clip.frameCount()
+                    + " frame(s)" + (clip.loop() ? ", looping" : ""));
+        }
+        return lines;
     }
 
     /** The weapon the stack belongs to, or {@code null}. */
@@ -259,6 +313,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
 
     /** Re-reads every online player's session (config/weapon reload). */
     public void refreshAll() {
+        // The representation is fixed by the server version, but recomputing it
+        // here keeps a reload honest if the pack subsystem itself restarted.
+        clientClock = services.context().packApi().usesModernItemModels();
         closeAll();
         for (Player player : Bukkit.getOnlinePlayers()) {
             refresh(player);
@@ -274,8 +331,11 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     private void closeAll() {
         for (Session session : new ArrayList<>(sessions.values())) {
             Player player = Bukkit.getPlayer(session.playerId);
-            if (player != null && session.magazine != null) {
-                services.itemFactory().magazine().flush(player, session.magazine);
+            if (player != null) {
+                if (session.magazine != null) {
+                    services.itemFactory().magazine().flush(player, session.magazine);
+                }
+                clearCooldown(player, session.weapon);
             }
         }
         sessions.clear();
@@ -292,6 +352,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         if (flush && session.magazine != null) {
             services.itemFactory().magazine().flush(player, session.magazine);
         }
+        // A sequence's cooldown lives on the player, not the item: leaving it
+        // running would animate a gun that is no longer in hand.
+        clearCooldown(player, session.weapon);
     }
 
     private Session ensure(Player player, ItemStack held, WeaponDefinition weapon) {
@@ -366,6 +429,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                 if (session.magazine != null) {
                     services.itemFactory().magazine().flush(player, session.magazine);
                 }
+                clearCooldown(player, session.weapon);
                 iterator.remove();
                 continue;
             }
@@ -378,6 +442,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                 if (session.animator != null) {
                     session.animator.stop();
                 }
+                clearCooldown(player, session.weapon);
                 iterator.remove();
                 if (weapon != null) {
                     // Same weapon, different stack: reopen on the stack that is
@@ -436,6 +501,13 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             shoot(player, session, weapon);
         }
 
+        if (session.sequenceTicks > 0) {
+            session.sequenceTicks--;
+            if (session.sequenceTicks == 0) {
+                finishPose(player, session, weapon, session.pose);
+            }
+        }
+
         tickPose(player, session, weapon);
         return needsTick(player, session, weapon);
     }
@@ -445,6 +517,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                 || session.reloading
                 || session.autoReloadDelay > 0
                 || session.burstRemaining > 0
+                || session.sequenceTicks > 0
                 || session.recoil > RECOIL_EPSILON
                 || (session.animator != null && session.animator.active())
                 || (session.autoHeld && weapon.fireMode() == FireMode.AUTO
@@ -461,6 +534,11 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         }
         if (weapon.usesAmmo() && (session.magazine == null || session.magazine.empty())) {
             dryFire(player, session, weapon);
+            return false;
+        }
+        // The veto point sits after the "has a round" check and before the
+        // round is spent, so a cancelled shot costs nothing at all.
+        if (!WeaponFireEvent.allow(player, player.getInventory().getItemInMainHand(), weapon)) {
             return false;
         }
 
@@ -552,6 +630,12 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
 
         session.reloading = true;
         session.reloadTotal = Math.max(1, weapon.reloadTicks());
+        if (!WeaponReloadEvent.allow(player, player.getInventory().getItemInMainHand(), weapon,
+                session.reloadTotal, automatic)) {
+            session.reloading = false;
+            session.reloadTotal = 0;
+            return false;
+        }
         session.reloadRemaining = session.reloadTotal;
         session.reloadMidPlayed = false;
         session.autoReloadDelay = 0;
@@ -562,7 +646,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             session.animator.stop();
         }
         session.pose = Pose.NONE;
-        startPose(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD);
+        if (!startSequence(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD)) {
+            startPose(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD);
+        }
         Sounds.playTo(player, weapon.soundReloadBegin(), weapon.soundVolume() * 0.85f,
                 Sounds.variance(1.0f, 0.04f), Sound.ITEM_CROSSBOW_LOADING_START);
         pushHud(player, session, weapon);
@@ -622,11 +708,63 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         NONE, RELOAD, FIRE, CYCLE, SCOPE_IN, SCOPE_HOLD, SCOPE_OUT, EQUIP
     }
 
+    /** One client-clock sequence of the weapon, or {@code null} when it has none. */
+    private ItemFrames.Sequence sequence(WeaponDefinition weapon, String name) {
+        if (!clientClock || weapon.frames() == null || name == null) {
+            return null;
+        }
+        ItemFrames.Sequence sequence = weapon.frames().plan().sequence(name);
+        return sequence != null && sequence.animates() ? sequence : null;
+    }
+
+    /**
+     * Starts a clip on the client's own clock: one state write and one item
+     * cooldown, then the client walks the clip's frames every rendered frame
+     * with no further packets. Returns false when this weapon has no such
+     * sequence, so the caller falls back to the server animator.
+     *
+     * <p>The cooldown is per material and is read by the pack's cooldown
+     * dispatch — the same tinted countdown vanilla draws over a hotbar item is
+     * the animation's clock.</p>
+     */
+    private boolean startSequence(Player player, Session session, WeaponDefinition weapon,
+                                  String name, int ticks, Pose pose) {
+        ItemFrames.Sequence sequence = sequence(weapon, name);
+        if (sequence == null) {
+            return false;
+        }
+        if (session.animator != null && session.animator.active()) {
+            session.animator.stop();
+        }
+        session.pose = pose;
+        writeFrame(player, session, weapon, sequence.gateState());
+        player.setCooldown(weapon.backingMaterial(), Math.max(1, ticks));
+        session.sequenceTicks = Math.max(1, ticks);
+        return true;
+    }
+
+    private void clearCooldown(Player player, WeaponDefinition weapon) {
+        if (clientClock) {
+            player.setCooldown(weapon.backingMaterial(), 0);
+        }
+    }
+
     private void playShotPose(Player player, Session session, WeaponDefinition weapon) {
+        // While the sights are up, the aim pose IS the shot pose: the gun does
+        // not drop out of the scope between rounds. The muzzle flash, tracer
+        // and the widening cone carry the shot instead.
+        if (session.scoped && weapon.scope() && hasScopeHold(weapon)) {
+            session.pendingCycle = false;
+            return;
+        }
         String fireClip = weapon.fireClip();
+        boolean hasCycle = canCycle(weapon);
+        if (startSequence(player, session, weapon, fireClip, FIRE_POSE_TICKS, Pose.FIRE)) {
+            session.pendingCycle = hasCycle;
+            return;
+        }
         boolean hasFire = session.animator != null && fireClip != null
                 && weapon.frames() != null && weapon.frames().hasClip(fireClip);
-        boolean hasCycle = canCycle(weapon);
         if (hasFire) {
             session.pendingCycle = hasCycle;
             startPose(player, session, weapon, fireClip, FIRE_POSE_TICKS, Pose.FIRE);
@@ -650,32 +788,51 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                 && weapon.frames() != null && weapon.frames().hasClip(weapon.cycleClip());
     }
 
+    /** True when the weapon has a pose to hold while scoped. */
+    private static boolean hasScopeHold(WeaponDefinition weapon) {
+        return weapon.frames() != null && weapon.scopeHoldClip() != null
+                && weapon.frames().hasClip(weapon.scopeHoldClip());
+    }
+
     private void playScopePose(Player player, Session session, WeaponDefinition weapon) {
-        if (session.animator == null || weapon.frames() == null) {
+        if (weapon.frames() == null) {
             rest(player, session, weapon);
             return;
         }
         if (session.scoped) {
-            if (!startPose(player, session, weapon, weapon.scopeInClip(), SCOPE_IN_TICKS, Pose.SCOPE_IN)) {
+            if (!startSequence(player, session, weapon, weapon.scopeInClip(), SCOPE_IN_TICKS, Pose.SCOPE_IN)
+                    && !startPose(player, session, weapon, weapon.scopeInClip(), SCOPE_IN_TICKS, Pose.SCOPE_IN)) {
                 startScopeHold(player, session, weapon);
             }
-        } else if (!startPose(player, session, weapon, weapon.scopeOutClip(), SCOPE_OUT_TICKS, Pose.SCOPE_OUT)) {
+        } else if (!startSequence(player, session, weapon, weapon.scopeOutClip(), SCOPE_OUT_TICKS,
+                Pose.SCOPE_OUT)
+                && !startPose(player, session, weapon, weapon.scopeOutClip(), SCOPE_OUT_TICKS,
+                        Pose.SCOPE_OUT)) {
             rest(player, session, weapon);
         }
     }
 
     private void startScopeHold(Player player, Session session, WeaponDefinition weapon) {
         String clip = weapon.scopeHoldClip();
-        if (clip == null || session.animator == null || weapon.frames() == null
-                || !weapon.frames().hasClip(clip)) {
+        if (clip == null || weapon.frames() == null || !weapon.frames().hasClip(clip)) {
             rest(player, session, weapon);
             return;
         }
         var frameClip = weapon.frames().clip(clip);
         if (frameClip != null && frameClip.frameCount() <= 1) {
-            // A one-frame hold is static: write it once and stop ticking.
+            // A one-frame hold is static: write it once and keep the pose until
+            // the player leaves the scope. This is also the client-clock path —
+            // a held pose needs no cooldown, only the state.
+            if (session.animator != null && session.animator.active()) {
+                session.animator.stop();
+            }
+            session.sequenceTicks = 0;
             writeFrame(player, session, weapon, weapon.frames().stateAtProgress(clip, 1.0f));
-            session.pose = Pose.NONE;
+            session.pose = Pose.SCOPE_HOLD;
+            return;
+        }
+        if (session.animator == null) {
+            rest(player, session, weapon);
             return;
         }
         session.animator.stop();
@@ -687,6 +844,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     }
 
     private void playEquipPose(Player player, Session session, WeaponDefinition weapon) {
+        if (startSequence(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
+            return;
+        }
         if (!startPose(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
             rest(player, session, weapon);
         }
@@ -720,12 +880,20 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         }
         Pose finished = session.pose;
         animator.stop();
+        finishPose(player, session, weapon, finished);
+    }
+
+    /** What a finished pose hands off to: the next clip, the scope hold, or rest. */
+    private void finishPose(Player player, Session session, WeaponDefinition weapon, Pose finished) {
         session.pose = Pose.NONE;
         switch (finished) {
             case FIRE -> {
                 if (session.pendingCycle && canCycle(weapon)) {
                     session.pendingCycle = false;
-                    startPose(player, session, weapon, weapon.cycleClip(), weapon.cycleTicks(), Pose.CYCLE);
+                    if (!startSequence(player, session, weapon, weapon.cycleClip(),
+                            Math.max(1, weapon.cycleTicks()), Pose.CYCLE)) {
+                        startPose(player, session, weapon, weapon.cycleClip(), weapon.cycleTicks(), Pose.CYCLE);
+                    }
                 } else if (session.scoped && weapon.scope()) {
                     startScopeHold(player, session, weapon);
                 } else {
@@ -754,6 +922,8 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             session.animator.stop();
         }
         session.pose = Pose.NONE;
+        session.sequenceTicks = 0;
+        clearCooldown(player, weapon);
         if (weapon.frames() == null) {
             return;
         }
@@ -820,6 +990,11 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             if (shooter == null) {
                 return true;
             }
+            if (hit.target() instanceof LivingEntity victim
+                    && !WeaponHitEvent.allow(shooter, victim, hit.damage(), hit.travelled(),
+                            hit.headshot())) {
+                return false;
+            }
             long now = System.currentTimeMillis();
             Long last = hitmarkAt.get(shooter.getUniqueId());
             if (last != null && now - last < HITMARK_INTERVAL_MILLIS) {
@@ -855,6 +1030,8 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         private boolean pendingCycle;
         private String hudSignature;
         private int frameState = Integer.MIN_VALUE;
+        /** Ticks left in the client-clock sequence being played, 0 when idle. */
+        private int sequenceTicks;
 
         private Session(UUID playerId, WeaponDefinition weapon,
                         ItemMagazine.Live magazine, ItemFrameAnimator animator) {

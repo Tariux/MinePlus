@@ -6,13 +6,19 @@ import com.mineplus.infrastructure.fx.ParticleFx;
 import com.mineplus.infrastructure.mob.BehaviorContext;
 import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobProfile;
+import com.mineplus.infrastructure.mob.action.AttackNearestAction;
 import com.mineplus.infrastructure.mob.action.EatPlantsAction;
 import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
+import com.mineplus.infrastructure.mob.custom.CustomMobAttributes;
+import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
+import com.mineplus.infrastructure.mob.custom.CustomMobModel;
 import com.mineplus.infrastructure.mob.group.Formation;
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.Bukkit;
@@ -68,6 +74,13 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       profile is gated by {@code notBuilder}, and the journey's activity
  *       claim means no other villager showcase can pull a marching pilgrim
  *       somewhere else.</li>
+ *   <li><b>Evil Pig</b> — the first <em>custom</em> mob, not a profile on a
+ *       vanilla mob: a vanilla pig base with a Mineplus identity
+ *       ({@code mobfun:evil_pig}), the vanilla pig model and a replacement
+ *       texture, no vanilla AI at all, and one Core action
+ *       ({@code attack_nearest}) that hunts the nearest player or villager.
+ *       Registered through {@code CustomMobApi}; spawned through
+ *       {@code /mobfun spawn evilpig}.</li>
  * </ul>
  *
  * <p>Rates are tuned for demonstration (fires are observable within seconds
@@ -87,7 +100,9 @@ public final class MobFunPlugin extends JavaPlugin {
 
     private PluginContext context;
     private MobFunSubCommand command;
-    private final List<MobFunShowcase> showcases = new ArrayList<>();
+    private final List<MobFunShowcaseEntry> showcases = new ArrayList<>();
+    /** Embedded Evil Pig texture; also the factory's stable source on re-enable. */
+    private byte[] evilPigTexture;
 
     @Override
     public void onEnable() {
@@ -182,7 +197,15 @@ public final class MobFunPlugin extends JavaPlugin {
                 .condition(BehaviorConditions.notBuilder(this))
                 .build()));
 
-        for (MobFunShowcase showcase : showcases) {
+        evilPigTexture = loadResource("mobs/evil_pig.png");
+        if (evilPigTexture != null) {
+            showcases.add(new CustomMobShowcase(this, context.customMobs(), "evilpig", "Evil Pig",
+                    EntityType.PIG, this::evilPigDefinition));
+        } else {
+            getLogger().severe("Evil Pig NOT registered: resource mobs/evil_pig.png is missing from the jar.");
+        }
+
+        for (MobFunShowcaseEntry showcase : showcases) {
             try {
                 showcase.start();
             } catch (Exception exception) {
@@ -200,8 +223,49 @@ public final class MobFunPlugin extends JavaPlugin {
 
         getLogger().info("[MobFun] " + showcases.size()
                 + " showcases (Grazer Cow, Grazing Sheep, Reforesting Pig, Lamplighter Villager, Florist Bee,"
-                + " Golem Guardian Villager, Frost Builder Villager, Necromancer Witch, Pilgrim Villager)"
-                + " enabled on top of Mineplus Core.");
+                + " Golem Guardian Villager, Frost Builder Villager, Necromancer Witch, Pilgrim Villager,"
+                + " Evil Pig) enabled on top of Mineplus Core.");
+    }
+
+    /**
+     * The Evil Pig: the vanilla pig model with a replacement texture, its own
+     * identity and exactly one behavior. Vanilla AI is cleared by the Core on
+     * spawn, so every action this mob takes comes from {@code attack_nearest}.
+     * A definition with no model would still work (the base pig stays visible);
+     * the model is what makes it "evil".
+     */
+    private CustomMobDefinition evilPigDefinition() {
+        CustomMobModel model = CustomMobModel.vanilla(EntityType.PIG, evilPigTexture);
+        return CustomMobDefinition.builder("mobfun:evil_pig", EntityType.PIG, model)
+                .displayName("Evil Pig")
+                .showName(true)
+                .attributes(CustomMobAttributes.builder()
+                        .maxHealth(12.0)
+                        .movementSpeed(0.28)
+                        .attackDamage(4.0)
+                        .followRange(24.0)
+                        .knockbackResistance(0.1)
+                        .build())
+                .behavior(profile -> profile
+                        .priority(BehaviorPriority.EVIL_PIG)
+                        .action(AttackNearestAction.builder()
+                                .searchRadius(18.0)
+                                .reach(2.5)
+                                .speed(1.2)
+                                .damage(4.0)
+                                .cooldownTicks(20L)
+                                .knockback(0.4)
+                                .build(), 1.0))
+                .build();
+    }
+
+    private byte[] loadResource(String path) {
+        try (InputStream stream = getResource(path)) {
+            return stream == null ? null : stream.readAllBytes();
+        } catch (IOException unreadable) {
+            getLogger().severe("Could not read embedded resource '" + path + "': " + unreadable.getMessage());
+            return null;
+        }
     }
 
     @Override

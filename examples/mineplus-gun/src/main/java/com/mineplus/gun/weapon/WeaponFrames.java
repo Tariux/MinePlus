@@ -75,6 +75,38 @@ public final class WeaponFrames {
     }
 
     /**
+     * The classified model stems of one gun folder, in play order.
+     *
+     * <p>{@code allStems} is the input order-independent sorted whole; the
+     * pose lists are the stems of each recognised animation, already ordered by
+     * their numeric token sequence ({@code loading_0}, {@code loading_0_t1},
+     * {@code loading_0_t2}, {@code loading_1}, …).</p>
+     */
+    public record Layout(String idleStem, String loadedStem,
+                         List<String> reloadStems, List<String> fireStems,
+                         List<String> equipStems, List<String> cycleStems,
+                         List<String> scopeInStems, List<String> scopeHoldStems,
+                         List<String> scopeOutStems, List<String> otherStems,
+                         List<String> allStems) {
+
+        public boolean hasReload() {
+            return reloadStems.size() >= 2;
+        }
+
+        public boolean hasFire() {
+            return !fireStems.isEmpty();
+        }
+
+        public boolean hasEquip() {
+            return !equipStems.isEmpty();
+        }
+
+        public boolean hasCycle() {
+            return !cycleStems.isEmpty();
+        }
+    }
+
+    /**
      * The frame spec of one weapon from its model stems. Exposed separately so
      * an explicit config can reuse the classifier if it wants to.
      */
@@ -82,6 +114,52 @@ public final class WeaponFrames {
         if (id == null || id.isBlank() || stems == null || stems.isEmpty()) {
             return null;
         }
+        Layout layout = layout(id, stems);
+        List<String> reload = layout.reloadStems();
+        List<String> fire = layout.fireStems();
+        String restStem = layout.loadedStem() != null ? layout.loadedStem() : layout.idleStem();
+
+        ItemFrames.Builder builder = ItemFrames.builder(reference(id, layout.idleStem()));
+        if (layout.loadedStem() != null) {
+            builder.loaded(reference(id, layout.loadedStem()));
+        }
+        if (!reload.isEmpty()) {
+            // The reload settles into the loaded pose: the last frame of the
+            // sequence (and of the legacy list) is the pose the gun ends in.
+            builder.reload(references(id, withRest(id, reload, restStem)));
+        }
+        if (!fire.isEmpty()) {
+            builder.fire(reference(id, fire.get(0)));
+            builder.clip("fire", references(id, withRest(id, fire, restStem)), 0, false);
+        }
+        if (!layout.scopeInStems().isEmpty()) {
+            String holdStem = layout.scopeHoldStems().isEmpty()
+                    ? restStem
+                    : layout.scopeHoldStems().get(0);
+            addClip(builder, id, "scope_in", withRest(id, layout.scopeInStems(), holdStem), false);
+        }
+        if (!layout.scopeHoldStems().isEmpty()) {
+            addClip(builder, id, "scope_hold", layout.scopeHoldStems(), true);
+        }
+        if (!layout.scopeOutStems().isEmpty()) {
+            addClip(builder, id, "scope_out", withRest(id, layout.scopeOutStems(), restStem), false);
+        }
+        if (!layout.equipStems().isEmpty()) {
+            addClip(builder, id, "equip", withRest(id, layout.equipStems(), restStem), false);
+        }
+        if (!layout.cycleStems().isEmpty()) {
+            addClip(builder, id, "cycle", withRest(id, layout.cycleStems(), restStem), false);
+        }
+
+        return ContentModel.ofFrames(builder.build(), List.copyOf(stems), texture);
+    }
+
+    /**
+     * Classifies every model stem of one gun folder. Generated tween frames
+     * ({@code loading_0_t3}, {@code fire_1}, …) classify exactly like authored
+     * ones, so a densified sequence needs no special case downstream.
+     */
+    public static Layout layout(String id, List<String> stems) {
         List<String> idle = new ArrayList<>();
         List<String> loaded = new ArrayList<>();
         List<String> reload = new ArrayList<>();
@@ -93,7 +171,9 @@ public final class WeaponFrames {
         List<String> cycle = new ArrayList<>();
         List<String> other = new ArrayList<>();
 
-        for (String stem : stems) {
+        List<String> sorted = new ArrayList<>(stems);
+        sorted.sort(Comparator.naturalOrder());
+        for (String stem : sorted) {
             String suffix = suffix(stem, id);
             if (matches(suffix, "loading", "reload", "load")) {
                 reload.add(stem);
@@ -118,9 +198,7 @@ public final class WeaponFrames {
             }
         }
 
-        Comparator<String> sequence = Comparator
-                .comparingInt((String stem) -> numericSuffix(stem, id))
-                .thenComparing(Comparator.naturalOrder());
+        Comparator<String> sequence = sequenceOrder(id);
         reload.sort(sequence);
         fire.sort(sequence);
         scopeIn.sort(sequence);
@@ -129,26 +207,11 @@ public final class WeaponFrames {
         equip.sort(sequence);
         cycle.sort(sequence);
 
-        String idleStem = pickIdle(id, stems, idle, other);
-        ItemFrames.Builder builder = ItemFrames.builder(reference(id, idleStem));
-
-        if (!loaded.isEmpty()) {
-            builder.loaded(reference(id, loaded.get(0)));
-        }
-        if (!reload.isEmpty()) {
-            builder.reload(references(id, reload));
-        }
-        if (!fire.isEmpty()) {
-            builder.fire(reference(id, fire.get(0)));
-            builder.clip("fire", references(id, fire), 0, false);
-        }
-        addClip(builder, id, "scope_in", scopeIn, false);
-        addClip(builder, id, "scope_hold", scopeHold, true);
-        addClip(builder, id, "scope_out", scopeOut, false);
-        addClip(builder, id, "equip", equip, false);
-        addClip(builder, id, "cycle", cycle, false);
-
-        return ContentModel.ofFrames(builder.build(), List.copyOf(stems), texture);
+        String idleStem = pickIdle(id, sorted, idle, other);
+        return new Layout(idleStem, loaded.isEmpty() ? null : loaded.get(0),
+                List.copyOf(reload), List.copyOf(fire), List.copyOf(equip), List.copyOf(cycle),
+                List.copyOf(scopeIn), List.copyOf(scopeHold), List.copyOf(scopeOut),
+                List.copyOf(other), List.copyOf(sorted));
     }
 
     private static String pickIdle(String id, List<String> stems, List<String> idle, List<String> other) {
@@ -176,6 +239,16 @@ public final class WeaponFrames {
         if (!stems.isEmpty()) {
             builder.clip(name, references(id, stems), 0, loop);
         }
+    }
+
+    /** Appends the pose the animation settles into when the list does not already end there. */
+    private static List<String> withRest(String id, List<String> stems, String restStem) {
+        List<String> out = new ArrayList<>(stems);
+        if (restStem != null && !restStem.isBlank()
+                && (out.isEmpty() || !out.get(out.size() - 1).equals(restStem))) {
+            out.add(restStem);
+        }
+        return out;
     }
 
     private static List<String> references(String id, List<String> stems) {
@@ -213,17 +286,49 @@ public final class WeaponFrames {
         return false;
     }
 
-    /** The trailing number of a frame name, or 0 when it has none. */
-    private static int numericSuffix(String stem, String id) {
-        String suffix = suffix(stem, id);
-        int underscore = suffix.lastIndexOf('_');
-        if (underscore >= 0 && underscore + 1 < suffix.length()) {
+    /**
+     * Play order inside one pose: numeric tokens compared as numbers, so
+     * {@code loading_2} precedes {@code loading_10} and a generated tween
+     * ({@code loading_0_t1}) lands between its two keyframes. A name with no
+     * number sorts ahead of the numbered frames of the same pose.
+     */
+    private static Comparator<String> sequenceOrder(String id) {
+        return (left, right) -> {
+            int compare = compareTokens(tokens(suffix(left, id)), tokens(suffix(right, id)));
+            return compare != 0 ? compare : left.compareTo(right);
+        };
+    }
+
+    /** Every run of digits in a stem, in order. */
+    private static List<Long> tokens(String text) {
+        List<Long> out = new ArrayList<>();
+        int index = 0;
+        while (index < text.length()) {
+            if (!Character.isDigit(text.charAt(index))) {
+                index++;
+                continue;
+            }
+            int start = index;
+            while (index < text.length() && Character.isDigit(text.charAt(index))) {
+                index++;
+            }
             try {
-                return Integer.parseInt(suffix.substring(underscore + 1));
-            } catch (NumberFormatException ignored) {
-                return 0;
+                out.add(Long.parseLong(text.substring(start, index)));
+            } catch (NumberFormatException overflow) {
+                out.add(Long.MAX_VALUE);
             }
         }
-        return 0;
+        return out;
+    }
+
+    private static int compareTokens(List<Long> left, List<Long> right) {
+        int limit = Math.min(left.size(), right.size());
+        for (int index = 0; index < limit; index++) {
+            int compare = Long.compare(left.get(index), right.get(index));
+            if (compare != 0) {
+                return compare;
+            }
+        }
+        return Integer.compare(left.size(), right.size());
     }
 }

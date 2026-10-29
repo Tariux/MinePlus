@@ -27,6 +27,17 @@ public interface PackApi {
     boolean isAvailable();
 
     /**
+     * True when this server presents items through modern item-model
+     * definitions (1.21.4+) rather than legacy {@code custom_model_data}
+     * predicates. Only the modern representation can serialize a client-clock
+     * animation, so a module checks this before deciding how to drive frame
+     * states. False when the subsystem is disabled or the server is older.
+     */
+    default boolean usesModernItemModels() {
+        return false;
+    }
+
+    /**
      * Registers a custom item: Mineplus identity, backing vanilla material,
      * and the registered model key that renders it. The item automatically
      * gains {@code ItemRegistry} recognition (PDC identity), and its
@@ -75,8 +86,44 @@ public interface PackApi {
      */
     void registerRawAsset(String namespace, String path, File file);
 
+    /**
+     * Registers a file whose bytes a subsystem composed in memory (a generated
+     * model JSON, a synthesized definition). The same entry re-registered by
+     * the same owner replaces the previous generation, so a derived asset can
+     * follow its source definition across reloads.
+     *
+     * @param namespace asset namespace
+     * @param path      output path under {@code assets/<ns>/}
+     * @param bytes     exact file contents
+     */
+    default void registerGeneratedAsset(String namespace, String path, byte[] bytes) {
+    }
     /** Creates the registered item's stack (identity + presentation), or null. */
     ItemStack createItem(String namespace, String id);
+
+    /**
+     * True when this server can present a generated model through an
+     * {@code ItemDisplay} — the capability a world renderer needs to build a
+     * rig out of per-part models. False when the pack is unavailable or the
+     * server predates the {@code item_model} component.
+     */
+    default boolean supportsGeneratedModelDisplay() {
+        return false;
+    }
+
+    /**
+     * The display stack for a generated model at an arbitrary pack path, or
+     * {@code null} when {@link #supportsGeneratedModelDisplay()} is false.
+     * Used by world renderers whose model paths are not item definitions
+     * (e.g. an entity rig's per-part models under {@code item/entity/...}).
+     *
+     * @param material      the invisible carrier material
+     * @param namespace     model namespace
+     * @param componentPath item-model path (slashes allowed)
+     */
+    default ItemStack createModelDisplay(org.bukkit.Material material, String namespace, String componentPath) {
+        return null;
+    }
 
     /** A player's current pack state; {@link PlayerPackState#UNKNOWN} when unprompted. */
     PlayerPackState playerPackState(UUID playerId);
