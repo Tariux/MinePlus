@@ -4,13 +4,22 @@ The `.ogg` samples in this folder are **not tracked in git** (see the module
 `.gitignore`). `sounds.json` (one level up) **is** tracked: it declares the
 additive `mineplusgun:` events the runtime plays.
 
-The module expects these files here for a full build:
+The module installs every `.ogg` here as
+`assets/mineplusgun/sounds/<name>.ogg` and mirrors `sounds.json` to
+`assets/mineplusgun/sounds.json`. The events it needs:
 
 ```
-shot1.ogg shot2.ogg shot3.ogg shot4.ogg
-reload_start.ogg reload_end.ogg empty.ogg
+pistol_shot        gun_bow
+shotgun_shot       gun_bow, crossbow_shoot4
+rifle_shot         crossbow_shoot1..3
+battle_rifle_shot  crossbow_shoot1..4
+reload_begin       crossbow_load_start, reload_start
+reload_mid         crossbow_load_mid1..4
+reload_done        crossbow_load_end, reload_end
+shot / heavy       shot1..4, heavy1..3
+empty              empty
 ```
 
-They are installed into the Core data folder and registered as
-`assets/mineplusgun/sounds/<name>.ogg`. Without them the module still fires and
-plays events, but the client has no sample to play (silent, never an error).
+Without the samples the module still fires and plays events, but the client has
+nothing to play (silent, never an error), and `Sounds` falls back to the vanilla
+event named alongside the custom one.

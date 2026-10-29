@@ -444,6 +444,7 @@ MOB_BEHAVIOR:
   MAX_BLOCK_EDITS_PER_RUN: 96
   MAX_ENTITY_SPAWNS_PER_RUN: 8
   MAX_SUSTAINED_PER_RUN: 64
+  MAX_PIPELINES_PER_RUN: 64
 
 ```
 
@@ -503,6 +504,7 @@ MOB_BEHAVIOR:
 | `MOB_BEHAVIOR.MAX_BLOCK_EDITS_PER_RUN` | edits 0-4096 | Hard ceiling of world block changes per run (default 96) — also clamps every `openEditSession` grant a module asks for |
 | `MOB_BEHAVIOR.MAX_ENTITY_SPAWNS_PER_RUN` | spawns 0-256 | Hard ceiling of entities summoned per run (default 8). Mob scenarios summon minions, golems and horses; an unbounded summon is the one way this subsystem can flood a tick |
 | `MOB_BEHAVIOR.MAX_SUSTAINED_PER_RUN` | entities 0-512 | Cap on scenario-claimed entities the sustained sweep advances per run even with no player near them — journeys and camps tick on (default 64) |
+| `MOB_BEHAVIOR.MAX_PIPELINES_PER_RUN` | pipelines 0-512 | Cap on multi-stage mob pipelines (locate → march → act) advanced per run, sharing the same processing budget (default 64). `0` pauses pipeline progress without detaching them |
 
 ---
 

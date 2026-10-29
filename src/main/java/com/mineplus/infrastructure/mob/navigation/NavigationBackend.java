@@ -39,6 +39,14 @@ interface NavigationBackend {
      */
     boolean moveTo(Mob mob, Location target, double speed);
 
+    /**
+     * Whether the backend can compute a path to {@code target} that reaches it.
+     * Backends without the query answer {@code true} ("unknown, do not veto").
+     */
+    default boolean canReach(Mob mob, Location target) {
+        return true;
+    }
+
     /** Drops the mob's current path (no-op when nothing is walking). */
     void stop(Mob mob);
 

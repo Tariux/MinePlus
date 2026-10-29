@@ -63,7 +63,8 @@ public final class MobFunSubCommand implements SubCommand {
 
     @Override
     public String description() {
-        return "MobFun behavior showcases (grazing cows/sheep, reforesting pigs, lamplighter villagers, florist bees)";
+        return "MobFun behavior showcases (grazing cows/sheep, reforesting pigs, lamplighter villagers, florist bees,"
+                + " raiding witches, pilgrim villagers)";
     }
 
     @Override
@@ -322,6 +323,11 @@ public final class MobFunSubCommand implements SubCommand {
                             + " structure-cache cooldown)");
             sender.sendMessage(ChatColor.DARK_GREEN + "Crews (engine state):");
             sendLines(sender, mobApi.crewSnapshot(STATUS_LINES), "  none marching");
+            sender.sendMessage(ChatColor.DARK_GREEN + "Squads (formations and roles):");
+            sendLines(sender, mobApi.squads().snapshot(STATUS_LINES), "  none shaped (crews walk plain formation points)");
+            sender.sendMessage(ChatColor.DARK_GREEN + "Pipelines (engine state):");
+            sendLines(sender, mobApi.pipelineSnapshot(STATUS_LINES),
+                    "  none running (a witch starts one when she finds a village to raid)");
             sender.sendMessage(ChatColor.DARK_GREEN + "Activity claims: " + ChatColor.WHITE
                     + claimedMobs());
         }

@@ -6,12 +6,12 @@ import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.config.WeaponConfigLoader;
 import com.mineplus.gun.feature.CombatFeature;
 import com.mineplus.gun.feature.HudFeature;
-import com.mineplus.gun.feature.MigrationFeature;
 import com.mineplus.gun.feature.ShopFeature;
 import com.mineplus.gun.feature.WeaponFeature;
 import com.mineplus.gun.hud.AmmoHud;
 import com.mineplus.gun.shop.EconomyBridge;
 import com.mineplus.gun.shop.ShopService;
+import com.mineplus.gun.weapon.WeaponAssets;
 import com.mineplus.gun.weapon.WeaponItemFactory;
 import com.mineplus.gun.weapon.WeaponRegistry;
 import com.mineplus.infrastructure.PluginContext;
@@ -25,10 +25,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 /**
  * MineplusGun — the combat/weapons module on top of the Mineplus Core.
  *
- * <p>Bootstrap mirrors the Core's other modules: build the shared services,
- * start every feature (install assets + register items/listeners, no reload),
- * perform exactly one coordinated {@code reloadAll()}, then register
- * {@code /mpgun} and {@code /mineplus gun}. Teardown runs in reverse.
+ * <p>Bootstrap mirrors the Core's other modules: install the shipped gun
+ * assets (models, textures, sounds) so frame discovery can read them, parse the
+ * config against that staging folder, build the shared services, start every
+ * feature (register items/listeners, no reload), perform exactly one
+ * coordinated {@code reloadAll()} — which recompiles the resource pack with the
+ * module's assets — then register {@code /mpgun} and {@code /mineplus gun}.
+ * Teardown runs in reverse.</p>
  */
 public final class MineplusGunPlugin extends JavaPlugin {
 
@@ -57,7 +60,13 @@ public final class MineplusGunPlugin extends JavaPlugin {
         }
 
         saveDefaultConfig();
-        GunConfig config = WeaponConfigLoader.load(getConfig());
+
+        // Assets first: frame discovery reads the installed model folder, so a
+        // gun folder works before anyone writes an animation block for it.
+        WeaponAssets.install(this, context);
+        WeaponAssets.register(this, context);
+
+        GunConfig config = WeaponConfigLoader.load(getConfig(), context.moduleSupport().dataFile(""));
 
         services = new GunServices(this, context);
         services.setConfig(config);
@@ -77,13 +86,13 @@ public final class MineplusGunPlugin extends JavaPlugin {
         features.add(new CombatFeature(this, context, services));
         features.add(new HudFeature(this, context, services));
         features.add(new ShopFeature(this, context, services));
-        features.add(new MigrationFeature(this, context, services));
 
         for (ModuleFeature feature : features) {
             feature.start();
         }
 
-        // One coordinated load of everything the features just installed.
+        // One coordinated load of everything the features just installed and
+        // registered; the pack recompiles here with the gun assets.
         context.jsonInfrastructureApi().reloadAll();
 
         registerCommands();

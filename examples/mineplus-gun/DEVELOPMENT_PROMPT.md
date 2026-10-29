@@ -96,9 +96,11 @@ Everything the module ships is a **pack asset**; nothing vanilla is touched.
 
 The frame models are the **imported pack frames** — the guns' own `idle`,
 `loading_N` and `primed` geometry, imported verbatim from the source packs by
-`tools/import-western-models.ps1`. The `fire` pose is *authored on top of*
-them and is deliberately not produced by the import, so re-importing never
-overwrites it.
+`tools/import-western-frames.js` (mapping `loading_N → reloadN`,
+`primed`/`_loaded → loaded`, deleting frames the source no longer has). The
+same import authors each weapon's `fire` pose from its own loaded model with a
+fixed recoil, so every gun has a distinct shooting pose and a re-import
+regenerates the whole set consistently.
 
 Frame naming is fixed by the Core's `ItemFrames` math: state `0` is idle,
 `1..N` are the reload frames in order, `N+1` is the loaded state and `N+2` is
@@ -114,7 +116,7 @@ settings:
   language: en
   hud:
     mode: ACTIONBAR            # ACTIONBAR | BOSSBAR | OFF
-    template: "&e{weapon} &7| &f{mag}&7/&f{reserve} &7| &b{mode}"
+    template: "{mag}&8/&7{reserve}"
     low-ammo-threshold: 2
   disabled-worlds: []          # gameplay (firing/shop use) disabled in these worlds
   pvp-only: false              # only damage players, never other living entities
@@ -145,16 +147,22 @@ weapons:
       loaded: loaded
       fire: fire
       texture: western_pistol.png
-    ammo: { magazine: 6, reload-ticks: 50 }
+    ammo: { magazine: 6, reload-ticks: 34 }
     ballistics: { damage: 10.0, headshot-multiplier: 2.0, velocity: 3.2, gravity: 0.03, drag: 0.01, range: 70, spread-degrees: 1.2, falloff-start: 30, falloff-per-block: 0.03 }
     fire: { mode: SEMI, rpm: 280 }
     fx: { muzzle: SMOKE, flash: FLAME, smoke: SMOKE, spark: SMALL_FLAME, tracer: CRIT, impact: CRIT, impact-smoke: CLOUD, sound-fire: "mineplusgun:shot" }
 ```
 
+`fire.cycle-ticks` turns the frame list into a per-shot action: after every
+shot the gun plays `1..N` over that many ticks and only then may fire again
+(the western rifle works its six poses, the lever rifle its five). `0` (the
+default) keeps the animation for reloads only.
+
 `WeaponConfigLoader` must: reject an unknown `fire.mode`, clamp `rpm` to
-`[30, 1200]`, clamp velocity/gravity/drag/penetration/ricochet to sane
-ranges, default every missing field, and **log (not throw)** on a bad weapon
-so one typo never disables the module.
+`[30, 1200]`, clamp `cycle-ticks` to `[0, 200]`, clamp
+velocity/gravity/drag/penetration/ricochet to sane ranges, default every
+missing field, and **log (not throw)** on a bad weapon so one typo never
+disables the module.
 
 ### 4.1 The carrier (`backing-material`)
 

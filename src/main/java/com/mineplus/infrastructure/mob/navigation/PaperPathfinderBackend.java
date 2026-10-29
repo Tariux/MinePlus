@@ -38,9 +38,27 @@ final class PaperPathfinderBackend implements NavigationBackend {
     @Override
     public boolean moveTo(Mob mob, Location target, double speed) {
         try {
-            return mob.getPathfinder().moveTo(target, speed);
+            var pathfinder = mob.getPathfinder();
+            // Vanilla's own mob navigation opens doors and floats in water;
+            // Paper's Pathfinder defaults both off, which is why a mob given a
+            // destination behind a village door used to stop at the door.
+            pathfinder.setCanOpenDoors(true);
+            pathfinder.setCanPassDoors(true);
+            pathfinder.setCanFloat(true);
+            return pathfinder.moveTo(target, speed);
         } catch (Throwable failure) {
             return false;
+        }
+    }
+
+    /** Asks the pathfinder for a real path and whether it reaches the target. */
+    @Override
+    public boolean canReach(Mob mob, Location target) {
+        try {
+            var result = mob.getPathfinder().findPath(target);
+            return result != null && result.canReachFinalPoint();
+        } catch (Throwable failure) {
+            return true; // unknown, never veto a walk on a probe failure
         }
     }
 

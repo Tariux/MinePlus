@@ -63,7 +63,13 @@ public final class HudService {
     private static final Settings DEFAULT_SETTINGS = new Settings(Mode.ACTIONBAR, null);
 
     private final Set<UUID> hidden = ConcurrentHashMap.newKeySet();
-    private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
+    /**
+     * One boss bar per player <em>per slot</em>. Keying only by player made two
+     * modules sharing the service write into one bar — the last module to
+     * update owned the title, and either module clearing on quit removed the
+     * other's bar as well.
+     */
+    private final Map<UUID, Map<String, BossBar>> bars = new ConcurrentHashMap<>();
     private final Map<String, Settings> slots = new ConcurrentHashMap<>();
 
     /** Applies new HUD settings (mode + template); players keep their toggle. */
@@ -121,7 +127,7 @@ public final class HudService {
             return;
         }
         if (current.mode() == Mode.BOSSBAR) {
-            bossBar(player, title, progress, tone);
+            bossBar(player, slot, title, progress, tone);
         } else {
             player.spigot().sendMessage(ChatMessageType.ACTION_BAR,
                     TextComponent.fromLegacyText(title));
@@ -138,11 +144,13 @@ public final class HudService {
         update(player, slot, ChatColor.RED + text, 0.0f, Tone.LOW);
     }
 
-    /** Removes any boss bar tied to one player. */
+    /** Removes every boss bar tied to one player, in every slot. */
     public void clear(UUID playerId) {
-        BossBar bar = bars.remove(playerId);
-        if (bar != null) {
-            bar.removeAll();
+        Map<String, BossBar> owned = bars.remove(playerId);
+        if (owned != null) {
+            for (BossBar bar : owned.values()) {
+                bar.removeAll();
+            }
         }
     }
 
@@ -152,18 +160,23 @@ public final class HudService {
      * HUD of another one that the player had turned off.
      */
     public void clearAll() {
-        for (BossBar bar : bars.values()) {
-            bar.removeAll();
+        for (Map<String, BossBar> owned : bars.values()) {
+            for (BossBar bar : owned.values()) {
+                bar.removeAll();
+            }
         }
         bars.clear();
     }
 
-    private void bossBar(Player player, String title, float progress, Tone tone) {
-        BossBar bar = bars.computeIfAbsent(player.getUniqueId(), ignored -> {
-            BossBar created = Bukkit.createBossBar(title, BarColor.GREEN, BarStyle.SEGMENTED_10);
-            created.addPlayer(player);
-            return created;
-        });
+    private void bossBar(Player player, String slot, String title, float progress, Tone tone) {
+        String key = slot == null || slot.isBlank() ? DEFAULT_SLOT : slot;
+        BossBar bar = bars.computeIfAbsent(player.getUniqueId(),
+                        ignored -> new ConcurrentHashMap<>())
+                .computeIfAbsent(key, ignored -> {
+                    BossBar created = Bukkit.createBossBar(title, BarColor.GREEN, BarStyle.SEGMENTED_10);
+                    created.addPlayer(player);
+                    return created;
+                });
         bar.setTitle(title);
         if (progress >= 0.0f) {
             bar.setProgress(Math.max(0.0f, Math.min(1.0f, progress)));

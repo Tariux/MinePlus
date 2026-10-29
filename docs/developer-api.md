@@ -410,13 +410,13 @@ DamageTransactions.apply(victim, 6.0, player);
   magazine).
 - **`DamageTransactions.inProgress()`** is the re-entrancy flag: a module whose
   own damage fires `EntityDamageByEntityEvent` back into its listener checks it
-  (the gun's melee path stands down while a transaction runs).
+  (the gun's hit path stands down while a transaction runs).
 - Telemetry: `context.ballistics().telemetrySummary()` (active/total rounds,
   hits, degraded shots) and `particleFx().emitted()` / `dropped()`.
 
 **Complete working module:** [`examples/mineplus-gun`](../examples/mineplus-gun/README.md)
-— firearms, melee, throwables and the reload/animation state machine, all on
-these surfaces; the feature code owns only weapon definitions and HUD.
+— firearms, the reload/pose state machine and a Vault shop, all on these
+surfaces; the feature code owns only weapon definitions and HUD.
 
 ---
 
@@ -464,6 +464,7 @@ a higher priority never steals a mob on its own.
 | Navigation | `navigateTo(target, speed)`, `navigateToWithin(target, stopDistance, speed)`, `stopNavigation()` — through `MobNavigator`, which tries Paper's public `Pathfinder` API first and falls back to the reflective NMS/Brain channel on Spigot. It never teleports and never spawns: movement is always the entity's own vanilla walk, so the client's motion stays authoritative. |
 | Journeys | `advanceJourney(...)`, `abandonJourney()`, `isJourneying()`, `journeyDestination()`, `journeys()` |
 | Crews | `joinCrew(crew, leader, goal)`, `rallyCrew`, `crewRejoin`, `crewRally`, `setCrewRally`, `crewSpread`, `crewLeader`, `crewGoal`, `crewMembers`, `isCrewLeader`, `leaveCrew`, `disbandCrew` |
+| Formations | `setCrewFormation(crew, Formation)`, `crewFormation(crew)`, `setCrewRole(crew, SquadRole)`, `crewRole(crew)` — a crew's shape around its formation point (wedge, column, pincer, ring) and each member's role in it |
 | Structures | `nearestStructure(key, maxRadiusChunks)` — async-chunk-safe lookup through `StructureLookup`, cached per region |
 
 `BehaviorContext.Conditions` is the shared predicate vocabulary: `inWorld`,
@@ -485,10 +486,15 @@ BehaviorAction pilgrim = JourneyToStructureAction.builder()
         .cohesionRadius(8).recruitRadius(16)
         .marchLeg(24)                         // how far the formation point advances per step
         .gatherRadius(6)                      // how close the crew must be to camp
+        .formation(Formation.WEDGE)           // the shape the crew walks in
         .restAtNight(true)
         .callbacks(new JourneyToStructureAction.Callbacks() {
             @Override public boolean onNight(BehaviorContext ctx, Location campSite) {
                 // raise the camp; return false to retry later the same night
+                return true;
+            }
+            @Override public boolean onDawn(BehaviorContext ctx, Location campSite) {
+                // clear the camp; return false to retry on the next roll
                 return true;
             }
             @Override public void onArrival(BehaviorContext ctx, Location destination) { }
@@ -536,6 +542,131 @@ Day and night are read through `WorldTimes` (`isNight`, `dayIndex`,
 `World#getTime()` / `getFullTime()` its own way. `JourneyRunner`'s internal
 cooldowns use `World#getGameTime()`, which `/time set` cannot stall.
 
+#### Route planning: legs that go around obstacles
+
+Each leg is not a straight line. `JourneyRunner` asks `RoutePlanner` for the
+next waypoint, and the planner first samples the straight line with a handful
+of block reads:
+
+- clear ground, no cliff, no water → the straight leg is returned unchanged,
+  so an open-field march costs almost nothing;
+- an obstacle → a bounded A\* search over a 25×25-cell window (2-block cells,
+  ≤256 expansions) finds a walkable line around it. Water is crossable but
+  priced, drops up to four blocks are allowed, cliffs and lava are blocked, and
+  the result is normalised by `GroundProbe` before the mob is sent to it.
+
+Planning is **segmented** (a rolling window, not a 2,000-block monolith): the
+route ahead is replanned every leg, when its chunks are loaded, so the plan
+never guesses at unloaded terrain. Searches share a wall-clock budget (24 per
+50 ms across all mobs); past that the runner keeps its straight leg instead of
+spending the tick on planning. A stall that survives the sideways detour earns
+exactly one full reroute before the journey reports `STUCK`.
+
+Two limits are deliberate, not missing features: the planner never teleports a
+mob (movement is always the entity's own vanilla walk, so the client's motion
+stays authoritative), and the whole mob subsystem is main-thread by design —
+it is scheduler-agnostic in the sense that it never assumes a thread it was not
+called on, but it does not claim Folia region-thread execution.
+
+#### Formations, roles and flocking
+
+A formation point says *where* the crew is; a formation says *how* it stands
+around it. `Formation.NONE` (the default) keeps the plain point, so nothing
+changes for existing crews. The others assign each member a slot in the crew's
+own frame (forward along the direction of travel, lateral beside it):
+
+| Formation | Shape |
+|---|---|
+| `COLUMN` | one behind the other — doorways, caves, bridges |
+| `LINE` | shoulder to shoulder across the route |
+| `WEDGE` | a V with the leader at its point — broad front |
+| `RUSH` | a loose charge, members spread but all pressing forward |
+| `PINCER` | two wings approaching the formation point from opposite sides |
+| `SURROUND` | a ring around the formation point — encirclement |
+
+`SquadRole` (`LEADER`, `TANK`, `BREAKER`, `FLANKER`, `SUPPORT`, `SNIPER`,
+`DISTRACTOR`) nudges a member's slot and spacing, so a tank walks the front and
+a sniper the back of the same wedge. Roles are optional and free when unused.
+
+Separation comes from `FlockSteering`: a member with neighbours inside the
+separation radius gets a small capped sideways push, so five villagers do not
+stack on one block and a crew can actually pass a doorway. Cohesion is the
+formation point and alignment is the shared route — nothing extra is simulated.
+
+```java
+// after the mob has joined its crew
+context.setCrewFormation("pilgrims", Formation.WEDGE);
+context.setCrewRole("pilgrims", SquadRole.SUPPORT);
+
+mob.squads().setFormation(crewKey, Formation.PINCER);   // identity-keyed API
+mob.squads().snapshot(10);                              // status output
+```
+
+### Settler pipelines: locate → travel → settle → build
+
+`SettlerPipeline` assembles the four phases every "move there and live there"
+scenario needs, leaving only the build step to the module:
+
+```java
+MobPipeline settle = SettlerPipeline.builder("pilgrim_settle")
+        .locateVillage()                       // cached, bell-anchored lookup
+        .march(JourneyRunner.Options.defaults())// legs, routing, stall recovery
+        .settle(6.0, 40L)                      // home spot within 6 blocks, 2s pause
+        .onSettled(context -> buildCamp(context)) // your build step, runs once
+        .build();
+
+mob.assignPipeline(this, villager, settle);
+```
+
+`SettleStage` picks a **standable home spot** within the radius of the anchor
+(rather than standing on the structure's single feature block) and stores it on
+the blackboard as `<destinationKey>#home`, so the build callback places blocks
+around the same spot. Pipelines give you the state machine for free: the engine
+ticks only the current stage, so the mob is in exactly one phase at a time, and
+the blackboard carries the village between them.
+
+### Pipelines: multi-stage scenarios
+
+A single action is one decision; some scenarios are phases. A `MobPipeline` is
+an immutable, shareable definition — find a village, march there, raid it —
+that the engine attaches to one mob and advances every behavior pass. All
+per-mob state lives in the `PipelineContext` blackboard, the pipeline holds an
+exclusive activity claim while it runs (so no ordinary profile pulls the mob
+mid-march), and each stage has its own success condition and timeout:
+
+```java
+MobPipeline raid = MobPipeline.builder("necromancer_village_raid")
+        .stage(LocateStructureStage.village("find_village", "village"))
+        .stage(new JourneyStage("march", "village", "village",
+                JourneyRunner.Options.defaults()))
+        .stage(new MyRaidStage())                 // your own PipelineStage
+        .onComplete(ctx -> cooldown(ctx.mob()))
+        .onFailure((ctx, reason) -> log(reason))
+        .build();
+
+mob.assignPipeline(this, witch, raid);            // main thread only
+```
+
+- `LocateStructureStage.village(id, key)` searches through the engine's cached
+  structure lookup and writes a **walkable** centre onto the blackboard — a
+  village's bell when one is loaded, else its bed centroid, else a standable
+  cell beside the reported point.
+- `JourneyStage` walks to a blackboard location through the shared
+  `JourneyRunner` (follow-range legs, stall detours, chunk leases). Pass the
+  structure type and it re-anchors the destination once the mob is close enough
+  for the village's bell to be found.
+- Custom stages implement `PipelineStage` (`id()`, `tick(ctx)` returning
+  `StageResult.RUNNING|COMPLETE|FAILED`, optional `onEnter`/`onExit`/
+  `timeoutTicks()`). `ctx` exposes the mob, its world, `nearestStructure(...)`,
+  `advanceJourney(...)`, `navigateToWithin(...)`, `openEditSession(...)`,
+  claims and the blackboard.
+- The pipeline advances at most `MAX_PIPELINES_PER_RUN` at a time, shares the
+  run's millisecond budget, skips unloaded mobs (resuming on load), and ends
+  itself if a higher-priority action takes the mob over.
+- `pipelineOf(entity)` reads the live handle; `pipelineSnapshot(maxLines)`
+  reports live scenarios for status commands; `assignPipeline` on a mob that
+  already runs one replaces it.
+
 ### Budgets, arbitration and testing
 
 - The engine sweeps chunks around online players with **alternating parity**,
@@ -562,13 +693,14 @@ cooldowns use `World#getGameTime()`, which `/time set` cannot stall.
   entity right now and returns the per-action `BehaviorFireResult`
   (`FIRED` / `DECLINED` / `CONDITION_FAILED`) — the test hook behind
   `/mobfun spawn|fire <id> [force]`.
-- `telemetrySummary()`, `journeySnapshot(maxLines)` and `crewSnapshot(maxLines)`
-  are the operator-visible state; `unregisterAll(plugin)` runs on module disable.
+- `telemetrySummary()`, `journeySnapshot(maxLines)`, `crewSnapshot(maxLines)`
+  and `pipelineSnapshot(maxLines)` are the operator-visible state;
+  `unregisterAll(plugin)` runs on module disable.
 
 **Complete working module:** [`examples/mineplus-mobfun`](../examples/mineplus-mobfun/README.md)
 — grazers, a reforesting pig, a lamplighter villager, a florist bee, golem- and
-snow-golem-summoning builders, a necromancer witch with a terrain-adaptive minion
-horde, and the pilgrim villagers above.
+snow-golem-summoning builders, a necromancer witch who locates a village,
+marches there and raids it as a pipeline, and the pilgrim villagers above.
 
 ---
 

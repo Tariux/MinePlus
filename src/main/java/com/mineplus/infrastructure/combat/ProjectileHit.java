@@ -5,6 +5,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 /**
  * One resolved projectile landing: what it struck, where, how far the round had
@@ -12,11 +13,13 @@ import org.bukkit.entity.Player;
  *
  * <p>Damage is already resolved for falloff, penetration and ricochet losses
  * and the headshot bonus by the time a hit is reported, so a handler can apply
- * gameplay consequences without redoing the math.
+ * gameplay consequences without redoing the math. {@code direction} is the
+ * round's normalized travel vector at impact — the push direction for knockback
+ * and the axis a module needs for directional impact effects.
  */
 public record ProjectileHit(Location position, Entity target, Block block, BlockFace face,
                             double travelled, double damage, boolean headshot,
-                            Player shooter, BallisticProfile profile) {
+                            Player shooter, BallisticProfile profile, Vector direction) {
 
     /** {@code true} when the round struck a living thing rather than geometry. */
     public boolean isEntityHit() {

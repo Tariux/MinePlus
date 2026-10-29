@@ -64,12 +64,17 @@ public final class MobBehaviorEngine {
     private final BehaviorTelemetry telemetry = new BehaviorTelemetry();
     private final BehaviorContext evaluationContext = new BehaviorContext(this);
     /** Long-distance walking state, owned by the engine so one runner serves every module. */
-    private final JourneyRunner journeys = new JourneyRunner();
+    private final JourneyRunner journeys;
     /** Cached, cost-gated structure discovery (the village a pilgrim is looking for). */
     private final StructureLookup structures = new StructureLookup();
+    /** Formations and roles that shape a crew around its formation point. */
+    private final com.mineplus.infrastructure.mob.group.SquadManager squads =
+            new com.mineplus.infrastructure.mob.group.SquadManager();
     /** Groups of mobs that move as one (a pilgrim crew, an escort). */
     private final com.mineplus.infrastructure.mob.group.MobCrewService crews =
-            new com.mineplus.infrastructure.mob.group.MobCrewService();
+            new com.mineplus.infrastructure.mob.group.MobCrewService(squads);
+    /** Multi-stage scenarios attached to individual mobs (find, march, raid). */
+    private final com.mineplus.infrastructure.mob.pipeline.MobPipelineEngine pipelines;
     private final java.util.concurrent.atomic.AtomicLong registrationSequence =
             new java.util.concurrent.atomic.AtomicLong();
 
@@ -91,8 +96,13 @@ public final class MobBehaviorEngine {
                     ? Integer.compare(second.priority(), first.priority())
                     : Long.compare(first.sequence(), second.sequence());
 
-    /** Runs a claim may go unmatched to a loaded entity before it is treated as abandoned. */
-    private static final int CLAIM_UNRESOLVED_LIMIT = 20;
+    /**
+     * Runs a claim may go unmatched to a loaded entity before it is treated as
+     * abandoned. A journey crosses chunks that unload behind the mob, and the
+     * engine runs every few ticks — a short limit silently deleted long
+     * marches after a couple of seconds in unloaded terrain.
+     */
+    private static final int CLAIM_UNRESOLVED_LIMIT = 400;
 
     /**
      * An exclusive, self-renewing activity one action holds over an entity:
@@ -146,6 +156,8 @@ public final class MobBehaviorEngine {
     /** Called by the Core's {@code PluginContext#bootstrap}; one engine per Core. */
     public MobBehaviorEngine(Plugin plugin) {
         this.plugin = plugin;
+        this.journeys = new JourneyRunner(plugin);
+        this.pipelines = new com.mineplus.infrastructure.mob.pipeline.MobPipelineEngine(this);
     }
 
     /** The active engine settings snapshot. */
@@ -157,19 +169,54 @@ public final class MobBehaviorEngine {
         return telemetry;
     }
 
+    /** The Core plugin that owns the scheduler and chunk tickets. */
+    Plugin plugin() {
+        return plugin;
+    }
+
     /** The engine's shared long-walk runner. */
-    JourneyRunner journeys() {
+    public JourneyRunner journeys() {
         return journeys;
     }
 
     /** The engine's shared structure-discovery cache. */
-    StructureLookup structures() {
+    public StructureLookup structures() {
         return structures;
+    }
+
+    /** Multi-stage scenario runner (the pipeline API's execution half). */
+    public com.mineplus.infrastructure.mob.pipeline.MobPipelineEngine pipelines() {
+        return pipelines;
+    }
+
+    // ------------------------------------------------------------------
+    // Pipeline bridge: the pipeline package works on public surface only
+    // ------------------------------------------------------------------
+
+    /** Claims the entity for a pipeline activity (see {@link #claimActivity}). */
+    public void claimEntity(LivingEntity entity, String activityId, Location anchor, double anchorRadius,
+                            long durationTicks, int priority) {
+        claimActivity(entity, activityId, anchor, anchorRadius, durationTicks, priority);
+    }
+
+    /** Releases the entity's activity when {@code activityId} owns it. */
+    public boolean releaseEntityActivity(LivingEntity entity, String activityId) {
+        return releaseActivity(entity, activityId);
+    }
+
+    /** The action id currently owning the entity, or {@code null}. */
+    public String entityActivityId(LivingEntity entity) {
+        return activityIdOf(entity);
     }
 
     /** The engine's shared crew (group-movement) registry. */
     public com.mineplus.infrastructure.mob.group.MobCrewService crews() {
         return crews;
+    }
+
+    /** The engine's formation/role registry for crews. */
+    public com.mineplus.infrastructure.mob.group.SquadManager squads() {
+        return squads;
     }
 
     /**
@@ -180,7 +227,7 @@ public final class MobBehaviorEngine {
      * {@link MobBehaviorSettings#maxEntitySpawnsPerRun()} — so no module can ask
      * its way out of the subsystem's limits.
      */
-    MobEditSession openEditSession(int editBudget, int spawnBudget) {
+    public MobEditSession openEditSession(int editBudget, int spawnBudget) {
         int editCap = Math.max(1, settings.maxBlockEditsPerRun());
         int spawnCap = Math.max(1, settings.maxEntitySpawnsPerRun());
         return new MobEditSession(Math.min(Math.max(0, editBudget), editCap),
@@ -402,6 +449,7 @@ public final class MobBehaviorEngine {
         running = false;
         BukkitTask task = runTask;
         runTask = null;
+        pipelines.cancelAll();
         activities.clear();
         if (task != null) {
             task.cancel();
@@ -429,6 +477,9 @@ public final class MobBehaviorEngine {
         journeys.step();
         crews.step();
         long deadline = System.nanoTime() + snapshot.budgetMillisPerRun() * 1_000_000L;
+        // Scenarios first: a pipeline is a process, and a process that only
+        // advances while a player stands next to it never finishes.
+        pipelines.tick(deadline, snapshot.maxPipelinesPerRun());
         int buckets = Math.max(1, snapshot.staggerBuckets());
         int runIndex = runCounter++;
         RunGuard guard = new RunGuard(snapshot.maxBlockEditsPerRun(), snapshot.maxEntitySpawnsPerRun());
@@ -528,6 +579,10 @@ public final class MobBehaviorEngine {
             if (candidates == null || candidates.isEmpty()) {
                 continue;
             }
+            // Pipelines already advanced this entity in this run.
+            if (pipelines.owns(living)) {
+                continue;
+            }
             processed++;
             sustainedThisRun.add(living.getUniqueId());
             evaluate(living, living.getType(), candidates, snapshot, guard, deadline);
@@ -537,6 +592,11 @@ public final class MobBehaviorEngine {
     private void evaluate(LivingEntity entity, EntityType type, List<MobProfile> candidates,
                           MobBehaviorSettings snapshot, RunGuard guard, long deadline) {
         telemetry.candidateSeen();
+        // A pipeline owns the entity as a whole scenario. Ordinary actions must
+        // not pull it mid-march; the pipeline engine has already advanced it.
+        if (pipelines.owns(entity)) {
+            return;
+        }
         evaluationContext.refresh(entity, ThreadLocalRandom.current(), guard);
         double checksPerSecond = snapshot.checksPerSecond();
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -554,11 +614,17 @@ public final class MobBehaviorEngine {
             // A scenario with a higher priority may take the entity over: the
             // guardian of a villager under attack outranks the pilgrimage it
             // was walking. The challenger plays the odds like any other action
-            // and keeps the mob only by claiming it — a challenger that
-            // declines leaves the running scenario untouched.
+            // and keeps the mob only by claiming it.
+            //
+            // Everything short of a claim leaves the running scenario alone:
+            // a claim is a process, and it advances on every pass. A challenger
+            // that rolled no turn, declined, or acted without claiming (a
+            // lamplighter planting a torch next to a marching pilgrim) has not
+            // taken the mob over and must not cost the scenario this pass —
+            // skipping it was what made a claimed journey creep or stand still
+            // while higher-priority ambient actions went about their business.
             MobProfile challenger = challengerFor(activity, candidates);
             if (challenger != null) {
-                boolean tookTurn = false;
                 for (MobProfile.ActionEntry entry : challenger.actions()) {
                     if (System.nanoTime() >= deadline) {
                         telemetry.budgetDeferred();
@@ -569,7 +635,6 @@ public final class MobBehaviorEngine {
                     if (random.nextDouble() > odds) {
                         continue;
                     }
-                    tookTurn = true;
                     evaluationContext.bindProfile(challenger);
                     evaluationContext.bindAction(entry.action().id());
                     boolean fired;
@@ -582,14 +647,13 @@ public final class MobBehaviorEngine {
                     }
                     if (fired) {
                         telemetry.eventFired(entry.action().id());
+                    }
+                    ActiveActivity current = activityOf(entity);
+                    if (current == null || !current.actionId().equals(activity.actionId())) {
+                        // The challenger claimed the mob (or ended the claim):
+                        // the previous scenario no longer owns this pass.
                         return;
                     }
-                    // Declined: the challenger's next action gets its turn, and
-                    // the running scenario keeps the mob until one of them
-                    // claims it.
-                }
-                if (tookTurn) {
-                    return;
                 }
             }
             boolean found = false;
@@ -776,6 +840,11 @@ public final class MobBehaviorEngine {
             }
             spawns++;
             return true;
+        }
+
+        @Override
+        public int remainingEdits() {
+            return Math.max(0, editLimit - edits);
         }
     }
 }

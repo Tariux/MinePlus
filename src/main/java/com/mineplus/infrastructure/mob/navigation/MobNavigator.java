@@ -91,6 +91,72 @@ public final class MobNavigator {
     }
 
     /**
+     * Whether the server can compute a path from {@code mob} to {@code target}
+     * that actually reaches it.
+     *
+     * <p>This is a real path search, not a distance check — use it to validate a
+     * destination worth paying for (a journey's final goal, a raid target), not
+     * on every repath. Backends without the query answer {@code true}, so a
+     * server that cannot tell never has a walk vetoed.
+     */
+    public static boolean canReach(Mob mob, Location target) {
+        if (mob == null || mob.isDead() || !mob.isValid()
+                || target == null || target.getWorld() == null
+                || mob.getWorld() != target.getWorld()) {
+            return false;
+        }
+        boolean paperFirst = BACKENDS[0].preference(mob) <= BACKENDS[1].preference(mob);
+        NavigationBackend backend = BACKENDS[paperFirst ? 0 : 1];
+        if (!backend.available()) {
+            backend = BACKENDS[paperFirst ? 1 : 0];
+        }
+        return !backend.available() || backend.canReach(mob, target);
+    }
+
+    /** The distance one path search may span for this mob (see {@link MobAttributes}). */
+    public static double pathRange(Mob mob) {
+        return MobAttributes.pathRange(mob);
+    }
+
+    /**
+     * Turns the mob's head toward {@code target} without moving it — the
+     * finishing touch on a waypoint change, so a mob that stops to gather looks
+     * where it is going instead of at the wall it just avoided.
+     *
+     * <p>{@code Mob#lookAt} is Paper API; it is invoked reflectively so a Spigot
+     * server simply keeps vanilla head tracking.
+     */
+    public static void lookToward(Mob mob, Location target) {
+        if (mob == null || target == null || mob.getWorld() != target.getWorld()) {
+            return;
+        }
+        java.lang.reflect.Method lookAt = LookSeam.LOOK_AT;
+        if (lookAt == null) {
+            return;
+        }
+        try {
+            lookAt.invoke(mob, target);
+        } catch (Throwable unavailable) {
+            // A server whose Mob#lookAt has a different signature: vanilla
+            // head tracking is a fine fallback.
+        }
+    }
+
+    /** Lazily resolved Paper look control; {@code null} on Spigot. */
+    private static final class LookSeam {
+
+        private static final java.lang.reflect.Method LOOK_AT = find();
+
+        private static java.lang.reflect.Method find() {
+            try {
+                return Mob.class.getMethod("lookAt", Location.class);
+            } catch (Throwable missing) {
+                return null;
+            }
+        }
+    }
+
+    /**
      * Drops any current path; a stopped mob returns to its own vanilla AI.
      * Both channels are cleared: a march may have been issued through either,
      * and a leftover Brain walk-target would silently keep the mob walking.

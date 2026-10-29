@@ -1,202 +1,236 @@
 # MineplusGun
 
-A standalone [Mineplus](../../README.md) module that owns the combat/weapons
-ecosystem â€” firearms, melee and ammunition â€” as **fully additive**
-content. It never overrides a vanilla item, block, texture or sound.
+A standalone [Mineplus](../../README.md) module that owns the firearms
+ecosystem — guns, magazines, scopes and a Vault shop — as **fully additive**
+content. It never overrides a vanilla item, block, texture, model or sound.
 
-- **[PLAN.md](PLAN.md)** — the design: asset inventory & organization, physics
-  model, fire modes, HUD, particles/sounds, the Vault shop, Core enhancements,
-  pricing, phasing.
 - **[DEVELOPMENT_PROMPT.md](DEVELOPMENT_PROMPT.md)** — the build contract:
-  verified Core APIs, exact layout, phased tasks and acceptance criteria.
+  verified Core APIs, exact layout and acceptance criteria.
 
 ## Status
 
-v1 implemented: Phase 0 Core readiness (item `display` import/emit, module
-`/mineplus` subcommand registration, additive `WEAPON`/`AMMO` categories),
-Phase 1 presentation + shop, and Phase 2 shooting runtime — plus the Western
-content axis on the Core `ItemFrames` infrastructure: frame-animated weapons,
-magazine rounds drawn from the player's gold-nugget supply, multi-pellet
-scatter guns and melee.
+The final gun system. Every piece of the first implementation (bow/crossbow
+carriers, left-click fire, per-shot stack writes, hand-rolled frame lists, the
+retired nine-gun Western arsenal) is deleted, not deprecated. What is left:
+
+- four shipped guns driven entirely by `config.yml`;
+- presentation **discovered from the model files themselves** — no frame list
+  to keep in sync;
+- right-click to fire, left-click reserved for the scope, F to reload, empty
+  guns reload themselves;
+- recoil, movement inaccuracy, knockback, pellet scatter, penetration,
+  falloff, tracer/particle/sound feedback — all through the Core's ballistics,
+  held-item input, magazine, HUD and effect budgets;
+- an event-driven runtime: no per-tick player scan, no work while nobody
+  shoots.
 
 ## Quick facts
 
 | | |
 |---|---|
-| Plugin id | `MineplusGun` (`depend: [Mineplus]`, `softdepend: [Vault, packetevents]`) |
+| Plugin id | `MineplusGun` (`depend: [Mineplus]`, `softdepend: [Vault]`) |
 | Commands | `/mpgun …` and `/mineplus gun …` |
 | Item axis | `PackApi.registerItem` (additive `item_model`; legacy `CustomModelData` fallback) |
-| Physics | tick-stepped simulated bullets (gravity, drag, penetration, ricochet) |
-| Input | the Core's held-item seam: right-click is the only trigger (one click = one shot, whatever the client sends), left-click is inert, swap-hands reloads |
+| Physics | tick-stepped simulated rounds (gravity, drag, penetration, ricochet, falloff, knockback) |
+| Input | the Core's held-item seam: right-click fires, left-click scopes and is otherwise swallowed, swap-hands reloads |
+| Presentation | Core `ItemFrames` + `ItemFrameAnimator`, states discovered from `defaults/guns/<id>/models/` |
 | Economy | Vault; all prices config-driven; admins/bypass-permission never charged |
-| Assets | 9 Western frame-animated guns across three source packs (western_1: pistol + rifle, western_2: lever rifle + coach shotgun, western_3/musketmod: flintlock pistol, musket, scoped musket, bayonet musket, blunderbuss), imported via `tools/import-western-models.ps1` |
-
-## Combat scenario (per gun type)
-
-Cadence derives from `fire.rpm` (`⌈1200/rpm⌉` ticks between shots) and
-`ammo.reload-ticks`. SEMI/BOLT/PUMP need a genuine re-press — the Core's
-trigger state folds the packets of one physical click into a single press, so
-a click on a block (which the client answers with two packets) never fires
-twice, and a pull that arrives while the weapon is still cycling is queued
-and fired as soon as the weapon is ready instead of being dropped. A fully
-auto `AUTO` config keeps firing while the Core's trigger is held.
-
-| Weapon | Type / action | Shot latency | Magazine / salvage | Damage* | Feel |
-|---|---|---|---|---|---|
-| `western_pistol` | PISTOL, SEMI | 5 ticks (0.25 s) | 6 / reload 2.5 s | 10.0 | fast sidearm, spam-clickable |
-| `lever_rifle` | RIFLE, SEMI | 10 ticks (0.5 s) | 8 / reload 3 s | 13.0 | steady mid-range pressure |
-| `western_rifle` | RIFLE, BOLT | 26 ticks (1.3 s) | 5 / reload 3.25 s | 16.0 (+1 penetration) | deliberate precision, punishes misses |
-| `coach_shotgun` | SHOTGUN, PUMP | 16 ticks (0.8 s) | 6 ×4 pellets / reload 4 s | 7.0 ×4 | room-sweeper, falls off hard past 10 blocks |
-| `flintlock_pistol` | PISTOL, SEMI | 10 ticks (0.5 s) | 1 / ram 4.5 s | 17.0 | one honest shot, then a long exposed ram |
-| `flintlock_musket` | RIFLE, SEMI | 22 ticks (1.1 s) | 1 / ram 5 s | 23.0 (+1 penetration) | battlefield sniper |
-| `bayonet_musket` | RIFLE, SEMI | 20 ticks (1.0 s) | 1 / ram 5 s | 22.0 (+1 penetration) | same role, tuned a step closer-in |
-| `scope_musket` | RIFLE, BOLT | 24 ticks (1.2 s) | 1 / ram 5.5 s | 25.0 (+2 penetration) | held right-click scopes (spread ×0.35) |
-| `blunderbuss` | SHOTGUN, PUMP | 20 ticks (1.0 s) | 2 ×6 pellets / ram 3.5 s | 5.0 ×6 | despair funnel — devastating point-blank only |
-
-*Base damage; headshots multiply by `ballistics.headshot-multiplier` and every
-gun carries distance falloff from `falloff-start` at `falloff-per-block`
-(bounded by `min-damage-fraction`).
-
-Feedback stack on every shot, all of it Core-owned (`fx:` per weapon): the
-muzzle **flash**, the burning **sparks** it throws off, the barrel **smoke**
-and the lingering **muzzle cloud**, the **tracer** puffs along the flight path
-(every 5 blocks), the impact burst and its dust, a per-shot pitch-varied
-report, and a hit-marker tick to the shooter (higher-pitched on headshots).
-Fired rounds draw from the gold-nugget reserve on reload; a reserve that cannot
-supply a single round flashes `NO AMMUNITION` on the HUD and the reload never
-starts. A pull while the weapon is loading neither fires nor clicks empty —
-the magazine is empty precisely because the reload is running.
-
-The HUD reads `{mag}` in **rounds** (in the magazine) and `{reserve}` in
-**rounds** (still loadable from the reserve), so `{mag}/{reserve}` is one
-coherent fraction whatever `ammo.items-per-round` costs.
+| Assets | 4 guns (`pistol`, `shotgun`, `rifle`, `battle_rifle`) with 28 frame models, 4 sprites and 21 sound samples under the `mineplusgun` namespace |
 
 ## Controls
 
 | Input | Action |
 |---|---|
-| **Right-click** | The only action. Fire (hold to keep firing â€” AUTO stays automatic while held); a scoped weapon scopes while held (spread Ã— `aim.spread-multiplier`, HUD `SCOPE`); melee swings. |
-| **Left-click** | Inert. Mining, attacking and the vanilla arm-punch animation are all suppressed. |
-| **Swap hands (F)** | Reload â€” the magazine rounds are drawn from the player's nugget supply (`ammo.material`, `ammo.items-per-round`; a supply too small for one round means no reload). |
+| **Right-click** | Fire. One press shoots; `AUTO` keeps firing while the Core's trigger reports the hold. |
+| **Left-click** | Toggle the scope on weapons with `aim.scope: true`. On every gun the gesture is swallowed: no punch, no mining, no block interaction, no vanilla melee. |
+| **F (swap hands)** | Reload. The Core consumes the swap, so the gun never leaves the hand. |
+| — | An empty gun starts reloading by itself a few ticks after the last shot, if the reserve can supply a round. |
 
-Left-click is deliberately not a fire button: the client plays the arm-punch
-animation locally when a swing happens, and it cannot be suppressed
-server-side, so a gun must never be fired from it. Every action lives on
-right-click. The runtime never branches on the input source, so a packet-level
-adapter drops in without touching weapon logic.
+Minecraft sends no event for an arbitrary key, so the reload key is the
+client's "Swap Item With Offhand" binding — point it at F.
 
-## Carriers (the neutral hook)
+Left-click is free of firing on purpose: it is the gesture a scoped weapon
+aims with, and the swing stream that feeds it would otherwise double as a fire
+button. Everything that shoots lives on right-click.
 
-A gun's `backing-material` is the vanilla carrier the additive model replaces.
-The arsenal uses **IRON_INGOT** — a *neutral* carrier, an item that does
-nothing on its own. That is the requirement: a carrier with a vanilla use
-action (a bow, a crossbow, food) puts the client into its own "using item"
-state, the client then stops sending further use packets, and the Core's
-trigger never sees the hold. A neutral carrier keeps the vanilla interaction
-inert, so the Core owns the whole trigger stream — whatever the client sends
-for one click, the Core resolves it into exactly one press.
+The scope is an aiming state, not a camera change: `aim.spread-multiplier`
+tightens the cone, `aim.move-multiplier` punishes moving while aimed,
+`aim.recoil-multiplier` softens recoil, the HUD reads `SCOPE` and a `scope_in`
+/ `scope_hold` / `scope_out` frame sequence plays when the gun ships one. A
+true client zoom needs a per-version packet (Spigot 1.21.1 exposes no FOV API),
+so it is deliberately not faked here.
 
-The module keeps the vanilla carrier inert for its weapons — every use path
-(interact, entity interact, attack) is cancelled before the vanilla behaviour
-can do anything. Unsafe carriers (e.g. `SPYGLASS`, which zooms) are
-substituted with a neutral carrier by the Core content parser.
+## Recoil is dispersion
 
-The load animation is **not** the client's draw gesture: it is the Core's own
-frame pipeline (below), so the poses play on the module's schedule and the
-weapon works the same on a client that never applies the pack.
+A server cannot rotate a modern client's view, so a shot does not kick the
+camera — it kicks the **cone**. Each round adds `accuracy.recoil-per-shot`
+degrees to the next shot's spread, capped at `accuracy.recoil-max` and
+recovered by `accuracy.recoil-recovery` per tick; movement adds
+`accuracy.move` / `.air` / `.sprint` on top. The resulting profile is quantised
+to a quarter degree and cached, so a full-auto magazine allocates a handful of
+`BallisticProfile`s instead of one per round.
+
+## Frame discovery (the scalable part)
+
+A gun folder is self-describing. The module installs
+`defaults/guns/<id>/models/*.json` into the Core's pack staging area
+(`plugins/Mineplus/pack/mineplusgun/models/item/<id>/`) and its sprite as
+`…/textures/item/<id>.png`; `WeaponFrames` then classifies every file by its
+name suffix after `<id>_`:
+
+| Suffix | Role |
+|---|---|
+| `idle`, `rest`, `base`, `default` | resting pose |
+| `primed`, `loaded`, `ready`, `cocked` | pose shown while rounds remain |
+| `loading_N`, `reload_N`, `load_N` | reload clip, sorted numerically and retimed to `ammo.reload-ticks` |
+| `fire_N`, `shoot_N`, `shot_N` | shot pose |
+| `scope_in`, `scope_hold`, `scope_out` (also `aim_`/`zoom_` spellings) | scope sequence |
+| `cycle`, `bolt`, `pump`, `rack`, `rechamber` | post-shot action cycle |
+| `equip`, `draw`, `raise` | draw pose |
+
+**Every one of them is optional.** The shipped packs only author `idle`,
+`primed` and `loading_N`, so these four guns reload with animation and hold
+their resting pose while firing and scoping — and they still fire, reload,
+scope and sell. A folder with a single `idle` model is a valid gun. A gun with
+no models at all is a valid gun on its vanilla carrier. Adding a weapon is a
+folder plus a config entry; no code, no frame list, no per-gun pose authoring.
+
+An explicit `frames:` block in the config overrides discovery for that weapon,
+so a server owner can retime or re-skin a gun without rebuilding the jar.
+
+## The arsenal
+
+Cadence is `⌈1200 / fire.rpm⌉` ticks; `PUMP`/`BOLT` wait for
+`fire.cycle-ticks` instead when it is larger.
+
+| Weapon | Type / action | Magazine / reload | Damage | Frames shipped |
+|---|---|---|---|---|
+| `pistol` | PISTOL, SEMI, 320 rpm | 12 / 36 t | 7.5 | idle, primed, 5 × loading |
+| `shotgun` | SHOTGUN, PUMP, 70 rpm, cycle 14 t | 4 ×8 pellets / 60 t | 5.0 ×8 | idle, primed, 8 × loading |
+| `rifle` | RIFLE, BOLT, 40 rpm, cycle 20 t, scoped | 5 / 44 t | 18.0 (+1 penetration) | idle, primed, 5 × loading |
+| `battle_rifle` | RIFLE, AUTO, 420 rpm, scoped | 20 / 48 t | 9.5 | idle, primed, 6 × loading |
+
+Each round carries per-weapon velocity, gravity, drag, range, spread,
+falloff, headshot multiplier, penetration, ricochet and **knockback**, plus
+its own effect stack (`fx:`): muzzle smoke, flash, sparks, tracer puffs,
+impact burst and dust, a per-gun report from the module's own sounds and a
+pitch-varied hit-marker tick for the shooter (higher on headshots). Rounds are
+metered by the Core's `BALLISTICS.MAX_ACTIVE_ROUNDS` (an over-budget shot
+resolves as one instant trace instead of queueing) and the `PARTICLE_FX`
+budgets, which every module on the server shares.
+
+## Magazines and ammunition
+
+The magazine is the Core's `ItemMagazine`: the live round count rides in memory
+while the gun is in hand and is flushed as one silent PDC write the moment it
+leaves the hand (slot change, drop, quit, world change, module disable). Stacks
+are matched by a per-stack identity tag, so two pistols of the same id are two
+guns with two magazines — the runtime re-opens a session when the stack in hand
+changes, never spends another stack's rounds.
+
+Reloading draws rounds from the player's inventory: `ammo.items-per-round`
+items of `ammo.material` (gold nuggets) per round. A reserve that cannot supply
+one whole round never starts a reload and flashes `NO AMMUNITION`; the HUD
+counts `{reserve}` in rounds, so `{mag}/{reserve}` is one coherent fraction.
+
+## Carriers
+
+Every gun's `backing-material` is **IRON_INGOT** — a neutral carrier with no
+vanilla use action. That is the requirement, not a taste: a carrier with its
+own use behaviour (bow, crossbow, food, spyglass) puts the client into a
+"using item" state, the client stops repeating the use packet, and the Core's
+trigger never sees the hold. A neutral carrier keeps the whole trigger stream
+server-side, so the Core can fold the two packets of one click into one press
+and report a genuine hold.
 
 ## Build
 
 ```bash
-# from the repo root — builds the Core, then this module, then deploys both
+# from the repo root — Core, then this module, then deploy both
 npm run build-all
-
-# or just this module (Core jar must already exist in build/libs/)
-npm run build-mineplus-gun
+npm run build-gun            # Core + this module
 
 # direct Gradle (from this folder), after `gradle jar` in the repo root
 gradle build --offline
 ```
 
-Requires `build/libs/mineplus-1.3.0.jar` (produced by the Core build).
+Requires `build/libs/mineplus-1.3.0.jar` (the Core build). The module jar
+carries `defaults/guns/` and `defaults/sounds/`; the retired
+`defaults/frames/` import is excluded from the jar and kept only as reference
+art.
+
+`npm run pack` (repository root) builds the same gun assets into
+`dist/mineplus-resource-pack.zip` for manual distribution. The complete pack is
+always the Core's artifact: `/mineplus pack recompile` and
+`plugins/Mineplus/packs/mp-<hash>.zip`, which adds the generated item
+definitions and legacy host files.
 
 ## Assets
 
-The weapon models, textures and sound samples are **local-only authoring
-binaries** and are not committed (see [`.gitignore`](.gitignore)). The frames
-and textures come from the author's three Western packs at
-`C:\Users\Tariux\Desktop\gunpacks` (`western_1`, `western_2`, `western_3`;
-the `modern_1` pack is ignored); each pack folder carries the guns' raw model
-JSONs and per-gun textures. Re-run the import any time the packs change:
+`src/main/resources/defaults/guns/<id>/` holds the models and sprite each gun
+renders; `defaults/sounds/` holds `sounds.json` and the samples. The sources
+are the author's pack library (`western_1`/`western_2` gun packs); the `.ogg`
+samples are local-only binaries (see the module `.gitignore` and the folder's
+`PLACEHOLDER.md`), so a fresh clone enables and shoots silently rather than
+failing.
 
-```powershell
-powershell -File tools/import-western-models.ps1
-```
-
-The import brings in the pack's own frames (`idle`, `reload*`, `loaded`) and
-the per-weapon texture; the `fire` pose is authored on top of them and is
-left untouched by the import.
-
-Drop the `.ogg` into `src/main/resources/defaults/sounds/mineplusgun/` for a
-build with real sound content. Without them the module still enables and the
-shop works, but weapons play no custom sounds.
-
-### The arsenal
-
-| Weapon id | Source pack | Type | Action | Frames |
-|---|---|---|---|---|
-| `western_pistol` | western_1 | PISTOL | SEMI, 6 rounds | idle + reload ×5 + loaded + fire |
-| `western_rifle` | western_1 | RIFLE | BOLT, 5 rounds | idle + reload ×6 + loaded + fire |
-| `lever_rifle` | western_2 | RIFLE | SEMI, 8 rounds | idle + reload ×5 + loaded + fire |
-| `coach_shotgun` | western_2 | SHOTGUN | PUMP, 6×4 pellets | idle + reload ×8 + loaded + fire |
-| `flintlock_pistol` | western_3 | PISTOL | SEMI, 1 round | idle + loaded + fire |
-| `flintlock_musket` | western_3 | RIFLE | SEMI, 1 round | idle + loaded + fire |
-| `bayonet_musket` | western_3 | RIFLE | SEMI, 1 round | idle + loaded + fire |
-| `scope_musket` | western_3 | RIFLE | BOLT, 1 round, scoped | idle + loaded + fire |
-| `blunderbuss` | western_3 | SHOTGUN | PUMP, 2×6 pellets | idle + loaded + fire |
-
-The reload frames are the pack's own animation, imported verbatim; the `fire`
-frame is the recoil pose the shot plays for its few ticks. Six guns inherit
-their fire pose from the pack (the hammer falls, the muzzle drops). Two had no
-such pose in the pack at all, so the recoil is authored on top of the imported
-geometry: the pistol's barrel swings up around the frame, the lever rifle's
-receiver, barrel and front sight kick up around the grip.
-
-Every gun renders through the Core's frame pipeline: one `custom_model_data`
-value per state, identical on modern (`item_model` `range_dispatch`) and
-legacy (pre-1.21.4 host-file predicate) servers, so frame animation works
-everywhere the pack renders at all. The state the client renders is the
-number the Core writes on the stack — the modern dispatch reads the
-`custom_model_data` component's float list and the legacy representation
-reads the integer, and the Core writes both, so one value drives the pose
-on either server.
-
-### Retired v0 arsenal
-
-The first implementation shipped different weapon ids (`colt_peacemaker`,
-`rifle_boltaction`, `knife_bowie`, …). Stacks stamped with those ids are
-retired: on enable and on every join the module exchanges each one for the
-fresh stack of its replacement (conserving the stack's uid and live rounds) —
-the Bowie knife is removed. The registry also still resolves the retired ids
-as aliases, so a held old gun fires immediately even before the swap.
+Events the runtime plays, all additive in the `mineplusgun` namespace:
+`pistol_shot`, `shotgun_shot`, `rifle_shot`, `battle_rifle_shot`,
+`reload_begin`, `reload_mid`, `reload_done`, `empty` (plus `shot`/`heavy`/
+`reload` alternates). An unknown custom event falls back to the vanilla sound
+named beside it, never to a thrown exception.
 
 ## Configuration
 
-The module keeps its own `plugins/MineplusGun/config.yml` (generated on first
-start). Highlights, all editable:
+The module keeps `plugins/MineplusGun/config.yml` (generated on first start).
+The shipped file is the documented schema — every key has a typed default in
+`WeaponConfigLoader`, is clamped, and a bad weapon is logged and skipped
+instead of breaking the module.
 
 | Section | Key | Meaning |
 |---|---|---|
-| `settings.hud` | `mode` / `template` / `low-ammo-threshold` | `ACTIONBAR`/`BOSSBAR`/`OFF`, `{weapon} {mag} {reserve} {mode}` |
-| `settings` | `language`, `disabled-worlds`, `pvp-only` | gameplay gating (a disabled world's guns behave as plain vanilla carriers) |
-| _not here_ | round budget, particle budgets | owned by the **Core** (`BALLISTICS.*` and `PARTICLE_FX.*` in `plugins/Mineplus/settings.mp.yml`), metered across every module that fires; over-budget shots resolve as an instant trace |
-| `economy` | `mode`, `price-multiplier`, `price-scale` | `VAULT`/`FREE`, price scaling |
+| `settings.hud` | `mode`, `template`, `low-ammo-threshold` | `ACTIONBAR`/`BOSSBAR`/`OFF`, template over `{mag} {reserve}` (`{weapon}`, `{mode}` available); `RELOADING`/`SCOPE` appended while true |
+| `settings` | `language`, `disabled-worlds`, `pvp-only` | gameplay gating (a disabled world's gun behaves as a plain carrier) and the player-only damage filter |
+| _not here_ | round and particle budgets | owned by the **Core** (`BALLISTICS.*`, `PARTICLE_FX.*` in `plugins/Mineplus/settings.mp.yml`) and shared across every module |
+| `ammo` | `material`, `items-per-round` | the reload reserve |
+| `economy` | `mode`, `price-multiplier`, `price-scale` | `VAULT`/`FREE` and price formatting |
 | `shop` | `title`, `rows`, `admin-bypass-payment` | GUI and bypass |
-| `weapons.<id>` | `model`, `type`, `backing-material`, `price`, `ammo`, `ballistics`, `fire`, `aim`, `fx`, `grenade`, `melee` | one entry per weapon |
-| `weapons.<id>.fx` | `flash`, `spark`, `smoke`, `muzzle`, `tracer`, `impact`, `impact-smoke`, `sound-fire` | the Core's shot effect stack — every name is a vanilla particle, an unknown one degrades to the default instead of silencing the weapon |
-| `weapons.<id>.frames` | `idle`, `reload`, `loaded`, `fire`, `texture` | the pack models the weapon renders; the stems resolve under `defaults/frames/<weapon-id>/` |
+| `weapons.<id>` | identity via the Core content parser: `display-name`, `category`, `backing-material`, `price`, optional `frames` | the item, not the gameplay |
+| `weapons.<id>.ammo` | `magazine`, `reload-ticks`, `type` | `magazine: 0` means an ammoless weapon (melee-shaped) |
+| `weapons.<id>.fire` | `mode` (`SEMI`/`AUTO`/`BURST`/`PUMP`/`BOLT`), `rpm`, `cycle-ticks`, `pellets`, `burst` | the action |
+| `weapons.<id>.ballistics` | `damage`, `velocity`, `gravity`, `drag`, `range`, `spread-degrees`, `falloff-*`, `headshot-multiplier`, `penetration`, `ricochet`, `knockback`, `hitbox-expansion`, `tracer-spacing` | one round's physics |
+| `weapons.<id>.accuracy` | `move`, `air`, `sprint`, `recoil-per-shot`, `recoil-recovery`, `recoil-max` | the dispersion model |
+| `weapons.<id>.aim` | `scope`, `spread-multiplier`, `move-multiplier`, `recoil-multiplier` | the left-click scope state |
+| `weapons.<id>.animation` | `reload`, `cycle`, `fire`, `scope-in`, `scope-hold`, `scope-out`, `equip` | clip names to play; an unknown name simply plays nothing |
+| `weapons.<id>.fx` | particles and `sound-*` names | the Core's effect stack; unknown names degrade, never throw |
 
-Every value is clamped by `WeaponConfigLoader`; a bad weapon is logged and
-skipped, never fatal. `backing-material` is validated against a safe-carrier
-allow-list (`IRON_INGOT` is the neutral default) and a scoped weapon is always
-carried by `SPYGLASS` — see _Carriers_ above.
+## Commands
+
+`/mpgun shop` · `/mpgun hud` · `/mpgun give <weapon> [player]` ·
+`/mpgun ammo [player] [amount]` · `/mpgun reload` · `/mpgun stats` ·
+`/mpgun debug <hitbox|trace>` (the last five need `mineplusgun.admin`).
+`/mineplus gun …` is the same tree. `/mpgun reload` re-installs assets,
+re-discovers frames, re-registers items, recompiles the pack and refreshes
+every live session.
+
+## Module layout
+
+| Package | Owns |
+|---|---|
+| `MineplusGunPlugin` | bootstrap: install assets → register assets → parse config → build services → start features → one `reloadAll()` → register commands |
+| `config` | `GunConfig` + `WeaponConfigLoader` (tolerant parse, clamps, type defaults) |
+| `weapon` | `WeaponDefinition` (gameplay record + compiled ballistic profiles), `WeaponFrames` (file-name discovery), `WeaponAssets` (jar → staging → pack registration), `WeaponItemFactory`, `WeaponRegistry` |
+| `runtime` | `WeaponRuntime` (sessions, firing, reloading, poses, HUD), `FireMode`, `AmmoSupply` |
+| `feature` | `WeaponFeature` (items + reload), `CombatFeature` (runtime + held-item handler + stack-change listeners), `HudFeature`, `ShopFeature` |
+| `hud`, `shop`, `command` | the module's adapters over the Core `HudService`, the Vault bridge and the shared command tree |
+
+Nothing here simulates a bullet, routes a click, stores a magazine, meters a
+particle or draws a bar: those are Core services, and the module is the content
+that uses them.
+
+## Retired
+
+`tools/import-western-frames.js` and `tools/import-western-models.ps1` belong to
+the previous nine-gun Western arsenal (`defaults/frames/`), which the discovery
+pipeline replaced. They are kept as authoring references only — no build step
+runs them, and `defaults/frames/` never reaches the jar.

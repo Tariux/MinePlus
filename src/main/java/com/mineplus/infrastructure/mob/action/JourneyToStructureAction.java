@@ -6,6 +6,8 @@ import com.mineplus.infrastructure.mob.WorldTimes;
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import com.mineplus.infrastructure.mob.journey.JourneyStatus;
 import com.mineplus.infrastructure.mob.navigation.GroundProbe;
+import com.mineplus.infrastructure.mob.navigation.MobAttributes;
+import com.mineplus.infrastructure.mob.navigation.MobNavigator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -13,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Mob;
+import org.bukkit.entity.Villager;
 
 /**
  * The generic pilgrim: a mob looks for the nearest structure of a type, rallies
@@ -81,6 +84,15 @@ public final class JourneyToStructureAction implements BehaviorAction {
             return true;
         }
 
+        /**
+         * Day returned and the crew is leaving its camp. Remove the camp here;
+         * returning {@code false} retries on the next engine roll, so an
+         * exhausted edit budget delays the march instead of abandoning blocks.
+         */
+        default boolean onDawn(BehaviorContext context, Location campSite) {
+            return true;
+        }
+
         /** The crew reached {@code destination}. Called once, for the leader. */
         default void onArrival(BehaviorContext context, Location destination) {
         }
@@ -113,6 +125,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
         private boolean restAtNight = true;
         private boolean groupTravel = true;
         private String crewName = "pilgrims";
+        private com.mineplus.infrastructure.mob.group.Formation formation;
         private JourneyRunner.Options stride = JourneyRunner.Options.defaults();
         private Callbacks callbacks = new Callbacks() {
         };
@@ -208,6 +221,17 @@ public final class JourneyToStructureAction implements BehaviorAction {
             return this;
         }
 
+        /**
+         * The shape the crew walks in: a wedge behind the leader on a march, a
+         * column through a cave, a pincer around a gate. Members keep their own
+         * slots around the formation point, so the group crosses a doorway in a
+         * line instead of piling onto one block.
+         */
+        public Builder formation(com.mineplus.infrastructure.mob.group.Formation value) {
+            this.formation = value;
+            return this;
+        }
+
         public Builder callbacks(Callbacks value) {
             this.callbacks = value == null ? new Callbacks() {
             } : value;
@@ -259,6 +283,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
     private final boolean restAtNight;
     private final boolean groupTravel;
     private final String crewName;
+    private final com.mineplus.infrastructure.mob.group.Formation formation;
     private final JourneyRunner.Options stride;
     private final Callbacks callbacks;
 
@@ -268,6 +293,8 @@ public final class JourneyToStructureAction implements BehaviorAction {
      * camp on their own nights.
      */
     private final Map<String, Long> campedNight = new ConcurrentHashMap<>();
+    /** Where each crew's current camp stands, so dawn can clear the right site. */
+    private final Map<String, Location> campSites = new ConcurrentHashMap<>();
     /** Which in-game day each leader last searched fruitlessly, for {@link Callbacks#onNotFound}. */
     private final Map<UUID, Long> reportedEmpty = new ConcurrentHashMap<>();
     /** How many rolls each crew has already waited for a straggler. */
@@ -290,6 +317,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
         this.restAtNight = builder.restAtNight;
         this.groupTravel = builder.groupTravel;
         this.crewName = builder.crewName;
+        this.formation = builder.formation;
         this.stride = builder.stride;
         this.callbacks = builder.callbacks;
     }
@@ -327,7 +355,9 @@ public final class JourneyToStructureAction implements BehaviorAction {
         if (night) {
             return rest(context, walker, day);
         }
-        campedNight.remove(crewId(context));
+        if (!resumeAfterNight(context, walker, crewId(context))) {
+            return true;
+        }
 
         if (arrived(context, walker, goal)) {
             return complete(context, walker, goal);
@@ -355,26 +385,29 @@ public final class JourneyToStructureAction implements BehaviorAction {
      * <p>A formation point carries the group along the route: every member
      * walks to it, and it advances once the whole crew has arrived. That is
      * what turns "each villager finds its own way to the village" into a
-     * march. Three bounds keep it honest: the formation point only ever moves
-     * one leg at a time, each member is handed a single step toward it that is
-     * inside its own path range, and a member that has fallen too far behind
-     * stops chasing the formation point and walks the goal on its own — a
-     * pilgrim that cannot rejoin is a pilgrim that still arrives.
+     * march.
+     *
+     * <p>Every member — the leader included — walks through
+     * {@link JourneyRunner}, the same long-distance machinery the solo march
+     * uses: legs inside the mob's own path range, waypoints normalised to
+     * standable ground, progress sampled and stalls routed around. The old
+     * shape of this method handed each member one raw path step at the
+     * formation point; a villager whose step landed in a wall, a river or a
+     * hill simply stood there, and the crew piled up "in front of each other"
+     * while the formation waited for a member that could never arrive. The
+     * journey runner either gets the member there or reports the leg stuck, and
+     * a stuck formation is abandoned in favour of walking the goal directly.
      */
     private boolean march(BehaviorContext context, Mob walker, Location goal) {
-        Location rally = context.crewRally(crewName);
-        if (rally == null) {
-            context.setCrewRally(crewName, walker.getLocation());
-            rally = context.crewRally(crewName);
-            if (rally == null) {
-                rally = walker.getLocation();
-            }
-        }
+        Location rally = ensureRally(context, walker);
         String crew = crewId(context);
+        // The formation point is advanced by the leader's own path range: a
+        // rally step the leader cannot path to is a step the crew never takes.
+        double leg = Math.min(marchLeg, MobAttributes.pathRange(walker));
         if (context.isCrewLeader(crewName)) {
             if (context.crewSpread(crewName) <= cohesionRadius) {
                 // The crew is together: the formation point moves a whole leg.
-                advanceRally(context, rally, goal, marchLeg);
+                advanceRally(context, rally, goal, leg);
                 marchWait.remove(crew);
             } else {
                 // The crew is spread out: the formation point waits for the
@@ -383,30 +416,35 @@ public final class JourneyToStructureAction implements BehaviorAction {
                 // patience the march creeps on with a shorter leg.
                 int waited = marchWait.merge(crew, 1, Integer::sum);
                 if (waited >= STRAGGLER_PATIENCE) {
-                    advanceRally(context, rally, goal, marchLeg * 0.5);
+                    advanceRally(context, rally, goal, leg * 0.5);
                     marchWait.put(crew, 0);
                 }
             }
         }
         // Too far behind to rejoin: the member walks the goal on its own. It
         // rejoins the formation when it catches up, but it is never lost.
-        if (distanceXZ(walker.getLocation(), rally) > detachRadius) {
-            context.advanceJourney(goal, stride);
-            return true;
-        }
-        if (context.isJourneying()) {
-            // Back in formation: the crew leads again, the private walk ends.
+        boolean detached = distanceXZ(walker.getLocation(), rally) > detachRadius;
+        JourneyStatus status = context.advanceJourney(detached ? goal : rally, stride);
+        if (status == JourneyStatus.STUCK && !detached) {
+            // The formation point itself is unreachable from here (a river, a
+            // wall, a cliff beyond the mob's path range). Chasing it is what
+            // parks a member in place for the rest of the march; walk the goal
+            // instead and let the crew's own patience move on.
             context.abandonJourney();
-        }
-        Location aim = context.crewRejoin(crewName, cohesionRadius, stride.legBlocks());
-        if (aim != null) {
-            // The waypoint is an interpolated point on the line to the
-            // formation point, and an interpolated point can sit inside a wall.
-            // A waypoint a mob cannot stand on is a waypoint it cannot path to.
-            Location walkable = GroundProbe.standableNear(aim, 2, 6);
-            context.navigateToWithin(walkable != null ? walkable : aim, 1.5, stride.speed());
+            context.advanceJourney(goal, stride);
         }
         return true;
+    }
+
+    /** The crew's formation point, created at the walker's feet on first use. */
+    private Location ensureRally(BehaviorContext context, Mob walker) {
+        Location rally = context.crewRally(crewName);
+        if (rally != null) {
+            return rally;
+        }
+        context.setCrewRally(crewName, walker.getLocation());
+        rally = context.crewRally(crewName);
+        return rally != null ? rally : walker.getLocation();
     }
 
     /**
@@ -427,8 +465,16 @@ public final class JourneyToStructureAction implements BehaviorAction {
         double scale = Math.min(1.0, leg / length);
         Location next = new Location(rally.getWorld(),
                 rally.getX() + dx * scale, rally.getY(), rally.getZ() + dz * scale);
-        Location standable = GroundProbe.standableNear(next, 3, 6);
-        context.setCrewRally(crewName, standable != null ? standable : next);
+        // The formation point follows a walkable line, not a straight one: a
+        // rally stepped onto a lake or the far side of a wall is a rally the
+        // whole crew then tries to path to, and one member after another
+        // reports it stuck. Routing the step keeps the group on ground both
+        // the leader and its followers can walk.
+        Location routed = com.mineplus.infrastructure.mob.route.RoutePlanner
+                .waypoint(rally.getWorld(), rally, goal, leg);
+        Location candidate = routed != null ? routed : next;
+        Location standable = GroundProbe.standableNear(candidate, 3, 6);
+        context.setCrewRally(crewName, standable != null ? standable : candidate);
     }
 
     /**
@@ -447,27 +493,20 @@ public final class JourneyToStructureAction implements BehaviorAction {
             if (Long.valueOf(night).equals(campedNight.get(crew))) {
                 return true;
             }
-            if (callbacks.onNight(context, walker.getLocation())) {
+            Location site = walker.getLocation().clone();
+            if (callbacks.onNight(context, site)) {
                 campedNight.put(crew, night);
+                campSites.put(crew, site);
             }
             return true;
         }
-        Location rally = context.crewRally(crewName);
-        if (rally == null) {
-            context.setCrewRally(crewName, walker.getLocation());
-            rally = context.crewRally(crewName);
-            if (rally == null) {
-                rally = walker.getLocation();
-            }
-        }
+        Location rally = ensureRally(context, walker);
         boolean leader = context.isCrewLeader(crewName);
         // The leader joins the crew as well: the formation point is where the
-        // camp stands, and the camp is for everybody.
-        Location aim = context.crewRejoin(crewName, gatherRadius, stride.legBlocks());
-        if (aim != null) {
-            Location walkable = GroundProbe.standableNear(aim, 2, 6);
-            context.navigateToWithin(walkable != null ? walkable : aim, 1.5, stride.speed());
-        }
+        // camp stands, and the camp is for everybody. Gathering goes through
+        // the journey runner, so a straggler blocked by terrain is routed
+        // around it instead of being left to bump into the same wall all night.
+        context.advanceJourney(rally, stride);
         if (!leader) {
             return true; // followers gather; the leader owns the camp
         }
@@ -488,7 +527,42 @@ public final class JourneyToStructureAction implements BehaviorAction {
         // night instead of writing the crew's campfire off entirely.
         if (callbacks.onNight(context, rally)) {
             campedNight.put(crew, night);
+            campSites.put(crew, rally.clone());
         }
+        return true;
+    }
+
+    /**
+     * The first daytime roll after a camp: wake sleeping members and clear the
+     * camp. A failed teardown (an exhausted edit budget) holds the march for a
+     * roll rather than leaving beds and a fire behind on the route.
+     */
+    private boolean resumeAfterNight(BehaviorContext context, Mob walker, String crew) {
+        Long camped = campedNight.get(crew);
+        if (camped == null) {
+            return true;
+        }
+        if (groupTravel) {
+            for (Mob member : context.crewMembers(crewName)) {
+                if (member instanceof Villager villager) {
+                    MobNavigator.wakeUp(villager);
+                }
+            }
+        } else if (walker instanceof Villager villager) {
+            MobNavigator.wakeUp(villager);
+        }
+        Location site = campSites.get(crew);
+        if (site == null) {
+            site = groupTravel ? context.crewRally(crewName) : walker.getLocation();
+        }
+        if (site == null) {
+            site = walker.getLocation();
+        }
+        if (!callbacks.onDawn(context, site)) {
+            return false;
+        }
+        campedNight.remove(crew, camped);
+        campSites.remove(crew);
         return true;
     }
 
@@ -534,6 +608,11 @@ public final class JourneyToStructureAction implements BehaviorAction {
         int joined = recruitRadius > 0
                 ? context.rallyCrew(crewName, recruitRadius, found)
                 : 0;
+        if (formation != null) {
+            // Every crew is shaped the moment it knows where it goes: members
+            // joining later inherit the formation with their membership.
+            context.setCrewFormation(crewName, formation);
+        }
         if (com.mineplus.util.DebugLogger.isEnabled()) {
             com.mineplus.util.DebugLogger.debug("[mob-journey] %s found %s at (%d, %d, %d), crew %d",
                     walker.getType(), structure, found.getBlockX(), found.getBlockY(), found.getBlockZ(),
@@ -577,7 +656,10 @@ public final class JourneyToStructureAction implements BehaviorAction {
     private boolean complete(BehaviorContext context, Mob walker, Location goal) {
         String crew = crewId(context);
         if (groupTravel && !context.isCrewLeader(crewName)) {
-            return true; // the leader ends the march for everybody
+            // Each follower ends its own claim as it arrives; while the leader
+            // waits at the goal there is nothing left for it to march.
+            finish(context, walker, goal);
+            return true;
         }
         if (groupTravel && context.crewSpread(crewName) > arrivalDistanceXZ) {
             Integer waited = arrivalWait.get(crew);
@@ -599,13 +681,16 @@ public final class JourneyToStructureAction implements BehaviorAction {
         boolean leader = !groupTravel || context.isCrewLeader(crewName);
         if (leader) {
             callbacks.onArrival(context, goal);
-            // Disbanding takes the whole crew with it, so the members see no
-            // goal on their next roll and go back to their ordinary behaviors.
+            // Disbanding takes the whole crew with it. Release every member's
+            // claim first: an arrival must not leave a straggler frozen under
+            // a journey activity it can no longer finish.
+            context.stopCrew(crewName, id);
             context.disbandCrew(crewName);
         } else {
             context.leaveCrew(crewName);
         }
         campedNight.remove(crew);
+        campSites.remove(crew);
         marchWait.remove(crew);
         gatherWait.remove(crew);
         arrivalWait.remove(crew);

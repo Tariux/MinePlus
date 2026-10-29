@@ -46,24 +46,48 @@ public final class AmmoHud {
         return hud.isEnabled(playerId);
     }
 
-    /** Pushes the current ammo state for the held weapon. */
+    /**
+     * Pushes the current ammo state for the held weapon.
+     *
+     * <p>The bar is deliberately quiet: the template renders the numbers, the
+     * magazine is tinted by how much is left, and a state word is appended
+     * only while something is actually happening (loading, scoping). The
+     * fire mode is no longer part of the resting line — it never changed
+     * between shots and only made the bar noisy.</p>
+     *
+     * @param progress boss-bar fill in {@code [0,1]} (reload progress while
+     *                 reloading, otherwise the magazine fill)
+     */
     public void update(Player player, WeaponDefinition weapon, int mag, int reserve, boolean reloading,
-                       boolean scoping) {
+                       boolean scoping, float progress) {
         GunConfig current = config;
         if (current == null || !weapon.usesAmmo()) {
             return;
         }
+        boolean low = !reloading && mag <= current.settings().lowAmmoThreshold();
+        String magColor = (reloading ? ChatColor.GRAY : low ? ChatColor.RED : ChatColor.WHITE).toString();
         Map<String, String> placeholders = Map.of(
                 "weapon", weapon.displayName(),
-                "mag", String.valueOf(mag),
+                "mag", magColor + mag,
                 "reserve", String.valueOf(reserve),
                 "mode", modeLabel(weapon, scoping));
         String title = HudService.render(current.settings().hudTemplate(), placeholders);
-        float progress = Math.max(0.0f, Math.min(1.0f, mag / (float) Math.max(1, weapon.magazine())));
+        if (reloading) {
+            title += ChatColor.DARK_GRAY + " | " + ChatColor.AQUA + "RELOADING";
+        } else if (scoping) {
+            title += ChatColor.DARK_GRAY + " | " + ChatColor.AQUA + "SCOPE";
+        }
         HudService.Tone tone = reloading ? HudService.Tone.BUSY
-                : mag <= current.settings().lowAmmoThreshold() ? HudService.Tone.LOW
+                : low ? HudService.Tone.LOW
                 : HudService.Tone.NORMAL;
-        hud.update(player, SLOT, title, progress, tone);
+        hud.update(player, SLOT, title, Math.max(0.0f, Math.min(1.0f, progress)), tone);
+    }
+
+    /** Convenience overload: the magazine fill is the bar's progress. */
+    public void update(Player player, WeaponDefinition weapon, int mag, int reserve, boolean reloading,
+                       boolean scoping) {
+        float progress = Math.max(0.0f, Math.min(1.0f, mag / (float) Math.max(1, weapon.magazine())));
+        update(player, weapon, mag, reserve, reloading, scoping, progress);
     }
 
     /**

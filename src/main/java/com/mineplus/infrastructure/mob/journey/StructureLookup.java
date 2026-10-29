@@ -28,6 +28,10 @@ import org.bukkit.World;
  *       {@link #REPROBE_COOLDOWN_TICKS}, however often mobs in it ask.</li>
  *   <li><b>Bounded map</b> — stale entries are pruned on read, so a long-running
  *       server cannot accumulate one entry per coordinate a mob ever stood on.</li>
+ *   <li><b>Usable centres</b> — the raw answer is only a feature reference
+ *       point. {@link StructureAnchor} converts it into the point a mob can
+ *       actually walk to (a village's bell, its bed centroid, or a standable
+ *       cell next to the reported position), and the cache stores that.</li>
  * </ul>
  *
  * <p>Thread model: main thread only (the behavior engine and force-fire are).
@@ -101,7 +105,7 @@ public final class StructureLookup {
         if (cache.size() > MAX_ENTRIES) {
             prune(now);
         }
-        return search(world, origin, structure, key, ceiling, now, includeUnknown);
+        return search(world, normalized, origin, structure, key, ceiling, now, includeUnknown);
     }
 
     /**
@@ -114,14 +118,15 @@ public final class StructureLookup {
      *                       is unexplored". It is the last resort at the full
      *                       ceiling because that pass marks chunks explored.
      */
-    private Location search(World world, Location origin, StructureType structure, String key, int ceiling,
-                            long now, boolean includeUnknown) {
+    private Location search(World world, String structureKey, Location origin, StructureType structure, String key,
+                            int ceiling, long now, boolean includeUnknown) {
         for (int radius = BASE_RADIUS_CHUNKS; ; radius *= 2) {
             int sweep = Math.min(radius, ceiling);
             Location found = probe(world, origin, structure, sweep, false);
             if (found != null) {
-                remember(key, found, sweep, now);
-                return found;
+                Location anchored = StructureAnchor.anchor(world, structureKey, found);
+                remember(key, anchored, sweep, now);
+                return anchored;
             }
             if (sweep >= ceiling) {
                 break;
@@ -130,8 +135,9 @@ public final class StructureLookup {
         if (includeUnknown) {
             Location beyond = probe(world, origin, structure, ceiling, true);
             if (beyond != null) {
-                remember(key, beyond, ceiling, now);
-                return beyond;
+                Location anchored = StructureAnchor.anchor(world, structureKey, beyond);
+                remember(key, anchored, ceiling, now);
+                return anchored;
             }
         }
         remember(key, null, ceiling, now);

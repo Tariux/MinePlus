@@ -55,6 +55,18 @@ import org.bukkit.scheduler.BukkitTask;
  * claims the interaction. A stack is owned by one handler only, so two modules
  * can never both act on one right-click.
  *
+ * <p><b>The two triggers.</b> A modern firearm-style item needs more than one
+ * gesture: primary (left mouse) to act, secondary (right mouse) to aim or
+ * place, and a reload key. Both buttons are resolved into their own
+ * {@link TriggerState} (so a held left button and a held right button never
+ * contaminate each other) through {@link #primaryTrigger(Player)} and
+ * {@link #secondaryTrigger(Player)}. Left-click is fed by the swing stream the
+ * client repeats while the button is held, plus block-damage events, so an
+ * automatic action keeps running while the crosshair sits on a block — the
+ * one case where the vanilla client stops repeating the use packet.
+ * {@code onPress}/{@code onTriggerRelease} keep their historic meaning as the
+ * secondary trigger, so existing handlers are untouched.</p>
+ *
  * <p><b>Threading.</b> All callbacks are Bukkit event callbacks, so they run on
  * the main thread and may touch the world directly.
  */
@@ -136,7 +148,8 @@ public final class HeldItemInput implements Listener {
 
         /**
          * A press arrived (right-click, in air or on a block, or aimed at an
-         * entity).
+         * entity). This is the <b>secondary</b> trigger; a gun maps it to
+         * aiming, a wand to its cast.
          *
          * @return {@code true} when the vanilla action must stay suppressed;
          *         {@code false} lets the carrier do its vanilla thing
@@ -144,9 +157,45 @@ public final class HeldItemInput implements Listener {
         boolean onPress(Player player, ItemStack held);
 
         /**
-         * The item left the hand by any route (slot switch, drop, sneak, quit,
-         * death, inventory close). Use it to stop hold-to-fire state and to
-         * persist whatever the item was counting.
+         * The <b>primary</b> trigger was pressed (left mouse, in air, on a
+         * block, or aimed at an entity). Invoked once per new gesture;
+         * whether the button is still held is read from
+         * {@link #primaryTrigger(Player)}.
+         *
+         * @return {@code true} to keep the vanilla action suppressed
+         */
+        default boolean onPrimaryPress(Player player, ItemStack held) {
+            return false;
+        }
+
+        /**
+         * The primary gesture ended while the item stayed in the hand. Stops
+         * automatic actions; a semi-automatic one simply waits for the next
+         * press.
+         */
+        default void onPrimaryRelease(Player player) {
+        }
+
+        /**
+         * The secondary gesture press. Defaults to the legacy
+         * {@link #onPress(Player, ItemStack)} contract.
+         */
+        default boolean onSecondaryPress(Player player, ItemStack held) {
+            return onPress(player, held);
+        }
+
+        /**
+         * The secondary gesture ended while the item stayed in the hand.
+         * Defaults to the legacy {@link #onTriggerRelease(Player)} contract.
+         */
+        default void onSecondaryRelease(Player player) {
+            onTriggerRelease(player);
+        }
+
+        /**
+         * The item left the hand by any route (slot switch, drop, quit,
+         * death). Use it to persist whatever the item was counting and to
+         * reset item-specific session state.
          */
         default void onRelease(Player player) {
         }
@@ -195,7 +244,8 @@ public final class HeldItemInput implements Listener {
 
     private final Plugin plugin;
     private final List<HeldItemHandler> handlers = new CopyOnWriteArrayList<>();
-    private final Map<UUID, TriggerState> triggers = new ConcurrentHashMap<>();
+    private final Map<UUID, TriggerState> secondaryTriggers = new ConcurrentHashMap<>();
+    private final Map<UUID, TriggerState> primaryTriggers = new ConcurrentHashMap<>();
     private final Listener paperStopUsing;
     private boolean registered;
     private BukkitTask triggerTask;
@@ -245,7 +295,8 @@ public final class HeldItemInput implements Listener {
         if (current != null) {
             current.cancel();
         }
-        triggers.clear();
+        secondaryTriggers.clear();
+        primaryTriggers.clear();
         if (!registered) {
             return;
         }
@@ -293,42 +344,84 @@ public final class HeldItemInput implements Listener {
     // ------------------------------------------------------------------
 
     /**
-     * The Core-owned trigger state of one player: whether the activation
-     * gesture is held down, and whether the last activation was a fresh press
-     * or the client repeating the one it already sent. Never null.
-     *
-     * <p>Modules read this instead of inferring the trigger from the raw
-     * interaction events, so the trigger behaves the same whatever carrier
-     * item the content happens to use.</p>
+     * The Core-owned trigger state of one player for the <b>secondary</b>
+     * (right mouse) gesture: whether it is held, and whether the last
+     * activation was a fresh press or the client repeating the one it already
+     * sent. Never null. This is the legacy {@code trigger(...)} accessor.
      */
     public TriggerState trigger(Player player) {
-        return triggers.computeIfAbsent(player.getUniqueId(), ignored -> new TriggerState());
+        return secondaryTrigger(player);
     }
 
-    /** Records an activation on the player's trigger state. */
-    private void recordPress(Player player) {
-        trigger(player).press(now(), CLICK_WINDOW_MILLIS);
+    /** The secondary (right mouse) trigger state of one player. Never null. */
+    public TriggerState secondaryTrigger(Player player) {
+        return secondaryTriggers.computeIfAbsent(player.getUniqueId(), ignored -> new TriggerState());
+    }
+
+    /** The primary (left mouse) trigger state of one player. Never null. */
+    public TriggerState primaryTrigger(Player player) {
+        return primaryTriggers.computeIfAbsent(player.getUniqueId(), ignored -> new TriggerState());
+    }
+
+    /** Records a secondary activation; returns {@code true} for a new gesture. */
+    private boolean recordPress(Player player) {
+        boolean fresh = secondaryTrigger(player).press(now(), CLICK_WINDOW_MILLIS);
         armTriggerTask();
+        return fresh;
     }
 
-    /** Ends the hold and tells the owning handler the gesture ended. */
+    /** Records a primary activation; returns {@code true} for a new gesture. */
+    private boolean recordPrimaryPress(Player player) {
+        boolean fresh = primaryTrigger(player).press(now(), CLICK_WINDOW_MILLIS);
+        armTriggerTask();
+        return fresh;
+    }
+
+    /** Ends the secondary hold and tells the owning handler the gesture ended. */
     private void recordRelease(Player player) {
-        TriggerState state = triggers.get(player.getUniqueId());
+        TriggerState state = secondaryTriggers.get(player.getUniqueId());
         if (state == null || !state.release(now())) {
             return;
         }
-        notifyTriggerRelease(player);
+        notifyTriggerRelease(player, false);
+    }
+
+    /** Ends the primary hold and tells the owning handler the gesture ended. */
+    private void recordPrimaryRelease(Player player) {
+        TriggerState state = primaryTriggers.get(player.getUniqueId());
+        if (state == null || !state.release(now())) {
+            return;
+        }
+        notifyTriggerRelease(player, true);
+    }
+
+    private void recordBothReleases(Player player) {
+        recordPrimaryRelease(player);
+        recordRelease(player);
     }
 
     /**
      * Ends every stale hold: the client stopped repeating the press, so the
      * player let go of the button. The task is armed only while somebody holds
-     * a trigger and retires as soon as nobody does.
+     * a trigger and retires as soon as nobody does. Both gestures are scanned;
+     * a player can legitimately hold both buttons at once.
      */
     private void scanTriggers() {
         long now = now();
+        boolean anyHeld = scan(primaryTriggers, now, true);
+        anyHeld |= scan(secondaryTriggers, now, false);
+        if (!anyHeld) {
+            BukkitTask current = triggerTask;
+            triggerTask = null;
+            if (current != null) {
+                current.cancel();
+            }
+        }
+    }
+
+    private boolean scan(Map<UUID, TriggerState> states, long now, boolean primary) {
         boolean anyHeld = false;
-        for (Map.Entry<UUID, TriggerState> entry : triggers.entrySet()) {
+        for (Map.Entry<UUID, TriggerState> entry : states.entrySet()) {
             TriggerState state = entry.getValue();
             if (!state.held()) {
                 continue;
@@ -343,29 +436,27 @@ public final class HeldItemInput implements Listener {
             if (expired) {
                 Player player = plugin.getServer().getPlayer(entry.getKey());
                 if (player != null) {
-                    notifyTriggerRelease(player);
+                    notifyTriggerRelease(player, primary);
                 }
             }
             anyHeld |= state.held();
         }
-        if (!anyHeld) {
-            BukkitTask current = triggerTask;
-            triggerTask = null;
-            if (current != null) {
-                current.cancel();
-            }
-        }
+        return anyHeld;
     }
 
-    private void notifyTriggerRelease(Player player) {
+    private void notifyTriggerRelease(Player player, boolean primary) {
         HeldItemHandler handler = owner(player, player.getInventory().getItemInMainHand());
         if (handler == null) {
             return;
         }
         try {
-            handler.onTriggerRelease(player);
+            if (primary) {
+                handler.onPrimaryRelease(player);
+            } else {
+                handler.onSecondaryRelease(player);
+            }
         } catch (Throwable failure) {
-            logFailure("trigger release handling", failure);
+            logFailure(primary ? "primary release handling" : "trigger release handling", failure);
         }
     }
 
@@ -386,10 +477,13 @@ public final class HeldItemInput implements Listener {
     // ------------------------------------------------------------------
 
     /**
-     * The press funnel. Right-click is the activation, on air, on a block, or
-     * on an entity — the last one arrives through the entity-interact events
-     * below, which is exactly why a module that only listens to
-     * {@link PlayerInteractEvent} never hits what it aims at.
+     * The press funnel. Right-click is the secondary activation, on air, on a
+     * block, or on an entity — the last one arrives through the entity-interact
+     * events below, which is exactly why a module that only listens to
+     * {@link PlayerInteractEvent} never hits what it aims at. Left-click is the
+     * primary activation; it is fed from here and from the swing stream, which
+     * is what keeps an automatic action alive while the player holds the
+     * button.
      */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
     public void onInteract(PlayerInteractEvent event) {
@@ -408,6 +502,13 @@ public final class HeldItemInput implements Listener {
             return;
         }
         Action action = event.getAction();
+        if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
+            routePrimaryPress(player, handler, main);
+            if (handler.freezeVanillaInteractions()) {
+                event.setCancelled(true);
+            }
+            return;
+        }
         boolean isPress = action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK;
         if (!isPress) {
             if (handler.freezeVanillaInteractions()) {
@@ -418,13 +519,30 @@ public final class HeldItemInput implements Listener {
         boolean handled = false;
         recordPress(player);
         try {
-            handled = handler.onPress(player, main);
+            handled = handler.onSecondaryPress(player, main);
         } catch (Throwable failure) {
             logFailure("press handling", failure);
             handled = true; // still suppress vanilla: we own this gesture
         }
         if (handled || handler.freezeVanillaInteractions()) {
             event.setCancelled(true);
+        }
+    }
+
+    /**
+     * One primary activation, deduplicated across the three event sources that
+     * can report the same physical click (left-click air/block, block damage,
+     * arm swing). Only a new gesture reaches the handler; a held button is
+     * read from {@link #primaryTrigger(Player)}.
+     */
+    private void routePrimaryPress(Player player, HeldItemHandler handler, ItemStack main) {
+        if (!recordPrimaryPress(player)) {
+            return;
+        }
+        try {
+            handler.onPrimaryPress(player, main);
+        } catch (Throwable failure) {
+            logFailure("primary press handling", failure);
         }
     }
 
@@ -453,7 +571,7 @@ public final class HeldItemInput implements Listener {
         cancel.set(true);
         recordPress(player);
         try {
-            handler.onPress(player, main);
+            handler.onSecondaryPress(player, main);
         } catch (Throwable failure) {
             logFailure("aimed press handling", failure);
         }
@@ -461,8 +579,17 @@ public final class HeldItemInput implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
     public void onBlockDamage(BlockDamageEvent event) {
-        HeldItemHandler handler = owner(event.getPlayer(), event.getPlayer().getInventory().getItemInMainHand());
-        if (handler != null && handler.freezeVanillaInteractions()) {
+        Player player = event.getPlayer();
+        ItemStack main = player.getInventory().getItemInMainHand();
+        HeldItemHandler handler = owner(player, main);
+        if (handler == null) {
+            return;
+        }
+        // Mining a block is the one left-button hold where the client stops
+        // repeating the use packet; the damage stream keeps the primary
+        // gesture alive so automatic actions do not die on a wall.
+        routePrimaryPress(player, handler, main);
+        if (handler.freezeVanillaInteractions()) {
             event.setCancelled(true);
         }
     }
@@ -502,6 +629,11 @@ public final class HeldItemInput implements Listener {
         if (handler == null) {
             return;
         }
+        // A left-click on an entity is a primary activation too. The swing
+        // event normally arrives first and this press is deduplicated by the
+        // click window; when it does not (synthetic attacks, some forks), this
+        // is the only report the handler ever gets.
+        routePrimaryPress(attacker, handler, main);
         try {
             if (handler.suppressVanillaMelee(attacker, event)) {
                 event.setCancelled(true);
@@ -512,14 +644,24 @@ public final class HeldItemInput implements Listener {
         }
     }
 
-    /** A held item that owns the hand never shows the vanilla arm punch. */
+    /**
+     * The client's swing stream: one arm swing per left click, repeated while
+     * the button is held. This is the primary press source, and the vanilla
+     * punch is hidden while an owned item is in hand.
+     */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onAnimation(PlayerAnimationEvent event) {
         if (event.getAnimationType() != PlayerAnimationType.ARM_SWING) {
             return;
         }
-        HeldItemHandler handler = owner(event.getPlayer(), event.getPlayer().getInventory().getItemInMainHand());
-        if (handler != null && handler.freezeVanillaInteractions()) {
+        Player player = event.getPlayer();
+        ItemStack main = player.getInventory().getItemInMainHand();
+        HeldItemHandler handler = owner(player, main);
+        if (handler == null) {
+            return;
+        }
+        routePrimaryPress(player, handler, main);
+        if (handler.freezeVanillaInteractions()) {
             event.setCancelled(true);
         }
     }
@@ -556,15 +698,17 @@ public final class HeldItemInput implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onSneak(PlayerToggleSneakEvent event) {
         if (event.isSneaking()) {
-            releaseAll(event.getPlayer());
+            // Sneaking lowers the weapon; it does not remove it from the hand.
+            recordBothReleases(event.getPlayer());
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onQuit(PlayerQuitEvent event) {
         releaseAll(event.getPlayer());
-        // The player is gone: its trigger state is dead weight in the map.
-        triggers.remove(event.getPlayer().getUniqueId());
+        // The player is gone: its trigger states are dead weight in the maps.
+        primaryTriggers.remove(event.getPlayer().getUniqueId());
+        secondaryTriggers.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
@@ -577,16 +721,22 @@ public final class HeldItemInput implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getPlayer() instanceof Player player) {
-            releaseAll(player);
+            // Closing a menu ends the trigger, not the weapon session.
+            recordBothReleases(player);
         }
     }
 
     private void releaseAll(Player player) {
-        TriggerState state = triggers.get(player.getUniqueId());
-        if (state != null) {
+        long now = now();
+        TriggerState primary = primaryTriggers.get(player.getUniqueId());
+        if (primary != null) {
             // The item is gone: the hold ends with it. The handler learns
             // about it through onRelease, which is the stronger signal.
-            state.release(now());
+            primary.release(now);
+        }
+        TriggerState secondary = secondaryTriggers.get(player.getUniqueId());
+        if (secondary != null) {
+            secondary.release(now);
         }
         for (HeldItemHandler handler : handlers) {
             try {
@@ -620,12 +770,9 @@ public final class HeldItemInput implements Listener {
             if (handler == null) {
                 return;
             }
+            // Stop-using ends the trigger gesture; the item is still in hand,
+            // so this must not invoke the stronger item-release callback.
             recordRelease(player);
-            try {
-                handler.onRelease(player);
-            } catch (Throwable failure) {
-                logFailure("stop-using release", failure);
-            }
         }
     }
 }

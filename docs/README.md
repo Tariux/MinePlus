@@ -56,7 +56,7 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) | Advanced | Hooks, lifecycle, signals |
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
 | [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon + Gear + Wine + Cabinet + pack showcases) |
-| [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms, melee, grenades, scopes and a Vault shop on the Core's ballistics, held-item input and magazine services |
+| [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms with file-discovered frame animations, right-click shooting, left-click scopes, ammunition economy and a Vault shop on the Core's ballistics, held-item input and magazine services |
 | [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch and pilgrim villagers on the Core's mob behavior engine |
 
 For building your own module, follow the canonical recipe in

@@ -36,6 +36,7 @@ public final class BallisticProfile {
     private final int penetration;
     private final double ricochetChance;
     private final int ricochetCount;
+    private final double knockback;
     private final double hitboxExpansion;
     private final double tracerSpacing;
     private final String muzzleParticle;
@@ -65,6 +66,7 @@ public final class BallisticProfile {
         this.penetration = builder.penetration;
         this.ricochetChance = builder.ricochetChance;
         this.ricochetCount = builder.ricochetCount;
+        this.knockback = builder.knockback;
         this.hitboxExpansion = builder.hitboxExpansion;
         this.tracerSpacing = builder.tracerSpacing;
         this.muzzleParticle = builder.muzzleParticle;
@@ -147,6 +149,15 @@ public final class BallisticProfile {
 
     public int ricochetCount() {
         return ricochetCount;
+    }
+
+    /**
+     * Horizontal push applied to a struck living target, in blocks per tick.
+     * The engine adds a small vertical lift so the target is visibly moved
+     * rather than slid along the floor. {@code 0} disables knockback.
+     */
+    public double knockback() {
+        return knockback;
     }
 
     /** Ray sweep radius around the round's line, in blocks. */
@@ -242,6 +253,7 @@ public final class BallisticProfile {
         private int penetration = 0;
         private double ricochetChance = 0.0;
         private int ricochetCount = 0;
+        private double knockback = 0.0;
         private double hitboxExpansion = DEFAULT_HITBOX_EXPANSION;
         private double tracerSpacing = 5.0;
         private String muzzleParticle = "SMOKE";
@@ -315,6 +327,12 @@ public final class BallisticProfile {
         public Builder ricochet(double chance, int count) {
             this.ricochetChance = Math.min(1.0, Math.max(0.0, chance));
             this.ricochetCount = Math.max(0, count);
+            return this;
+        }
+
+        /** Horizontal push per landed round, in blocks per tick. */
+        public Builder knockback(double value) {
+            this.knockback = Math.min(4.0, Math.max(0.0, value));
             return this;
         }
 
