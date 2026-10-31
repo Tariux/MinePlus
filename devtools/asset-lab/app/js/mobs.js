@@ -35,11 +35,13 @@ export async function showMob(ctx, response) {
     const none = response.renderType === 'NONE';
     if (retexture || none) {
         ctx.viewer.clear();
+        ctx.details(mobDetails(response));
     } else {
+        // bindRigControls installs the details (rig verdict + pose controls +
+        // animator panel) — it must be the last writer.
         ctx.viewer.renderRig(response, {});
         bindRigControls(ctx, response);
     }
-    ctx.details(mobDetails(response));
 }
 
 function mobDetails(r) {
