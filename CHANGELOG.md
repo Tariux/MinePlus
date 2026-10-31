@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Custom mobs (`Mineplus`) — Rig facing, retexture fallback, animation and hunting fixes
+
+#### Fixed
+
+- **A `.bbmodel` imported nothing on Blockbench 5.0 files** — `BbModelParser`
+  read only the classic shape, so a 5.0 file gave unnamed `group_N` bones at
+  pivot (0,0,0) with zero keyframes: the rig stood perfectly still and no walk
+  or attack clip played. The parser now joins the root `groups[]` geometry to
+  the bare outliner nodes by uuid and reads animator tracks from the
+  `keyframes[]` array (`channel`/`time`/`interpolation`/`data_points`), so the
+  Villager Soldier arrives with 29 named bones and its `animation.idle` +
+  `animation.walk`, and the Woodland Trickster with 15 bones and idle + walk +
+  attack. Elements rotated on more than one axis bake into synthetic sub-bones
+  instead of losing the rotation, and a `pixel_uv` style read as entity UV is
+  tolerated rather than failing the file.
+- **A rigged mob walked backwards** — the yaw frame used the server body yaw,
+  which a cleared-AI mob keeps pointing at whatever it last looked at, so the
+  model's front and its stride disagreed. `MobRenderEngine` now derives the rig
+  heading from the mob's own per-pass position delta (eased over the shortest
+  arc, frozen while dead, falling back to body yaw while standing), and a model
+  authored facing another axis corrects through the previously
+  documented-but-unwired `MobRenderSpec.yawOffsetDegrees` (mob YAML
+  `render.yaw-offset`).
+- **The Evil Pig kept its vanilla texture on a pre-1.21.5 server** —
+  `RETEXTURE_VANILLA` shipped only a generated texture plus a variant registry
+  entry, and data-driven variants do not exist before 1.21.5, so nothing ever
+  restskinned the entity. Where that channel is missing the Core now compiles
+  the PNG onto a `VanillaMobModels` part rig, and on a server that does have it
+  the written variant entry is now actually applied to each spawned mob
+  (`VariantDatapackWriter.applyVariant` was never called, so the reskin silently
+  did nothing there either).
+- **A hostile custom mob stood still beside a creative player** —
+  `AttackNearestAction` excluded creative and spectator players from target
+  acquisition, so the one player testing a mob was the one it would never hunt.
+  They are now hunted and swung at like any prey, and only the damage,
+  knockback and hit sound are withheld.
+
+#### Changed
+
+- **`CUSTOM_MOBS.RENDER_INTERVAL_TICKS` is honored** — the pose loop was
+  hardcoded to one tick and the setting was read by nothing; it now schedules
+  the loop and scales the animation clocks and the measured speed with the
+  interval, so raising it cuts display packets without desynchronizing clips.
+- **`/mobfun rig <id>` reports facing** — each live mob line prints the rig
+  heading beside the server body yaw, and `/mobfun rig <id> yaw-offset
+  <deg|auto>` probes a facing offset on a running server before it is authored
+  into the definition. The stale "Overrides: `mobs/<id>.model.json`" line is
+  gone: nothing in the Core reads that file.
+
+#### Removed
+
+- Dead code in the custom-mob ecosystem: `MobRenderEngine.onRemoved` /
+  `animatorBinding`, `MobAnimator.overlayActive` / `baseState`,
+  `MobAnimation.hasTracks`, `MobFaceUvs.forDirection`,
+  `PackReport.Builder.isBroken`, `CustomMobAttributes.templatedAttributeNames`,
+  `BoneTransformMath.translationOf`, the unused `TransportMobBackend` identity
+  matrix, `MobRenderSpec.variantRegistryFor` / `variantHasModelField` and the
+  module's unread `overridesFile` / `relative` helpers.
+
 ### Core engine (`Mineplus`) — Composed visual impact units
 
 #### Added

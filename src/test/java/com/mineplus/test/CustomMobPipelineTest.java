@@ -53,15 +53,13 @@ public final class CustomMobPipelineTest {
         eulerSigns();
         pivotAndNesting();
         bbmodelFixture();
+        bbmodelFormat5Fixture();
         emitterWindowFitting();
         if (failures.isEmpty()) {
             System.out.println("CustomMobPipelineTest: all checks passed");
             return;
         }
         System.out.println("CustomMobPipelineTest: " + failures.size() + " failure(s)");
-        for (String failure : failures) {
-            System.out.println("  FAIL " + failure);
-        }
         System.exit(1);
     }
 
@@ -279,6 +277,119 @@ public final class CustomMobPipelineTest {
         check("walk wrap", near(walk.wrap(1.25f), 0.25f));
     }
 
+    /**
+     * The Blockbench 4.12+ dialect ({@code meta.format_version} {@code "5.0"}):
+     * outliner nodes are bare {@code {uuid, children}} shells, every group's real
+     * name/pivot/rest rotation lives in the root {@code groups} array joined by
+     * uuid, and animation frames arrive as one flat {@code keyframes} list whose
+     * values may be strings. This is the shape every shipped MobFun mob uses.
+     */
+    private static void bbmodelFormat5Fixture() {
+        String pngBase64 = Base64.getEncoder().encodeToString(PngUtil.neutralPlaceholder(64, 64));
+        String json = "{"
+                + "\"meta\": {\"format_version\": \"5.0\", \"model_format\": \"bedrock\","
+                + " \"box_uv\": true},"
+                + "\"resolution\": {\"width\": 64, \"height\": 64},"
+                + "\"elements\": ["
+                + "  {\"name\": \"leg_geo\", \"uuid\": \"el_leg\", \"type\": \"cube\", \"box_uv\": false,"
+                + "   \"from\": [-2, 0, -2], \"to\": [2, 6, 2], \"origin\": [0, 0, 0], \"texture\": 0,"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 16, 4, 22], \"texture\": 0}}},"
+                + "  {\"name\": \"head_geo\", \"uuid\": \"el_head\", \"type\": \"cube\", \"box_uv\": false,"
+                + "   \"from\": [-4, 20, -4], \"to\": [4, 28, 4], \"origin\": [0, 20, 0], \"texture\": 0,"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 0, 8, 8], \"texture\": 0}}},"
+                + "  {\"name\": \"brim\", \"uuid\": \"el_brim\", \"type\": \"cube\", \"box_uv\": false,"
+                + "   \"from\": [-4, 28, -4], \"to\": [4, 30, 4], \"origin\": [0, 28, 0], \"texture\": 0,"
+                + "   \"rotation\": [10, 0, -18],"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 30, 8, 32], \"texture\": 0}}}"
+                + "],"
+                + "\"groups\": ["
+                + "  {\"name\": \"leg_right\", \"uuid\": \"g_leg\", \"origin\": [0, 6, 0],"
+                + "   \"rotation\": [0, 0, 0], \"children\": []},"
+                + "  {\"name\": \"head\", \"uuid\": \"g_head\", \"origin\": [0, 20, 0],"
+                + "   \"rotation\": [5, 0, -5], \"children\": []}"
+                + "],"
+                + "\"outliner\": ["
+                + "  {\"uuid\": \"g_leg\", \"isOpen\": false, \"children\": [\"el_leg\"]},"
+                + "  {\"uuid\": \"g_head\", \"isOpen\": false, \"children\": [\"el_head\", \"el_brim\"]}"
+                + "],"
+                + "\"textures\": [{\"name\": \"skin\", \"width\": 64, \"height\": 64,"
+                + "   \"source\": \"data:image/png;base64," + pngBase64 + "\"}],"
+                + "\"animations\": ["
+                + "  {\"name\": \"animation.walk\", \"loop\": \"loop\", \"length\": 1.0,"
+                + "   \"animators\": {"
+                + "     \"g_leg\": {\"name\": \"leg_right\", \"type\": \"bone\", \"rotation_global\": false,"
+                + "       \"keyframes\": ["
+                + "         {\"channel\": \"rotation\", \"time\": 0.0, \"interpolation\": \"linear\","
+                + "          \"data_points\": [{\"x\": \"25\", \"y\": \"0\", \"z\": \"0\"}]},"
+                + "         {\"channel\": \"rotation\", \"time\": 0.5, \"interpolation\": \"linear\","
+                + "          \"data_points\": [{\"x\": \"-25\", \"y\": \"0\", \"z\": \"0\"}]},"
+                + "         {\"channel\": \"position\", \"time\": 0.5, \"interpolation\": \"step\","
+                + "          \"data_points\": [{\"x\": \"0\", \"y\": \"1\", \"z\": \"2\"}]},"
+                + "         {\"channel\": \"scale\", \"time\": 0.5, \"interpolation\": \"linear\","
+                + "          \"data_points\": [{\"x\": \"1.2\", \"y\": \"1.2\", \"z\": \"1.2\"}]}"
+                + "       ]},"
+                + "     \"g_head\": {\"name\": \"head\", \"type\": \"bone\", \"rotation_global\": true,"
+                + "       \"keyframes\": ["
+                + "         {\"channel\": \"rotation\", \"time\": 0.0, \"interpolation\": \"catmullrom\","
+                + "          \"data_points\": [{\"x\": 0, \"y\": 0, \"z\": 0}]}"
+                + "       ]}"
+                + "   }}"
+                + "]}";
+
+        ModelData model = BbModelParser.parse("format5.bbmodel",
+                json.getBytes(StandardCharsets.UTF_8), reference -> null);
+
+        int leg = model.boneIndex("leg_right");
+        check("5.0 group name joins from the groups array", leg > 0);
+        ModelBone legBone = model.bone(leg);
+        check("5.0 group pivot joins from the groups array", near(legBone.pivotY(), 6.0f));
+        check("5.0 element attaches to its group", legBone.cubes().size() == 1);
+
+        int head = model.boneIndex("head");
+        ModelBone headBone = model.bone(head);
+        check("5.0 rest rotation joins from the groups array",
+                near(headBone.restRotationX(), 5.0f) && near(headBone.restRotationZ(), -5.0f));
+        check("5.0 head attachment detected from the joined name",
+                headBone.attachment() == ModelBone.Attachment.HEAD);
+        check("5.0 head cube carries only its own element", headBone.cubes().size() == 1);
+        int brim = model.boneIndex("head_rot0");
+        check("5.0 multi-axis element rotation bakes into a bone", brim >= 0
+                && model.bone(brim).parentIndex() == head
+                && near(model.bone(brim).restRotationX(), 10.0f)
+                && near(model.bone(brim).restRotationZ(), -18.0f)
+                && model.bone(brim).cubes().size() == 1);
+
+        ModelCube.Uv legUv = legBone.cubes().get(0).face("north");
+        check("5.0 pixel uvs are kept as authored",
+                legUv != null && near(legUv.u1(), 0) && near(legUv.v1(), 16)
+                        && near(legUv.u2(), 4) && near(legUv.v2(), 22));
+        check("5.0 consistent pixel uvs raise no scaling issue",
+                model.issues().stream().noneMatch(issue -> issue.contains("pixel")));
+
+        ModelAnimation walk = model.animations().get("animation.walk");
+        check("5.0 clip parsed", walk != null);
+        check("5.0 clip loops", walk != null && walk.loopMode() == ModelAnimation.LoopMode.LOOP);
+        check("5.0 clip length", walk != null && near(walk.lengthSeconds(), 1.0f));
+        check("5.0 wrap", walk != null && near(walk.wrap(1.25f), 0.25f));
+
+        ModelAnimation.BoneTrack track = walk == null ? null : walk.track("leg_right");
+        check("5.0 keyframes drive the joined bone name", track != null && track.rotation() != null);
+        float[] out = new float[3];
+        track.rotation().sample(0.25f, out);
+        check("5.0 string data points interpolate numerically", near(out[0], 0.0f));
+        track.rotation().sample(0.75f, out);
+        check("5.0 rotation clamps at the last key", near(out[0], -25.0f));
+        check("5.0 position channel parsed", track.position() != null);
+        track.position().sample(0.75f, out);
+        check("5.0 step position holds", near(out[1], 1.0f) && near(out[2], 2.0f));
+        check("5.0 scale channel parsed", track.scale() != null);
+        track.scale().sample(0.75f, out);
+        check("5.0 scale value read", near(out[0], 1.2f));
+
+        check("5.0 global rotation is reported, not swallowed",
+                model.issues().stream().anyMatch(issue -> issue.contains("global")));
+    }
+
     // ------------------------------------------------------------------
     // Emitter window fitting (through the real compiler + a captured pack)
     // ------------------------------------------------------------------
@@ -434,6 +545,7 @@ public final class CustomMobPipelineTest {
     private static void check(String name, boolean condition) {
         if (!condition) {
             failures.add(name);
+            System.out.println("  FAIL " + name);
         }
     }
 

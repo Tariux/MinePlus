@@ -85,6 +85,10 @@ public final class MobRenderEngine {
     private static final int VIEWER_RECONCILE_TICKS = 20;
     private static final float DEATH_GRACE_SECONDS = 0.5f;
     private static final float BONE_MARKER_SCALE = 0.06f;
+    /** Horizontal movement per tick below which the body yaw is the better heading. */
+    private static final double MIN_HEADING_STEP = 0.004;
+    /** How fast the rig heading closes on its target (1.0 = no easing). */
+    private static final float HEADING_EASE = 0.4f;
 
     private final Plugin plugin;
     private final PackApi pack;
@@ -100,6 +104,8 @@ public final class MobRenderEngine {
 
     private BukkitTask tickTask;
     private BukkitTask reconcileTask;
+    /** The cadence the pose loop is actually scheduled at (mirrors the setting). */
+    private int poseIntervalTicks = 1;
     private volatile static MobRenderEngine active;
     private volatile boolean boneDebug;
 
@@ -122,6 +128,7 @@ public final class MobRenderEngine {
 
     /** Applies new subsystem settings; disabled rendering tears the rigs down. */
     public void updateSettings(CustomMobSettings next) {
+        int previousInterval = settings.renderIntervalTicks();
         if (next != null) {
             this.settings = next;
         }
@@ -130,6 +137,12 @@ public final class MobRenderEngine {
                 destroySession(session);
                 sessions.remove(session.entity.getUniqueId());
             }
+        }
+        if (tickTask != null && settings.renderIntervalTicks() != previousInterval) {
+            tickTask.cancel();
+            poseIntervalTicks = settings.renderIntervalTicks();
+            tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick,
+                    poseIntervalTicks, poseIntervalTicks);
         }
     }
 
@@ -141,7 +154,9 @@ public final class MobRenderEngine {
     public void start() {
         Bukkit.getPluginManager().registerEvents(new Listeners(), plugin);
         GenericFallbackAssets.register(pack);
-        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+        poseIntervalTicks = settings.renderIntervalTicks();
+        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick,
+                poseIntervalTicks, poseIntervalTicks);
         reconcileTask = Bukkit.getScheduler().runTaskTimer(plugin, this::reconcileViewers,
                 VIEWER_RECONCILE_TICKS, VIEWER_RECONCILE_TICKS);
         active = this;
@@ -292,21 +307,20 @@ public final class MobRenderEngine {
                     "[CustomMobs] '" + definition.id() + "': " + entry.status);
             return;
         }
+        String registry = VariantDatapackWriter.registryFor(definition.baseType());
+        String whyNoVariant = registry == null ? "no variant registry for "
+                + definition.baseType().name().toLowerCase(Locale.ROOT)
+                : !ServerVersion.dataDrivenVariants() ? "data-driven variants need 1.21.5+ (server is "
+                + ServerVersion.rawVersion() + ")" : null;
+        if (whyNoVariant != null && presentRetextureAsRig(entry, png, whyNoVariant)) {
+            return;
+        }
         if (pack != null && pack.isAvailable()) {
             pack.registerGeneratedAsset(definition.namespace(),
                     "textures/entity/" + definition.path() + ".png", png);
         }
-        String registry = VariantDatapackWriter.registryFor(definition.baseType());
-        if (registry == null) {
-            entry.status = "no variant registry for " + definition.baseType()
-                    + "; the texture ships for servers that support one";
-            logOnce(definition.id(), "variant", false,
-                    "[CustomMobs] '" + definition.id() + "': " + entry.status);
-            return;
-        }
-        if (!ServerVersion.dataDrivenVariants()) {
-            entry.status = "texture shipped; data-driven variants need 1.21.5+ (server is "
-                    + ServerVersion.rawVersion() + ")";
+        if (whyNoVariant != null) {
+            entry.status = "texture shipped; " + whyNoVariant;
             logOnce(definition.id(), "variant", false,
                     "[CustomMobs] '" + definition.id() + "': " + entry.status);
             return;
@@ -317,6 +331,32 @@ public final class MobRenderEngine {
                 + (changed ? "; restart the server (or /reload) so the client registry syncs" : "");
         logOnce(definition.id(), "variant", true,
                 "[CustomMobs] '" + definition.id() + "': " + entry.status);
+    }
+
+    /**
+     * The retexture path on a server that cannot extend a vanilla variant
+     * registry: the mob wears its texture on a part rig built from the vanilla
+     * model descriptor instead of relying on the client's model. It is the
+     * ordinary bundle path, so head look, procedural limb swing and hiding the
+     * base entity all work exactly as they do for an imported model.
+     */
+    private boolean presentRetextureAsRig(Entry entry, byte[] png, String why) {
+        CustomMobDefinition definition = entry.definition;
+        if (!VanillaMobModels.supports(definition.baseType()) || pack == null
+                || !pack.isAvailable()) {
+            return false;
+        }
+        CustomMobModel legacy = CustomMobModel.vanilla(definition.baseType(), png);
+        ModelData model = LegacyModelAdapter.adapt(definition.path() + ".vanilla", legacy, null);
+        ModelBundle bundle = ModelBundleCompiler.compile(pack, definition.namespace(),
+                definition.path(), model);
+        if (!bundle.presentable()) {
+            return false;
+        }
+        entry.bundle = bundle;
+        entry.status = "retextured as a part rig (" + why + "); " + bundle.statusLine();
+        logOnce(definition.id(), "variant", true, "[CustomMobs] '" + definition.id() + "': " + entry.status);
+        return true;
     }
 
     private void logOnce(String definitionId, String key, boolean healthy, String message) {
@@ -339,7 +379,18 @@ public final class MobRenderEngine {
     /** A custom mob spawned (or re-discovered on chunk load): build its rig session. */
     public void onSpawned(LivingEntity entity, CustomMobDefinition definition) {
         Entry entry = entries.get(definition.id());
-        if (entry == null || !ServerVersion.displayEntities()) {
+        if (entry == null) {
+            return;
+        }
+        if (entry.spec != null && entry.spec.type() == MobRenderSpec.RenderType.RETEXTURE_VANILLA
+                && entry.bundle == null) {
+            // The datapack entry alone does not restkin anything: the entity has
+            // to be told to use the variant. A failure here is not fatal — the
+            // mob simply keeps its vanilla texture.
+            VariantDatapackWriter.applyVariant(entity, definition.namespace(), definition.path(),
+                    definition.baseType());
+        }
+        if (!ServerVersion.displayEntities()) {
             return;
         }
         Session existing = sessions.remove(entity.getUniqueId());
@@ -354,14 +405,6 @@ public final class MobRenderEngine {
             sessions.put(entity.getUniqueId(), session);
         }
         applySessionViewers(session);
-    }
-
-    /** The mob is gone or the definition unregistered: remove its rig. */
-    public void onRemoved(LivingEntity entity) {
-        Session session = sessions.remove(entity.getUniqueId());
-        if (session != null) {
-            destroySession(session);
-        }
     }
 
     /** Re-compiles every definition and rebuilds every session (pack reload path). */
@@ -410,6 +453,7 @@ public final class MobRenderEngine {
             return;
         }
         CustomMobSettings current = settings;
+        float passSeconds = TICK_SECONDS * poseIntervalTicks;
         Iterator<Session> iterator = sessions.values().iterator();
         while (iterator.hasNext()) {
             Session session = iterator.next();
@@ -425,7 +469,7 @@ public final class MobRenderEngine {
                 session.deathTimer = session.animator.deathClipLength() + DEATH_GRACE_SECONDS;
             }
             if (session.dead) {
-                session.deathTimer -= TICK_SECONDS;
+                session.deathTimer -= passSeconds;
                 if (session.deathTimer <= 0.0f || !session.animator.hasDeathClip()) {
                     destroySession(session);
                     iterator.remove();
@@ -459,9 +503,9 @@ public final class MobRenderEngine {
         session.lastX = location.getX();
         session.lastY = location.getY();
         session.lastZ = location.getZ();
-        float speed = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        float speed = (float) Math.sqrt(dx * dx + dy * dy + dz * dz) / poseIntervalTicks;
 
-        session.animator.tick(TICK_SECONDS, speed);
+        session.animator.tick(TICK_SECONDS * poseIntervalTicks, speed);
         if (!session.hasRig) {
             return;
         }
@@ -470,8 +514,8 @@ public final class MobRenderEngine {
             return;
         }
 
-        float bodyYaw = location.getYaw();
-        BoneTransformMath.yawFrame(bodyYaw, session.yawQuaternion);
+        float heading = session.dead ? session.heading : advanceHeading(session, location, dx, dz);
+        BoneTransformMath.yawFrame(heading, session.entry.yawOffset(), session.yawQuaternion);
         session.yawMatrix.set(session.yawQuaternion);
 
         ModelBundle bundle = session.entry.bundle;
@@ -488,8 +532,10 @@ public final class MobRenderEngine {
         if (hasHead) {
             // Head yaw reaches Bukkit only through the runtime handle (the
             // stub-free NMS field), so the engine uses the shared reflective
-            // helper and falls back to the body yaw when the runtime hides it.
-            headYaw = BoneTransformMath.headYawModel(MobAiIsolation.headYaw(entity, bodyYaw), bodyYaw);
+            // helper and falls back to the rig heading when the runtime hides
+            // it. The delta is measured against the rig frame, not the server
+            // body yaw, or the head would point off by however far the two differ.
+            headYaw = BoneTransformMath.headYawModel(MobAiIsolation.headYaw(entity, heading), heading);
             headPitch = BoneTransformMath.headPitchModel(entity.getPitch());
         }
 
@@ -602,14 +648,30 @@ public final class MobRenderEngine {
         }
     }
 
+    /**
+     * The direction the rig faces, eased one tick toward its target. A viewer
+     * reads "forward" from where the mob actually travels, while the server-side
+     * body yaw can lag a path turn — or stay where the mob spawned, because a
+     * mob whose vanilla goals are cleared has nothing else rotating its body —
+     * so a moving mob faces its movement and a standing mob keeps its body yaw.
+     */
+    private float advanceHeading(Session session, Location location, double dx, double dz) {
+        double stepPerTick = Math.sqrt(dx * dx + dz * dz) / poseIntervalTicks;
+        float target = stepPerTick >= MIN_HEADING_STEP
+                ? (float) Math.toDegrees(Math.atan2(-dx, dz))
+                : location.getYaw();
+        float delta = BoneTransformMath.wrapDegrees(target - session.heading);
+        session.heading = BoneTransformMath.wrapDegrees(session.heading + delta * HEADING_EASE);
+        return session.heading;
+    }
+
     private void poseGenericCube(Session session, Location location) {
         if (session.genericCube == null) {
             return;
         }
-        float yaw = location.getYaw();
         float height = (float) entityHeight(session.entity);
-        session.scratchMatrix.identity();
-        session.scratchMatrix.rotateY((180.0f - yaw) * (float) (Math.PI / 180.0));
+        BoneTransformMath.yawFrame(location.getYaw(), session.entry.yawOffset(), session.yawQuaternion);
+        session.scratchMatrix.set(session.yawQuaternion);
         session.scratchMatrix.scale(height);
         session.scratchLocation.setWorld(location.getWorld());
         session.scratchLocation.set(location.getX(),
@@ -742,12 +804,6 @@ public final class MobRenderEngine {
         return session == null ? null : session.animator.snapshot();
     }
 
-    /** The bound clip per animation state, for the inspect command. */
-    public Map<String, String> animatorBinding(LivingEntity entity) {
-        Session session = entity == null ? null : sessions.get(entity.getUniqueId());
-        return session == null ? Map.of() : session.animator.binding();
-    }
-
     /** Plays the mob's attack clip now; {@code false} when impossible. */
     public boolean playAttack(LivingEntity entity) {
         Session session = entity == null ? null : sessions.get(entity.getUniqueId());
@@ -781,6 +837,33 @@ public final class MobRenderEngine {
     /** Shows or hides a tiny cube at every bone pivot of every rigged mob. */
     public void setBoneDebug(boolean on) {
         this.boneDebug = on;
+    }
+
+    /**
+     * Overrides one definition's authored-front offset at runtime. {@code null}
+     * restores the definition's own value; live rigs pick the change up on
+     * their next pose push, so a model that renders backwards is answered with
+     * one command instead of a rebuild.
+     */
+    public void setYawOffset(String definitionId, Float degrees) {
+        Entry entry = definitionId == null ? null : entries.get(definitionId);
+        if (entry == null) {
+            return;
+        }
+        entry.yawOffsetOverride = degrees == null ? null
+                : Float.valueOf(BoneTransformMath.wrapDegrees(degrees));
+    }
+
+    /** The offset one definition's rigs currently use (the override or the authored value). */
+    public float yawOffset(String definitionId) {
+        Entry entry = definitionId == null ? null : entries.get(definitionId);
+        return entry == null ? 0.0f : entry.yawOffset();
+    }
+
+    /** The direction one live rig faces (degrees), or {@code NaN} when it has none. */
+    public float rigHeading(LivingEntity entity) {
+        Session session = entity == null ? null : sessions.get(entity.getUniqueId());
+        return session == null ? Float.NaN : session.heading;
     }
 
     /** Static hook for behavior actions outside the engine's ownership. */
@@ -840,10 +923,20 @@ public final class MobRenderEngine {
         final MobRenderSpec spec;
         volatile ModelBundle bundle;
         volatile String status = "";
+        /** Non-null while a runtime probe overrides the definition's yaw offset. */
+        volatile Float yawOffsetOverride;
 
         Entry(CustomMobDefinition definition, MobRenderSpec spec) {
             this.definition = definition;
             this.spec = spec;
+        }
+
+        float yawOffset() {
+            Float override = yawOffsetOverride;
+            if (override != null) {
+                return override.floatValue();
+            }
+            return spec == null ? 0.0f : spec.yawOffsetDegrees();
         }
     }
 
@@ -897,6 +990,7 @@ public final class MobRenderEngine {
         double lastX;
         double lastY;
         double lastZ;
+        float heading;
         final Location scratchLocation = new Location(null, 0, 0, 0);
         final Vector3f scratchVector = new Vector3f();
         final Vector3f pieceShift = new Vector3f();
@@ -915,6 +1009,7 @@ public final class MobRenderEngine {
             this.lastX = location.getX();
             this.lastY = location.getY();
             this.lastZ = location.getZ();
+            this.heading = location.getYaw();
         }
 
         boolean usesTransport() {

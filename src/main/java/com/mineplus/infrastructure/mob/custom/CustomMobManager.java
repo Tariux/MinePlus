@@ -644,6 +644,21 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         return renderEngine.playAnimation(mob, clipName);
     }
 
+    @Override
+    public float rigHeading(LivingEntity mob) {
+        return renderEngine.rigHeading(mob);
+    }
+
+    @Override
+    public float yawOffset(String definitionId) {
+        return renderEngine.yawOffset(definitionId);
+    }
+
+    @Override
+    public void setYawOffset(String definitionId, Float degrees) {
+        renderEngine.setYawOffset(definitionId, degrees);
+    }
+
     /** The bone-marker debug mode (engine-level, for the mob command). */
     public boolean boneDebug() {
         return renderEngine.boneDebug();

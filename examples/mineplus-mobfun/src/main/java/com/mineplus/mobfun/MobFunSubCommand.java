@@ -8,7 +8,6 @@ import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
 import com.mineplus.infrastructure.mob.custom.CustomMobModel;
 import com.mineplus.pack.PackApi;
 import com.mineplus.pack.compile.PackArtifact;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -118,9 +117,10 @@ public final class MobFunSubCommand implements SubCommand {
             }
             case "rig" -> {
                 if (args.length >= 2) {
-                    return reportRig(sender, args[1], args.length >= 3 && args[2].equalsIgnoreCase("attack"));
+                    return rig(sender, args);
                 }
-                sender.sendMessage(ChatColor.RED + "Usage: /mobfun rig <" + customIdList() + "> [attack]");
+                sender.sendMessage(ChatColor.RED + "Usage: /mobfun rig <" + customIdList()
+                        + "> [attack | yaw-offset <deg|auto>]");
                 return true;
             }
             case "pack" -> {
@@ -389,30 +389,91 @@ public final class MobFunSubCommand implements SubCommand {
     }
 
     /**
-     * {@code /mobfun rig <id> [attack]} — the presentation read-out for one
-     * custom mob: what the definition asks for, what the Core could actually
-     * present, and the live pose of each mob. "It looks like a plain villager"
-     * has several very different causes (pack not delivered, no model asset,
-     * rig cap, render toggle, isolation failure) and this separates them in one
-     * command.
+     * {@code /mobfun rig <id> [attack | yaw-offset <deg|auto>]} — the
+     * presentation read-out for one custom mob: what the definition asks for,
+     * what the Core could actually present, and the live pose and facing of each
+     * mob. "It looks like a plain villager" has several very different causes
+     * (pack not delivered, no model asset, rig cap, render toggle, isolation
+     * failure) and this separates them in one command.
      */
-    private boolean reportRig(CommandSender sender, String idToken, boolean attack) {
+    private boolean rig(CommandSender sender, String[] args) {
+        String action = args.length >= 3 ? args[2].toLowerCase(Locale.ROOT) : "";
+        if (action.startsWith("yaw")) {
+            return probeYawOffset(sender, args[1], args.length >= 4 ? args[3] : null);
+        }
+        return reportRig(sender, args[1], action.equals("attack"));
+    }
+
+    /**
+     * Answers "this rig faces backwards" without a rebuild: the offset goes onto
+     * the definition and every live rig picks it up on its next pose push.
+     * {@code auto} restores the authored value — a probe, never persisted.
+     */
+    private boolean probeYawOffset(CommandSender sender, String idToken, String value) {
+        CustomMobShowcase custom = customShowcase(sender, idToken);
+        if (custom == null) {
+            return true;
+        }
+        CustomMobApi api = custom.api();
+        String definitionId = custom.definition().id();
+        if (value == null) {
+            sender.sendMessage(ChatColor.DARK_GREEN + "Yaw offset: " + ChatColor.WHITE
+                    + one(api.yawOffset(definitionId)) + "° (a live probe; nothing is persisted)");
+            sender.sendMessage(ChatColor.GRAY + "Usage: /mobfun rig <id> yaw-offset <degrees|auto>");
+            return true;
+        }
+        if (value.equals("auto") || value.equals("reset")) {
+            api.setYawOffset(definitionId, null);
+            sender.sendMessage(ChatColor.GREEN + "Yaw offset restored to the authored "
+                    + one(api.yawOffset(definitionId)) + "°.");
+            return true;
+        }
+        float degrees;
+        try {
+            degrees = Float.parseFloat(value);
+        } catch (NumberFormatException malformed) {
+            sender.sendMessage(ChatColor.RED + "'" + value + "' is not a number of degrees."
+                    + " Use e.g. '180' for a backwards model, or 'auto'.");
+            return true;
+        }
+        api.setYawOffset(definitionId, degrees);
+        sender.sendMessage(ChatColor.GREEN + "Yaw offset → " + one(api.yawOffset(definitionId))
+                + "° for every live " + definitionId + ". If that makes it face its walk"
+                + " direction, author the value into the definition (MobRenderSpec"
+                + ".yawOffsetDegrees / the mob YAML's render.yaw-offset).");
+        return true;
+    }
+
+    /** The custom-mob showcase behind {@code idToken}, with every refusal explained. */
+    private CustomMobShowcase customShowcase(CommandSender sender, String idToken) {
         MobFunShowcaseEntry showcase = findShowcase(idToken);
         if (showcase == null) {
             sender.sendMessage(ChatColor.RED + "Unknown showcase '" + idToken + "'.");
-            return true;
+            return null;
         }
         if (!(showcase instanceof CustomMobShowcase custom)) {
             sender.sendMessage(ChatColor.RED + "'" + showcase.id() + "' is a behavior showcase"
                     + " (a profile on a vanilla mob); it has no rig. Custom mobs: " + customIdList() + ".");
+            return null;
+        }
+        if (custom.definition() == null) {
+            sender.sendMessage(ChatColor.RED + custom.label() + " is not registered (it is OFF,"
+                    + " its model failed to load, or CUSTOM_MOBS.ENABLED is false).");
+            return null;
+        }
+        return custom;
+    }
+
+    private static String one(float value) {
+        return Float.isNaN(value) ? "n/a" : String.format(Locale.ROOT, "%.1f", value);
+    }
+
+    private boolean reportRig(CommandSender sender, String idToken, boolean attack) {
+        CustomMobShowcase custom = customShowcase(sender, idToken);
+        if (custom == null) {
             return true;
         }
         CustomMobDefinition definition = custom.definition();
-        if (definition == null) {
-            sender.sendMessage(ChatColor.RED + showcase.label() + " is not registered (it is OFF,"
-                    + " its model failed to load, or CUSTOM_MOBS.ENABLED is false).");
-            return true;
-        }
         CustomMobApi api = custom.api();
         sender.sendMessage(ChatColor.DARK_GREEN + definition.id() + " — " + definition.displayName());
 
@@ -430,7 +491,7 @@ public final class MobFunSubCommand implements SubCommand {
                     .findFirst().orElse(null);
             if (mob == null) {
                 sender.sendMessage(ChatColor.YELLOW + "No live " + definition.path()
-                        + " to swing with; /mobfun spawn " + showcase.id() + " first.");
+                        + " to swing with; /mobfun spawn " + custom.id() + " first.");
             } else {
                 boolean playing = api.playAttack(mob);
                 sender.sendMessage((playing ? ChatColor.GREEN : ChatColor.RED)
@@ -446,11 +507,10 @@ public final class MobFunSubCommand implements SubCommand {
                 + (failure == null ? ChatColor.WHITE : ChatColor.RED) + (failure == null
                 ? api.rigStatus(definition.id())
                 : "NOT presenting it, because " + failure));
-        File overrides = overridesFile(definition.path());
-        sender.sendMessage(ChatColor.DARK_GREEN + "Overrides: " + ChatColor.WHITE + (overrides == null
-                ? "unknown (Core data folder unavailable)"
-                : overrides.isFile() ? overrides.getName() + " (authored corrections apply)"
-                : "none (authored defaults apply; create " + relative(overrides) + " to correct a rig)"));
+        sender.sendMessage(ChatColor.DARK_GREEN + "Facing: " + ChatColor.WHITE
+                + "yaw offset " + one(api.yawOffset(definition.id()))
+                + "° (0 = the model's own front; set 180 if it was authored backwards."
+                + " Probe it live with /mobfun rig " + custom.id() + " yaw-offset <deg>)");
         List<LivingEntity> live = api.liveMobs(definition.id());
         if (live.isEmpty()) {
             sender.sendMessage(ChatColor.DARK_GREEN + "Live mobs: " + ChatColor.WHITE + "none");
@@ -465,9 +525,12 @@ public final class MobFunSubCommand implements SubCommand {
             }
             String pose = api.poseSnapshot(mob);
             String isolation = api.isolationLabel(mob);
+            float heading = api.rigHeading(mob);
             sender.sendMessage(ChatColor.WHITE + "  " + shortId(mob.getUniqueId())
                     + " at " + describe(mob.getLocation())
                     + " | AI: " + (isolation == null ? "never applied" : isolation)
+                    + " | walk " + one(heading) + "° vs body "
+                    + one(mob.getLocation().getYaw()) + "°"
                     + " | pose: " + (pose == null ? "no rig" : pose)
                     + (mob.isInvisible() ? " | base hidden" : " | base visible"));
         }
@@ -554,18 +617,6 @@ public final class MobFunSubCommand implements SubCommand {
         return sorted.size() <= limit ? sorted : sorted.subList(0, limit);
     }
 
-    private File overridesFile(String idPath) {
-        org.bukkit.plugin.Plugin core = Bukkit.getPluginManager().getPlugin("Mineplus");
-        if (core == null) {
-            return null;
-        }
-        return new File(new File(core.getDataFolder(), "mobs"), idPath + ".model.json");
-    }
-
-    private String relative(File file) {
-        return "plugins/Mineplus/mobs/" + file.getName();
-    }
-
     private static String shortId(UUID id) {
         return id.toString().substring(0, 8);
     }
@@ -631,11 +682,11 @@ public final class MobFunSubCommand implements SubCommand {
                     completions.add(showcase.id());
                 }
             }
-            completions.add("attack");
             return filter(completions, args[1]);
         }
         if (args[0].equalsIgnoreCase("rig") && args.length == 3) {
             completions.add("attack");
+            completions.add("yaw-offset");
             return filter(completions, args[2]);
         }
         if (args[0].equalsIgnoreCase("pack") && args.length == 2) {

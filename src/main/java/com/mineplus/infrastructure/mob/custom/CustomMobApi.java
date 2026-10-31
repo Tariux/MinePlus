@@ -147,6 +147,33 @@ public interface CustomMobApi {
     }
 
     /**
+     * The direction one live rig currently faces, in Bukkit yaw degrees, or
+     * {@code NaN} when the mob carries no rig. Printed next to the mob's own
+     * body yaw and its movement heading, it answers "is the rig facing where
+     * the mob walks" without a rebuild.
+     */
+    default float rigHeading(LivingEntity mob) {
+        return Float.NaN;
+    }
+
+    /**
+     * The authored-front offset one definition's rigs use (degrees). A model
+     * whose front is not Blockbench's {@code -z} needs {@code 180} here, not a
+     * renderer change.
+     */
+    default float yawOffset(String definitionId) {
+        return 0.0f;
+    }
+
+    /**
+     * Overrides a definition's yaw offset for the live rigs, or restores the
+     * authored value with {@code null}. A runtime probe only: nothing is
+     * persisted, so a restart returns every rig to its definition.
+     */
+    default void setYawOffset(String definitionId, Float degrees) {
+    }
+
+    /**
      * Applies new subsystem settings ({@code CUSTOM_MOBS}).
      */
     void updateSettings(CustomMobSettings settings);

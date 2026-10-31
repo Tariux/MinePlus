@@ -19,8 +19,6 @@ import org.joml.Matrix4fc;
  */
 public final class TransportMobBackend implements MobDisplayBackend {
 
-    private static final Matrix4fc IDENTITY = new Matrix4f();
-
     private final DisplayTransport transport;
     private final String tagPrefix;
 

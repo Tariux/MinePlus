@@ -209,3 +209,129 @@ weapons:
       impact: CRIT
       impact-smoke: CLOUD
       sound-fire: "mineplusgun:battle_rifle_shot"
+
+  # --- Gunsmith western set (authored in Blockbench, see art/gunsmith) ------
+  rust_shot:
+    display-name: "&6Rust-Shot"
+    category: WEAPON
+    type: PISTOL
+    backing-material: RAW_IRON
+    price: 500
+    ammo: { magazine: 6, reload-ticks: 44, type: 45scrap }
+    fire: { mode: SEMI, rpm: 180 }
+    ballistics:
+      damage: 11
+      headshot-multiplier: 2.2
+      velocity: 3.1
+      gravity: 0.04
+      drag: 0.02
+      range: 55
+      spread-degrees: 2.2
+      falloff-start: 18
+      falloff-per-block: 0.05
+      knockback: 0.5
+    accuracy:
+      move: 0.8
+      air: 3
+      sprint: 4
+      recoil-per-shot: 0.9
+      recoil-recovery: 0.25
+      recoil-max: 3.2
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:pistol_shot"
+    animation:
+      reload: 1.6
+      cycle: 0.9
+      fire: 0.3
+
+  frontier_eye:
+    display-name: "&bFrontier Eye"
+    category: WEAPON
+    type: RIFLE
+    backing-material: FLINT
+    price: 3200
+    ammo: { magazine: 7, reload-ticks: 52, type: longgrain }
+    fire: { mode: BOLT, rpm: 46, cycle-ticks: 26 }
+    ballistics:
+      damage: 16.5
+      headshot-multiplier: 2.4
+      velocity: 4.2
+      gravity: 0.022
+      drag: 0.01
+      penetration: 1
+      range: 140
+      spread-degrees: 0.7
+      falloff-start: 55
+      falloff-per-block: 0.02
+      knockback: 0.45
+    accuracy:
+      move: 1.2
+      air: 3.2
+      sprint: 4.6
+      recoil-per-shot: 0.8
+      recoil-recovery: 0.24
+      recoil-max: 3.4
+    aim: { scope: true, spread-multiplier: 0.3, move-multiplier: 1.8, recoil-multiplier: 0.55 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:rifle_shot"
+    animation:
+      reload: 1.9
+      cycle: 0.9
+      fire: 0.45
+      scope-in: 0.25
+      scope-hold: 0.35
+      scope-out: 0.3
+
+  boom_stick:
+    display-name: "&cBoom-Stick"
+    category: WEAPON
+    type: SHOTGUN
+    backing-material: GUNPOWDER
+    price: 1800
+    ammo: { magazine: 2, reload-ticks: 58, type: heavygauge }
+    fire: { mode: SEMI, rpm: 75, cycle-ticks: 20, pellets: 10 }
+    ballistics:
+      damage: 5.5
+      headshot-multiplier: 1.4
+      velocity: 2.6
+      gravity: 0.05
+      drag: 0.035
+      range: 26
+      spread-degrees: 9.5
+      falloff-start: 8
+      falloff-per-block: 0.11
+      knockback: 0.85
+    accuracy:
+      move: 0.7
+      air: 2.8
+      sprint: 3.8
+      recoil-per-shot: 1.6
+      recoil-recovery: 0.3
+      recoil-max: 5
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:shotgun_shot"
+    animation:
+      reload: 1.8
+      cycle: 0.5
+      fire: 0.5

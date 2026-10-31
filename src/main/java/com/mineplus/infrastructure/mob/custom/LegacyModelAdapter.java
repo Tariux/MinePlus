@@ -27,9 +27,20 @@ public final class LegacyModelAdapter {
     }
 
     public static ModelData adapt(String sourceName, CustomMobModel model) {
+        return adapt(sourceName, model, sourceName + ": hand-authored parts use the deprecated"
+                + " custom-mob model API; prefer a .bbmodel or Java JSON file.");
+    }
+
+    /**
+     * @param notice the issue to record in the model's report, or {@code null} for
+     *               none — the engine uses that when a legacy shape is its own
+     *               choice (a retexture fallback rig), not a deprecated authoring path
+     */
+    public static ModelData adapt(String sourceName, CustomMobModel model, String notice) {
         List<String> issues = new ArrayList<>();
-        issues.add(sourceName + ": hand-authored parts use the deprecated custom-mob model API;"
-                + " prefer a .bbmodel or Java JSON file.");
+        if (notice != null) {
+            issues.add(notice);
+        }
 
         int heightPx = model.modelHeightPx();
         List<ModelPartRef> refs = new ArrayList<>();

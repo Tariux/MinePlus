@@ -32,6 +32,12 @@ dependencies {
     )
 }
 
+// The jars above are compileOnly so nothing is bundled into the plugin jar, but
+// the test source set is a separate classpath and needs them too.
+configurations {
+    testImplementation.extendsFrom compileOnly
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release.set(21)

@@ -21,9 +21,18 @@ import java.util.Set;
  *
  * <p>Handles the shapes real exports use: generic and bedrock cube fields
  * ({@code from/to} or {@code origin/size}), box-UV and per-face UVs, embedded
- * base64 textures or references resolved through a sibling resolver, the
- * recursive outliner group tree, locators and null objects as attachment
- * bones, and animations with per-key linear/step/catmullrom interpolation.
+ * base64 textures or references resolved through a sibling resolver, locators
+ * and null objects as attachment bones, and animations with per-key
+ * linear/step/catmullrom interpolation.</p>
+ *
+ * <p>Two outliner and two animation dialects are read, because both ship in the
+ * wild. Blockbench up to 4.11 inlines a group's {@code name}, {@code origin} and
+ * {@code rotation} in its outliner node and keys clip frames by time inside a
+ * per-channel object. Blockbench 4.12+ ({@code meta.format_version}
+ * {@code "5.0"}) keeps outliner nodes as bare {@code {uuid, children}} shells
+ * with the group data in a root {@code groups} array joined by uuid, and puts
+ * every frame of every channel in one flat {@code keyframes} array carrying
+ * {@code channel}, {@code time}, {@code interpolation} and {@code data_points}.
  * Everything the parser does not understand is recorded as an issue and
  * skipped — never a crash, never silent garbage.</p>
  */
@@ -87,10 +96,14 @@ public final class BbModelParser {
         private final List<ModelBone> bones = new ArrayList<>();
         private final Map<String, Integer> boneIndexByUuid = new HashMap<>();
         private final Map<String, Integer> elementBoneIndex = new HashMap<>();
+        /** Format 5.0: group uuid -> the root {@code groups} entry holding its real data. */
+        private final Map<String, JsonObject> groupsByUuid = new HashMap<>();
         /** element uuid -> the cube parsed for it, in element order. */
         private final Map<String, List<ModelCube>> cubesByElement = new LinkedHashMap<>();
         private final Map<String, Boolean> molangWarned = new HashMap<>();
         private boolean pixelUvWarned;
+        private boolean pixelUvSeen;
+        private boolean normalizedUvSeen;
         private int rotationBoneCounter;
 
         private Parse(String sourceName, JsonObject root, BbModelParser.TextureResolver textureResolver) {
@@ -126,6 +139,7 @@ public final class BbModelParser {
             int rootIndex = bones.size();
             bones.add(new ModelBone("root", "root", -1, 0, 0, 0, 0, 0, 0,
                     List.of(), ModelBone.Attachment.NONE));
+            indexGroups();
             if (root.has("outliner") && root.get("outliner").isJsonArray()) {
                 walkOutliner(root.getAsJsonArray("outliner"), rootIndex, elementsByUuid);
             } else {
@@ -213,6 +227,24 @@ public final class BbModelParser {
         // Outliner
         // ------------------------------------------------------------------
 
+        /**
+         * Format 5.0 moves every group's real data out of the outliner node and
+         * into a flat root {@code groups} array; the outliner keeps only the
+         * uuid and the child list. Index it so the walk can join by uuid.
+         */
+        private void indexGroups() {
+            if (!root.has("groups") || !root.get("groups").isJsonArray()) {
+                return;
+            }
+            for (JsonElement entry : root.getAsJsonArray("groups")) {
+                if (entry.isJsonObject() && entry.getAsJsonObject().has("uuid")
+                        && entry.getAsJsonObject().get("uuid").isJsonPrimitive()) {
+                    groupsByUuid.put(entry.getAsJsonObject().get("uuid").getAsString(),
+                            entry.getAsJsonObject());
+                }
+            }
+        }
+
         private void walkOutliner(JsonArray outliner, int parentIndex, Map<String, JsonObject> elementsByUuid) {
             int counter = 0;
             for (JsonElement entry : outliner) {
@@ -224,11 +256,15 @@ public final class BbModelParser {
                 if (!entry.isJsonObject()) {
                     continue;
                 }
-                JsonObject group = entry.getAsJsonObject();
-                String uuid = string(group, "uuid", "");
-                float[] pivot = floatArrayOr(group.get("origin"), 0.0f, 3);
-                float[] rest = floatArrayOr(group.get("rotation"), 0.0f, 3);
-                String rawName = string(group, "name", "group_" + counter);
+                JsonObject node = entry.getAsJsonObject();
+                String uuid = string(node, "uuid", "");
+                JsonObject authored = uuid.isEmpty() ? null : groupsByUuid.get(uuid);
+                String rawName = firstText(string(node, "name", null), string(authored, "name", null),
+                        "group_" + counter);
+                float[] pivot = floatArrayOr(firstNonNull(node.get("origin"),
+                        authored == null ? null : authored.get("origin")), 0.0f, 3);
+                float[] rest = floatArrayOr(firstNonNull(node.get("rotation"),
+                        authored == null ? null : authored.get("rotation")), 0.0f, 3);
                 String name = uniqueName(ModelBone.sanitizeName(rawName, bones.size()));
                 int index = bones.size();
                 bones.add(new ModelBone(name, rawName, parentIndex,
@@ -237,8 +273,10 @@ public final class BbModelParser {
                 if (!uuid.isEmpty()) {
                     boneIndexByUuid.put(uuid, index);
                 }
-                if (group.has("children") && group.get("children").isJsonArray()) {
-                    walkOutliner(group.getAsJsonArray("children"), index, elementsByUuid);
+                JsonArray children = firstArray(node.get("children"),
+                        authored == null ? null : authored.get("children"));
+                if (children != null) {
+                    walkOutliner(children, index, elementsByUuid);
                 }
             }
         }
@@ -406,14 +444,17 @@ public final class BbModelParser {
                     float max = Math.max(Math.max(Math.abs(uv[0]), Math.abs(uv[1])),
                             Math.max(Math.abs(uv[2]), Math.abs(uv[3])));
                     if (max > 1.001f) {
-                        // Already pixel-space (an unusual export); keep as-is once warned.
-                        if (!pixelUvWarned) {
+                        // Bedrock-format exports write pixel UVs, which is what the
+                        // pipeline wants; only a *mix* of styles is an authoring bug.
+                        pixelUvSeen = true;
+                        if (normalizedUvSeen && !pixelUvWarned) {
                             pixelUvWarned = true;
-                            issues.add(sourceName + ": per-face UVs are already pixel-space;"
-                                    + " scaling skipped.");
+                            issues.add(sourceName + ": a face UV is pixel-space while another is"
+                                    + " normalized; the pixel one is used as authored.");
                         }
                         faces.put(direction, new ModelCube.Uv(uv[0], uv[1], uv[2], uv[3]));
                     } else {
+                        normalizedUvSeen = true;
                         faces.put(direction, new ModelCube.Uv(uv[0] * texW, uv[1] * texH,
                                 uv[2] * texW, uv[3] * texH));
                     }
@@ -461,13 +502,9 @@ public final class BbModelParser {
                 if (Math.abs(rx) < 1.0e-4f && Math.abs(ry) < 1.0e-4f && Math.abs(rz) < 1.0e-4f) {
                     return null;
                 }
-                int nonZero = (Math.abs(rx) > 1.0e-4f ? 1 : 0) + (Math.abs(ry) > 1.0e-4f ? 1 : 0)
-                        + (Math.abs(rz) > 1.0e-4f ? 1 : 0);
-                if (nonZero > 1) {
-                    issues.add(sourceName + ": a multi-axis element rotation was found; only single-axis"
-                            + " rotations are supported — rotate the group in Blockbench instead.");
-                    return null;
-                }
+                // Any axis combination is fine here: the rotation becomes a synthetic
+                // bone, and bone rotations have none of the client's one-axis ±45°
+                // element-rotation limits.
                 return new float[]{rx, ry, rz};
             }
             return null;
@@ -493,16 +530,32 @@ public final class BbModelParser {
 
                 if (animation.has("animators") && animation.get("animators").isJsonObject()) {
                     JsonObject animators = animation.getAsJsonObject("animators");
+                    String clipName = string(animation, "name", rawName);
                     for (Map.Entry<String, JsonElement> animatorEntry : animators.entrySet()) {
                         if (!animatorEntry.getValue().isJsonObject()) {
                             continue;
                         }
+                        // Animators are keyed by bone uuid; Blockbench also allows
+                        // animating a bare element, which drives the bone it hangs on.
                         Integer boneIndex = boneIndexByUuid.get(animatorEntry.getKey());
+                        if (boneIndex == null) {
+                            boneIndex = elementBoneIndex.get(animatorEntry.getKey());
+                        }
                         if (boneIndex == null || boneIndex >= finishedBones.size()) {
                             continue;
                         }
                         String boneName = finishedBones.get(boneIndex).name();
                         JsonObject animator = animatorEntry.getValue().getAsJsonObject();
+                        JsonArray keyframes = arrayOrNull(animator.get("keyframes"));
+                        if (keyframes != null) {
+                            parseKeyframes(keyframes, boneName, clipName, builder);
+                            if (booleanValue(animator, "rotation_global")) {
+                                issues.add(sourceName + ": clip '" + clipName + "' drives '" + boneName
+                                        + "' with global (world-space) rotations; they are applied as"
+                                        + " bone-local rotations.");
+                            }
+                            continue;
+                        }
                         parseChannel(animator.get("rotation"), boneName, "rotation", builder);
                         parseChannel(animator.get("position"), boneName, "position", builder);
                         parseChannel(animator.get("scale"), boneName, "scale", builder);
@@ -535,6 +588,123 @@ public final class BbModelParser {
             return ModelAnimation.LoopMode.ONCE;
         }
 
+        /**
+         * Format 5.0: one flat list of frames for every channel of the bone. Each
+         * frame names its own channel, time, interpolation and value(s); values may
+         * be strings (Blockbench writes numbers as strings here) or Molang.
+         */
+        private void parseKeyframes(JsonArray keyframes, String boneName, String clipName,
+                                    ModelAnimation.Builder builder) {
+            for (JsonElement entry : keyframes) {
+                if (!entry.isJsonObject()) {
+                    continue;
+                }
+                JsonObject key = entry.getAsJsonObject();
+                String channel = switch (string(key, "channel", "rotation").toLowerCase(Locale.ROOT)) {
+                    case "position" -> "position";
+                    case "scale" -> "scale";
+                    case "rotation" -> "rotation";
+                    default -> null;
+                };
+                if (channel == null) {
+                    issues.add(sourceName + ": clip '" + clipName + "' has an unsupported channel '"
+                            + string(key, "channel", "?") + "' on '" + boneName + "'; skipped.");
+                    continue;
+                }
+                Double timeValue = number(key.get("time"));
+                if (timeValue == null) {
+                    issues.add(sourceName + ": clip '" + clipName + "' has a frame on '" + boneName
+                            + "' with no readable time; skipped.");
+                    continue;
+                }
+                float time = timeValue.floatValue();
+                ModelAnimation.Interpolation interpolation =
+                        parseInterpolation(string(key, "interpolation", null));
+                JsonElement points = key.get("data_points");
+                List<float[]> values = dataPoints(points, key.get("data_point"));
+                for (int i = 0; i < values.size(); i++) {
+                    if (i > 0) {
+                        issues.add(sourceName + ": clip '" + clipName + "' frame on '" + boneName
+                                + "' carries " + values.size() + " data points; only the first plays"
+                                + " (merge the frames in Blockbench).");
+                        break;
+                    }
+                    float[] data = values.get(i);
+                    builder.key(boneName, channel, time,
+                            floatOrZero(data, 0, boneName, channel),
+                            floatOrZero(data, 1, boneName, channel),
+                            floatOrZero(data, 2, boneName, channel), interpolation);
+                }
+            }
+        }
+
+        /** Every value shape a Blockbench frame can carry: objects, triples or scalars. */
+        private static List<float[]> dataPoints(JsonElement points, JsonElement legacyPoint) {
+            List<float[]> out = new ArrayList<>();
+            if (points != null && points.isJsonArray()) {
+                for (JsonElement entry : points.getAsJsonArray()) {
+                    float[] triple = valueTriple(entry);
+                    if (triple != null) {
+                        out.add(triple);
+                    }
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            JsonElement single = points != null && !points.isJsonArray() ? points : legacyPoint;
+            float[] triple = valueTriple(single);
+            if (triple != null) {
+                out.add(triple);
+            }
+            return out;
+        }
+
+        private static float[] valueTriple(JsonElement value) {
+            if (value == null || value.isJsonNull()) {
+                return null;
+            }
+            if (value.isJsonObject()) {
+                JsonObject object = value.getAsJsonObject();
+                return new float[]{numberOr(object.get("x")), numberOr(object.get("y")),
+                        numberOr(object.get("z"))};
+            }
+            if (value.isJsonArray()) {
+                return floatArrayOr(value, Float.NaN, 3);
+            }
+            Double scalar = number(value);
+            return scalar == null ? null
+                    : new float[]{scalar.floatValue(), scalar.floatValue(), scalar.floatValue()};
+        }
+
+        private static float numberOr(JsonElement value) {
+            Double parsed = value == null ? null : number(value);
+            return parsed == null ? Float.NaN : parsed.floatValue();
+        }
+
+        /** A JSON number, or a string that is one (Blockbench writes numeric strings). */
+        private static Double number(JsonElement value) {
+            if (value == null || !value.isJsonPrimitive()) {
+                return null;
+            }
+            try {
+                return value.getAsDouble();
+            } catch (RuntimeException notANumber) {
+                return Molang.numericConstant(value.getAsString());
+            }
+        }
+
+        private static ModelAnimation.Interpolation parseInterpolation(String value) {
+            if (value == null) {
+                return ModelAnimation.Interpolation.LINEAR;
+            }
+            return switch (value.toLowerCase(Locale.ROOT)) {
+                case "step" -> ModelAnimation.Interpolation.STEP;
+                case "catmullrom", "bezier" -> ModelAnimation.Interpolation.CATMULLROM;
+                default -> ModelAnimation.Interpolation.LINEAR;
+            };
+        }
+
         private void parseChannel(JsonElement channelElement, String boneName, String channel,
                                   ModelAnimation.Builder builder) {
             if (channelElement == null || !channelElement.isJsonObject()) {
@@ -555,10 +725,7 @@ public final class BbModelParser {
                 if (value.isJsonObject()) {
                     JsonObject key = value.getAsJsonObject();
                     data = floatArrayOr(key.get("data_point"), Float.NaN, 3);
-                    String lerp = string(key, "lerp_mode", null);
-                    if ("catmullrom".equalsIgnoreCase(lerp)) {
-                        interpolation = ModelAnimation.Interpolation.CATMULLROM;
-                    }
+                    interpolation = parseInterpolation(string(key, "lerp_mode", null));
                 } else if (value.isJsonArray()) {
                     data = floatArrayOr(value, Float.NaN, 3);
                 } else if (value.isJsonPrimitive()) {
@@ -619,5 +786,35 @@ public final class BbModelParser {
             return fallback;
         }
         return object.get(key).getAsString();
+    }
+
+    private static String firstText(String first, String second, String fallback) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        return second != null && !second.isBlank() ? second : fallback;
+    }
+
+    private static JsonElement firstNonNull(JsonElement first, JsonElement second) {
+        return first != null && !first.isJsonNull() ? first : second;
+    }
+
+    private static JsonArray arrayOrNull(JsonElement element) {
+        return element != null && element.isJsonArray() ? element.getAsJsonArray() : null;
+    }
+
+    /** The child list to walk: the outliner node's when it has one, else the group's. */
+    private static JsonArray firstArray(JsonElement nodeChildren, JsonElement authoredChildren) {
+        JsonArray node = arrayOrNull(nodeChildren);
+        if (node != null && !node.isEmpty()) {
+            return node;
+        }
+        JsonArray authored = arrayOrNull(authoredChildren);
+        return authored != null && !authored.isEmpty() ? authored : node != null ? node : authored;
+    }
+
+    private static boolean booleanValue(JsonObject object, String key) {
+        JsonElement element = object == null ? null : object.get(key);
+        return element != null && element.isJsonPrimitive() && element.getAsBoolean();
     }
 }

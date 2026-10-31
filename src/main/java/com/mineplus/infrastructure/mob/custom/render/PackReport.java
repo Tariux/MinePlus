@@ -65,10 +65,6 @@ public record PackReport(Status status, List<String> reasons) {
             return this;
         }
 
-        public boolean isBroken() {
-            return !broken.isEmpty();
-        }
-
         public PackReport build() {
             if (!broken.isEmpty()) {
                 List<String> all = new ArrayList<>(broken);

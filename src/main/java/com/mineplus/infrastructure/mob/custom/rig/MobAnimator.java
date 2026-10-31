@@ -139,12 +139,6 @@ public final class MobAnimator {
         return attackClip != null;
     }
 
-    /** True while an attack, hurt or command overlay is playing. */
-    public boolean overlayActive() {
-        return attackTime < overlayLength(attackClip) || hurtTime < overlayLength(hurtClip)
-                || overlayTime < overlayLength(overlayClip);
-    }
-
     private static float overlayLength(ModelAnimation clip) {
         return clip == null || clip.lengthSeconds() <= 0.0f ? 0.5f : clip.lengthSeconds();
     }
@@ -186,10 +180,6 @@ public final class MobAnimator {
     /** Length of the bound death clip in seconds; a short hold when none is bound. */
     public float deathClipLength() {
         return deathClip == null ? 0.5f : Math.max(0.05f, deathClip.lengthSeconds());
-    }
-
-    public State baseState() {
-        return baseState;
     }
 
     /** Advances the clocks and resamples every pose. Pure; no clock source of its own. */

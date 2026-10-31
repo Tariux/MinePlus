@@ -788,12 +788,13 @@ the four `LEG_*` roles, `STATIC`) that tells the rig which vanilla pose applies,
 so head tracking and leg swing follow the entity while parts stay independently
 animated.
 
-The Core compiles the model into pack assets (`MobRigAssetWriter`): one texture
+The Core compiles the model into pack assets (`PackModelEmitter`, through the
+`BoneRigAssetWriter` the virtual axis already uses): one texture
 PNG, one item model per part, one item definition per part — the vanilla box-UV
 cross layout is converted to element face windows exactly as Blockbench derives
 it. Parts are kept inside the client's -16..32 px element window (shifted, or
 split into `<part>_p2`, … when larger than 48 px) and each piece becomes its
-own display, reassembled by the pose pass. `MobRigRenderer` then hides the base
+own display, reassembled by the pose pass. `MobRenderEngine` then hides the base
 entity and presents every part/piece as an `ItemDisplay` carrying that part's
 `item_model` (a legacy server reaches the same models through the pack's
 reserved `custom_model_data` overrides), driven on

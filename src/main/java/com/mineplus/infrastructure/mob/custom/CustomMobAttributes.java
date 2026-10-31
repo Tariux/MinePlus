@@ -184,12 +184,6 @@ public final class CustomMobAttributes {
         return Double.isFinite(value) ? value : null;
     }
 
-    /** The template names this class can carry, for status reporting. */
-    public static String[] templatedAttributeNames() {
-        return new String[]{"MAX_HEALTH", "MOVEMENT_SPEED", "ATTACK_DAMAGE", "FOLLOW_RANGE", "ARMOR",
-                "KNOCKBACK_RESISTANCE", "ATTACK_KNOCKBACK", "SCALE", "JUMP_STRENGTH", "GRAVITY"};
-    }
-
     public Double maxHealth() {
         return maxHealth;
     }
