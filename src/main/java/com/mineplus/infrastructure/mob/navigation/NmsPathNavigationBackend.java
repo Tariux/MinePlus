@@ -1,30 +1,27 @@
 package com.mineplus.infrastructure.mob.navigation;
 
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Location;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Villager;
 
 /**
  * The reflective NMS backend for servers without the Paper Pathfinder API.
- * Two channels, both through the server's own pathfinding:
- * <ol>
- *   <li><b>Brain walk target</b> â€” for Brain-driven mobs (villagers) the
- *       vanilla {@code WALK_TARGET} memory is set, so the mob's own AI
- *       performs the walk (hazard-aware, no goal tug-of-war).</li>
- *   <li><b>Path navigation</b> â€” {@code PathNavigation.moveTo(x, y, z,
- *       speed)} for goal-driven mobs and as the fallback everywhere.</li>
- * </ol>
  *
- * <p>Handles come from {@link NmsEntityPlan}; {@code canFloat} is configured
- * once per mob so long marches survive river crossings.
+ * <p>Every mob family — goal-driven and Brain-driven alike — walks through the
+ * same vanilla {@code NavigationAbstract}: {@code moveTo(x, y, z, speed)}
+ * requests a path and the mob's own step follows it. The Brain is deliberately
+ * not used as a movement channel: a custom mob has its Brain behaviors cleared
+ * by design, so a walk target written into a cleared Brain would never be
+ * consumed.</p>
+ *
+ * <p>Because the mob's vanilla goals are cleared, nothing else rotates it.
+ * Each request therefore also points the vanilla look control at the
+ * destination, so the body yaw follows the path instead of freezing at the
+ * spawn direction (the "walks backwards" symptom). Handles come from
+ * {@link NmsEntityPlan}; {@code canFloat} is configured once per mob so long
+ * marches survive river crossings.</p>
  */
 final class NmsPathNavigationBackend implements NavigationBackend {
-
-    /** One-time water-float setup per mob, so paths survive river crossings. */
-    private static final java.util.Set<UUID> floatConfigured = ConcurrentHashMap.newKeySet();
 
     NmsPathNavigationBackend() {
     }
@@ -35,10 +32,10 @@ final class NmsPathNavigationBackend implements NavigationBackend {
         return true;
     }
 
-    /** First choice for Brain-driven mobs: their own AI performs the walk. */
+    /** Always the fallback: Paper's public Pathfinder wins when it is present. */
     @Override
     public int preference(org.bukkit.entity.Mob mob) {
-        return mob instanceof Villager ? 0 : 10;
+        return 10;
     }
 
     @Override
@@ -47,32 +44,22 @@ final class NmsPathNavigationBackend implements NavigationBackend {
         if (plan == null || plan.getHandle == null) {
             return false;
         }
-        // Both channels path through the mob's own navigation, so both need the
-        // float flag: a long march crosses a river, and a villager whose
-        // navigation refuses water stands on the bank forever.
-        configureFloat(plan, mob);
-        if (mob instanceof Villager && BrainWalkTarget.apply(plan, mob, target, speed)) {
-            return true;
-        }
-        return moveToViaNavigation(plan, mob, target, speed);
-    }
-
-    /** Sets {@code canFloat} once per mob, for whichever channel walks it. */
-    private static void configureFloat(NmsEntityPlan plan, Mob mob) {
-        if (plan.navigationSetCanFloat == null || plan.getNavigation == null
-                || !floatConfigured.add(mob.getUniqueId())) {
-            return;
-        }
         try {
             Object handle = plan.getHandle.invoke(mob);
             if (handle == null) {
-                return;
+                return false;
             }
-            Object navigation = plan.getNavigation.invoke(handle);
-            if (navigation != null) {
-                plan.navigationSetCanFloat.invoke(navigation, true);
+            Object navigation = plan.getNavigation == null ? null : plan.getNavigation.invoke(handle);
+            if (navigation == null) {
+                return false;
             }
-        } catch (Throwable ignored) {
+            // Cheap enough to re-assert per request and stateless: a mob that
+            // was unloaded and reloaded gets its water crossing back without a
+            // UUID registry that grows for the life of the server.
+            plan.setCanFloat(navigation, true);
+            return plan.moveTo(handle, navigation, target, speed);
+        } catch (Throwable failure) {
+            return false;
         }
     }
 
@@ -83,10 +70,7 @@ final class NmsPathNavigationBackend implements NavigationBackend {
             if (plan == null || plan.getHandle == null) {
                 return;
             }
-            if (mob instanceof Villager) {
-                BrainWalkTarget.clear(plan, mob);
-            }
-            if (plan.getNavigation == null || plan.navigationStop == null) {
+            if (plan.getNavigation == null) {
                 return;
             }
             Object handle = plan.getHandle.invoke(mob);
@@ -95,7 +79,7 @@ final class NmsPathNavigationBackend implements NavigationBackend {
             }
             Object navigation = plan.getNavigation.invoke(handle);
             if (navigation != null) {
-                plan.navigationStop.invoke(navigation);
+                plan.stopNavigation(navigation);
             }
         } catch (Throwable ignored) {
         }
@@ -118,25 +102,4 @@ final class NmsPathNavigationBackend implements NavigationBackend {
             return false;
         }
     }
-
-    private boolean moveToViaNavigation(NmsEntityPlan plan, Mob mob, Location target, double speed) {
-        if (plan == null || plan.navigationMoveTo == null) {
-            return false;
-        }
-        try {
-            Object handle = plan.getHandle.invoke(mob);
-            if (handle == null) {
-                return false;
-            }
-            Object navigation = plan.getNavigation == null ? null : plan.getNavigation.invoke(handle);
-            if (navigation == null) {
-                return false;
-            }
-            return Boolean.TRUE.equals(
-                    plan.navigationMoveTo.invoke(navigation, target.getX(), target.getY(), target.getZ(), speed));
-        } catch (Throwable failure) {
-            return false;
-        }
-    }
 }
-

@@ -15,10 +15,10 @@ import org.bukkit.entity.Villager;
  *       {@code Class.forName} probe, so a Spigot server never reaches the
  *       call site (the Core's standard paper-only seam).</li>
  *   <li>{@link NmsPathNavigationBackend} â€” reflective fallback for servers
- *       without the Paper API: the vanilla Brain walk-target channel for
- *       Brain-driven mobs (villagers), then NMS {@code PathNavigation}.
- *       Every 1.20.5+ runtime is mojang-mapped, so the named reflection
- *       lookups hit; a structural probe covers exotic remaps.</li>
+ *       without the Paper API: the vanilla {@code NavigationAbstract} path
+ *       request, which every mob family (goal-driven or Brain-driven) follows
+ *       through its own step. Handles resolve by shape, so one jar serves both
+ *       mojang- and Spigot-mapped runtimes.</li>
  * </ol>
  *
  * <p>A {@code false} return from {@link #moveTo} means no backend could path
@@ -66,8 +66,15 @@ public final class MobNavigator {
         // Each backend names the mob family it speaks to; try the one that owns
         // this mob first so nothing sets a path the mob's own AI will fight.
         boolean paperFirst = BACKENDS[0].preference(mob) <= BACKENDS[1].preference(mob);
-        return walk(BACKENDS[paperFirst ? 0 : 1], mob, target, speed)
+        boolean walked = walk(BACKENDS[paperFirst ? 0 : 1], mob, target, speed)
                 || walk(BACKENDS[paperFirst ? 1 : 0], mob, target, speed);
+        if (walked) {
+            // A goal-less mob has nothing pointing its head along the path, so
+            // the navigator does it: without this the body yaw stays where the
+            // mob spawned and a rig looks like it is walking sideways/backwards.
+            lookToward(mob, target);
+        }
+        return walked;
     }
 
     private static boolean walk(NavigationBackend backend, Mob mob, Location target, double speed) {
@@ -131,14 +138,23 @@ public final class MobNavigator {
             return;
         }
         java.lang.reflect.Method lookAt = LookSeam.LOOK_AT;
-        if (lookAt == null) {
+        if (lookAt != null) {
+            try {
+                lookAt.invoke(mob, target);
+                return;
+            } catch (Throwable unavailable) {
+                // Fall through to the NMS look control.
+            }
+        }
+        NmsEntityPlan plan = NmsEntityPlan.forEntity(mob);
+        if (plan == null || plan.getHandle == null) {
             return;
         }
         try {
-            lookAt.invoke(mob, target);
+            Object handle = plan.getHandle.invoke(mob);
+            plan.faceTarget(handle, target.getX(), target.getY() + 1.0, target.getZ(), 20.0f, 20.0f);
         } catch (Throwable unavailable) {
-            // A server whose Mob#lookAt has a different signature: vanilla
-            // head tracking is a fine fallback.
+            // Vanilla head tracking is a fine fallback.
         }
     }
 
@@ -157,9 +173,8 @@ public final class MobNavigator {
     }
 
     /**
-     * Drops any current path; a stopped mob returns to its own vanilla AI.
-     * Both channels are cleared: a march may have been issued through either,
-     * and a leftover Brain walk-target would silently keep the mob walking.
+     * Drops any current path; a stopped mob stays where it is (its vanilla AI
+     * goals are cleared, so nothing re-paths it behind the caller's back).
      */
     public static void stop(Mob mob) {
         if (mob == null) {

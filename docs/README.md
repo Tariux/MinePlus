@@ -61,7 +61,7 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
 | [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon + Gear + Wine + Cabinet + pack showcases) |
 | [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms with file-discovered frame animations, right-click shooting, left-click scopes, ammunition economy and a Vault shop on the Core's ballistics, held-item input and magazine services |
-| [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch, pilgrim villagers and the Evil Pig custom mob on the Core's mob behavior and custom-mob APIs |
+| [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch, pilgrim villagers and the Evil Pig + Villager Soldier custom mobs on the Core's mob behavior and custom-mob APIs |
 
 For building your own module, follow the canonical recipe in
 [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md).

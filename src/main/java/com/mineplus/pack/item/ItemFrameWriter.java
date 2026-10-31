@@ -31,6 +31,12 @@ import org.bukkit.inventory.meta.ItemMeta;
  * item keeps rendering its bare backing material — the graceful degradation
  * every pack item already applies.</p>
  *
+ * <p>With {@code PACK.APPEARANCE_MODE: SELECT} the same state is additionally
+ * written to the component's <em>string list</em> — the channel
+ * {@code minecraft:select} reads — and that list becomes the value the writer
+ * reads back as current. The float channel stays in place for every definition
+ * that dispatches on it.</p>
+ *
  * <p><b>The reflective seam is probed, not assumed.</b> {@code ItemMeta}
  * declares the accessor as {@code int getCustomModelData()} but the setter as
  * {@code void setCustomModelData(Integer)}; a lookup that asks for the boxed
@@ -57,6 +63,18 @@ public final class ItemFrameWriter {
             : findMethod(COMPONENT_TYPE, "getFloats");
     private static final Method SET_FLOATS = COMPONENT_TYPE == null ? null
             : findMethod(COMPONENT_TYPE, "setFloats", List.class);
+    private static final Method GET_STRINGS = COMPONENT_TYPE == null ? null
+            : findMethod(COMPONENT_TYPE, "getStrings");
+    private static final Method SET_STRINGS = COMPONENT_TYPE == null ? null
+            : findMethod(COMPONENT_TYPE, "setStrings", List.class);
+
+    /**
+     * True when the pack's item definitions dispatch on
+     * {@code custom_model_data.strings[0]} ({@code PACK.APPEARANCE_MODE:
+     * SELECT}). Set once by the pack subsystem; the default float channel is
+     * untouched when off.
+     */
+    private static volatile boolean STRING_STATES;
 
     /** The one-shot report of a seam that refuses the frame state. */
     private static final AtomicBoolean SEAM_REPORTED = new AtomicBoolean();
@@ -76,6 +94,31 @@ public final class ItemFrameWriter {
     public static boolean supportsFloatState() {
         return COMPONENT_TYPE != null && GET_COMPONENT != null && SET_COMPONENT != null
                 && GET_FLOATS != null && SET_FLOATS != null;
+    }
+
+    /**
+     * True when the server can write the {@code custom_model_data} string
+     * list — the channel {@code minecraft:select} reads.
+     */
+    public static boolean supportsStringState() {
+        return COMPONENT_TYPE != null && GET_COMPONENT != null && SET_COMPONENT != null
+                && GET_STRINGS != null && SET_STRINGS != null;
+    }
+
+    /**
+     * Selects the definition's state channel. When enabled (the pack compiled
+     * {@code SELECT} definitions), frame states are read from and written to
+     * {@code custom_model_data.strings[0]}; otherwise the existing float
+     * channel is used unchanged. A server without the string component keeps
+     * the float channel even when enabled.
+     */
+    public static void setStringStates(boolean enabled) {
+        STRING_STATES = enabled && supportsStringState();
+    }
+
+    /** True when frame states currently travel on the string channel. */
+    public static boolean usesStringStates() {
+        return STRING_STATES;
     }
 
     /**
@@ -127,11 +170,40 @@ public final class ItemFrameWriter {
      * that have no component API at all.
      */
     private static int readCurrent(ItemMeta meta) {
+        if (STRING_STATES) {
+            Integer stringState = readStringState(meta);
+            if (stringState != null) {
+                return stringState;
+            }
+        }
         Float value = readFloatState(meta);
         if (value != null) {
             return Math.round(value);
         }
         return readLegacyState(meta);
+    }
+
+    /**
+     * The state stored on the string channel, or {@code null} when the server
+     * has no string component (the caller then reads the float channel).
+     */
+    private static Integer readStringState(ItemMeta meta) {
+        if (!supportsStringState()) {
+            return null;
+        }
+        try {
+            Object component = GET_COMPONENT.invoke(meta);
+            if (component == null) {
+                return 0;
+            }
+            Object strings = GET_STRINGS.invoke(component);
+            if (strings instanceof List<?> list && !list.isEmpty() && list.get(0) != null) {
+                return Integer.parseInt(list.get(0).toString());
+            }
+            return 0;
+        } catch (Throwable failure) {
+            return 0;
+        }
     }
 
     /**
@@ -179,10 +251,37 @@ public final class ItemFrameWriter {
      */
     private static boolean writeState(ItemMeta meta, int state) {
         boolean written = writeLegacyState(meta, state);
+        if (STRING_STATES && writeStringState(meta, state)) {
+            written = true;
+        }
         if (writeFloatState(meta, state)) {
             written = true;
         }
         return written;
+    }
+
+    /**
+     * Writes the frame state into the component's string list — the value a
+     * {@code minecraft:select} definition dispatches on. The number is
+     * serialized as its decimal string, matching the case entries the writer
+     * emits.
+     */
+    private static boolean writeStringState(ItemMeta meta, int state) {
+        if (!supportsStringState()) {
+            return false;
+        }
+        try {
+            Object component = GET_COMPONENT.invoke(meta);
+            if (component == null) {
+                return false;
+            }
+            SET_STRINGS.invoke(component, List.of(Integer.toString(state)));
+            SET_COMPONENT.invoke(meta, component);
+            return true;
+        } catch (Throwable failure) {
+            DebugLogger.warning("[ItemFrameWriter] Could not write the frame string state: " + failure);
+            return false;
+        }
     }
 
     /** The legacy integer the host-file predicates read. */

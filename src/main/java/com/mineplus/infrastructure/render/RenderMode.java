@@ -16,10 +16,13 @@ import java.util.Locale;
  *   <li>{@link #VIRTUAL} — the packless virtual engine ({@code VIRTUAL} + {@code MODEL}).</li>
  *   <li>{@link #PACK_ITEM} — pack item model ({@code PACK} + {@code MODEL}).</li>
  *   <li>{@link #PACK_BLOCK} — pack block display ({@code PACK} + {@code BLOCK}).</li>
+ *   <li>{@link #PACK_BONES} — pack bone rig ({@code PACK} + {@code BONES}).</li>
  *   <li>{@link #HYBRID_ITEM} — virtual render plus the pack item layered on top
  *       ({@code VIRTUAL_PLUS_PACK} + {@code MODEL}); the {@code hybrid} key maps here.</li>
  *   <li>{@link #HYBRID_BLOCK} — virtual render plus the pack block layered on top
  *       ({@code VIRTUAL_PLUS_PACK} + {@code BLOCK}).</li>
+ *   <li>{@link #HYBRID_BONES} — virtual render plus the pack bone rig layered on
+ *       top ({@code VIRTUAL_PLUS_PACK} + {@code BONES}).</li>
  * </ul>
  *
  * <p><b>Limitation:</b> a mode selects one primitive for the whole rendered
@@ -33,8 +36,10 @@ public enum RenderMode {
     VIRTUAL(RenderBackend.VIRTUAL, RenderKind.MODEL),
     PACK_ITEM(RenderBackend.PACK, RenderKind.MODEL),
     PACK_BLOCK(RenderBackend.PACK, RenderKind.BLOCK),
+    PACK_BONES(RenderBackend.PACK, RenderKind.BONES),
     HYBRID_ITEM(RenderBackend.VIRTUAL_PLUS_PACK, RenderKind.MODEL),
-    HYBRID_BLOCK(RenderBackend.VIRTUAL_PLUS_PACK, RenderKind.BLOCK);
+    HYBRID_BLOCK(RenderBackend.VIRTUAL_PLUS_PACK, RenderKind.BLOCK),
+    HYBRID_BONES(RenderBackend.VIRTUAL_PLUS_PACK, RenderKind.BONES);
 
     private final RenderBackend backend;
     private final RenderKind kind;
@@ -86,8 +91,10 @@ public enum RenderMode {
         return switch (normalized) {
             case "pack", "pack_item", "pack_item_model", "resource_pack", "pack_only", "item" -> PACK_ITEM;
             case "pack_block", "block", "block_display", "display" -> PACK_BLOCK;
+            case "pack_bones", "bones", "bone_rig", "bones_rig", "rig" -> PACK_BONES;
             case "hybrid", "hybrid_item", "virtual_pack", "virtual_plus_pack", "both" -> HYBRID_ITEM;
             case "hybrid_block", "virtual_pack_block", "virtual_plus_pack_block" -> HYBRID_BLOCK;
+            case "hybrid_bones", "virtual_pack_bones", "virtual_plus_pack_bones" -> HYBRID_BONES;
             default -> VIRTUAL;
         };
     }

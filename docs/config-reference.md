@@ -47,9 +47,9 @@ Reload everything from game with `/mineplus reload all`.
 | `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
 | `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
 | `animations` | `[]` | Clip names to auto-play on this level's rendered model (see [Animation Engine](developer-api.md#animation-engine)) |
-| `renderMode` | `virtual` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item`, `pack_block`, `hybrid_item` (`hybrid`), `hybrid_block`. Takes precedence over `renderBackend`/`renderKind`. |
+| `renderMode` | `virtual` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item`, `pack_block`, `pack_bones`, `hybrid_item` (`hybrid`), `hybrid_block`, `hybrid_bones`. Takes precedence over `renderBackend`/`renderKind`. |
 | `renderBackend` | `virtual` | Legacy backend axis: `virtual` \| `pack` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
-| `renderKind` | `model` | Legacy primitive axis: `model` \| `block`. Still fully supported; prefer `renderMode`. |
+| `renderKind` | `model` | Legacy primitive axis: `model` \| `block` \| `bones`. Still fully supported; prefer `renderMode`. |
 
 > **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
 
@@ -453,10 +453,27 @@ MOB_BEHAVIOR:
 CUSTOM_MOBS:
   ENABLED: true
   RENDERING: true
-  RENDER_INTERVAL_TICKS: 2
+  RENDER_INTERVAL_TICKS: 1
+  RENDER_INTERPOLATION_TICKS: 1
   RENDER_DISTANCE: 48
   MAX_RIGGED_PER_WORLD: 96
   REMOVE_UNKNOWN_ON_LOAD: true
+
+# Performance telemetry and the adaptive degradation valve. Telemetry powers
+# /mineplus perf; the valve only changes animation/network cadence.
+PERFORMANCE:
+  TELEMETRY: true
+  ADAPTIVE: true
+  POSE_BUDGET_MS: 3
+
+# Deferred world-edit queue: when enabled, block changes submitted through it
+# drain across ticks under a wall-clock and block budget instead of applying
+# in one pass. Disabled (default) applies each submission immediately on the
+# main thread.
+WORLD_EDITS:
+  ENABLED: false
+  MAX_MS_PER_TICK: 2
+  MAX_BLOCKS_PER_TICK: 256
 
 ```
 
@@ -467,6 +484,23 @@ CUSTOM_MOBS:
 | `RENDERING.POLICY.ALLOW_DEGRADE_TO_VIRTUAL` | `true` / `false` | When a pack/hybrid request cannot be served (pack subsystem unavailable, pack display attach failure), fall back to the virtual engine. `false` leaves the content unrendered instead |
 | `RENDERING.POLICY.LOG_ROUTING` | `true` / `false` | Log each routing decision (downgrades, unavailable routes) via `DebugLogger`; requires `ADDITIONAL_DEBUG_LOGS: true` |
 | `RENDERING.POLICY.TRACK_TELEMETRY` | `true` / `false` | Maintain the route counters shown by `/mineplus render stats` |
+| `PERFORMANCE.TELEMETRY` | `true` / `false` | Collect counters, per-tick ring rows and `/mineplus perf` output; `false` makes every recorder a no-op branch |
+| `PERFORMANCE.ADAPTIVE` | `true` / `false` | Raise the animation tick interval (up to 4 ticks) and halve the bundle weight limit when the pose slice stays over budget; never touches gameplay |
+| `PERFORMANCE.POSE_BUDGET_MS` | milliseconds | Pose apply slice budget per tick that feeds the adaptive valve (default `3`) |
+| `WORLD_EDITS.ENABLED` | `true` / `false` | Deferred world-edit queue: `true` drains enqueued block edits across ticks under a budget; `false` (default) applies each enqueue immediately (main thread) and schedules no task |
+| `WORLD_EDITS.MAX_MS_PER_TICK` | milliseconds ≥ 0 | Wall-clock budget of one drain pass (default `2`; `0` = no time bound) |
+| `WORLD_EDITS.MAX_BLOCKS_PER_TICK` | blocks ≥ 1 | Hard ceiling of blocks applied by one drain pass (default `256`) |
+| `INPUT.FAST_PATH` | `true` / `false` | Install one Netty handler per player (`mineplus_input`) that captures swing/use/interact packets at network arrival and drains them at tick start through the same trigger fold; `false` (default) touches no channel and uses the Bukkit event path only. A failure logs once and permanently falls back to events |
+| `VISUAL_UNITS.ENABLED` / `MAX_ACTIVE` / `MAX_SPAWN_PER_TICK` / `MAX_MS_PER_TICK` | `true` / `false`, units, units, milliseconds | Composed impact units (flash + dust + pooled surface decal + sound) advanced by one task under one budget (`64` live, `16` admitted per tick, `1` ms per pass). Off by default: no task, no allocation; over the ceiling the lowest-priority unit is dropped first and every pooled decal is returned on expiry, drop and disable |
+| `DISPLAY_TRANSPORT.NETWORK.BUNDLE_WEIGHT_LIMIT` | weight ≥ 1 | Per-bundle payload ceiling after packet weighting (metadata/equipment lists count their entries, everything else 1; default `4096`), so a few heavy packets cannot collapse a bundle |
+| `DISPLAY_TRANSPORT.NETWORK.FLUSH_BUDGET_MS` | milliseconds ≥ 0 | Per-tick send budget for player queues; players that do not fit carry over to the next tick in order, `0` flushes everything (default `2`) |
+| `DISPLAY_TRANSPORT.VIEWER_STATE.ENABLED` | `true` / `false` | Keep a per-observer render state (`lodTier`, `forcedVisible`, brightness/equipment/stance/animation overrides) instead of a bare LOD tier; a forced-visible observer keeps a model spawned instead of losing it (default `true`) |
+| `DISPLAY_TRANSPORT.STANCES.ENABLED` | `true` / `false` | Observer-only equipment stance channel (`StanceService`): one observer can see a different stance of an entity without touching its real equipment; `false` registers no listeners and sends no packets (default `false`) |
+| `DISPLAY_TRANSPORT.STANCES.RESEND_ON_INVENTORY_CLOSE` | `true` / `false` | Re-send stance equipment after a player closes an inventory (the client re-syncs its own equipment view); default `true` |
+| `RIGS.ENABLED` | `true` / `false` | Master switch for the pack bone-rig primitive (`renderKind: bones` / `renderMode: pack_bones`); `false` (default) keeps every pack level on its per-cube model/block path and changes nothing |
+| `RIGS.MAX_DISPLAYS_PER_INSTANCE` | displays 1-4096 | Hard ceiling of display bones per rig (default `64`); a larger rig falls back to its other renderer |
+| `RIGS.HITBOX_BONES` | `true` / `false` | Spawn invisible displays for `hitbox`-tagged bones (opt-in ray-trace targets); default `false` |
+| `RIGS.INTERPOLATION_TICKS` | ticks 1-20 | Client-side interpolation window for bone pose pushes (default `2`) |
 | `COLLISION_MODE` | `GEOMETRY` / `SURFACE` / `AABB` | Barrier cell rasterization: per-cube SAT (default), interior hollowing for walk-in structures, or `AABB` — a compatibility alias resolved through the same geometry path |
 | `COLLISION_EPSILON` | float | Shrink factor for geometry contact tests |
 | `COLLISION_NON_AIR_POLICY` | `SKIP` / `STRICT` | When a collision cell isn't air: skip that cell, or abort the whole spawn |
@@ -478,6 +512,11 @@ CUSTOM_MOBS:
 | `ANIMATION.TICK_INTERVAL_TICKS` | ticks ≥ 1 | Server ticks between transform pushes; `1` (default) pushes every tick and lets the client interpolate to its own frame rate |
 | `ANIMATION.INTERPOLATION_TICKS` | ticks ≥ 0 | Client interpolation window between pushes; `0` (default) matches the tick interval |
 | `ANIMATION.AUTOPLAY` | `true` / `false` | Auto-start clips declared in multiblock level `animations` keys or model `.meta.json` `autoplay` lists |
+| `ANIMATION.PIPELINE` | `TICK` / `ASYNC_COMPUTE` / `ASYNC_SEND` | Pose evaluation mode: `TICK` evaluates and applies in the tick (old behavior), `ASYNC_COMPUTE` (default) evaluates on the single bounded `Mineplus-Pose` thread and applies on the main thread, `ASYNC_SEND` adds a single shared flush pass per tick |
+| `ANIMATION.MAX_APPLY_PER_TICK` | pose writes ≥ 1 | Display pose writes per tick in async pipelines (default `512`); the remainder carries over in order, bounding the main-thread pose cost |
+| `ANIMATION.AUTO_STATE` | `true` / `false` | Derive `attack` > `airborne` > `swim` > `walk` > `idle` clips from the model's owning entity at automatic priority; explicit `AnimationApi` calls always win. Off by default (default `false`) |
+| `ANIMATION.TRANSITION` | `IMMEDIATE` / `AFTER_CURRENT` | Automatic state switch timing: cut at once, or let the current automatic clip finish its pass first (default `AFTER_CURRENT`) |
+| `ANIMATION.TRANSITION_TICKS` | ticks ≥ 0 | Crossfade length used when an automatic state starts or ends (default `5`) |
 | `TEXEL_BAKING.ENABLED` | `true` / `false` | Global texel baking switch; `false` restores the pre-texel pipeline entirely |
 | `TEXEL_BAKING.MODE` | `AUTO` / `ON` / `OFF` | `AUTO` (default) bakes only faces that would use the FULL strategy and have a resolvable PNG; `ON` bakes every face with a resolvable PNG; `OFF` never bakes |
 | `TEXEL_BAKING.DETAIL` | `FACE` / `SUPERSAMPLE_2X2` / `SUPERSAMPLE_4X4` | Samples per texel: one center sample, or 4/16 area-averaged samples for close-up models |
@@ -501,6 +540,8 @@ CUSTOM_MOBS:
 | `PACK.CACHE.MAX_ARTIFACTS` | artifacts ≥ 1 | Generated `mp-<hash>.zip` artifacts kept before pruning (default 8; the current one is always pinned) |
 | `PACK.PACK_FORMAT_OVERRIDE` | format ≥ 1 | Non-zero pins `pack.mcmeta`'s `pack_format` when the built-in table lags a new release; the pack also declares a generous `supported_formats` range so newer clients accept it by default |
 | `PACK.LIGHTING` | `AUTO` / `NATURAL` / `EMISSIVE` / `FULLBRIGHT` | How pack display entities are lit (default `AUTO`): non-emissive models use natural world light; emissive models get block light = their max `light_emission` and sky 15. `NATURAL` never overrides (dark in caves), `EMISSIVE` always applies the model's emission, `FULLBRIGHT` is the legacy `(15, 15)` glow. Applies after restart |
+| `PACK.APPEARANCE_MODE` | `AUTO` / `ITEM_MODEL` / `RANGE_DISPATCH` / `SELECT` / `LEGACY` | Item state channel (default `AUTO` = today's behavior: `item_model` on 1.21.4+, legacy predicates before). `RANGE_DISPATCH` gives every item a float `custom_model_data` dispatch, `SELECT` uses the string list + `minecraft:select` (falls back to `RANGE_DISPATCH` when the server cannot write strings), `LEGACY` forces predicates. Applies after restart |
+| `PACK.VALIDATE_ASSETS` | `true` / `false` | Validate models/textures before writing the artifact (default `true`): bone/cube/animation and source-file budgets, texture edges, unresolved texture names, duplicate ids and entry collisions are reported as warnings only — the pack still builds |
 | `BALLISTICS.ENABLED` | `true` / `false` | Projectile engine master switch. `false` makes `Ballistics.fire` refuse, and the firing module owns the no-op path (never an exception) |
 | `BALLISTICS.MAX_ACTIVE_ROUNDS` | rounds 1-4096 | Rounds simulated concurrently (default 128). A shot fired over the cap degrades to one instant trace across its full range — same hit, same damage, no simulation backlog; counted in `degradedShots()` |
 | `BALLISTICS.TRACERS` | `true` / `false` | Draw the dashed tracer along each round's path (the AMBIENT particle channel) |
@@ -519,7 +560,8 @@ CUSTOM_MOBS:
 | `MOB_BEHAVIOR.MAX_PIPELINES_PER_RUN` | pipelines 0-512 | Cap on multi-stage mob pipelines (locate → march → act) advanced per run, sharing the same processing budget (default 64). `0` pauses pipeline progress without detaching them |
 | `CUSTOM_MOBS.ENABLED` | `true` / `false` | Custom-mob subsystem master switch (default `true`). `false` makes registration and spawning no-ops; already-registered behavior profiles keep running, rigs detach on the next refresh |
 | `CUSTOM_MOBS.RENDERING` | `true` / `false` | Create per-part display rigs at all (default `true`). `false` leaves the base entity visible — identity, AI isolation, attributes and behavior are unaffected |
-| `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 2). The pose task exists only while a rig is attached |
+| `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 1). The pose task exists only while a rig is attached |
+| `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS` | ticks 1-40 | Client-side interpolation window for each pose push (default 1). Keep it equal to the interval: a shorter window snaps, a longer one lags behind the body |
 | `CUSTOM_MOBS.RENDER_DISTANCE` | blocks 8-256 | Distance beyond which a rig stops receiving pose updates (default 48); the client still culls by its own view range |
 | `CUSTOM_MOBS.MAX_RIGGED_PER_WORLD` | rigs 1-4096 | Hard ceiling of rigged custom mobs per world (default 96). Past it, newly spawned mobs stay visible as their vanilla base |
 | `CUSTOM_MOBS.REMOVE_UNKNOWN_ON_LOAD` | `true` / `false` | Remove a custom-tagged entity whose definition is no longer registered when its chunk loads (default `true`). Unknown entities are AI-isolated either way, never turned back into vanilla mobs |
@@ -563,6 +605,7 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 | `/mineplus pack push <player>` | Deliver the current pack to one player |
 | `/mineplus render stats` | Unified render engine telemetry: route counts per render mode, degraded/unavailable routes, pack attach failures, and the active `RENDERING.POLICY` |
 | `/mineplus render reset` | Zero the routing counters |
+| `/mineplus perf [reset\|dump]` | Performance telemetry table, counter/valve reset, or a JSON snapshot under `plugins/Mineplus/perf/` |
 
 **Permissions:** `mineplus.admin.status`, `mineplus.admin.reload`, `mineplus.admin.model`, `mineplus.admin.pack`, `mineplus.admin.render` — all default to op.
 

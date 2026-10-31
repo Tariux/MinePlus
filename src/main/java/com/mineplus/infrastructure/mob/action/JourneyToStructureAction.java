@@ -123,6 +123,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
         private double gatherRadius = 6.0;
         private double detachRadius = 64.0;
         private boolean restAtNight = true;
+        private double campDistance = 0.0;
         private boolean groupTravel = true;
         private String crewName = "pilgrims";
         private com.mineplus.infrastructure.mob.group.Formation formation;
@@ -196,6 +197,18 @@ public final class JourneyToStructureAction implements BehaviorAction {
         /** {@code false} to march around the clock. */
         public Builder restAtNight(boolean value) {
             this.restAtNight = value;
+            return this;
+        }
+
+        /**
+         * How close the goal must be for the crew to stop for the night.
+         * {@code 0} (default) camps every night wherever the crew is; a
+         * positive value marches through the night while the goal is still
+         * farther away, so a long crossing is not doubled by a camp in the
+         * middle of nowhere.
+         */
+        public Builder campDistance(double value) {
+            this.campDistance = Math.max(0.0, value);
             return this;
         }
 
@@ -281,6 +294,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
     private final double gatherRadius;
     private final double detachRadius;
     private final boolean restAtNight;
+    private final double campDistance;
     private final boolean groupTravel;
     private final String crewName;
     private final com.mineplus.infrastructure.mob.group.Formation formation;
@@ -315,6 +329,7 @@ public final class JourneyToStructureAction implements BehaviorAction {
         this.gatherRadius = builder.gatherRadius;
         this.detachRadius = builder.detachRadius;
         this.restAtNight = builder.restAtNight;
+        this.campDistance = builder.campDistance;
         this.groupTravel = builder.groupTravel;
         this.crewName = builder.crewName;
         this.formation = builder.formation;
@@ -352,7 +367,8 @@ public final class JourneyToStructureAction implements BehaviorAction {
         // scenario that stops firing stops owning it too.
         context.claimActivity(id, goal, 0.0, CLAIM_RENEW_TICKS);
 
-        if (night) {
+        if (night && (campDistance <= 0.0
+                || distanceXZ(walker.getLocation(), goal) <= campDistance)) {
             return rest(context, walker, day);
         }
         if (!resumeAfterNight(context, walker, crewId(context))) {

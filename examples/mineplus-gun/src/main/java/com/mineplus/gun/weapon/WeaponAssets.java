@@ -1,14 +1,22 @@
 package com.mineplus.gun.weapon;
 
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.mineplus.infrastructure.PluginContext;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.jar.JarEntry;
@@ -42,6 +50,8 @@ public final class WeaponAssets {
     private static final String SOUND_INSTALL = "pack/mineplusgun/sounds/";
     private static final String MANIFEST_INSTALL = "pack/mineplusgun/sounds.json";
 
+    private static final com.google.gson.Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
+
     private WeaponAssets() {
     }
 
@@ -64,7 +74,100 @@ public final class WeaponAssets {
         // Densify and complete the installed animation before anyone reads the
         // folder: frame discovery and the pack both consume what is on disk.
         WeaponAnimations.generateAll(plugin, context);
+        // Generated frames deep-copy their source, so the repair runs last.
+        sanitizeTextures(plugin, context);
         return installed;
+    }
+
+    /**
+     * Drops faces that reference a texture variable the model never defines.
+     *
+     * <p>A single unresolved face makes the client refuse the whole model and
+     * render the missing-model checkerboard, which is what "some frames are
+     * purple and black" looks like in hand. The usual cause is an author
+     * hiding a face as {@code #missing} instead of removing it; the face was
+     * invisible anyway, so removing it restores the intended look and keeps
+     * the rest of the model faithful.</p>
+     *
+     * @return how many model files were repaired
+     */
+    private static int sanitizeTextures(JavaPlugin plugin, PluginContext context) {
+        File root = context.moduleSupport().dataFile("pack/mineplusgun/models/item");
+        List<File> files = new ArrayList<>();
+        collect(root, ".json", files);
+        int repaired = 0;
+        for (File file : files) {
+            try {
+                JsonElement parsed = JsonParser.parseString(
+                        Files.readString(file.toPath(), StandardCharsets.UTF_8));
+                if (!parsed.isJsonObject()) {
+                    continue;
+                }
+                if (dropUnresolvedFaces(parsed.getAsJsonObject()) > 0) {
+                    Files.writeString(file.toPath(), GSON.toJson(parsed.getAsJsonObject()),
+                            StandardCharsets.UTF_8);
+                    repaired++;
+                }
+            } catch (Exception malformed) {
+                plugin.getLogger().warning("[MineplusGun] Could not read model '"
+                        + file.getName() + "': " + malformed.getMessage());
+            }
+        }
+        if (repaired > 0) {
+            plugin.getLogger().info("[MineplusGun] Repaired " + repaired
+                    + " model file(s) with unresolved texture references.");
+        }
+        return repaired;
+    }
+
+    private static int dropUnresolvedFaces(JsonObject model) {
+        JsonObject textures = objectOf(model, "textures");
+        if (textures == null || textures.isEmpty()) {
+            return 0;
+        }
+        JsonArray elements = arrayOf(model, "elements");
+        if (elements == null) {
+            return 0;
+        }
+        int dropped = 0;
+        for (JsonElement element : elements) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject faces = objectOf(element.getAsJsonObject(), "faces");
+            if (faces == null) {
+                continue;
+            }
+            List<String> unresolved = new ArrayList<>();
+            for (Map.Entry<String, JsonElement> face : faces.entrySet()) {
+                if (!face.getValue().isJsonObject()) {
+                    continue;
+                }
+                JsonElement texture = face.getValue().getAsJsonObject().get("texture");
+                if (texture == null || !texture.isJsonPrimitive()
+                        || !texture.getAsString().startsWith("#")) {
+                    continue;
+                }
+                if (!textures.has(texture.getAsString().substring(1))) {
+                    unresolved.add(face.getKey());
+                }
+            }
+            for (String key : unresolved) {
+                faces.remove(key);
+                dropped++;
+            }
+        }
+        return dropped;
+    }
+
+    private static JsonObject objectOf(JsonObject parent, String key) {
+        JsonElement value = parent.get(key);
+        return value != null && value.isJsonObject() ? value.getAsJsonObject() : null;
+    }
+
+    private static JsonArray arrayOf(JsonObject parent, String key) {
+        JsonElement value = parent.get(key);
+        return value != null && value.isJsonArray() ? value.getAsJsonArray() : null;
     }
 
     /**

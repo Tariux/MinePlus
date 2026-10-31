@@ -377,6 +377,11 @@ zip into a client's `resourcepacks` folder or host it and point
   architecture's pose pipeline where bindings apply, but client-side
   predicate/item-model animation (ModelEngine-style rigs) is future work — the
   `AnimationApi` selector surface is the integration point.
-- **Custom mobs / armor runtime**: the definitional layer (identity, model,
-  slot semantics via `PackItemDefinition.equipmentSlot`) is in place; mob
-  hosting and armor-layer textures are extension points, not shipped runtime.
+- **Custom mobs / armor runtime**: custom mob rigs are shipped — the Core
+  compiles a `CustomMobModel` into one item model + item definition per part
+  (split into pieces when a part exceeds the client element window) and
+  `MobRigRenderer` poses them as `ItemDisplay`s over a hidden base entity, so
+  the mob axis needs no client-side model hosting. Armor-layer textures and
+  true texture-only entity reskins remain extension points: 1.21.1 has no
+  `entity_to_model`/renderer-file mechanism to override a vanilla entity's
+  texture server-side.

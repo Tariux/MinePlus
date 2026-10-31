@@ -12,6 +12,7 @@ import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.infrastructure.virtual.rig.BoneRigRenderer;
 import com.mineplus.pack.render.PackBlockRenderer;
 import com.mineplus.pack.render.PackModelRenderer;
 import com.mineplus.util.DebugLogger;
@@ -40,6 +41,7 @@ public final class ModelRenderingManager {
     private final RenderRouter renderRouter = new RenderRouter();
     private volatile PackModelRenderer packRenderer;
     private volatile PackBlockRenderer packBlockRenderer;
+    private volatile BoneRigRenderer packBoneRenderer;
 
     public ModelRenderingManager(VirtualBlockManager virtualBlockManager) {
         this.virtualBlockManager = virtualBlockManager;
@@ -58,6 +60,11 @@ public final class ModelRenderingManager {
     /** Injected alongside {@link #setPackRenderer}: the pack block axis. */
     public void setPackBlockRenderer(PackBlockRenderer packBlockRenderer) {
         this.packBlockRenderer = packBlockRenderer;
+    }
+
+    /** Injected alongside {@link #setPackRenderer}: the pack bone-rig axis. */
+    public void setPackBoneRenderer(BoneRigRenderer packBoneRenderer) {
+        this.packBoneRenderer = packBoneRenderer;
     }
 
     /** True when the pack renderer is available for backend selection. */
@@ -100,9 +107,11 @@ public final class ModelRenderingManager {
         }
         switch (route.backend()) {
             case PACK -> {
-                UUID id = resolved.level().renderKind() == RenderKind.BLOCK
-                        ? renderPackBlock(resolved)
-                        : renderPack(resolved);
+                UUID id = switch (route.kind()) {
+                    case BLOCK -> renderPackBlock(resolved);
+                    case BONES -> renderPackBones(resolved);
+                    default -> renderPack(resolved);
+                };
                 if (id != null) {
                     return id;
                 }
@@ -179,6 +188,38 @@ public final class ModelRenderingManager {
         return instanceId;
     }
 
+    /**
+     * Pack-backend bone rig render: feasibility first (the model's groups must
+     * have been compiled into a rig), then the shared collision lattice, then
+     * one {@code ItemDisplay} per bone.
+     */
+    private UUID renderPackBones(Resolved resolved) {
+        BoneRigRenderer renderer = packBoneRenderer;
+        if (renderer == null || !renderer.hasRig(resolved.model().name())) {
+            return null;
+        }
+        UUID instanceId = virtualBlockManager.spawnCollisionModel(resolved.model(), resolved.placement());
+        if (instanceId == null) {
+            return null;
+        }
+        if (!attachPackVisual(instanceId, resolved)) {
+            virtualBlockManager.removeModel(instanceId);
+            return null;
+        }
+        return instanceId;
+    }
+
+    /** The origin convention the virtual engine would render this model with. */
+    private ModelMeta.OriginMode originModeFor(VirtualModel model) {
+        ModelMeta meta = virtualBlockManager.getModelMeta(model.name());
+        ModelMeta.OriginMode mode = meta.originMode() != null
+                ? meta.originMode() : virtualBlockManager.settings().originMode();
+        if (mode == null || mode == ModelMeta.OriginMode.AUTO) {
+            mode = ModelMeta.OriginMode.forModel(model.modelFormat(), model.cubes());
+        }
+        return mode;
+    }
+
     /** Attaches the pack visual the level's kind selects; true when a display spawned. */
     private boolean attachPackVisual(UUID instanceId, Resolved resolved) {
         if (resolved.level().renderKind() == RenderKind.BLOCK) {
@@ -191,6 +232,23 @@ public final class ModelRenderingManager {
             }
             renderRouter.recordAttachFailure();
             DebugLogger.warning("render: pack block display attach failed for instance " + instanceId
+                    + "; falling back to virtual rendering.");
+            return false;
+        }
+        if (resolved.level().renderKind() == RenderKind.BONES) {
+            BoneRigRenderer renderer = packBoneRenderer;
+            if (renderer == null) {
+                return false;
+            }
+            BoneRigRenderer.Anchor anchor = BoneRigRenderer.Anchor.forMode(
+                    originModeFor(resolved.model()), resolved.placement().location());
+            if (renderer.attach(instanceId, resolved.model().name(), anchor.base(),
+                    resolved.placement().globalRotation(), anchor.pixelShift(), anchor.rotationPivot(),
+                    renderer.settings().interpolationTicks(), 1.0f)) {
+                return true;
+            }
+            renderRouter.recordAttachFailure();
+            DebugLogger.warning("render: pack bone rig attach failed for instance " + instanceId
                     + "; falling back to virtual rendering.");
             return false;
         }
@@ -244,6 +302,10 @@ public final class ModelRenderingManager {
         if (blockRenderer != null) {
             blockRenderer.remove(renderedModelId);
         }
+        BoneRigRenderer boneRenderer = packBoneRenderer;
+        if (boneRenderer != null) {
+            boneRenderer.remove(renderedModelId);
+        }
         virtualBlockManager.removeModel(renderedModelId);
     }
 
@@ -295,6 +357,10 @@ public final class ModelRenderingManager {
         PackBlockRenderer blockRenderer = packBlockRenderer;
         if (blockRenderer != null) {
             swept += blockRenderer.sweepGhosts();
+        }
+        BoneRigRenderer boneRenderer = packBoneRenderer;
+        if (boneRenderer != null) {
+            swept += boneRenderer.sweepGhosts();
         }
         return swept;
     }

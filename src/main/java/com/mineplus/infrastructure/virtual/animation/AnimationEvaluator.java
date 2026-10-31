@@ -50,18 +50,48 @@ public final class AnimationEvaluator {
 
     /** Samples one bone animator of a clip at {@code time} into {@code delta}. */
     public static void accumulate(AnimationClip.BoneAnimation animation, float time, BoneDelta delta) {
+        accumulate(animation, time, delta, 1.0f);
+    }
+
+    /**
+     * Weighted variant used by the priority stack / crossfade: rotation and
+     * position deltas are scaled, scale interpolates from rest. Weight {@code 1}
+     * is exactly {@link #accumulate(AnimationClip.BoneAnimation, float, BoneDelta)}.
+     */
+    public static void accumulate(AnimationClip.BoneAnimation animation, float time, BoneDelta delta, float weight) {
+        if (weight <= 0.0f) {
+            return;
+        }
         float[] values = SCRATCH_VALUES.get();
+        if (weight >= 1.0f) {
+            if (!animation.rotation().isEmpty()) {
+                sample(animation.rotation(), time, values);
+                delta.rotationDegrees.add(values[0], values[1], values[2]);
+            }
+            if (!animation.position().isEmpty()) {
+                sample(animation.position(), time, values);
+                delta.positionPixels.add(values[0], values[1], values[2]);
+            }
+            if (!animation.scale().isEmpty()) {
+                sample(animation.scale(), time, values);
+                delta.scale.mul(values[0], values[1], values[2]);
+            }
+            delta.animated = true;
+            return;
+        }
         if (!animation.rotation().isEmpty()) {
             sample(animation.rotation(), time, values);
-            delta.rotationDegrees.add(values[0], values[1], values[2]);
+            delta.rotationDegrees.add(values[0] * weight, values[1] * weight, values[2] * weight);
         }
         if (!animation.position().isEmpty()) {
             sample(animation.position(), time, values);
-            delta.positionPixels.add(values[0], values[1], values[2]);
+            delta.positionPixels.add(values[0] * weight, values[1] * weight, values[2] * weight);
         }
         if (!animation.scale().isEmpty()) {
             sample(animation.scale(), time, values);
-            delta.scale.mul(values[0], values[1], values[2]);
+            delta.scale.mul(1.0f + (values[0] - 1.0f) * weight,
+                    1.0f + (values[1] - 1.0f) * weight,
+                    1.0f + (values[2] - 1.0f) * weight);
         }
         delta.animated = true;
     }

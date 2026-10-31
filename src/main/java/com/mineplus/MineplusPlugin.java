@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.CommandRouter;
 import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.command.sub.ModelSubCommand;
+import com.mineplus.infrastructure.command.sub.PerfCommand;
 import com.mineplus.infrastructure.command.sub.ReloadSubCommand;
 import com.mineplus.infrastructure.command.sub.StatusSubCommand;
 import com.mineplus.infrastructure.core.api.BasicInfrastructureApi;
@@ -43,15 +44,23 @@ public final class MineplusPlugin extends JavaPlugin {
         virtualBlockManager = new VirtualBlockManager();
         virtualBlockManager.updateSettings(configManager.getConfig().getVirtualRendering());
         virtualBlockManager.updateTexelSettings(configManager.getConfig().getTexelBaking());
-        attachDisplayTransport();
+        // Created before the transport so both sides report to one registry;
+        // PluginContext owns it from bootstrap on.
+        com.mineplus.infrastructure.perf.PerfRegistry perf =
+                new com.mineplus.infrastructure.perf.PerfRegistry(configManager.getConfig().getPerformance());
+        virtualBlockManager.setPerfRegistry(perf);
+        attachDisplayTransport(perf);
         virtualBlockManager.loadModels(this);
 
         context = PluginContext.bootstrap(
                 this, virtualBlockManager, configManager.getConfig().getAnimation(),
-                configManager.getConfig().getPack(), configManager.getConfig().getCustomMobs());
+                configManager.getConfig().getPack(), configManager.getConfig().getCustomMobs(), perf,
+                configManager.getConfig().getRigs(), configManager.getConfig().getWorldEdits());
         context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
         context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
         context.applyCombatSettings(configManager.getConfig().getCombat());
+        context.applyInputSettings(configManager.getConfig().getInput());
+        context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());
         context.finalizeSetup();
 
         registerCommand();
@@ -94,6 +103,7 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new ModelSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.PackSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.RenderSubCommand(context));
+        commandRouter.register(new PerfCommand(context));
 
         command.setExecutor(commandRouter);
         command.setTabCompleter(commandRouter);
@@ -112,6 +122,10 @@ public final class MineplusPlugin extends JavaPlugin {
         if (displayTransport != null) {
             getServer().getPluginManager().registerEvents(new DisplayTransportListener(displayTransport), this);
         }
+        if (context.stances() != null && context.stances().enabled()) {
+            // Listener-free when the stance channel is disabled.
+            getServer().getPluginManager().registerEvents(context.stances(), this);
+        }
     }
 
     /**
@@ -119,12 +133,12 @@ public final class MineplusPlugin extends JavaPlugin {
      * surface supports it. Failure is non-fatal: the virtual render pipeline falls
      * back to the legacy spawned-entity path and the plugin keeps working.
      */
-    private void attachDisplayTransport() {
+    private void attachDisplayTransport(com.mineplus.infrastructure.perf.PerfRegistry perf) {
         if (!configManager.getConfig().getDisplayTransport().enabled()) {
             return;
         }
         try {
-            displayTransport = DisplayTransport.start(this, configManager.getConfig().getDisplayTransport());
+            displayTransport = DisplayTransport.start(this, configManager.getConfig().getDisplayTransport(), perf);
             virtualBlockManager.setDisplayTransport(displayTransport);
         } catch (Throwable t) {
             getLogger().warning("Display transport unavailable, using legacy entity rendering: " + t.getMessage());
@@ -178,7 +192,13 @@ public final class MineplusPlugin extends JavaPlugin {
             context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
             context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
             context.customMobs().updateSettings(configManager.getConfig().getCustomMobs());
+            context.customMobManager().updateRigSettings(configManager.getConfig().getRigs());
             context.applyCombatSettings(configManager.getConfig().getCombat());
+            context.applyInputSettings(configManager.getConfig().getInput());
+            context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());
+            if (context.packSystem() != null) {
+                context.packSystem().updateRigSettings(configManager.getConfig().getRigs());
+            }
         }
         // Pack mode changes apply after restart (delivery binding, listeners);
         // a running subsystem still recompiles so freshly registered content

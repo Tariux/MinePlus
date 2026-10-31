@@ -32,6 +32,11 @@ public final class MineplusPackApi implements PackApi {
     }
 
     @Override
+    public com.mineplus.pack.asset.AppearanceMode appearanceMode() {
+        return isAvailable() ? system.appearanceMode() : com.mineplus.pack.asset.AppearanceMode.AUTO;
+    }
+
+    @Override
     public void registerItem(PackItemDefinition definition) {
         system.registerItem(definition);
     }
@@ -47,6 +52,13 @@ public final class MineplusPackApi implements PackApi {
     }
 
     @Override
+    public void registerBoneRig(com.mineplus.pack.rig.PackBoneRigDefinition definition) {
+        if (system != null) {
+            system.registerBoneRig(definition);
+        }
+    }
+
+    @Override
     public void registerTexture(String namespace, String path, File file) {
         system.registerTexture(namespace, path, file);
     }
@@ -59,6 +71,11 @@ public final class MineplusPackApi implements PackApi {
     @Override
     public void registerGeneratedAsset(String namespace, String path, byte[] bytes) {
         system.registerGeneratedAsset(namespace, path, bytes);
+    }
+
+    @Override
+    public void registerDisplayModel(org.bukkit.Material material, String namespace, String componentPath) {
+        system.registerDisplayModel(material, namespace, componentPath);
     }
 
     @Override

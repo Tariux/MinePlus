@@ -7,6 +7,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Core engine (`Mineplus`) — Composed visual impact units
+
+#### Added
+
+- **`VisualUnitService` + `VISUAL_UNITS`** — `context.visualUnits()` admits an
+  ordered unit of components (`ParticleBurst`, `SoundCue`, `LightFlash`,
+  `DecalDisplay`) with one lifetime, priority and anchor; one task advances
+  them under `MAX_ACTIVE` / `MAX_SPAWN_PER_TICK` / `MAX_MS_PER_TICK`, dropping
+  the lowest-priority unit first, routing particles and sounds through
+  `ParticleFx`/`Sounds`, and returning every pooled decal display on expiry,
+  drop and shutdown (`stats().liveDecals()` makes a leak visible). Block
+  impacts in `Ballistics` use `impact(Location, ImpactProfile)` when enabled;
+  disabled by default, where the service has no task, allocates nothing and the
+  existing per-effect path is unchanged.
+
+### Core engine (`Mineplus`) — Optional inbound input fast path
+
+#### Added
+
+- **`INPUT.FAST_PATH`** — when enabled, `HeldItemInput` installs one Netty
+  handler (`mineplus_input`) per player that captures swing/use/interact
+  packets at network arrival into a bounded queue and drains them at tick start
+  through the same `TriggerState` fold, with a short per-gesture delivery claim
+  so the Bukkit event that follows never fires the click twice; the handler is
+  forwarded untouched, removed on quit/disable, and any failure logs once and
+  permanently falls back to the event path. Off by default: no reflection, no
+  channel access, no task.
+
+### Core engine (`Mineplus`) — Deferred world-edit queue
+
+#### Added
+
+- **`DeferredEditQueue` + `WORLD_EDITS`** — `context.deferredEdits()` accepts
+  per-world edit batches (HIGH/LOW FIFO, last-wins coalescing) and applies them
+  on the main thread across ticks under a wall-clock (`MAX_MS_PER_TICK`) and
+  block (`MAX_BLOCKS_PER_TICK`) budget, skipping unloaded chunks instead of
+  forcing loads and reporting depth through `PerfRegistry`; `ENABLED: false`
+  (default) applies every submission immediately on the main thread exactly as
+  before, and shutdown flushes what is pending under a hard cap.
+
+### Core engine (`Mineplus`) — Pack appearance modes and asset validation
+
+#### Added
+
+- **`PACK.APPEARANCE_MODE` + `PACK.VALIDATE_ASSETS`** — item definitions can
+  present state through the modern `item_model` component (`AUTO`/`ITEM_MODEL`),
+  a float `range_dispatch`, a `minecraft:select` on the
+  `custom_model_data` string list (with an automatic range fallback when the
+  server cannot write strings) or legacy predicates, while `ItemFrameWriter`
+  follows the resolved channel with no module change; every compile now reports
+  soft content budgets (bones, cubes, animations, source size, texture edges,
+  unresolved textures, duplicate ids, entry collisions) through `DebugLogger`
+  and `/mineplus pack status`, and a bad asset only warns — the pack still
+  builds. `AUTO` keeps the previous artifact byte-identical.
+
+### Core engine (`Mineplus`) — Performance telemetry
+
+#### Added
+
+- **`PerfRegistry` + `/mineplus perf`** — one context-owned, allocation-free
+  telemetry registry (LongAdder counters, gauge atomics, fixed per-tick ring
+  rows) fed by the display transport, packet optimizer, entity pool, animation
+  runtime, texel baker, pack compiler and mob engine; the command prints a
+  compact table, resets counters and dumps a JSON snapshot to
+  `plugins/Mineplus/perf/`. The `PERFORMANCE.ADAPTIVE` valve raises the
+  animation tick interval (up to 4 ticks) and halves the bundle weight limit
+  when the pose slice stays over `POSE_BUDGET_MS`, restoring stepwise once the
+  budget is met again.
+
+### Core engine (`Mineplus`) — Adaptive pose pipeline
+
+#### Changed
+
+- **Off-tick pose evaluation with a bounded apply slice** — `ANIMATION.PIPELINE`
+  picks the runtime's evaluation strategy: `TICK` keeps the old
+  evaluate-and-apply-in-tick path, `ASYNC_COMPUTE` (default) samples clips and
+  composes bone matrices on one bounded `Mineplus-Pose` thread while the main
+  thread applies finished frames under `ANIMATION.MAX_APPLY_PER_TICK` (512) with
+  ordered carry-over, and `ASYNC_SEND` adds a single shared flush pass.
+  Controllers still advance on the main thread, a generation guard discards
+  frames superseded by a stop/reload/settings change, a worker exception logs
+  once and permanently degrades the session to `TICK`, the worker thread only
+  exists while animated instances do, and `/mineplus perf` reports applied/
+  dropped frames, the pose slice cost and a degraded flag.
+
+### Core engine (`Mineplus`) — Weighted bundling and bounded sends
+
+#### Changed
+
+- **Weight-aware bundles and a per-tick send budget** — `PacketOptimizer` fills
+  each bundle greedily against both `NETWORK.BUNDLE_LIMIT` and a new
+  `NETWORK.BUNDLE_WEIGHT_LIMIT` (4096), where `NmsAdapter.packetWeight` counts a
+  metadata/equipment packet's list entries instead of a flat 1 (resolved once by
+  `ReflectionNmsAdapter`, never throwing). Flushing now honours
+  `NETWORK.FLUSH_BUDGET_MS` (2 ms): players that do not fit keep their queue in
+  arrival order for the next tick, at least one batch always goes out, and
+  `PacketOptimizer.Stats` exposes packets, average/max weight and deferred
+  players. Defaults preserve the previous one-bundle-per-player behaviour.
+
+### Core engine (`Mineplus`) — Per-observer render state and equipment stances
+
+#### Added
+
+- **Per-viewer render state and an observer-only stance channel** — the display
+  transport now stores a `RenderViewState` per observer instead of a bare LOD
+  tier (`context`-side `viewerState(instanceId, viewerId)`; `forcedVisible` pins a
+  model instead of hiding it, plus brightness/equipment/stance/animation
+  override slots). `context.stances()` (`StanceService`, gated by
+  `DISPLAY_TRANSPORT.STANCES.ENABLED`) lets one observer see an entity in a
+  different stance through bundled `NmsAdapter.equipmentPacket` sends — two
+  observers can hold different stances of the same entity, `clear`/`clearAll`
+  restore the real equipment, nothing touches the target's inventory, the
+  observer's own first-person hand is skipped, and the service registers no
+  listeners and sends no packets when disabled or when the packet transport is
+  not running.
+
+### Core engine (`Mineplus`) — Animation priority stack and automatic states
+
+#### Added
+
+- **Per-bone animation priorities, crossfades and automatic state selection** —
+  controllers now carry a priority plus fade-in/fade-out windows
+  (`playAnimation(id, clip, playback, priority[, fadeIn, fadeOut])`). For every
+  bone only the highest-priority level contributes, equal priorities still
+  compose additively (default `0` behaves exactly as before), and a fading
+  winner blends the next lower level in and back out, so a reload layered over a
+  walk returns to the same walk phase instead of restarting it. With
+  `ANIMATION.AUTO_STATE: true` the runtime derives `attack` > `airborne` >
+  `swim` > `walk` > `idle` from the model's owning entity (walk phase from limb
+  swing), switching `ANIMATION.TRANSITION` (`AFTER_CURRENT` by default) with
+  `ANIMATION.TRANSITION_TICKS` crossfades at priority `-1` so explicit
+  `AnimationApi` calls always win; `clearAutoState(uuid)` hands full control
+  back. Controller snapshots are reused per instance, so steady-state ticks no
+  longer allocate.
+
+### Core engine (`Mineplus`) — Pack bone-rig backend
+
+#### Added
+
+- **`RIGS` + `renderKind: bones` (`renderMode: pack_bones`/`hybrid_bones`)** —
+  `context.packApi().registerBoneRig(PackBoneRigDefinition)` declares a content
+  level whose geometry renders as one `ItemDisplay` per bone instead of one per
+  cube: `BoneRigAssetWriter` emits one item model + item definition per bone
+  from the model's outliner hierarchy (`BoneRigDefinition` keeps bones in
+  preorder, empty groups move children, `muzzle`/`attachment`/`hitbox` tags are
+  understood), and `BoneRigRenderer` poses every bone from its parent matrix
+  with client-side interpolation (`RIGS.INTERPOLATION_TICKS`).
+  `RIGS.MAX_DISPLAYS_PER_INSTANCE` caps one rig's display count and
+  `RIGS.HITBOX_BONES` opts into invisible hitbox displays; placement, collision
+  and persistence stay with the ordinary multiblock lifecycle. `RIGS.ENABLED:
+  false` (default) keeps every pack level on its per-cube path and leaves the
+  virtual engine byte-identical.
+
 ### Core engine (`Mineplus`) — Custom mobs
 
 #### Added
@@ -40,7 +193,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   player/villager, sticky target, throttled re-path, line-of-sight strike
   through `DamageTransactions.apply`, knockback and sounds.
 - **`CUSTOM_MOBS` settings** — `ENABLED`, `RENDERING`, `RENDER_INTERVAL_TICKS`,
-  `RENDER_DISTANCE`, `MAX_RIGGED_PER_WORLD`, `REMOVE_UNKNOWN_ON_LOAD`.
+  `RENDER_INTERPOLATION_TICKS`, `RENDER_DISTANCE`, `MAX_RIGGED_PER_WORLD`,
+  `REMOVE_UNKNOWN_ON_LOAD`.
+
+#### Fixed
+
+- **Villager-based custom mobs were never isolated and could not be steered** —
+  the reflective entity plan was built from the declared return type of
+  `getHandle()`, which CraftBukkit declares as `Entity` for `CraftVillager`.
+  No navigation, look control, Brain or goal selectors were found, so the
+  villager kept its vanilla brain and every walk request failed. The plan now
+  resolves against the live handle's runtime class; all three showcases report
+  `goals+brain` isolation and accept paths after their spawn fall completes.
+- **Mobs could look like they walked sideways or backwards** — with vanilla
+  goals cleared nothing rotated the body. `MobNavigator` now points the vanilla
+  look control at the destination on every accepted request, so body yaw
+  follows the path and the rig's yaw frame follows body yaw. The rig's head
+  pitch also falls back to the entity's own look pitch when the obfuscated NMS
+  accessor is unavailable.
+- **Oversized rig parts rendered as missing-texture cubes** — `MobRigAssetWriter`
+  now keeps every element inside the client's −16..32 px item-model window:
+  a small overshoot is shifted, a part spanning more than 48 px is split into
+  deterministic pieces, and `BoneRigRenderer` compensates each piece's offset in
+  the pose pass. The soldier's spear is two pieces instead of one corrupt cube.
+- **Attack cadence** — `AttackNearestAction` keeps its chase state between
+  evaluations (re-path every 10 ticks or when the target moves 1.5 blocks, stop
+  at reach) instead of standing still between odds-gated fires; strikes are
+  attributed through `DamageTransactions`, and a landed melee hit plays the
+  rig's `animation.attack` overlay.
+- **Walk clips barely moved while a mob walked** — the pose pass compared a
+  velocity in blocks per tick with a walk reference in blocks per second, so a
+  mob moving at 2 blocks/s produced a weight of 0.1 and the amplitude and clip
+  tempo never left their minimums. The velocity is converted once to blocks per
+  second, the stride phase stays per tick, and amplitude now reaches its ceiling
+  at the reference speed. Measured on the final build: soldier 2.09 b/s with
+  weight 1.00, trickster 2.37 b/s with weight 1.00, evil pig 1.81 b/s with
+  weight 0.90, phase advancing every pass; `playAttack` returns `true` only for
+  the trickster (the only authored attack clip) and its overlay runs one second
+  then fades back to walk/idle.
 
 ### Modules (`mineplus-mobfun`)
 

@@ -2,8 +2,14 @@ package com.mineplus.pack;
 
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.registry.ItemRegistry;
+import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.infrastructure.virtual.rig.BoneRigAssetWriter;
+import com.mineplus.infrastructure.virtual.rig.BoneRigBlueprint;
+import com.mineplus.infrastructure.virtual.rig.BoneRigDefinition;
+import com.mineplus.infrastructure.virtual.rig.BoneRigRenderer;
+import com.mineplus.infrastructure.virtual.rig.RigSettings;
 import com.mineplus.MineplusPlugin;
 import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.compile.PackCache;
@@ -21,8 +27,10 @@ import com.mineplus.pack.item.PackItemDefinition;
 import com.mineplus.pack.item.PackItemFactory;
 import com.mineplus.pack.render.PackBlockRenderer;
 import com.mineplus.pack.render.PackModelRenderer;
+import com.mineplus.pack.rig.PackBoneRigDefinition;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -51,6 +59,9 @@ import org.bukkit.inventory.ItemStack;
  */
 public final class PackSystem {
 
+    /** Ghost-cleanup tag prefix of the pack bone rig; the mob rig uses its own. */
+    private static final String BONE_RIG_TAG_PREFIX = "mineplus_packrig:";
+
     private final MineplusPlugin plugin;
     private final VirtualBlockManager virtualBlockManager;
     private final ItemRegistry itemRegistry;
@@ -62,24 +73,38 @@ public final class PackSystem {
     private final PackItemFactory itemFactory;
     private final PackModelRenderer modelRenderer;
     private final PackBlockRenderer blockRenderer;
+    private final BoneRigRenderer boneRenderer;
     private final PackDeliveryService delivery;
     private final List<PackItemDefinition> registeredItems = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final List<PackBlockDefinition> registeredBlocks = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<PackBoneRigDefinition> registeredBoneRigs = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** {@code namespace:id} -> rig binding, so reloads re-derive assets idempotently. */
+    private final java.util.Map<String, PackBoneRigDefinition> boneRigsByKey = new java.util.concurrent.ConcurrentHashMap<>();
     /** {@code namespace:id} -> carrier binding, so reloads re-attach geometry idempotently. */
     private final java.util.Map<String, PackBlockAsset> blockAssetsByKey = new java.util.concurrent.ConcurrentHashMap<>();
     /** Allocated slots per carrier; a pack block owns one state per its carrier. */
     private final java.util.Map<PackBlockCarrier, java.util.BitSet> carrierSlots = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Legacy display models, keyed by their model reference
+     * ({@code <ns>:item/<path>}). A generated rig model has no item id, so its
+     * legacy presentation is a host-file override addressed by this map.
+     */
+    private final java.util.Map<String, ItemModelAsset> displayModels = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final ExecutorService compileExecutor;
     private final AtomicBoolean pendingCompile = new AtomicBoolean(false);
     private volatile PackArtifact currentArtifact;
     private volatile boolean running;
+    private volatile RigSettings rigSettings;
+    /** Resolved appearance strategy of this session (configured mode × server capability). */
+    private final com.mineplus.pack.asset.AppearanceMode.Resolved appearance;
 
     private PackSystem(
             MineplusPlugin plugin,
             VirtualBlockManager virtualBlockManager,
             ItemRegistry itemRegistry,
-            PackSettings settings
+            PackSettings settings,
+            RigSettings rigSettings
     ) {
         this.plugin = plugin;
         this.virtualBlockManager = virtualBlockManager;
@@ -87,11 +112,19 @@ public final class PackSystem {
         this.settings = settings;
         this.cache = new PackCache(plugin.getDataFolder());
         this.compiler = new PackCompiler(virtualBlockManager, cache, settings);
-        this.itemFactory = new PackItemFactory(
-                PackFormat.itemRepresentation(org.bukkit.Bukkit.getBukkitVersion()));
+        this.appearance = settings.appearanceMode().resolve(
+                PackFormat.itemRepresentation(org.bukkit.Bukkit.getBukkitVersion()),
+                com.mineplus.pack.item.ItemFrameWriter.supportsStringState());
+        com.mineplus.pack.item.ItemFrameWriter.setStringStates(
+                appearance.dispatch() == com.mineplus.pack.asset.AppearanceMode.Dispatch.SELECT);
+        this.itemFactory = new PackItemFactory(appearance.representation());
         this.modelRenderer = new PackModelRenderer(assetRegistry, itemFactory, settings.lighting());
         this.modelRenderer.bindModelsReloadedHook(this::onReload);
         this.blockRenderer = new PackBlockRenderer(assetRegistry, plugin.getLogger(), settings.lighting());
+        RigSettings limits = rigSettings == null ? RigSettings.defaults() : rigSettings;
+        this.rigSettings = limits;
+        this.boneRenderer = new BoneRigRenderer(plugin, new MineplusPackApi(this),
+                virtualBlockManager.displayTransport(), limits, BONE_RIG_TAG_PREFIX);
         this.delivery = new PackDeliveryService(settings, cache);
         this.compileExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mineplus-pack-compile");
@@ -112,9 +145,51 @@ public final class PackSystem {
             ModelRenderingManager renderingManager,
             PackSettings settings
     ) {
-        PackSystem system = new PackSystem(plugin, virtualBlockManager, itemRegistry, settings);
+        return start(plugin, virtualBlockManager, itemRegistry, renderingManager, settings, null, null);
+    }
+
+    /**
+     * @param perf performance registry the compiler reports build durations to
+     *             (may be {@code null})
+     */
+    public static PackSystem start(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            ItemRegistry itemRegistry,
+            ModelRenderingManager renderingManager,
+            PackSettings settings,
+            com.mineplus.infrastructure.perf.PerfRegistry perf
+    ) {
+        return start(plugin, virtualBlockManager, itemRegistry, renderingManager, settings, perf, null);
+    }
+
+    /**
+     * @param perf        performance registry the compiler reports build durations to
+     *                    (may be {@code null})
+     * @param rigSettings bone-rig limits ({@code RIGS}); {@code null} = defaults
+     */
+    public static PackSystem start(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            ItemRegistry itemRegistry,
+            ModelRenderingManager renderingManager,
+            PackSettings settings,
+            com.mineplus.infrastructure.perf.PerfRegistry perf,
+            RigSettings rigSettings
+    ) {
+        PackSystem system = new PackSystem(plugin, virtualBlockManager, itemRegistry, settings,
+                rigSettings == null ? RigSettings.defaults() : rigSettings);
+        system.compiler.setPerfRegistry(perf);
         system.startInternal(renderingManager);
         return system;
+    }
+
+    /** Applies reloaded rig limits to the running renderer. */
+    public void updateRigSettings(RigSettings rigSettings) {
+        if (rigSettings != null) {
+            this.rigSettings = rigSettings;
+            boneRenderer.updateSettings(rigSettings);
+        }
     }
 
     private void startInternal(ModelRenderingManager renderingManager) {
@@ -131,8 +206,11 @@ public final class PackSystem {
                     new PackPlayerTracker(this), plugin);
             plugin.getServer().getPluginManager().registerEvents(modelRenderer, plugin);
             plugin.getServer().getPluginManager().registerEvents(blockRenderer, plugin);
+            plugin.getServer().getPluginManager().registerEvents(boneRenderer, plugin);
+            boneRenderer.setTransport(virtualBlockManager.displayTransport());
             renderingManager.setPackRenderer(modelRenderer);
             renderingManager.setPackBlockRenderer(blockRenderer);
+            renderingManager.setPackBoneRenderer(boneRenderer);
             scheduleRecompile();
             plugin.getLogger().info("[Pack] Resource pack subsystem active (delivery="
                     + settings.deliveryMode()
@@ -167,8 +245,22 @@ public final class PackSystem {
      * this before choosing how to drive their frame states.
      */
     public boolean usesModernItemModels() {
-        return PackFormat.itemRepresentation(org.bukkit.Bukkit.getBukkitVersion())
-                == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
+        return appearance.modern();
+    }
+
+    /** The configured appearance mode (before capability resolution). */
+    public com.mineplus.pack.asset.AppearanceMode appearanceMode() {
+        return settings.appearanceMode();
+    }
+
+    /** The appearance strategy actually in force on this server. */
+    public com.mineplus.pack.asset.AppearanceMode.Resolved appearance() {
+        return appearance;
+    }
+
+    /** Content diagnostics of the last compile (empty when validation is off). */
+    public com.mineplus.pack.compile.ModelAssetValidator.Report validationReport() {
+        return compiler.lastReport();
     }
 
     // ------------------------------------------------------------------
@@ -276,9 +368,34 @@ public final class PackSystem {
         }
     }
 
+    /**
+     * Registers a bone rig: the loaded model whose outliner groups become one
+     * display each, compiled into per-bone item models. Placement, collision
+     * and persistence stay with the ordinary multiblock lifecycle; this
+     * registration only declares the pack rendering.
+     *
+     * <p>Idempotent per {@code namespace:id}: re-registration re-derives the
+     * assets once the model is loaded (order-insensitive, like items and
+     * blocks).</p>
+     */
+    public void registerBoneRig(PackBoneRigDefinition definition) {
+        if (definition == null) {
+            return;
+        }
+        try {
+            String key = definition.contentId();
+            if (boneRigsByKey.put(key, definition) == null) {
+                registeredBoneRigs.add(definition);
+            }
+            ensureBoneRigAssets(definition);
+            scheduleRecompile();
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+        }
+    }
+
     /** First free carrier slot, or -1 when the carrier is exhausted. */
-    private synchronized int allocateCarrierSlot(PackBlockCarrier carrier) {
-        java.util.BitSet used = carrierSlots.computeIfAbsent(carrier, ignored -> new java.util.BitSet());
+    private synchronized int allocateCarrierSlot(PackBlockCarrier carrier) {        java.util.BitSet used = carrierSlots.computeIfAbsent(carrier, ignored -> new java.util.BitSet());
         int slot = used.nextClearBit(0);
         if (slot >= carrier.stateCount()) {
             return -1;
@@ -325,15 +442,64 @@ public final class PackSystem {
 
     /** True when generated models can be displayed through an {@code ItemDisplay}. */
     public boolean supportsGeneratedModelDisplay() {
-        return itemFactory.supportsItemModelComponent();
+        // The modern representation names the model in the item_model component;
+        // the legacy representation resolves it through the host-file override
+        // registered by registerDisplayModel. Both can present a world model,
+        // so availability is the only gate — a path with no override simply
+        // yields no stack (see createModelDisplay) and the rig stays offline.
+        return true;
+    }
+
+    /**
+     * Reserves a legacy {@code custom_model_data} predicate for a generated
+     * model path, so an {@code ItemDisplay} can carry it on servers without
+     * the {@code item_model} component. The modern representation needs no
+     * such reservation: the component already names the model.
+     */
+    public void registerDisplayModel(org.bukkit.Material material, String namespace, String componentPath) {
+        if (material == null || namespace == null || componentPath == null || componentPath.isBlank()) {
+            return;
+        }
+        if (itemFactory.supportsItemModelComponent()) {
+            return; // the component names the model; no legacy predicate is needed
+        }
+        String reference = namespace + ":item/" + componentPath;
+        String key = reference.toLowerCase(java.util.Locale.ROOT);
+        if (displayModels.containsKey(key)) {
+            return;
+        }
+        try {
+            ItemModelAsset asset = new ItemModelAsset(namespace, displayItemId(componentPath), plugin.getName(),
+                    material, "", reference, List.of());
+            assetRegistry.register(asset);
+            displayModels.put(key, asset);
+            scheduleRecompile();
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+        }
+    }
+
+    /**
+     * A stable, legal item id for a display model path. Item ids admit only
+     * {@code [a-z0-9_.-]}; the path keeps slashes for the model file, so the
+     * id is a sanitized, prefixed form of the same path.
+     */
+    private static String displayItemId(String componentPath) {
+        return "display_" + componentPath.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9_.-]", "_");
     }
 
     /** Display stack for a generated model path (see {@link PackApi#createModelDisplay}). */
     public ItemStack createModelDisplay(org.bukkit.Material material, String namespace, String componentPath) {
-        if (!supportsGeneratedModelDisplay()) {
+        if (material == null || namespace == null || componentPath == null) {
             return null;
         }
-        return itemFactory.createModelDisplay(material, namespace, componentPath);
+        if (itemFactory.supportsItemModelComponent()) {
+            return itemFactory.createModelDisplay(material, namespace, componentPath);
+        }
+        ItemModelAsset asset = displayModels.get(
+                (namespace + ":item/" + componentPath).toLowerCase(java.util.Locale.ROOT));
+        return asset == null ? null : itemFactory.create(asset);
     }
 
     /**
@@ -349,6 +515,9 @@ public final class PackSystem {
         }
         for (PackBlockDefinition definition : registeredBlocks) {
             ensureBlockModelAssets(definition);
+        }
+        for (PackBoneRigDefinition definition : registeredBoneRigs) {
+            ensureBoneRigAssets(definition);
         }
         scheduleRecompile();
     }
@@ -411,6 +580,45 @@ public final class PackSystem {
             return;
         }
         registerModelTextures(namespace, geometryKey, model, "block");
+    }
+
+    /**
+     * Idempotently derives a bone rig's per-bone item models once its geometry
+     * model is loaded, then registers the blueprint with the rig renderer.
+     * A model with no bones collapses to a single root bone, so a rig never
+     * renders nothing when the source has geometry.
+     */
+    private void ensureBoneRigAssets(PackBoneRigDefinition definition) {
+        if (!rigSettings.enabled()) {
+            // The axis is off: keep the artifact byte-identical to a build
+            // without bone rigs instead of compiling models nothing uses.
+            return;
+        }
+        VirtualModel model = virtualBlockManager.getModel(definition.geometryModelKey());
+        if (model == null) {
+            return;
+        }
+        String namespace = definition.namespace();
+        try {
+            BoneRigDefinition rig = BoneRigDefinition.fromModel(
+                    definition.modelKey(), model, "rig/" + definition.id());
+            BoneRigBlueprint blueprint = BoneRigBlueprint.of(definition.modelKey(), namespace, rig);
+            List<String> warnings = new java.util.ArrayList<>();
+            for (BoneRigAssetWriter.Entry entry
+                    : BoneRigAssetWriter.writeRig(model, blueprint, warnings)) {
+                registerGeneratedAsset(namespace, entry.path(), entry.bytes());
+            }
+            for (String warning : warnings) {
+                DebugLogger.warning("[Pack] Bone rig '" + definition.contentId() + "': " + warning);
+            }
+            boneRenderer.registerBlueprint(blueprint);
+            registerModelTextures(namespace, definition.geometryModelKey(), model, "item");
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+        } catch (RuntimeException failure) {
+            plugin.getLogger().warning("[Pack] Bone rig '" + definition.contentId()
+                    + "' could not be derived: " + failure);
+        }
     }
 
     /**
@@ -486,6 +694,9 @@ public final class PackSystem {
             }
             for (PackBlockDefinition definition : registeredBlocks) {
                 ensureBlockModelAssets(definition);
+            }
+            for (PackBoneRigDefinition definition : registeredBoneRigs) {
+                ensureBoneRigAssets(definition);
             }
             List<PackAsset> snapshot = assetRegistry.snapshot();
             if (snapshot.isEmpty()) {
@@ -568,6 +779,11 @@ public final class PackSystem {
         return blockRenderer;
     }
 
+    /** The bone-rig renderer ({@code renderKind: "bones"} levels + mob rigs). */
+    public BoneRigRenderer boneRenderer() {
+        return boneRenderer;
+    }
+
     public PackItemFactory itemFactory() {
         return itemFactory;
     }
@@ -611,6 +827,99 @@ public final class PackSystem {
     public void onPlayerPackState(UUID playerId, PlayerPackState state) {
         if (state == PlayerPackState.APPLIED) {
             DebugLogger.info("[Pack] Player " + playerId + " applied the pack.");
+        }
+    }
+
+    /**
+     * Outcome of the self-check that the artifact the server hands out is the
+     * artifact it means to hand out.
+     *
+     * @param reachable  the download URL answered at all
+     * @param bytes      body length
+     * @param entries    zip entries parsed from the body ({@code -1} when it is not a zip)
+     * @param hashMatches the body's SHA-1 equals the artifact's recorded SHA-1
+     * @param detail     what was seen, for the command line
+     */
+    public record DeliveryCheck(boolean reachable, int bytes, int entries, boolean hashMatches, String detail) {
+
+        public boolean ok() {
+            return reachable && hashMatches && entries > 0;
+        }
+    }
+
+    /**
+     * Downloads the current artifact through its own delivery URL and checks it
+     * end to end: the endpoint answers, the bytes are a readable zip, and their
+     * SHA-1 matches what the client was told. A pack that "downloads" but never
+     * applies is almost always exactly this — an endpoint serving a truncated,
+     * stale, or mismatched file — and it is invisible from the server side
+     * until someone asks. Runs off-thread; the returned future completes on the
+     * calling thread's executor.
+     */
+    public CompletableFuture<DeliveryCheck> verifyDeliveryAsync() {
+        PackArtifact artifact = currentArtifact;
+        if (artifact == null) {
+            return CompletableFuture.completedFuture(
+                    new DeliveryCheck(false, 0, -1, false, "no artifact compiled"));
+        }
+        String url = delivery.urlFor(artifact);
+        if (url == null) {
+            return CompletableFuture.completedFuture(
+                    new DeliveryCheck(false, 0, -1, false, "delivery is not reachable (mode DISABLED,"
+                            + " endpoint down, or no URL configured)"));
+        }
+        CompletableFuture<DeliveryCheck> future = new CompletableFuture<>();
+        Thread probe = new Thread(() -> future.complete(probeDelivery(url, artifact)), "mineplus-pack-verify");
+        probe.setDaemon(true);
+        probe.start();
+        return future;
+    }
+
+    /**
+     * {@link #verifyDeliveryAsync()} with the answer delivered on the main
+     * thread, so a command can report it without touching Bukkit off-thread.
+     */
+    public void verifyDelivery(java.util.function.Consumer<DeliveryCheck> callback) {
+        verifyDeliveryAsync().thenAccept(check -> PackScheduling.scheduleNow(plugin, () -> callback.accept(check)));
+    }
+
+    private static DeliveryCheck probeDelivery(String url, PackArtifact artifact) {
+        try {
+            java.net.HttpURLConnection connection =
+                    (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(15000);
+            connection.setRequestMethod("GET");
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                connection.disconnect();
+                return new DeliveryCheck(false, 0, -1, false, "endpoint answered HTTP " + status + " at " + url);
+            }
+            byte[] body;
+            try (java.io.InputStream in = connection.getInputStream()) {
+                body = in.readAllBytes();
+            } finally {
+                connection.disconnect();
+            }
+            int entryCount = 0;
+            try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(
+                    new java.io.ByteArrayInputStream(body))) {
+                while (zip.getNextEntry() != null) {
+                    entryCount++;
+                }
+            } catch (IOException notAZip) {
+                return new DeliveryCheck(true, body.length, -1, false,
+                        "body is not a readable zip (" + notAZip.getMessage() + ")");
+            }
+            String sha1 = java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-1").digest(body));
+            boolean matches = sha1.equalsIgnoreCase(artifact.sha1());
+            return new DeliveryCheck(true, body.length, entryCount, matches, matches
+                    ? "served file matches the current artifact"
+                    : "SHA-1 mismatch: served " + sha1 + ", artifact " + artifact.sha1()
+                            + " — clients reject this pack");
+        } catch (Throwable failure) {
+            return new DeliveryCheck(false, 0, -1, false, "probe failed: " + failure);
         }
     }
 

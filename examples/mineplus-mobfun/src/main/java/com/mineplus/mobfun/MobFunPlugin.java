@@ -12,6 +12,7 @@ import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
+import com.mineplus.infrastructure.mob.custom.BedrockMobModel;
 import com.mineplus.infrastructure.mob.custom.CustomMobAttributes;
 import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
 import com.mineplus.infrastructure.mob.custom.CustomMobModel;
@@ -24,8 +25,10 @@ import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
+import org.bukkit.entity.Enemy;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.IronGolem;
+import org.bukkit.entity.Player;
 import org.bukkit.entity.Snowman;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -81,6 +84,23 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       ({@code attack_nearest}) that hunts the nearest player or villager.
  *       Registered through {@code CustomMobApi}; spawned through
  *       {@code /mobfun spawn evilpig}.</li>
+ *   <li><b>Villager Soldier</b> — a fully authored custom mob: the Blockbench
+ *       soldier model ({@code mobs/soldier_villager.bbmodel}, a 22-group rig
+ *       with per-face UVs and its own {@code walk}/{@code idle} clips) on a
+ *       villager base, armed with a spear and one Core action
+ *       ({@code attack_nearest}) that hunts hostile mobs. It is the showcase
+ *       for {@code BedrockMobModel}: the outliner becomes the render rig and
+ *       the file's clips are played by the Core, so the legs swing while it
+ *       walks and the whole rig breathes while it stands. Spawned through
+ *       {@code /mobfun spawn soldier}.</li>
+ *   <li><b>Woodland Trickster</b> — a second fully authored custom mob
+ *       ({@code mobs/woodland_trickster.bbmodel}) on a villager base: the
+ *       file's own bone tree (body, head, hood, cloth, arms, legs) with its
+ *       authored rest rotations, and three clips — {@code animation.idle},
+ *       {@code animation.walk} and {@code animation.attack}. Idle and walk
+ *       blend by movement; the attack clip is played by the Core's rig whenever
+ *       the mob lands a hit. It hunts players. Spawned through
+ *       {@code /mobfun spawn trickster}.</li>
  * </ul>
  *
  * <p>Rates are tuned for demonstration (fires are observable within seconds
@@ -103,6 +123,10 @@ public final class MobFunPlugin extends JavaPlugin {
     private final List<MobFunShowcaseEntry> showcases = new ArrayList<>();
     /** Embedded Evil Pig texture; also the factory's stable source on re-enable. */
     private byte[] evilPigTexture;
+    /** Imported Villager Soldier model, or {@code null} when its resources failed to load. */
+    private CustomMobModel soldierModel;
+    /** Imported Woodland Trickster model, or {@code null} when its resources failed to load. */
+    private CustomMobModel tricksterModel;
 
     @Override
     public void onEnable() {
@@ -180,14 +204,21 @@ public final class MobFunPlugin extends JavaPlugin {
                 .structure("village")
                 .crewName(PilgrimCamp.CREW)
                 .searchRadiusChunks(64)
-                .arrivalDistance(24)
-                .cohesionRadius(10)
+                .arrivalDistance(16)
+                .cohesionRadius(12)
                 .recruitRadius(24)
                 .marchLeg(32)
                 .gatherRadius(8)
                 .detachRadius(64)
+                // A camp is the end of a march, not a rest stop in the middle
+                // of one: while the village is still far away the crew walks
+                // through the night instead of doubling the crossing.
+                .campDistance(96)
                 .formation(Formation.WEDGE)
-                .stride(new JourneyRunner.Options(1.15, 8.0, 8.0, 32, 40L, 60L, 2.0, 6, 0.0))
+                // A pilgrim with a destination is in a hurry: a faster stride
+                // and a shorter repath keep the walk continuous and the crew
+                // closing on the village instead of ambling across the map.
+                .stride(new JourneyRunner.Options(1.9, 6.0, 8.0, 32, 30L, 40L, 1.5, 6, 0.0))
                 .callbacks(new PilgrimCamp(this, fx))
                 .build();
         showcases.add(new MobFunShowcase(this, "pilgrim", "Pilgrim Villager", EntityType.VILLAGER,
@@ -203,6 +234,18 @@ public final class MobFunPlugin extends JavaPlugin {
                     EntityType.PIG, this::evilPigDefinition));
         } else {
             getLogger().severe("Evil Pig NOT registered: resource mobs/evil_pig.png is missing from the jar.");
+        }
+
+        soldierModel = loadSoldierModel();
+        if (soldierModel != null) {
+            showcases.add(new CustomMobShowcase(this, context.customMobs(), "soldier", "Villager Soldier",
+                    EntityType.VILLAGER, this::soldierDefinition));
+        }
+
+        tricksterModel = loadTricksterModel();
+        if (tricksterModel != null) {
+            showcases.add(new CustomMobShowcase(this, context.customMobs(), "trickster", "Woodland Trickster",
+                    EntityType.VILLAGER, this::tricksterDefinition));
         }
 
         for (MobFunShowcaseEntry showcase : showcases) {
@@ -224,7 +267,7 @@ public final class MobFunPlugin extends JavaPlugin {
         getLogger().info("[MobFun] " + showcases.size()
                 + " showcases (Grazer Cow, Grazing Sheep, Reforesting Pig, Lamplighter Villager, Florist Bee,"
                 + " Golem Guardian Villager, Frost Builder Villager, Necromancer Witch, Pilgrim Villager,"
-                + " Evil Pig) enabled on top of Mineplus Core.");
+                + " Evil Pig, Villager Soldier, Woodland Trickster) enabled on top of Mineplus Core.");
     }
 
     /**
@@ -233,12 +276,19 @@ public final class MobFunPlugin extends JavaPlugin {
      * spawn, so every action this mob takes comes from {@code attack_nearest}.
      * A definition with no model would still work (the base pig stays visible);
      * the model is what makes it "evil".
+     *
+     * <p>The rig here is not decoration: a 1.21.1 client has no entity-model
+     * override channel, so the only way a retextured pig can show its own
+     * texture is as the per-part displays the Core builds from the vanilla pig
+     * descriptor. {@code AUTO} asks for that rig and keeps the plain pig when the
+     * pack cannot present it.</p>
      */
     private CustomMobDefinition evilPigDefinition() {
         CustomMobModel model = CustomMobModel.vanilla(EntityType.PIG, evilPigTexture);
         return CustomMobDefinition.builder("mobfun:evil_pig", EntityType.PIG, model)
                 .displayName("Evil Pig")
                 .showName(true)
+                .visual(CustomMobDefinition.VisualMode.AUTO)
                 .attributes(CustomMobAttributes.builder()
                         .maxHealth(12.0)
                         .movementSpeed(0.28)
@@ -255,6 +305,146 @@ public final class MobFunPlugin extends JavaPlugin {
                                 .damage(4.0)
                                 .cooldownTicks(20L)
                                 .knockback(0.4)
+                                .build(), 1.0))
+                .build();
+    }
+
+    /**
+     * Imports the Blockbench soldier with its own outliner and its own clips.
+     *
+     * <p>Every outliner group becomes a render bone (pivot, parent, geometry),
+     * so the spear hand, the helmet and the knees articulate exactly as
+     * authored; the file's {@code animation.walk} and {@code animation.idle}
+     * clips drive them, blended by movement speed. Nothing is hand-mapped, so
+     * re-exporting the model with more groups or other clips needs no code
+     * change.</p>
+     */
+    private CustomMobModel loadSoldierModel() {
+        byte[] modelJson = loadResource("mobs/soldier_villager.bbmodel");
+        byte[] texture = loadResource("mobs/soldier_villager.png");
+        if (modelJson == null || texture == null) {
+            getLogger().severe("Villager Soldier NOT registered: mobs/soldier_villager.bbmodel and"
+                    + " mobs/soldier_villager.png must both be present in the jar.");
+            return null;
+        }
+        try {
+            return BedrockMobModel.parse(modelJson)
+                    .textureName("soldier_villager")
+                    .partsFromOutliner()
+                    .animationClips()
+                    .build(texture);
+        } catch (RuntimeException malformed) {
+            getLogger().severe("Villager Soldier NOT registered: " + malformed.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The Villager Soldier: an imported model on a villager base with one job —
+     * guard the village. Vanilla AI is cleared by the Core, so the spear only
+     * moves through {@code attack_nearest}, aimed at hostile mobs rather than
+     * players or villagers.
+     *
+     * <p>It moves like an iron golem: the attribute profile starts from
+     * {@link EntityType#IRON_GOLEM}'s captured defaults (health, knockback,
+     * scale, gravity and the rest of the golem's numbers), and only the fields
+     * below deviate from that template. Health and armor are deliberately high:
+     * the rig detaches on death (a displayed mob has no corpse), and a showcase
+     * that a single shotgun blast erases cannot be inspected while it reacts to
+     * damage.</p>
+     *
+     * <p>{@code visual(RIG)} is a demand, not a preference: if no part display
+     * can be spawned, the Core says so in the log and in {@code /mobfun rig
+     * soldier} instead of quietly leaving a villager standing where a soldier
+     * should be.</p>
+     */
+    private CustomMobDefinition soldierDefinition() {
+        return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER, soldierModel)
+                .displayName("Villager Soldier")
+                .visual(CustomMobDefinition.VisualMode.RIG)
+                .attributes(CustomMobAttributes.builder()
+                        .fromTemplate(EntityType.IRON_GOLEM)
+                        .maxHealth(60.0)
+                        .movementSpeed(0.3)
+                        .attackDamage(6.0)
+                        .followRange(28.0)
+                        .armor(10.0)
+                        .knockbackResistance(0.3)
+                        .build())
+                .behavior(profile -> profile
+                        .priority(BehaviorPriority.SOLDIER)
+                        .action(AttackNearestAction.builder()
+                                .searchRadius(20.0)
+                                .reach(3.4)
+                                .speed(1.2)
+                                .damage(6.0)
+                                .cooldownTicks(26L)
+                                .knockback(0.45)
+                                .target(candidate -> candidate instanceof Enemy)
+                                .build(), 1.0))
+                .build();
+    }
+
+    /**
+     * Imports the Woodland Trickster with its own outliner, rest rotations and
+     * its three clips ({@code animation.idle}, {@code animation.walk},
+     * {@code animation.attack}).
+     */
+    private CustomMobModel loadTricksterModel() {
+        byte[] modelJson = loadResource("mobs/woodland_trickster.bbmodel");
+        byte[] texture = loadResource("mobs/woodland_trickster.png");
+        if (modelJson == null || texture == null) {
+            getLogger().severe("Woodland Trickster NOT registered: mobs/woodland_trickster.bbmodel and"
+                    + " mobs/woodland_trickster.png must both be present in the jar.");
+            return null;
+        }
+        try {
+            return BedrockMobModel.parse(modelJson)
+                    .textureName("woodland_trickster")
+                    .partsFromOutliner()
+                    .animationClips()
+                    .build(texture);
+        } catch (RuntimeException malformed) {
+            getLogger().severe("Woodland Trickster NOT registered: " + malformed.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The Woodland Trickster: a small hunched woodland creature on a villager
+     * base that hunts players. Its rig is the file's own bone tree (hood over
+     * head, cloth over the legs) and its clips drive the whole pose: idle
+     * breathing while it stands, a leg/arm swing while it walks, and a one-shot
+     * punch the Core plays when it swings — not only when it lands.
+     *
+     * <p>Its body numbers come from {@link EntityType#ZOMBIE}: the template is
+     * captured once and supplies attack knockback, scale and gravity, while the
+     * four fields below are this creature's own. Nothing here reaches a real
+     * zombie — the profile is keyed to the custom id.</p>
+     */
+    private CustomMobDefinition tricksterDefinition() {
+        return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.VILLAGER, tricksterModel)
+                .displayName("Woodland Trickster")
+                .visual(CustomMobDefinition.VisualMode.RIG)
+                .attributes(CustomMobAttributes.builder()
+                        .fromTemplate(EntityType.ZOMBIE)
+                        .maxHealth(30.0)
+                        .movementSpeed(0.32)
+                        .attackDamage(4.0)
+                        .followRange(24.0)
+                        .armor(2.0)
+                        .knockbackResistance(0.1)
+                        .build())
+                .behavior(profile -> profile
+                        .priority(BehaviorPriority.TRICKSTER)
+                        .action(AttackNearestAction.builder()
+                                .searchRadius(16.0)
+                                .reach(2.6)
+                                .speed(1.2)
+                                .damage(4.0)
+                                .cooldownTicks(24L)
+                                .knockback(0.35)
+                                .target(candidate -> candidate instanceof Player)
                                 .build(), 1.0))
                 .build();
     }

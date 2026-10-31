@@ -58,6 +58,8 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     private static final String IDENTITY_KEY = "custom_mob_id";
     /** Scoreboard tag prefix, so an entity is discoverable without a PDC read. */
     private static final String TAG_PREFIX = "mineplus_custom_mob:";
+    /** How often isolation is re-asserted on live custom mobs (ticks). */
+    private static final long REASSERT_INTERVAL_TICKS = 100L;
     /**
      * A definition without a behavior consumer still gets a profile: an idle
      * action whose only job is to make "this mob has a Core behavior profile"
@@ -88,18 +90,36 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     private final Map<Plugin, Set<String>> ownedIds = new ConcurrentHashMap<>();
     /** Live custom entities: UUID -> definition id. The identity cache the engine reads. */
     private final Map<UUID, String> identities = new ConcurrentHashMap<>();
+    /** Entity -> how its vanilla AI was last actually cleared, for status output. */
+    private final Map<UUID, MobAiIsolation.Result> isolationResults = new ConcurrentHashMap<>();
+    /** Re-asserts isolation on live custom mobs. */
+    private org.bukkit.scheduler.BukkitTask reassertTask;
+    /** One full warning per session about an unreachable isolation surface. */
+    private boolean hasWarnedUnreachable;
 
     private volatile CustomMobSettings settings;
     private boolean started;
 
     public CustomMobManager(Plugin plugin, PackApi pack, MobBehaviorApi behaviorApi,
                             CustomMobSettings settings) {
+        this(plugin, pack, behaviorApi, settings, null);
+    }
+
+    /**
+     * @param rigSettings bone-rig limits ({@code RIGS}) the per-part renderer
+     *                    obeys; {@code null} = defaults
+     */
+    public CustomMobManager(Plugin plugin, PackApi pack, MobBehaviorApi behaviorApi,
+                            CustomMobSettings settings,
+                            com.mineplus.infrastructure.virtual.rig.RigSettings rigSettings) {
         this.plugin = plugin;
         this.pack = pack;
         this.behaviorApi = behaviorApi;
         this.identityKey = new NamespacedKey(plugin, IDENTITY_KEY);
         this.settings = settings == null ? CustomMobSettings.defaults() : settings;
-        this.renderer = new MobRigRenderer(plugin, pack, this.settings);
+        this.renderer = rigSettings == null
+                ? new MobRigRenderer(plugin, pack, this.settings)
+                : new MobRigRenderer(plugin, pack, this.settings, rigSettings);
     }
 
     /**
@@ -115,6 +135,47 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         plugin.getServer().getPluginManager().registerEvents(renderer, plugin);
         renderer.start();
+        armReassertSweep();
+    }
+
+    /**
+     * Vanilla goals come back at runtime — a villager that panics, a mob that
+     * is tempted with food — so isolation is re-asserted on the live custom
+     * mobs instead of being applied once at spawn. The sweep is cheap: it walks
+     * the identity cache and touches only entities that are still loaded.
+     */
+    private void armReassertSweep() {
+        if (reassertTask != null) {
+            return;
+        }
+        reassertTask = Bukkit.getScheduler().runTaskTimer(plugin, this::reassertIsolation,
+                REASSERT_INTERVAL_TICKS, REASSERT_INTERVAL_TICKS);
+    }
+
+    private void reassertIsolation() {
+        if (!settings.enabled() || identities.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<UUID, String> entry : identities.entrySet()) {
+            if (!(Bukkit.getEntity(entry.getKey()) instanceof LivingEntity living)
+                    || living.isDead() || !living.isValid() || !(living instanceof Mob mob)) {
+                isolationResults.remove(entry.getKey());
+                identities.remove(entry.getKey());
+                continue;
+            }
+            Registration registration = registrations.get(entry.getValue());
+            if (registration == null) {
+                continue; // unknown id: restoreIfCustom owns it when its module returns
+            }
+            if (registration.definition.keepsVanillaGoals()) {
+                continue;
+            }
+            MobAiIsolation.Result result = MobAiIsolation.isolateDetailed(mob);
+            if (!result.isolated() && !result.equals(isolationResults.get(entry.getKey()))) {
+                reportIsolationFailure(registration.definition, living, result);
+            }
+            isolationResults.put(entry.getKey(), result);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -149,6 +210,9 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         registrations.put(definition.id(), registration);
         ownedIds.computeIfAbsent(owner, key -> ConcurrentHashMap.newKeySet()).add(definition.id());
 
+        // A re-registration may carry a new model for the same id; the cached
+        // blueprint (pivots, hierarchy, part assets) must not outlive it.
+        renderer.invalidateBlueprint(definition.id());
         if (definition.model() != null) {
             MobRigAssetWriter.register(pack, definition.namespace(), definition.path(), definition.model());
         }
@@ -295,16 +359,46 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
             mob.setPersistent(definition.persistent());
             mob.setCustomName(definition.displayName());
             mob.setCustomNameVisible(definition.showName());
-            if (!MobAiIsolation.isolate(mob)) {
-                DebugLogger.warning("[custom-mobs] Could not clear vanilla goals of '" + definition.id()
-                        + "' (" + entity.getType() + "); its vanilla AI may keep running.");
+            if (definition.keepsVanillaGoals()) {
+                // The author asked for the donor's own AI, so vanilla goals
+                // staying put is the intended behavior, not a failed isolation.
+                isolationResults.put(entity.getUniqueId(), MobAiIsolation.Result.GOALS_KEPT);
+            } else {
+                MobAiIsolation.Result result = MobAiIsolation.isolateDetailed(mob);
+                isolationResults.put(entity.getUniqueId(), result);
+                if (!result.isolated()) {
+                    reportIsolationFailure(definition, entity, result);
+                }
             }
         }
 
-        // A rig from a previous session saved the base as invisible; start
-        // visible and let the rig hide it again only when it actually attaches.
-        entity.setInvisible(false);
-        renderer.attach(entity, definition);
+        // The renderer owns base visibility: it hides the base when it presents
+        // the mob and shows it when it cannot. A rig restored from a previous
+        // session was saved invisible, so a failed attach must clear that.
+        if (!renderer.attach(entity, definition)) {
+            entity.setInvisible(false);
+        }
+    }
+
+    /**
+     * Says out loud what failed and what to do about it. A mob whose selectors
+     * and Brain are both unreachable keeps its vanilla AI — the mob is then a
+     * normal vanilla creature wearing a custom skin, which is a visible defect,
+     * never something to swallow silently.
+     */
+    private void reportIsolationFailure(CustomMobDefinition definition, LivingEntity entity,
+                                        MobAiIsolation.Result result) {
+        String detail = MobAiIsolation.isSupported(entity)
+                ? "the reflection surface changed on this runtime"
+                : "'" + entity.getType() + "' exposes neither goal selectors nor a Brain";
+        if (!hasWarnedUnreachable) {
+            hasWarnedUnreachable = true;
+            plugin.getLogger().warning("[custom-mobs] Could not isolate '" + definition.id() + "' ("
+                    + entity.getType() + "): " + detail + "; vanilla AI keeps running for it. ("
+                    + result.label() + ")");
+        } else {
+            DebugLogger.warning("[custom-mobs] Could not isolate '" + definition.id() + "': " + detail);
+        }
     }
 
     private void tagIdentity(Entity entity, String id) {
@@ -425,7 +519,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
                 // fully custom again the moment its module registers.
                 identities.put(entity.getUniqueId(), id);
                 if (entity instanceof Mob mob) {
-                    MobAiIsolation.isolate(mob);
+                    isolationResults.put(entity.getUniqueId(), MobAiIsolation.isolateDetailed(mob));
                 }
             }
             return;
@@ -477,6 +571,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     }
 
     private void forget(UUID entityId) {
+        isolationResults.remove(entityId);
         if (identities.remove(entityId) != null) {
             renderer.detach(entityId);
         }
@@ -501,9 +596,8 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         renderer.start();
         for (LivingEntity mob : allLiveMobs()) {
             Registration registration = registrations.get(identities.get(mob.getUniqueId()));
-            if (registration != null) {
+            if (registration != null && !renderer.attach(mob, registration.definition)) {
                 mob.setInvisible(false);
-                renderer.attach(mob, registration.definition);
             }
         }
     }
@@ -530,10 +624,20 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         }
     }
 
+    /** Applies reloaded bone-rig limits to the per-part renderer. */
+    public void updateRigSettings(com.mineplus.infrastructure.virtual.rig.RigSettings next) {
+        renderer.updateRigSettings(next);
+    }
+
     @Override
     public void shutdown() {
+        if (reassertTask != null) {
+            reassertTask.cancel();
+            reassertTask = null;
+        }
         renderer.stop();
         identities.clear();
+        isolationResults.clear();
         registrations.clear();
         ownedIds.clear();
     }
@@ -541,6 +645,45 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     /** Rig count, for the Core's status command. */
     public int riggedCount() {
         return renderer.rigCount();
+    }
+
+    /**
+     * How this mob's vanilla AI was last cleared, for a status line; {@code null}
+     * for an entity the manager has never applied a definition to.
+     */
+    public MobAiIsolation.Result isolationResult(LivingEntity entity) {
+        return entity == null ? null : isolationResults.get(entity.getUniqueId());
+    }
+
+    /** The last pose a rigged mob was given, or {@code null} when it carries no rig. */
+    public String poseSnapshot(UUID mobId) {
+        return renderer.poseSnapshot(mobId);
+    }
+
+    @Override
+    public String poseSnapshot(LivingEntity mob) {
+        return mob == null ? null : renderer.poseSnapshot(mob.getUniqueId());
+    }
+
+    @Override
+    public boolean playAttack(LivingEntity mob) {
+        return renderer.playAttack(mob);
+    }
+
+    @Override
+    public String isolationLabel(LivingEntity mob) {
+        MobAiIsolation.Result result = isolationResult(mob);
+        return result == null ? null : result.label();
+    }
+
+    @Override
+    public String rigFailure(String definitionId) {
+        return renderer.rigFailure(definitionId);
+    }
+
+    @Override
+    public String rigStatus(String definitionId) {
+        return renderer.rigStatus(definitionId);
     }
 
     private static final class Registration {

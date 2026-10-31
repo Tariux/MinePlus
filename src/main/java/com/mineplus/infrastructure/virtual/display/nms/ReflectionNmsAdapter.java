@@ -53,6 +53,12 @@ final class ReflectionNmsAdapter implements NmsAdapter {
     private final Constructor<?> friendlyBufCtor;
     private final Constructor<?> pairCtorClass;
 
+    /** Structural weight probes: packet class -> cached list field (payload units). */
+    private final Class<?> metadataPacketClass;
+    private final Class<?> equipmentPacketClass;
+    private final Field metadataWeightField;
+    private final Field equipmentWeightField;
+
     private final MethodHandle bufWriteVarInt;
     private final MethodHandle bufWriteVarIntArray;
 
@@ -88,6 +94,8 @@ final class ReflectionNmsAdapter implements NmsAdapter {
 
             Class<?> metaPacket = mojang ? cls("net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket") : cls("net.minecraft.network.protocol.game.PacketPlayOutEntityMetadata");
             this.metadataCtor = findCtorByShape(metaPacket, int.class, List.class);
+            this.metadataPacketClass = metaPacket;
+            this.metadataWeightField = findListField(metaPacket);
 
             Class<?> teleportPacket = mojang ? cls("net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket") : cls("net.minecraft.network.protocol.game.PacketPlayOutEntityTeleport");
             this.teleportCtor = findCtorByShape(teleportPacket, entityClass);
@@ -103,6 +111,8 @@ final class ReflectionNmsAdapter implements NmsAdapter {
 
             Class<?> equipPacket = mojang ? cls("net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket") : cls("net.minecraft.network.protocol.game.PacketPlayOutEntityEquipment");
             this.equipmentCtor = findCtorByShape(equipPacket, int.class, List.class);
+            this.equipmentPacketClass = equipPacket;
+            this.equipmentWeightField = findListField(equipPacket);
 
             Class<?> bundlePacket = cls("net.minecraft.network.protocol.game.ClientboundBundlePacket");
             this.bundleCtor = findBundleCtor(bundlePacket);
@@ -196,6 +206,45 @@ final class ReflectionNmsAdapter implements NmsAdapter {
     public Object bundle(List<Object> packets) {
         try { return bundleCtor.newInstance((Object) new ArrayList<>(packets)); }
         catch (Throwable t) { throw new IllegalStateException(t); }
+    }
+
+    /**
+     * Structural weight estimate: metadata packets weigh their packed entries,
+     * equipment packets weigh their slots, everything else one unit. Lookups are
+     * resolved once in the constructor; a probe that could not be resolved
+     * falls back to one and never throws.
+     */
+    @Override
+    public int packetWeight(Object packet) {
+        if (packet == null) {
+            return 1;
+        }
+        try {
+            Class<?> type = packet.getClass();
+            if (type == metadataPacketClass) {
+                return listWeight(packet, metadataWeightField);
+            }
+            if (type == equipmentPacketClass) {
+                return listWeight(packet, equipmentWeightField);
+            }
+        } catch (Throwable ignored) {
+            // A hostile/renamed shape must degrade to unit weight, never break sends.
+        }
+        return 1;
+    }
+
+    private static int listWeight(Object packet, Field field) {
+        if (field == null) {
+            return 1;
+        }
+        try {
+            Object value = field.get(packet);
+            if (value instanceof List<?> list) {
+                return Math.max(1, list.size());
+            }
+        } catch (Throwable ignored) {
+        }
+        return 1;
     }
 
     @Override
@@ -337,6 +386,23 @@ final class ReflectionNmsAdapter implements NmsAdapter {
     private Constructor<?> vec3Ctor(Class<?> vec3Class) {
         try { return accessible(vec3Class.getDeclaredConstructor(double.class, double.class, double.class)); }
         catch (NoSuchMethodException e) { throw fail("Vec3 ctor not found"); }
+    }
+
+    /** First {@code List}-typed field in the hierarchy — the payload list of a packet. */
+    private static Field findListField(Class<?> owner) {
+        for (Class<?> c = owner; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field field : c.getDeclaredFields()) {
+                if (List.class.isAssignableFrom(field.getType())) {
+                    try {
+                        field.setAccessible(true);
+                        return field;
+                    } catch (RuntimeException ignored) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
     }
     private Object newBuffer() {
         try {

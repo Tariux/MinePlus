@@ -29,6 +29,34 @@ public interface AnimationApi {
     boolean playAnimation(UUID instanceId, String animation);
 
     /**
+     * Plays an animation at an explicit priority. Higher-priority clips win per
+     * bone; equal priorities compose additively (the default behavior). An
+     * explicitly started clip always wins over automatic state selection, which
+     * runs below every explicit priority.
+     *
+     * @return {@code true} if the instance exists and the clip was found
+     */
+    default boolean playAnimation(UUID instanceId, String animation, AnimationPlayback playback, int priority) {
+        return playAnimation(instanceId, animation, playback, priority, 0, 0);
+    }
+
+    /**
+     * Plays an animation at an explicit priority with crossfade windows: the clip
+     * blends in over {@code fadeInTicks} and, when stopped (or once it ends),
+     * blends out over {@code fadeOutTicks} instead of snapping.
+     *
+     * @return {@code true} if the instance exists and the clip was found
+     */
+    boolean playAnimation(UUID instanceId, String animation, AnimationPlayback playback,
+                          int priority, int fadeInTicks, int fadeOutTicks);
+
+    /**
+     * Removes the automatic layer and stops automatic state selection for this
+     * instance, handing full control to explicit calls (until it re-renders).
+     */
+    void clearAutoState(UUID instanceId);
+
+    /**
      * Stops a playing animation and returns affected bones to their rest pose.
      *
      * @return {@code true} if a controller was removed

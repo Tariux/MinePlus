@@ -90,24 +90,35 @@ public final class PackItemFactory {
      * per-part models live under {@code item/entity/...}, whose path contains
      * a slash and therefore cannot be an {@link ItemModelAsset}).
      *
+     * <p>The modern representation names the model in the {@code item_model}
+     * component. The legacy representation can only reach a model through a
+     * reserved {@code custom_model_data} host override, which the caller
+     * registers through {@code PackApi#registerDisplayModel} and resolves via
+     * {@link #create(ItemModelAsset)} — an arbitrary hash of the path would be
+     * a predicate no host file dispatches, so a legacy caller that comes here
+     * gets {@code null} and keeps whatever it was rendering.</p>
+     *
      * @param material        the invisible carrier item
      * @param namespace       model namespace
      * @param componentPath   {@code item_model} path, slashes allowed
+     * @return the carrier stack with the model applied, or {@code null} when
+     *         this server cannot present that path
      */
     public ItemStack createModelDisplay(org.bukkit.Material material, String namespace, String componentPath) {
+        if (!supportsItemModelComponent()) {
+            return null;
+        }
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) {
             return stack;
         }
-        boolean modern = representation == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL;
-        boolean applied = modern && applyItemModelComponent(meta,
-                new NamespacedKey(namespace, componentPath));
-        if (!applied) {
-            // No legacy host override exists for an arbitrary model path; a
-            // custom-model-data value would resolve to a missing model, so the
-            // plain carrier is the honest fallback (rigs require the component).
-            return stack;
+        try {
+            if (!applyItemModelComponent(meta, new NamespacedKey(namespace, componentPath))) {
+                return null;
+            }
+        } catch (IllegalArgumentException invalidKey) {
+            return null;
         }
         stack.setItemMeta(meta);
         return stack;

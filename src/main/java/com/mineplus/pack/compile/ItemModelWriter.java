@@ -61,9 +61,32 @@ public final class ItemModelWriter {
      * down-and-up equip bob would otherwise replay on every gate write.</p>
      */
     public static String modernDefinitionJson(ItemModelAsset item) {
+        return modernDefinitionJson(item, com.mineplus.pack.asset.AppearanceMode.Dispatch.DIRECT);
+    }
+
+    /**
+     * Modern definition JSON for the resolved appearance dispatch.
+     *
+     * <p>{@code DIRECT} is the historical output (a plain {@code model} for
+     * unframed items, the float {@code range_dispatch} for framed ones).
+     * {@code RANGE} gives plain items the same float dispatch, keyed by their
+     * stable custom-model-data base. {@code SELECT} replaces the float
+     * dispatch with {@code minecraft:select} over
+     * {@code custom_model_data.strings[0]}, keyed by the same decimal state
+     * values the runtime writes.</p>
+     */
+    public static String modernDefinitionJson(ItemModelAsset item,
+                                              com.mineplus.pack.asset.AppearanceMode.Dispatch dispatch) {
         JsonObject root = new JsonObject();
-        if (item.isFramed()) {
+        if (dispatch == com.mineplus.pack.asset.AppearanceMode.Dispatch.SELECT) {
+            if (item.isFramed()) {
+                root.addProperty("hand_animation_on_swap", false);
+            }
+            root.add("model", selectDispatch(item));
+        } else if (item.isFramed()) {
             root.addProperty("hand_animation_on_swap", false);
+            root.add("model", framedDispatch(item));
+        } else if (dispatch == com.mineplus.pack.asset.AppearanceMode.Dispatch.RANGE) {
             root.add("model", framedDispatch(item));
         } else {
             JsonObject model = new JsonObject();
@@ -112,6 +135,43 @@ public final class ItemModelWriter {
         dispatch.add("entries", entries);
         dispatch.add("fallback", modelObject(fallbackReference));
         return dispatch;
+    }
+
+    /**
+     * {@code minecraft:select} on {@code custom_model_data} strings index 0:
+     * one case per state, keyed by the decimal value the runtime writes
+     * ({@link ItemModelAsset#frameStackValue(int)}), with the resting model as
+     * fallback. A plain item still gets its base case, so a stack that has
+     * never carried a state falls through to the same model.
+     */
+    private static JsonObject selectDispatch(ItemModelAsset item) {
+        JsonObject dispatch = new JsonObject();
+        dispatch.addProperty("type", "minecraft:select");
+        dispatch.addProperty("property", "minecraft:custom_model_data");
+        dispatch.addProperty("index", 0);
+        String fallbackReference = item.fallbackModelReference() != null
+                ? item.fallbackModelReference()
+                : item.modelReference();
+        Map<Integer, JsonObject> sequences = sequenceDispatches(item, fallbackReference);
+
+        JsonArray cases = new JsonArray();
+        cases.add(selectCase(item.frameStackValue(0),
+                sequences.containsKey(0) ? sequences.get(0) : modelObject(fallbackReference)));
+        for (ItemModelAsset.Frame frame : item.frames()) {
+            int state = Math.round(frame.threshold());
+            cases.add(selectCase(item.frameStackValue(state),
+                    sequences.containsKey(state) ? sequences.get(state) : modelObject(frame.modelReference())));
+        }
+        dispatch.add("cases", cases);
+        dispatch.add("fallback", modelObject(fallbackReference));
+        return dispatch;
+    }
+
+    private static JsonObject selectCase(int stateValue, JsonObject model) {
+        JsonObject entry = new JsonObject();
+        entry.addProperty("when", Integer.toString(stateValue));
+        entry.add("model", model);
+        return entry;
     }
 
     /** One nested client-clock dispatch per gated state, keyed by state number. */

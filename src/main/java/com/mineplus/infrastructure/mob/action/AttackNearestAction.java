@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.mob.action;
 import com.mineplus.infrastructure.combat.DamageTransactions;
 import com.mineplus.infrastructure.mob.BehaviorAction;
 import com.mineplus.infrastructure.mob.BehaviorContext;
+import com.mineplus.infrastructure.mob.custom.MobRigRenderer;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +43,11 @@ public final class AttackNearestAction implements BehaviorAction {
     private static final long RETARGET_TICKS = 60L;
     /** Repath cadence while closing the distance. */
     private static final long REPATH_TICKS = 10L;
+    /**
+     * A target that stepped this far from the point the last path was aimed at
+     * earns an early repath; otherwise a mob chases the ground its prey left.
+     */
+    private static final double REPATH_TARGET_MOVE_SQ = 2.25; // 1.5 blocks
     /** Bookkeeping ceiling before expired entries are swept. */
     private static final int STATE_SOFT_LIMIT = 512;
 
@@ -80,7 +86,7 @@ public final class AttackNearestAction implements BehaviorAction {
 
     private final Options options;
     private final Map<UUID, Long> cooldownUntil = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> nextRepath = new ConcurrentHashMap<>();
+    private final Map<UUID, Chase> chases = new ConcurrentHashMap<>();
     private final Map<UUID, Sticky> targets = new ConcurrentHashMap<>();
 
     public AttackNearestAction() {
@@ -97,6 +103,11 @@ public final class AttackNearestAction implements BehaviorAction {
     }
 
     @Override
+    public boolean continuous() {
+        return true;
+    }
+
+    @Override
     public boolean execute(BehaviorContext context) {
         if (!(context.entity() instanceof Mob attacker) || attacker.isDead() || !attacker.isValid()) {
             return false;
@@ -110,44 +121,63 @@ public final class AttackNearestAction implements BehaviorAction {
         if (target == null) {
             target = findTarget(attacker);
             if (target == null) {
+                // The hunt is over: without this the mob keeps walking to the
+                // last spot its prey occupied.
+                if (chases.remove(id) != null) {
+                    context.stopNavigation();
+                }
                 return false;
             }
             targets.put(id, new Sticky(target.getUniqueId(), now + RETARGET_TICKS));
         }
 
         double distance = attacker.getLocation().distance(target.getLocation());
-        if (distance > options.reach()) {
-            Long due = nextRepath.get(id);
-            if (due != null && now < due) {
-                return false;
-            }
-            nextRepath.put(id, now + REPATH_TICKS);
-            return context.navigateTo(target.getLocation(), options.speed());
+        if (distance > options.reach() || !attacker.hasLineOfSight(target)) {
+            chase(context, id, attacker, target, now);
+            return true;
+        }
+
+        // In reach: stop the walk before striking, or the mob keeps pushing
+        // into its prey (and past it) while the hit cooldown runs.
+        if (chases.remove(id) != null) {
+            context.stopNavigation();
         }
 
         Long until = cooldownUntil.get(id);
         if (until != null && now < until) {
-            return false;
-        }
-        if (!attacker.hasLineOfSight(target)) {
-            // In reach but behind a wall: keep walking, the navigator will
-            // round the corner. Striking through geometry is never correct.
-            Long due = nextRepath.get(id);
-            if (due != null && now < due) {
-                return false;
-            }
-            nextRepath.put(id, now + REPATH_TICKS);
-            return context.navigateTo(target.getLocation(), options.speed());
+            return true;
         }
 
-        context.stopNavigation();
         strike(attacker, target);
         cooldownUntil.put(id, now + options.cooldownTicks());
         targets.put(id, new Sticky(target.getUniqueId(), now + RETARGET_TICKS));
         return true;
     }
 
+    /**
+     * Issues (or re-issues) the walk toward {@code target}. A path is only
+     * requested when the previous one is due for a refresh or the target left
+     * the spot it was aimed at, so a mob closing on a standing target is not
+     * re-routed every evaluation.
+     */
+    private void chase(BehaviorContext context, UUID id, Mob attacker, LivingEntity target, long now) {
+        Location destination = target.getLocation();
+        Chase chase = chases.get(id);
+        boolean stale = chase == null
+                || !chase.targetId().equals(target.getUniqueId())
+                || now >= chase.nextRepathAt()
+                || chase.destination().distanceSquared(destination) > REPATH_TARGET_MOVE_SQ;
+        if (!stale) {
+            return;
+        }
+        context.navigateTo(destination, options.speed());
+        chases.put(id, new Chase(target.getUniqueId(), destination.clone(), now + REPATH_TICKS));
+    }
+
     private void strike(Mob attacker, LivingEntity target) {
+        // The swing is announced before the damage resolves: a mob that misses
+        // still animates, which is what a hunting mob does most of the time.
+        com.mineplus.infrastructure.mob.custom.MobRigRenderer.notifyMeleeSwing(attacker);
         DamageTransactions.apply(target, options.damage(), attacker);
         if (options.knockback() > 0.0) {
             Vector push = target.getLocation().toVector().subtract(attacker.getLocation().toVector());
@@ -191,7 +221,13 @@ public final class AttackNearestAction implements BehaviorAction {
         Location origin = attacker.getLocation();
         LivingEntity best = null;
         double bestDistance = radius * radius;
-        for (LivingEntity candidate : origin.getNearbyLivingEntities(radius, radius * 0.75, radius)) {
+        // World#getNearbyEntities(Location, x, y, z) is the one query every
+        // server implementation ships; the living-entity/type variants are
+        // Paper-only and fail to link on Spigot.
+        for (Entity entity : origin.getWorld().getNearbyEntities(origin, radius, radius * 0.75, radius)) {
+            if (!(entity instanceof LivingEntity candidate)) {
+                continue;
+            }
             if (candidate == attacker || candidate.isDead() || !candidate.isValid()) {
                 continue;
             }
@@ -224,8 +260,8 @@ public final class AttackNearestAction implements BehaviorAction {
         if (cooldownUntil.size() > STATE_SOFT_LIMIT) {
             cooldownUntil.entrySet().removeIf(entry -> entry.getValue() < now - 200L);
         }
-        if (nextRepath.size() > STATE_SOFT_LIMIT) {
-            nextRepath.entrySet().removeIf(entry -> entry.getValue() < now - 200L);
+        if (chases.size() > STATE_SOFT_LIMIT) {
+            chases.entrySet().removeIf(entry -> entry.getValue().nextRepathAt() < now - 200L);
         }
         if (targets.size() > STATE_SOFT_LIMIT) {
             targets.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
@@ -300,5 +336,9 @@ public final class AttackNearestAction implements BehaviorAction {
     }
 
     private record Sticky(UUID targetId, long expiresAt) {
+    }
+
+    /** The walk currently issued for one hunter: its prey, its aim point and its refresh time. */
+    private record Chase(UUID targetId, Location destination, long nextRepathAt) {
     }
 }

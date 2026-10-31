@@ -48,7 +48,12 @@ context.mobBehaviorApi()       // mob behavior engine: profiles, journeys, crews
 context.particleFx()           // budgeted particle + sound emission (shared, never throws)
 context.ballistics()           // core projectile simulation
 context.heldItemInput()        // held-item press/release/swap seam with vanilla-interaction freeze
+context.perf()                 // telemetry counters/gauges + adaptive valve (never null)
+context.deferredEdits()        // deferred world-edit queue: enqueue(World, List<BlockEdit>), HIGH/LOW, per-tick budget
+context.visualUnits()          // composed impact units: spawn(VisualUnit) / impact(Location, ImpactProfile)
 ```
+
+`/mineplus perf` prints the live telemetry table, `/mineplus perf reset` zeroes counters and the valve, `/mineplus perf dump` writes a JSON snapshot under `plugins/Mineplus/perf/`.
 
 Always perform the dependency check in `onEnable` and disable with a human-readable message if the core is absent — see the reference implementation in [`MineplusFunPlugin.java`](../examples/mineplus-fun/src/main/java/com/mineplus/fun/MineplusFunPlugin.java).
 
@@ -201,6 +206,12 @@ AnimationApi anim = context.animationApi();
 anim.playAnimation(instance.id(), "rotate_gear");
 anim.playAnimation(instance.id(), "recoil", AnimationPlayback.speed(2.0f));
 
+// Priority layer + crossfade: higher priority wins per bone (equal priorities stay
+// additive), fades blend in/out instead of snapping. Explicit calls always beat
+// automatic state selection, which runs at priority -1.
+anim.playAnimation(instance.id(), "reload", AnimationPlayback.defaults(), 10, 4, 6);
+anim.clearAutoState(instance.id());   // hand full control to explicit calls
+
 // One-shot trigger: restarts from t=0, forced to play once
 anim.triggerAnimation(instance.id(), AnimationSelector.animation("recoil"));
 
@@ -236,6 +247,8 @@ anim.getAnimationState(instance.id(), "recoil");  // playback snapshot or null
 - `onAnimationStart`/`onAnimationComplete` fire on the type's hook (exception-isolated like all hook dispatch). Looping clips fire start once per start, never complete.
 - All methods accept a multiblock instance id **or** — for raw `/mineplus model debugspawn`-ed models — the rendered model id itself.
 - Models without animations cost nothing: binding capture, tick work, and controllers only exist when the model carries both bones and clips.
+- `ANIMATION.PIPELINE` selects `PosePipeline`: `TICK` evaluates and applies inside the tick (pre-pipeline behavior), `ASYNC_COMPUTE` (default) evaluates on the single bounded `Mineplus-Pose` thread and applies on the main thread under `ANIMATION.MAX_APPLY_PER_TICK` with carry-over, `ASYNC_SEND` additionally gathers a tick's pose writes into one flush pass.
+- **Priorities and auto states**: controllers carry a priority and fade windows; per bone only the highest-priority level contributes (equal priorities still compose additively, so priority `0` with no fades is byte-identical to the old behavior), and a lower layer resumes at its own elapsed time when the higher one ends. With `ANIMATION.AUTO_STATE: true` the runtime derives `attack` > `airborne` > `swim` > `walk` > `idle` from the model's entity (via `AnimationInstanceBridge#entityFor` or `setAutoStateSource`) at priority `-1`, switching `IMMEDIATE` or `AFTER_CURRENT` and crossfading over `ANIMATION.TRANSITION_TICKS`.
 - Molang keyframe expressions fall back to `0` and are reported at import (`/mineplus model info` shows the parsed clip table).
 - `/mineplus model info <key>` reports bones, clips with loop mode/length/per-bone track counts, and meta autoplay.
 
@@ -265,11 +278,13 @@ Best content: pixel art with flat regions (lettering, stripes, emblems). Noise/c
 |---|---|
 | `registerItem(PackItemDefinition)` | Custom item: PDC identity + auto model/texture assets + modern `item_model`/legacy `CustomModelData` presentation |
 | `registerBlock(PackBlockDefinition)` | Custom block rendering: allocates a carrier state (`PackBlockCarrier.NOTE_BLOCK`) and attaches block-space geometry + textures |
+| `registerBoneRig(PackBoneRigDefinition)` | Bone-rig rendering (`renderKind: bones`): one `ItemDisplay` per bone with generated per-bone item models, capped by `RIGS.MAX_DISPLAYS_PER_INSTANCE`; placement/collision/persistence stay with the multiblock lifecycle |
 | `registerModel(ns, path, modelKey)` | Standalone model asset from a loaded virtual model |
 | `registerTexture(ns, path, file)` / `registerRawAsset(ns, path, file)` | Verbatim PNG / pack file assets |
 | `createItem(ns, id)` | The registered item's `ItemStack` |
 | `playerPackState(uuid)` / `deliverPack(player)` / `deliveryUrl(player)` | Delivery state and diagnostics |
 | `recompile()` / `currentArtifact()` | Explicit compile / the current artifact |
+| `appearanceMode()` | Configured `PACK.APPEARANCE_MODE` (`AUTO` when disabled); frame state writes follow it automatically through `ItemFrameWriter` |
 
 ```java
 // Item (see mineplus-fun's PackShowcaseFeature)
@@ -306,8 +321,10 @@ Rendering selection is a single declarative vocabulary, `RenderMode`. One value 
 | `VIRTUAL` | `virtual` | `VIRTUAL` + `MODEL` | Packless virtual engine (default) |
 | `PACK_ITEM` | `pack_item` (`pack`/`item`) | `PACK` + `MODEL` | Pack item model (`ItemDisplay`) |
 | `PACK_BLOCK` | `pack_block` (`block`) | `PACK` + `BLOCK` | Pack block display (`BlockDisplay` + carrier state) |
+| `PACK_BONES` | `pack_bones` (`bones`) | `PACK` + `BONES` | Pack bone rig (one `ItemDisplay` per bone) |
 | `HYBRID_ITEM` | `hybrid_item` (`hybrid`/`virtual+pack`) | `VIRTUAL_PLUS_PACK` + `MODEL` | Virtual render plus the pack item layered on top |
 | `HYBRID_BLOCK` | `hybrid_block` | `VIRTUAL_PLUS_PACK` + `BLOCK` | Virtual render plus the pack block layered on top |
+| `HYBRID_BONES` | `hybrid_bones` | `VIRTUAL_PLUS_PACK` + `BONES` | Virtual render plus the pack bone rig layered on top |
 
 **Routing is centralized.** A multiblock level declares intent; `ModelRenderingManager` resolves it through the `RenderRouter` — the single choke point that applies subsystem availability and the global `RENDERING.POLICY` (whether a pack request may degrade to the virtual engine when the pack is unavailable or a pack display fails to attach). A `RenderMode` selects one primitive for the whole level; mixing backends or primitives per cube/face is **not** supported by the engine (the pack axis draws an entire model client-side as one model or block).
 
@@ -321,6 +338,10 @@ RenderPolicy policy = router.policy();                  // the active routing po
 `/mineplus render stats` prints the same snapshot; `/mineplus render reset` zeroes the counters.
 
 > **Migrating from the legacy pair:** replace `"renderBackend": "pack", "renderKind": "block"` with `"renderMode": "pack_block"`. Both forms parse today, but new content should use `renderMode`. See the [migration guide](migration-guide.md).
+
+**Per-observer state.** `DisplayTransport.viewerState(instanceId, viewerId)` returns the observer's `RenderViewState` (`lodTier`, `forcedVisible`, `brightnessOverride`, `equipmentOverride`, `stanceId`, `animationOverride`; `forcedVisible` keeps a model spawned instead of hiding it), and `context.stances()` exposes the observer-only `StanceService` — `apply(observer, target, stanceId, Map<EquipmentSlot, ItemStack>)`, `clear`, `clearAll`, `resend`, `registerStance`/`availableStances` — which sends equipment packets to that observer alone through the transport's packet optimizer and never mutates the target's inventory (inert when `DISPLAY_TRANSPORT.STANCES.ENABLED: false` or the packet transport is not running).
+
+**Send budgeting.** `PacketOptimizer` fills each viewer's bundle against `NETWORK.BUNDLE_LIMIT` and `NETWORK.BUNDLE_WEIGHT_LIMIT` (metadata/equipment packets count their list entries through `NmsAdapter.packetWeight`, everything else 1), and `PacketOptimizer.Stats` reports packets, average/max weight and deferred players; a flush pass stops at `NETWORK.FLUSH_BUDGET_MS` and carries the rest in arrival order.
 
 ---
 
@@ -341,6 +362,7 @@ otherwise re-implement badly. The pieces are:
 | `ItemMagazine` / `ItemState` | registry | Countable item state (rounds) live in memory while held, persisted to PDC when the stack leaves the hand |
 | `ItemFrames` / `ItemFrameWriter` | pack item | Idle / loaded / reload / fire frame math for `item_model` presentation, and the writer that puts one state on the stack |
 | `TriggerState` | input | The per-player press state: one physical click resolves to one press, however many packets the client sent for it |
+| `InputSettings` / `HeldItemInput.updateSettings` | input | `INPUT.FAST_PATH` toggles the optional Netty read-ahead; gestures still resolve through the same `TriggerState` fold and never deliver twice |
 
 ```java
 // 1. Describe the round (WeaponDefinition in mineplus-gun does exactly this).
@@ -461,7 +483,7 @@ a higher priority never steals a mob on its own.
 | World edits (budgeted) | `trySetBlock(Block, BlockData)`, `tryBreak(Block, boolean)`, `trySpawn(Location, Class, Consumer)` — all return `false` once the run's grant is spent, so an action degrades instead of throwing |
 | Scenario arbitration | `claimActivity(id[, durationTicks])`, `claimActivity(id, anchor, anchorRadius, durationTicks)`, `releaseActivity`, `ownsActivity`, `activeActivityId`, `activityAnchor()` |
 | Confinement | `confinementCenter()`, `confinementRadius()`, `withinConfinement()` — the claimed anchor is what keeps a scenario mob inside the area it belongs to |
-| Navigation | `navigateTo(target, speed)`, `navigateToWithin(target, stopDistance, speed)`, `stopNavigation()` — through `MobNavigator`, which tries Paper's public `Pathfinder` API first and falls back to the reflective NMS/Brain channel on Spigot. It never teleports and never spawns: movement is always the entity's own vanilla walk, so the client's motion stays authoritative. |
+| Navigation | `navigateTo(target, speed)`, `navigateToWithin(target, stopDistance, speed)`, `stopNavigation()` — through `MobNavigator`, which tries Paper's public `Pathfinder` API first and falls back to the reflective NMS channel on Spigot (the entity's own `NavigationAbstract`, resolved from its live handle class). Each accepted request also turns the vanilla look control toward the destination, so a goal-less mob faces its path instead of walking sideways. It never teleports and never spawns: movement is always the entity's own vanilla walk, so the client's motion stays authoritative. A request is refused while the mob is airborne, so callers re-request on their own cadence rather than treating one `false` as "unreachable". |
 | Journeys | `advanceJourney(...)`, `abandonJourney()`, `isJourneying()`, `journeyDestination()`, `journeys()` |
 | Crews | `joinCrew(crew, leader, goal)`, `rallyCrew`, `crewRejoin`, `crewRally`, `setCrewRally`, `crewSpread`, `crewLeader`, `crewGoal`, `crewMembers`, `isCrewLeader`, `leaveCrew`, `disbandCrew` |
 | Formations | `setCrewFormation(crew, Formation)`, `crewFormation(crew)`, `setCrewRole(crew, SquadRole)`, `crewRole(crew)` — a crew's shape around its formation point (wedge, column, pincer, ring) and each member's role in it |
@@ -736,7 +758,10 @@ LivingEntity pig = mobs.spawn(location, "mymod:evil_pig");
   entity's goal and target selectors through `MobAiIsolation` while leaving AI
   enabled — the navigator still ticks the mob's own vanilla walk, but nothing
   in the mob decides anything. Every action comes from the definition's
-  behavior profile, evaluated by the mob behavior engine.
+  behavior profile, evaluated by the mob behavior engine. The reflective plan
+  is resolved from the entity's **live handle class**, so a CraftBukkit bridge
+  declared as `Entity getHandle()` (CraftVillager) still yields the real
+  navigation, look control and Brain.
 - **Identity is persisted, not positional.** The id lives in PDC
   (`custom_mob_id`), with a scoreboard tag as the cheap discovery path and a
   live `UUID → id` cache for the engine sweep. A definition registered later
@@ -766,12 +791,17 @@ animated.
 The Core compiles the model into pack assets (`MobRigAssetWriter`): one texture
 PNG, one item model per part, one item definition per part — the vanilla box-UV
 cross layout is converted to element face windows exactly as Blockbench derives
-it. `MobRigRenderer` then hides the base entity and presents every part as an
-`ItemDisplay` carrying that part's `item_model`, driven on
-`CUSTOM_MOBS.RENDER_INTERVAL_TICKS`. When the pack subsystem is unavailable (or
-the server has no `item_model` support) the base entity simply stays visible:
-behavior, identity and persistence are unaffected, so a custom mob is always
-testable without the visual layer.
+it. Parts are kept inside the client's -16..32 px element window (shifted, or
+split into `<part>_p2`, … when larger than 48 px) and each piece becomes its
+own display, reassembled by the pose pass. `MobRigRenderer` then hides the base
+entity and presents every part/piece as an `ItemDisplay` carrying that part's
+`item_model` (a legacy server reaches the same models through the pack's
+reserved `custom_model_data` overrides), driven on
+`CUSTOM_MOBS.RENDER_INTERVAL_TICKS` with the client-side window set by
+`RENDER_INTERPOLATION_TICKS`. When the pack subsystem is unavailable or a part
+model cannot be resolved the base entity simply stays visible: behavior,
+identity and persistence are unaffected, so a custom mob is always testable
+without the visual layer.
 
 Rig cost is bounded by `RENDER_DISTANCE` (no pose pushes past it),
 `MAX_RIGGED_PER_WORLD`, and a pose task that only exists while at least one rig

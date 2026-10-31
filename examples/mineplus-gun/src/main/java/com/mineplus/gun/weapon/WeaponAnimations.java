@@ -122,6 +122,18 @@ public final class WeaponAnimations {
 
         JsonObject idle = models.get(layout.idleStem());
         JsonObject loaded = layout.loadedStem() == null ? null : models.get(layout.loadedStem());
+        JsonObject rest = loaded != null ? loaded : idle;
+
+        if (!layout.hasReload() && rest != null) {
+            // A gun whose pack never authored a reload still needs one: three
+            // poses that rock the gun while the action is worked. The runtime
+            // plays them one write per pose, so even a legacy pack shows a
+            // reload instead of a static gun.
+            double[] shape = {0.3, 0.9, 0.15};
+            for (int step = 0; step < shape.length; step++) {
+                generated.put(id + "_loading_" + step, workAction(rest, shape[step]));
+            }
+        }
 
         if (!layout.hasFire()) {
             JsonObject base = loaded != null ? loaded : idle;
@@ -264,21 +276,21 @@ public final class WeaponAnimations {
             if (transform == null) {
                 continue;
             }
-            nudge(transform, "translation", 1, 6.0 * amount);
-            nudge(transform, "translation", 2, -1.5 * amount);
-            nudge(transform, "rotation", 0, 30.0 * amount);
-            nudge(transform, "rotation", 2, 8.0 * amount);
-            nudge(transform, "scale", 0, -0.08 * amount);
-            nudge(transform, "scale", 1, -0.08 * amount);
-            nudge(transform, "scale", 2, -0.08 * amount);
+            // Small on purpose: the client already plays its own draw
+            // animation on the slot change, and stacking a deep pose on top
+            // of it is the double hand bob that reads as a broken equip.
+            nudge(transform, "translation", 1, 1.4 * amount);
+            nudge(transform, "translation", 2, -0.6 * amount);
+            nudge(transform, "rotation", 0, 7.0 * amount);
+            nudge(transform, "rotation", 2, 2.0 * amount);
         }
         for (String slot : THIRD_PERSON) {
             JsonObject transform = object(display, slot);
             if (transform == null) {
                 continue;
             }
-            nudge(transform, "translation", 1, 3.0 * amount);
-            nudge(transform, "rotation", 0, 15.0 * amount);
+            nudge(transform, "translation", 1, 0.8 * amount);
+            nudge(transform, "rotation", 0, 4.0 * amount);
         }
         return out;
     }

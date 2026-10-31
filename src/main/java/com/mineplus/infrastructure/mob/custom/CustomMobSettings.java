@@ -18,6 +18,10 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param renderingEnabled      whether visual rigs are created at all; a custom
  *                              mob without a rig is visible as its vanilla base
  * @param renderIntervalTicks   server ticks between rig pose pushes
+ * @param renderInterpolationTicks client-side interpolation window in ticks;
+ *                              passed to {@code setInterpolationDuration} so the
+ *                              client smooths between pose updates; lower values
+ *                              look smoother but cost more bandwidth
  * @param renderDistance        blocks beyond which a rig stops receiving pose
  *                              updates (the client also culls by view range)
  * @param maxRiggedPerWorld     hard ceiling of rigged custom mobs per world
@@ -28,6 +32,7 @@ public record CustomMobSettings(
         boolean enabled,
         boolean renderingEnabled,
         int renderIntervalTicks,
+        int renderInterpolationTicks,
         int renderDistance,
         int maxRiggedPerWorld,
         boolean removeUnknownOnLoad
@@ -35,12 +40,13 @@ public record CustomMobSettings(
 
     public CustomMobSettings {
         renderIntervalTicks = clamp(renderIntervalTicks, 1, 40);
+        renderInterpolationTicks = clamp(renderInterpolationTicks, 1, 40);
         renderDistance = clamp(renderDistance, 8, 256);
         maxRiggedPerWorld = clamp(maxRiggedPerWorld, 1, 4096);
     }
 
     public static CustomMobSettings defaults() {
-        return new CustomMobSettings(true, true, 2, 48, 96, true);
+        return new CustomMobSettings(true, true, 1, 1, 48, 96, true);
     }
 
     public static CustomMobSettings parse(FileConfiguration yaml, CustomMobSettings fallback) {
@@ -53,6 +59,7 @@ public record CustomMobSettings(
                 section.getBoolean("ENABLED", defaults.enabled()),
                 section.getBoolean("RENDERING", defaults.renderingEnabled()),
                 section.getInt("RENDER_INTERVAL_TICKS", defaults.renderIntervalTicks()),
+                section.getInt("RENDER_INTERPOLATION_TICKS", defaults.renderInterpolationTicks()),
                 section.getInt("RENDER_DISTANCE", defaults.renderDistance()),
                 section.getInt("MAX_RIGGED_PER_WORLD", defaults.maxRiggedPerWorld()),
                 section.getBoolean("REMOVE_UNKNOWN_ON_LOAD", defaults.removeUnknownOnLoad())

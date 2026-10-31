@@ -21,49 +21,111 @@ import org.bukkit.entity.Mob;
  */
 public final class MobAiIsolation {
 
+    /** What one isolation attempt actually reached. */
+    public enum Result {
+        /** Both vanilla goal selectors were emptied. */
+        GOALS,
+        /** The Brain (a villager-family entity) was emptied; selectors are absent. */
+        BRAIN,
+        /** Selectors and Brain both emptied. */
+        GOALS_AND_BRAIN,
+        /** Nothing was emptied: vanilla AI keeps running and the caller must say so. */
+        UNREACHABLE,
+        /** Not a pathfinding mob (an item, a player, a projectile). */
+        NOT_A_MOB,
+        /**
+         * Isolation deliberately skipped: the definition asked to keep the
+         * donor entity's own goals, so vanilla AI is expected, not a defect.
+         */
+        GOALS_KEPT;
+
+        public boolean isolated() {
+            return this == GOALS || this == BRAIN || this == GOALS_AND_BRAIN;
+        }
+
+        /** A short label for status output. */
+        public String label() {
+            return switch (this) {
+                case GOALS -> "goals";
+                case BRAIN -> "brain";
+                case GOALS_AND_BRAIN -> "goals+brain";
+                case UNREACHABLE -> "NOT ISOLATED";
+                case NOT_A_MOB -> "not a mob";
+                case GOALS_KEPT -> "vanilla goals kept";
+            };
+        }
+    }
+
     private MobAiIsolation() {
     }
 
     /**
      * Clears {@code entity}'s vanilla goals and target, keeping AI enabled.
+     * Also clears the Brain for Brain-driven entities (villagers, piglins, etc.)
+     * when the goal/target selectors are unavailable.
      *
-     * @return {@code true} when the entity's selectors were reached and
-     *         cleared; {@code false} for a Brain-driven entity (a villager) or
-     *         a runtime whose selectors could not be resolved — vanilla AI is
-     *         then still active and the caller should report it rather than
-     *         assume isolation
+     * @return {@code true} when the entity's selectors or Brain were reached and
+     *         cleared; {@code false} when the entity type is unsupported or
+     *         the runtime's reflection surface changed — vanilla AI is then
+     *         still active and the caller should report it rather than assume
+     *         isolation
      */
     public static boolean isolate(LivingEntity entity) {
+        return isolateDetailed(entity).isolated();
+    }
+
+    /**
+     * The same isolation as {@link #isolate}, reported per mechanism so a
+     * caller can tell "isolated through the Brain" from "nothing was reachable"
+     * — the latter means vanilla AI is still driving the mob and has to be
+     * surfaced, never swallowed.
+     */
+    public static Result isolateDetailed(LivingEntity entity) {
         if (!(entity instanceof Mob mob) || entity.isDead() || !entity.isValid()) {
-            return false;
+            return Result.NOT_A_MOB;
         }
         mob.setAware(true);
         mob.setTarget(null);
         NmsEntityPlan plan = NmsEntityPlan.forEntity(entity);
         if (plan == null) {
-            return false;
+            return Result.UNREACHABLE;
         }
+        boolean goals;
+        boolean brain;
         try {
             Object handle = plan.getHandle.invoke(entity);
             if (handle == null) {
-                return false;
+                return Result.UNREACHABLE;
             }
-            return plan.clearGoals(handle);
+            goals = plan.clearGoals(handle);
+            brain = plan.clearBrain(handle);
         } catch (Throwable unavailable) {
-            // A runtime whose reflection surface changed loses AI isolation,
-            // not the whole custom-mob subsystem.
-            return false;
+            return Result.UNREACHABLE;
         }
+        if (goals && brain) {
+            return Result.GOALS_AND_BRAIN;
+        }
+        if (goals) {
+            return Result.GOALS;
+        }
+        if (brain) {
+            return Result.BRAIN;
+        }
+        return Result.UNREACHABLE;
     }
 
     /**
-     * {@code true} when this entity type exposes a goal/target selector — the
-     * structural requirement for isolation. Brain-driven entities report
-     * {@code false}.
+     * {@code true} when this entity type can be isolated: goal/target selectors
+     * OR a Brain is available — Brain-driven entities (villagers) qualify through
+     * the Brain path even when selectors are absent.
      */
     public static boolean isSupported(LivingEntity entity) {
         NmsEntityPlan plan = NmsEntityPlan.forEntity(entity);
-        return plan != null && (plan.goalSelectorGetter != null || plan.targetSelectorGetter != null);
+        if (plan == null) {
+            return false;
+        }
+        return plan.goalSelectorGetter != null || plan.targetSelectorGetter != null
+                || plan.getBrain != null;
     }
 
     /** The entity's head yaw, falling back to its body yaw when unreadable. */

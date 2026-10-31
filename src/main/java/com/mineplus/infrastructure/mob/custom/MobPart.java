@@ -7,18 +7,21 @@ import java.util.Objects;
 
 /**
  * One independently rendered piece of a custom mob (a head, a body, a leg),
- * with a pivot and an optional base rotation in vanilla entity-model space.
+ * with a pivot, an optional base rotation in vanilla entity-model space and an
+ * optional parent part.
  *
  * <p>Coordinates are pixels, {@code y} grows downward from
  * {@code modelHeightPx}, and the model front is {@code -z}. Each part becomes
  * one {@link org.bukkit.entity.ItemDisplay} driven by the Core's rig renderer,
  * so parts animate independently: the role tells the renderer which vanilla
- * pose (head tracking, quadruped leg swing) applies.</p>
+ * pose (head tracking, quadruped leg swing) applies, and an animation clip
+ * drives the parts it names.</p>
  *
- * <p>Parts are siblings in model space; a part's pivot is absolute (not
- * relative to another part). This is exactly the shape of a vanilla quadruped
- * model and covers texture-extended mobs; hierarchical/custom models can be
- * expressed by placing each part at its world pivot.</p>
+ * <p>A part's pivot is absolute, never relative to its parent; {@link #parent}
+ * only says which part's rotation carries it. That is the same shape an
+ * imported outliner has (each group names an absolute origin), so a model's
+ * group tree becomes a part tree without re-basing any coordinate. A part with
+ * no boxes is a pure bone: it renders nothing but still moves its children.</p>
  */
 public final class MobPart {
 
@@ -35,6 +38,7 @@ public final class MobPart {
 
     private final String name;
     private final Role role;
+    private final int parent;
     private final float pivotX;
     private final float pivotY;
     private final float pivotZ;
@@ -43,10 +47,11 @@ public final class MobPart {
     private final float rotationZ;
     private final List<MobBox> boxes;
 
-    private MobPart(String name, Role role, float pivotX, float pivotY, float pivotZ,
+    private MobPart(String name, Role role, int parent, float pivotX, float pivotY, float pivotZ,
                     float rotationX, float rotationY, float rotationZ, List<MobBox> boxes) {
         this.name = name;
         this.role = role;
+        this.parent = parent;
         this.pivotX = pivotX;
         this.pivotY = pivotY;
         this.pivotZ = pivotZ;
@@ -63,6 +68,11 @@ public final class MobPart {
 
     public Role role() {
         return role;
+    }
+
+    /** Index of the part whose rotation carries this one, or {@code -1} for a root. */
+    public int parent() {
+        return parent;
     }
 
     public float pivotX() {
@@ -106,6 +116,7 @@ public final class MobPart {
 
         private final String name;
         private final Role role;
+        private int parent = -1;
         private float pivotX;
         private float pivotY;
         private float pivotZ;
@@ -121,6 +132,12 @@ public final class MobPart {
             }
             this.name = normalized;
             this.role = role == null ? Role.STATIC : role;
+        }
+
+        /** Index of the part whose rotation carries this one ({@code -1} = root). */
+        public Builder parent(int index) {
+            this.parent = index;
+            return this;
         }
 
         /** Absolute pivot in vanilla model pixels (y grows downward). */
@@ -145,10 +162,8 @@ public final class MobPart {
         }
 
         public MobPart build() {
-            if (boxes.isEmpty()) {
-                throw new IllegalStateException("Mob part '" + name + "' has no boxes");
-            }
-            return new MobPart(name, role, pivotX, pivotY, pivotZ, rotationX, rotationY, rotationZ, boxes);
+            return new MobPart(name, role, parent, pivotX, pivotY, pivotZ,
+                    rotationX, rotationY, rotationZ, boxes);
         }
     }
 }

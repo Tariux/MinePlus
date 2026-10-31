@@ -25,4 +25,12 @@ public interface AnimationInstanceBridge {
 
     /** Dispatches {@code onAnimationComplete} on the type's hook (isolated). */
     void onAnimationComplete(MultiBlockInstance instance, String animation);
+
+    /**
+     * Living entity driving automatic state selection for a rendered model, or
+     * {@code null} when the model is not entity-bound. Default: none.
+     */
+    default org.bukkit.entity.LivingEntity entityFor(UUID renderedModelId) {
+        return null;
+    }
 }

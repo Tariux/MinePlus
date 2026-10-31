@@ -84,6 +84,69 @@ public interface CustomMobApi {
      */
     void refreshRendering();
 
+    // ------------------------------------------------------------------
+    // Presentation probes (a module's status command reads these)
+    // ------------------------------------------------------------------
+
+    /**
+     * The last pose one rigged mob was given — its pose source, blended speed
+     * and clocks — or {@code null} when the mob carries no rig. A test command
+     * prints this to tell "the rig is not attached" from "the rig is attached
+     * and standing still".
+     */
+    default String poseSnapshot(LivingEntity mob) {
+        return null;
+    }
+
+    /**
+     * How this mob's vanilla AI was last actually cleared ({@code goals},
+     * {@code brain}, {@code goals+brain}, {@code NOT ISOLATED}, {@code vanilla
+     * goals kept}), or {@code null} for an entity the subsystem never applied a
+     * definition to. Isolation can fail silently on a remapped runtime; this is
+     * how an operator sees that.
+     */
+    default String isolationLabel(LivingEntity mob) {
+        return null;
+    }
+
+    /**
+     * Why this definition last failed to present a rig ("the pack subsystem is
+     * off", "the per-world rig cap is reached", …), or {@code null} when its
+     * mobs render rigged or the definition never tried. A mob falling back to
+     * its base entity is a legitimate outcome; it is never meant to be silent.
+     */
+    default String rigFailure(String definitionId) {
+        return null;
+    }
+
+    /**
+     * The last presentation outcome for this definition in one sentence — the
+     * honest companion to {@link #rigFailure}, which cannot distinguish "the rig
+     * works" from "nothing has asked for it yet". Use this for status output.
+     */
+    default String rigStatus(String definitionId) {
+        return null;
+    }
+
+    /**
+     * Plays a rigged mob's authored attack clip now. A module whose content
+     * strikes outside the Core's attack actions uses this for its own timing;
+     * a mob with no attack clip, or no rig, ignores it.
+     */
+    default boolean playAttack(LivingEntity mob) {
+        return false;
+    }
+
+    /**
+     * Re-reads the authored per-mob presentation overrides
+     * ({@code mobs/<id>.model.json}) and re-attaches live rigs so a cadence or
+     * yaw correction takes effect without a restart.
+     */
+    default void reloadModelOverrides() {
+        MobModelOverrides.clearCache();
+        refreshRendering();
+    }
+
     /** Applies new subsystem settings ({@code CUSTOM_MOBS}). */
     void updateSettings(CustomMobSettings settings);
 

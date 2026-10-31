@@ -88,6 +88,7 @@ public final class MobBehaviorEngine {
             new java.util.concurrent.atomic.AtomicLong();
 
     private volatile MobBehaviorSettings settings = MobBehaviorSettings.defaults();
+    private volatile com.mineplus.infrastructure.perf.PerfRegistry perf;
     private volatile BukkitTask runTask;
     private volatile boolean running;
     private int runCounter;
@@ -374,6 +375,11 @@ public final class MobBehaviorEngine {
         return profilesByCustomId.size();
     }
 
+    /** Telemetry sink for run durations (may be {@code null}). */
+    public void setPerfRegistry(com.mineplus.infrastructure.perf.PerfRegistry perf) {
+        this.perf = perf;
+    }
+
     /** Applies new settings (config reload). Safe while running. */
     void updateSettings(MobBehaviorSettings newSettings) {
         MobBehaviorSettings previous = this.settings;
@@ -528,7 +534,22 @@ public final class MobBehaviorEngine {
         DebugLogger.info("[mob-behavior] Engine started (interval " + interval + " ticks).");
     }
 
+    /** Timed wrapper: reports run duration and run count to the perf registry. */
     private void run() {
+        long started = System.nanoTime();
+        try {
+            runInternal();
+        } finally {
+            com.mineplus.infrastructure.perf.PerfRegistry registry = perf;
+            if (registry != null && settings.enabled() && hasAnyProfiles()) {
+                registry.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.MOB_ENGINE_RUN_MILLIS,
+                        (System.nanoTime() - started) / 1_000_000L);
+                registry.add(com.mineplus.infrastructure.perf.PerfRegistry.Counter.MOB_ENGINE_RUNS, 1);
+            }
+        }
+    }
+
+    private void runInternal() {
         MobBehaviorSettings snapshot = settings;
         if (!snapshot.enabled() || !hasAnyProfiles()) {
             return;
@@ -758,7 +779,7 @@ public final class MobBehaviorEngine {
             evaluationContext.bindProfile(profile);
             for (MobProfile.ActionEntry entry : profile.actions()) {
                 double seconds = Math.max(0.25, entry.intervalSeconds());
-                double odds = Math.min(1.0, 1.0 / (seconds * checksPerSecond));
+                double odds = entry.action().continuous() ? 1.0 : Math.min(1.0, 1.0 / (seconds * checksPerSecond));
                 if (random.nextDouble() > odds) {
                     continue;
                 }

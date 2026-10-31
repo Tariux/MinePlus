@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.input;
 
 import com.mineplus.infrastructure.combat.DamageTransactions;
+import com.mineplus.infrastructure.input.net.InputChannel;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -121,6 +122,14 @@ public final class HeldItemInput implements Listener {
      * module never has to invent its own hold cap.</p>
      */
     private static final long MAX_HOLD_MILLIS = 60_000L;
+
+    /**
+     * Window inside which a gesture the fast path already delivered is not
+     * delivered again by the Bukkit event. Duplicate reports of one click
+     * arrive within a tick; a deliberate second click is far slower, and this
+     * stays below the click window so it never swallows one.
+     */
+    private static final long FAST_PATH_DEDUPE_MILLIS = 75L;
 
     /** Ticks between two scans of the trigger states. */
     private static final long TRIGGER_SCAN_TICKS = 1L;
@@ -246,7 +255,10 @@ public final class HeldItemInput implements Listener {
     private final List<HeldItemHandler> handlers = new CopyOnWriteArrayList<>();
     private final Map<UUID, TriggerState> secondaryTriggers = new ConcurrentHashMap<>();
     private final Map<UUID, TriggerState> primaryTriggers = new ConcurrentHashMap<>();
+    private final Map<UUID, long[]> fastDeliveries = new ConcurrentHashMap<>();
     private final Listener paperStopUsing;
+    private volatile InputSettings inputSettings = InputSettings.defaults();
+    private volatile InputChannel fastPath;
     private boolean registered;
     private BukkitTask triggerTask;
 
@@ -272,7 +284,44 @@ public final class HeldItemInput implements Listener {
         }
         handlers.add(handler);
         ensureRegistered();
+        startFastPath();
         return true;
+    }
+
+    /**
+     * Applies the {@code INPUT} settings slice (called on enable and reload).
+     * With {@code FAST_PATH: false} no channel is touched and no task exists;
+     * turning it off at runtime removes the Netty handler again.
+     */
+    public void updateSettings(InputSettings settings) {
+        this.inputSettings = settings == null ? InputSettings.defaults() : settings;
+        if (!inputSettings.fastPath()) {
+            stopFastPath();
+        } else {
+            startFastPath();
+        }
+    }
+
+    /** {@code true} while the network fast path is installed and delivering. */
+    public boolean fastPathActive() {
+        InputChannel channel = fastPath;
+        return channel != null && channel.active();
+    }
+
+    private void startFastPath() {
+        if (!inputSettings.fastPath() || fastPath != null) {
+            return;
+        }
+        InputChannel channel = new InputChannel(plugin, this::onFastInput);
+        fastPath = channel.start() ? channel : null;
+    }
+
+    private void stopFastPath() {
+        InputChannel channel = fastPath;
+        fastPath = null;
+        if (channel != null) {
+            channel.shutdown();
+        }
     }
 
     /** Detaches a handler. The service stops listening when none remain. */
@@ -290,6 +339,7 @@ public final class HeldItemInput implements Listener {
 
     /** Unregisters every listener this service installed. Idempotent. */
     public void shutdown() {
+        stopFastPath();
         BukkitTask current = triggerTask;
         triggerTask = null;
         if (current != null) {
@@ -297,6 +347,7 @@ public final class HeldItemInput implements Listener {
         }
         secondaryTriggers.clear();
         primaryTriggers.clear();
+        fastDeliveries.clear();
         if (!registered) {
             return;
         }
@@ -398,6 +449,50 @@ public final class HeldItemInput implements Listener {
     private void recordBothReleases(Player player) {
         recordPrimaryRelease(player);
         recordRelease(player);
+    }
+
+    /**
+     * One gesture read at network arrival, delivered on the main thread at tick
+     * start. It goes through the same trigger fold and handler callbacks as the
+     * event path; the delivery claim keeps the Bukkit event that follows in the
+     * same tick from counting the click again.
+     */
+    private void onFastInput(Player player, boolean primary) {
+        ItemStack main = player.getInventory().getItemInMainHand();
+        HeldItemHandler handler = owner(player, main);
+        if (handler == null) {
+            return;
+        }
+        if (primary) {
+            routePrimaryPress(player, handler, main);
+            return;
+        }
+        recordPress(player);
+        if (!claimFastDelivery(player.getUniqueId(), false)) {
+            return;
+        }
+        try {
+            handler.onSecondaryPress(player, main);
+        } catch (Throwable failure) {
+            logFailure("fast-path press handling", failure);
+        }
+    }
+
+    /**
+     * Claims one gesture delivery per player inside the dedupe window. With the
+     * fast path off this is never called, so the event path is unchanged.
+     */
+    private boolean claimFastDelivery(UUID playerId, boolean primary) {
+        long[] slot = fastDeliveries.computeIfAbsent(playerId, ignored -> new long[2]);
+        int index = primary ? 0 : 1;
+        long now = now();
+        synchronized (slot) {
+            if (slot[index] != 0L && now - slot[index] <= FAST_PATH_DEDUPE_MILLIS) {
+                return false;
+            }
+            slot[index] = now;
+            return true;
+        }
     }
 
     /**
@@ -518,11 +613,13 @@ public final class HeldItemInput implements Listener {
         }
         boolean handled = false;
         recordPress(player);
-        try {
-            handled = handler.onSecondaryPress(player, main);
-        } catch (Throwable failure) {
-            logFailure("press handling", failure);
-            handled = true; // still suppress vanilla: we own this gesture
+        if (!fastPathActive() || claimFastDelivery(player.getUniqueId(), false)) {
+            try {
+                handled = handler.onSecondaryPress(player, main);
+            } catch (Throwable failure) {
+                logFailure("press handling", failure);
+                handled = true; // still suppress vanilla: we own this gesture
+            }
         }
         if (handled || handler.freezeVanillaInteractions()) {
             event.setCancelled(true);
@@ -537,6 +634,9 @@ public final class HeldItemInput implements Listener {
      */
     private void routePrimaryPress(Player player, HeldItemHandler handler, ItemStack main) {
         if (!recordPrimaryPress(player)) {
+            return;
+        }
+        if (fastPathActive() && !claimFastDelivery(player.getUniqueId(), true)) {
             return;
         }
         try {
@@ -570,10 +670,12 @@ public final class HeldItemInput implements Listener {
         }
         cancel.set(true);
         recordPress(player);
-        try {
-            handler.onSecondaryPress(player, main);
-        } catch (Throwable failure) {
-            logFailure("aimed press handling", failure);
+        if (!fastPathActive() || claimFastDelivery(player.getUniqueId(), false)) {
+            try {
+                handler.onSecondaryPress(player, main);
+            } catch (Throwable failure) {
+                logFailure("aimed press handling", failure);
+            }
         }
     }
 
@@ -709,6 +811,7 @@ public final class HeldItemInput implements Listener {
         // The player is gone: its trigger states are dead weight in the maps.
         primaryTriggers.remove(event.getPlayer().getUniqueId());
         secondaryTriggers.remove(event.getPlayer().getUniqueId());
+        fastDeliveries.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)

@@ -84,6 +84,7 @@ public class VirtualBlockManager implements Listener {
     private TextureImageStore textureImageStore;
     private MultiBlockLifecycleManager lifecycleManager;
     private DisplayTransport displayTransport;
+    private com.mineplus.infrastructure.perf.PerfRegistry perf;
 
     public VirtualBlockManager() {
         int threads = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2));
@@ -125,6 +126,11 @@ public class VirtualBlockManager implements Listener {
 
     public DisplayTransport displayTransport() {
         return displayTransport;
+    }
+
+    /** Telemetry sink for texel bake counters (may be {@code null}). */
+    public void setPerfRegistry(com.mineplus.infrastructure.perf.PerfRegistry perf) {
+        this.perf = perf;
     }
 
     public void setLifecycleManager(MultiBlockLifecycleManager manager) {
@@ -365,6 +371,10 @@ public class VirtualBlockManager implements Listener {
         TexelBakingSettings settingsSnapshot = texelSettings;
         TextureImageStore store = imageStore();
         long generation = texelBakeGeneration.get();
+        com.mineplus.infrastructure.perf.PerfRegistry registry = perf;
+        if (registry != null) {
+            registry.add(com.mineplus.infrastructure.perf.PerfRegistry.Counter.TEXEL_BAKES_QUEUED, 1);
+        }
         CompletableFuture<TexelBakeResult> future = CompletableFuture.supplyAsync(() -> {
             // Skip superseded work before paying for PNG decode + rasterization:
             // a reload or settings change has already scheduled a fresher bake
@@ -383,9 +393,15 @@ public class VirtualBlockManager implements Listener {
         future.whenComplete((result, error) -> {
             texelBakeFutures.remove(key, future);
             if (error != null) {
+                if (registry != null) {
+                    registry.add(com.mineplus.infrastructure.perf.PerfRegistry.Counter.TEXEL_BAKES_FAILED, 1);
+                }
                 DebugLogger.warning("[TexelBaking] Model '" + key + "' bake failed: "
                         + (error.getMessage() != null ? error.getMessage() : error.getClass().getSimpleName()));
                 return;
+            }
+            if (registry != null) {
+                registry.add(com.mineplus.infrastructure.perf.PerfRegistry.Counter.TEXEL_BAKES_COMPLETED, 1);
             }
             if (texelBakeGeneration.get() != generation) return; // superseded by a reload
             texelBakes.put(key, result);

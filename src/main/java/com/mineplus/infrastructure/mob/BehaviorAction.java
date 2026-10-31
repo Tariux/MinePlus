@@ -25,4 +25,14 @@ public interface BehaviorAction {
      * @return {@code true} when the action changed the world in a way worth counting
      */
     boolean execute(BehaviorContext context);
+
+    /**
+     * {@code true} when this action is a continuous process: while it owns the
+     * entity, the per-fire odds gate is bypassed and the action evaluates
+     * every engine stagger, so movement and attack cadence are steady rather
+     * than probabilistic. Default {@code false}.
+     */
+    default boolean continuous() {
+        return false;
+    }
 }
