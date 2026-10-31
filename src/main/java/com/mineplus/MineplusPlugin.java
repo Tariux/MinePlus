@@ -30,6 +30,7 @@ public final class MineplusPlugin extends JavaPlugin {
     private VirtualBlockManager virtualBlockManager;
     private ConfigManager configManager;
     private com.mineplus.infrastructure.virtual.display.DisplayTransport displayTransport;
+    private com.mineplus.infrastructure.mob.custom.MobYamlLoader yamlMobs;
 
     @Override
     public void onEnable() {
@@ -63,8 +64,36 @@ public final class MineplusPlugin extends JavaPlugin {
         context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());
         context.finalizeSetup();
 
+        yamlMobs = loadYamlMobs();
+
         registerCommand();
         registerListeners();
+    }
+
+    /**
+     * Loads the operator's {@code mobs/*.yml} definitions under the Core's own
+     * identity. The examples folder ships in the jar and is extracted once;
+     * the loader only reads top-level {@code mobs/*.yml} files.
+     */
+    private com.mineplus.infrastructure.mob.custom.MobYamlLoader loadYamlMobs() {
+        if (context == null || !context.customMobs().isAvailable()) {
+            return null;
+        }
+        java.io.File dir = new java.io.File(getDataFolder(), "mobs");
+        if (!dir.exists() && !dir.mkdirs()) {
+            getLogger().warning("Could not create " + dir + "; YAML mob definitions are unavailable.");
+            return null;
+        }
+        try {
+            saveResource("mobs/examples/example_evil_pig.yml", false);
+        } catch (IllegalArgumentException resourceMissing) {
+            getLogger().warning("Example mob definition is missing from the jar: " + resourceMissing);
+        }
+        com.mineplus.infrastructure.mob.custom.MobYamlLoader loader =
+                new com.mineplus.infrastructure.mob.custom.MobYamlLoader(
+                        this, context.customMobs(), dir);
+        loader.reload();
+        return loader;
     }
 
     @Override
@@ -83,6 +112,7 @@ public final class MineplusPlugin extends JavaPlugin {
         }
 
         commandRouter = null;
+        yamlMobs = null;
         context = null;
         instance = null;
         virtualBlockManager = null;
@@ -103,6 +133,7 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new ModelSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.PackSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.RenderSubCommand(context));
+        commandRouter.register(new com.mineplus.infrastructure.command.sub.MobSubCommand(context, yamlMobs));
         commandRouter.register(new PerfCommand(context));
 
         command.setExecutor(commandRouter);
@@ -192,7 +223,6 @@ public final class MineplusPlugin extends JavaPlugin {
             context.renderRouter().updatePolicy(configManager.getConfig().getRenderPolicy());
             context.mobBehaviorApi().updateSettings(configManager.getConfig().getMobBehavior());
             context.customMobs().updateSettings(configManager.getConfig().getCustomMobs());
-            context.customMobManager().updateRigSettings(configManager.getConfig().getRigs());
             context.applyCombatSettings(configManager.getConfig().getCombat());
             context.applyInputSettings(configManager.getConfig().getInput());
             context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());

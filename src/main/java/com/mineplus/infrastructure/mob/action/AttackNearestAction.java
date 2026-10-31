@@ -3,7 +3,7 @@ package com.mineplus.infrastructure.mob.action;
 import com.mineplus.infrastructure.combat.DamageTransactions;
 import com.mineplus.infrastructure.mob.BehaviorAction;
 import com.mineplus.infrastructure.mob.BehaviorContext;
-import com.mineplus.infrastructure.mob.custom.MobRigRenderer;
+import com.mineplus.infrastructure.mob.custom.MobRenderEngine;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -177,7 +177,7 @@ public final class AttackNearestAction implements BehaviorAction {
     private void strike(Mob attacker, LivingEntity target) {
         // The swing is announced before the damage resolves: a mob that misses
         // still animates, which is what a hunting mob does most of the time.
-        com.mineplus.infrastructure.mob.custom.MobRigRenderer.notifyMeleeSwing(attacker);
+        com.mineplus.infrastructure.mob.custom.MobRenderEngine.notifyMeleeSwing(attacker);
         DamageTransactions.apply(target, options.damage(), attacker);
         if (options.knockback() > 0.0) {
             Vector push = target.getLocation().toVector().subtract(attacker.getLocation().toVector());

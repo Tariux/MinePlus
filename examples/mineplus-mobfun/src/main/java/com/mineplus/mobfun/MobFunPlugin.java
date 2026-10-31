@@ -12,10 +12,9 @@ import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
-import com.mineplus.infrastructure.mob.custom.BedrockMobModel;
 import com.mineplus.infrastructure.mob.custom.CustomMobAttributes;
 import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
-import com.mineplus.infrastructure.mob.custom.CustomMobModel;
+import com.mineplus.infrastructure.mob.custom.MobRenderSpec;
 import com.mineplus.infrastructure.mob.group.Formation;
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
 import java.io.IOException;
@@ -89,7 +88,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       with per-face UVs and its own {@code walk}/{@code idle} clips) on a
  *       villager base, armed with a spear and one Core action
  *       ({@code attack_nearest}) that hunts hostile mobs. It is the showcase
- *       for {@code BedrockMobModel}: the outliner becomes the render rig and
+ *       for the Core's {@code BBMODEL} render pipeline: the outliner becomes the render rig and
  *       the file's clips are played by the Core, so the legs swing while it
  *       walks and the whole rig breathes while it stands. Spawned through
  *       {@code /mobfun spawn soldier}.</li>
@@ -123,10 +122,6 @@ public final class MobFunPlugin extends JavaPlugin {
     private final List<MobFunShowcaseEntry> showcases = new ArrayList<>();
     /** Embedded Evil Pig texture; also the factory's stable source on re-enable. */
     private byte[] evilPigTexture;
-    /** Imported Villager Soldier model, or {@code null} when its resources failed to load. */
-    private CustomMobModel soldierModel;
-    /** Imported Woodland Trickster model, or {@code null} when its resources failed to load. */
-    private CustomMobModel tricksterModel;
 
     @Override
     public void onEnable() {
@@ -236,14 +231,14 @@ public final class MobFunPlugin extends JavaPlugin {
             getLogger().severe("Evil Pig NOT registered: resource mobs/evil_pig.png is missing from the jar.");
         }
 
-        soldierModel = loadSoldierModel();
-        if (soldierModel != null) {
+        if (hasBoth("Villager Soldier",
+                "mobs/soldier_villager.bbmodel", "mobs/soldier_villager.png")) {
             showcases.add(new CustomMobShowcase(this, context.customMobs(), "soldier", "Villager Soldier",
                     EntityType.VILLAGER, this::soldierDefinition));
         }
 
-        tricksterModel = loadTricksterModel();
-        if (tricksterModel != null) {
+        if (hasBoth("Woodland Trickster",
+                "mobs/woodland_trickster.bbmodel", "mobs/woodland_trickster.png")) {
             showcases.add(new CustomMobShowcase(this, context.customMobs(), "trickster", "Woodland Trickster",
                     EntityType.VILLAGER, this::tricksterDefinition));
         }
@@ -271,24 +266,23 @@ public final class MobFunPlugin extends JavaPlugin {
     }
 
     /**
-     * The Evil Pig: the vanilla pig model with a replacement texture, its own
+     * The Evil Pig: the real vanilla pig with a replacement texture, its own
      * identity and exactly one behavior. Vanilla AI is cleared by the Core on
      * spawn, so every action this mob takes comes from {@code attack_nearest}.
-     * A definition with no model would still work (the base pig stays visible);
-     * the model is what makes it "evil".
      *
-     * <p>The rig here is not decoration: a 1.21.1 client has no entity-model
-     * override channel, so the only way a retextured pig can show its own
-     * texture is as the per-part displays the Core builds from the vanilla pig
-     * descriptor. {@code AUTO} asks for that rig and keeps the plain pig when the
-     * pack cannot present it.</p>
+     * <p>{@code RETEXTURE_VANILLA} never rebuilds the pig's geometry — the base
+     * entity stays a real pig and only its texture is swapped through a
+     * data-driven variant. That channel needs a 1.21.5+ server; on older
+     * runtimes the Core says so and the pig simply looks vanilla (gameplay
+     * unaffected) instead of rendering a messy model-copy.
      */
     private CustomMobDefinition evilPigDefinition() {
-        CustomMobModel model = CustomMobModel.vanilla(EntityType.PIG, evilPigTexture);
-        return CustomMobDefinition.builder("mobfun:evil_pig", EntityType.PIG, model)
+        return CustomMobDefinition.builder("mobfun:evil_pig", EntityType.PIG)
                 .displayName("Evil Pig")
                 .showName(true)
-                .visual(CustomMobDefinition.VisualMode.AUTO)
+                .render(MobRenderSpec.builder(MobRenderSpec.RenderType.RETEXTURE_VANILLA, "evil_pig.png")
+                        .textureBytes(() -> evilPigTexture)
+                        .build())
                 .attributes(CustomMobAttributes.builder()
                         .maxHealth(12.0)
                         .movementSpeed(0.28)
@@ -310,40 +304,35 @@ public final class MobFunPlugin extends JavaPlugin {
     }
 
     /**
-     * Imports the Blockbench soldier with its own outliner and its own clips.
-     *
-     * <p>Every outliner group becomes a render bone (pivot, parent, geometry),
-     * so the spear hand, the helmet and the knees articulate exactly as
-     * authored; the file's {@code animation.walk} and {@code animation.idle}
-     * clips drive them, blended by movement speed. Nothing is hand-mapped, so
-     * re-exporting the model with more groups or other clips needs no code
-     * change.</p>
+     * Both the model file and its texture must be present in the jar for a
+     * Blockbench showcase to register; parsing happens lazily on the first
+     * spawn inside the Core's {@code BbModelParser}.
      */
-    private CustomMobModel loadSoldierModel() {
-        byte[] modelJson = loadResource("mobs/soldier_villager.bbmodel");
-        byte[] texture = loadResource("mobs/soldier_villager.png");
-        if (modelJson == null || texture == null) {
-            getLogger().severe("Villager Soldier NOT registered: mobs/soldier_villager.bbmodel and"
-                    + " mobs/soldier_villager.png must both be present in the jar.");
-            return null;
+    private boolean hasBoth(String label, String modelPath, String texturePath) {
+        boolean hasModel = loadResource(modelPath) != null;
+        boolean hasTexture = loadResource(texturePath) != null;
+        if (hasModel && hasTexture) {
+            return true;
         }
-        try {
-            return BedrockMobModel.parse(modelJson)
-                    .textureName("soldier_villager")
-                    .partsFromOutliner()
-                    .animationClips()
-                    .build(texture);
-        } catch (RuntimeException malformed) {
-            getLogger().severe("Villager Soldier NOT registered: " + malformed.getMessage());
-            return null;
-        }
+        getLogger().severe(label + " NOT registered: " + modelPath + " and " + texturePath
+                + " must both be present in the jar.");
+        return false;
     }
 
     /**
-     * The Villager Soldier: an imported model on a villager base with one job —
-     * guard the village. Vanilla AI is cleared by the Core, so the spear only
-     * moves through {@code attack_nearest}, aimed at hostile mobs rather than
-     * players or villagers.
+     * The Villager Soldier: an imported Blockbench model on a villager base
+     * with one job — guard the village. Vanilla AI is cleared by the Core, so
+     * the spear only moves through {@code attack_nearest}, aimed at hostile
+     * mobs rather than players or villagers.
+     *
+     * <p>The {@code BBMODEL} spec hands the raw file to the Core: every
+     * outliner group becomes a render bone (pivot, parent, geometry), so the
+     * spear hand, the helmet and the knees articulate exactly as authored, and
+     * the file's {@code animation.walk} and {@code animation.idle} clips drive
+     * them, blended by movement speed. Nothing is hand-mapped, so re-exporting
+     * the model with more groups or other clips needs no code change. The
+     * sibling PNG resolves the file's texture reference even for non-embedded
+     * exports.</p>
      *
      * <p>It moves like an iron golem: the attribute profile starts from
      * {@link EntityType#IRON_GOLEM}'s captured defaults (health, knockback,
@@ -352,16 +341,15 @@ public final class MobFunPlugin extends JavaPlugin {
      * the rig detaches on death (a displayed mob has no corpse), and a showcase
      * that a single shotgun blast erases cannot be inspected while it reacts to
      * damage.</p>
-     *
-     * <p>{@code visual(RIG)} is a demand, not a preference: if no part display
-     * can be spawned, the Core says so in the log and in {@code /mobfun rig
-     * soldier} instead of quietly leaving a villager standing where a soldier
-     * should be.</p>
      */
     private CustomMobDefinition soldierDefinition() {
-        return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER, soldierModel)
+        return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER)
                 .displayName("Villager Soldier")
                 .visual(CustomMobDefinition.VisualMode.RIG)
+                .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "soldier_villager.bbmodel")
+                        .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
+                        .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
+                        .build())
                 .attributes(CustomMobAttributes.builder()
                         .fromTemplate(EntityType.IRON_GOLEM)
                         .maxHealth(60.0)
@@ -386,36 +374,12 @@ public final class MobFunPlugin extends JavaPlugin {
     }
 
     /**
-     * Imports the Woodland Trickster with its own outliner, rest rotations and
-     * its three clips ({@code animation.idle}, {@code animation.walk},
-     * {@code animation.attack}).
-     */
-    private CustomMobModel loadTricksterModel() {
-        byte[] modelJson = loadResource("mobs/woodland_trickster.bbmodel");
-        byte[] texture = loadResource("mobs/woodland_trickster.png");
-        if (modelJson == null || texture == null) {
-            getLogger().severe("Woodland Trickster NOT registered: mobs/woodland_trickster.bbmodel and"
-                    + " mobs/woodland_trickster.png must both be present in the jar.");
-            return null;
-        }
-        try {
-            return BedrockMobModel.parse(modelJson)
-                    .textureName("woodland_trickster")
-                    .partsFromOutliner()
-                    .animationClips()
-                    .build(texture);
-        } catch (RuntimeException malformed) {
-            getLogger().severe("Woodland Trickster NOT registered: " + malformed.getMessage());
-            return null;
-        }
-    }
-
-    /**
      * The Woodland Trickster: a small hunched woodland creature on a villager
-     * base that hunts players. Its rig is the file's own bone tree (hood over
-     * head, cloth over the legs) and its clips drive the whole pose: idle
-     * breathing while it stands, a leg/arm swing while it walks, and a one-shot
-     * punch the Core plays when it swings — not only when it lands.
+     * base that hunts players. Its rig is the bbmodel file's own bone tree
+     * (hood over head, cloth over the legs) and its clips drive the whole
+     * pose: idle breathing while it stands, a leg/arm swing while it walks,
+     * and a one-shot punch the Core plays when it swings — not only when it
+     * lands.
      *
      * <p>Its body numbers come from {@link EntityType#ZOMBIE}: the template is
      * captured once and supplies attack knockback, scale and gravity, while the
@@ -423,9 +387,13 @@ public final class MobFunPlugin extends JavaPlugin {
      * zombie — the profile is keyed to the custom id.</p>
      */
     private CustomMobDefinition tricksterDefinition() {
-        return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.VILLAGER, tricksterModel)
+        return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.VILLAGER)
                 .displayName("Woodland Trickster")
                 .visual(CustomMobDefinition.VisualMode.RIG)
+                .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "woodland_trickster.bbmodel")
+                        .modelBytes(() -> loadResource("mobs/woodland_trickster.bbmodel"))
+                        .textureBytes(() -> loadResource("mobs/woodland_trickster.png"))
+                        .build())
                 .attributes(CustomMobAttributes.builder()
                         .fromTemplate(EntityType.ZOMBIE)
                         .maxHealth(30.0)

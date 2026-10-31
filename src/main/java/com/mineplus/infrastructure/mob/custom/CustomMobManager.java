@@ -83,7 +83,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     private final PackApi pack;
     private final MobBehaviorApi behaviorApi;
     private final NamespacedKey identityKey;
-    private final MobRigRenderer renderer;
+    private final MobRenderEngine renderEngine;
     /** Definition id -> registration (insertion ordered for status output). */
     private final Map<String, Registration> registrations = new LinkedHashMap<>();
     /** Owner -> the definition ids it registered. */
@@ -102,24 +102,20 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
 
     public CustomMobManager(Plugin plugin, PackApi pack, MobBehaviorApi behaviorApi,
                             CustomMobSettings settings) {
-        this(plugin, pack, behaviorApi, settings, null);
-    }
-
-    /**
-     * @param rigSettings bone-rig limits ({@code RIGS}) the per-part renderer
-     *                    obeys; {@code null} = defaults
-     */
-    public CustomMobManager(Plugin plugin, PackApi pack, MobBehaviorApi behaviorApi,
-                            CustomMobSettings settings,
-                            com.mineplus.infrastructure.virtual.rig.RigSettings rigSettings) {
         this.plugin = plugin;
         this.pack = pack;
         this.behaviorApi = behaviorApi;
         this.identityKey = new NamespacedKey(plugin, IDENTITY_KEY);
         this.settings = settings == null ? CustomMobSettings.defaults() : settings;
-        this.renderer = rigSettings == null
-                ? new MobRigRenderer(plugin, pack, this.settings)
-                : new MobRigRenderer(plugin, pack, this.settings, rigSettings);
+        this.renderEngine = new MobRenderEngine(plugin, pack, this.settings);
+    }
+
+    /**
+     * Late transport injection: the packet-based display transport may start
+     * before or after the mob engine, so the Core hands it over once both exist.
+     */
+    public void attachTransport(com.mineplus.infrastructure.virtual.display.DisplayTransport transport) {
+        renderEngine.setTransport(transport);
     }
 
     /**
@@ -133,8 +129,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         }
         started = true;
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        plugin.getServer().getPluginManager().registerEvents(renderer, plugin);
-        renderer.start();
+        renderEngine.start();
         armReassertSweep();
     }
 
@@ -210,18 +205,16 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         registrations.put(definition.id(), registration);
         ownedIds.computeIfAbsent(owner, key -> ConcurrentHashMap.newKeySet()).add(definition.id());
 
-        // A re-registration may carry a new model for the same id; the cached
-        // blueprint (pivots, hierarchy, part assets) must not outlive it.
-        renderer.invalidateBlueprint(definition.id());
-        if (definition.model() != null) {
-            MobRigAssetWriter.register(pack, definition.namespace(), definition.path(), definition.model());
-        }
-        renderer.start();
+        // The engine owns presentation: it compiles the bundle or retexture
+        // assets and (re)builds the sessions of this id's live mobs through the
+        // restore pass below.
+        renderEngine.registerDefinition(definition);
         restoreLoadedEntities();
         if (DebugLogger.isEnabled()) {
             plugin.getLogger().info("[custom-mobs] " + owner.getName() + " registered '"
                     + definition.id() + "' (" + definition.baseType()
-                    + (definition.model() == null ? ", no model" : ", model " + definition.model().parts().size() + " parts")
+                    + (definition.renderSpec() == null ? ", legacy model path" : ", "
+                            + definition.renderSpec().type())
                     + ")");
         }
     }
@@ -253,6 +246,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         if (owned != null) {
             owned.remove(id);
         }
+        renderEngine.unregisterDefinition(id);
         removeLiveMobs(id);
     }
 
@@ -372,10 +366,12 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
             }
         }
 
-        // The renderer owns base visibility: it hides the base when it presents
-        // the mob and shows it when it cannot. A rig restored from a previous
-        // session was saved invisible, so a failed attach must clear that.
-        if (!renderer.attach(entity, definition)) {
+        // The engine owns base visibility: it hides the base per viewer when it
+        // presents the mob and shows it when it cannot. A mob saved by an older
+        // version may carry a persisted invisible flag; clear it whenever no rig
+        // ended up covering the entity.
+        renderEngine.onSpawned(entity, definition);
+        if (!renderEngine.hasRig(entity)) {
             entity.setInvisible(false);
         }
     }
@@ -571,10 +567,10 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     }
 
     private void forget(UUID entityId) {
+        // The render engine owns its sessions (death clip, unload cleanup via
+        // its own listeners and tick pass); identity bookkeeping only.
         isolationResults.remove(entityId);
-        if (identities.remove(entityId) != null) {
-            renderer.detach(entityId);
-        }
+        identities.remove(entityId);
     }
 
     // ------------------------------------------------------------------
@@ -586,47 +582,14 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         if (!settings.enabled()) {
             return;
         }
-        if (!renderer.isAvailable() || !settings.renderingEnabled()) {
-            renderer.detachAll();
-            for (LivingEntity mob : allLiveMobs()) {
-                mob.setInvisible(false);
-            }
-            return;
-        }
-        renderer.start();
-        for (LivingEntity mob : allLiveMobs()) {
-            Registration registration = registrations.get(identities.get(mob.getUniqueId()));
-            if (registration != null && !renderer.attach(mob, registration.definition)) {
-                mob.setInvisible(false);
-            }
-        }
-    }
-
-    private List<LivingEntity> allLiveMobs() {
-        List<LivingEntity> mobs = new ArrayList<>();
-        for (UUID id : identities.keySet()) {
-            if (Bukkit.getEntity(id) instanceof LivingEntity living && living.isValid() && !living.isDead()) {
-                mobs.add(living);
-            }
-        }
-        return mobs;
+        renderEngine.updateSettings(settings);
+        renderEngine.refreshRendering();
     }
 
     @Override
     public void updateSettings(CustomMobSettings next) {
         this.settings = next == null ? CustomMobSettings.defaults() : next;
-        renderer.updateSettings(this.settings);
-        if (!this.settings.enabled()) {
-            renderer.detachAll();
-            for (LivingEntity mob : allLiveMobs()) {
-                mob.setInvisible(false);
-            }
-        }
-    }
-
-    /** Applies reloaded bone-rig limits to the per-part renderer. */
-    public void updateRigSettings(com.mineplus.infrastructure.virtual.rig.RigSettings next) {
-        renderer.updateRigSettings(next);
+        renderEngine.updateSettings(this.settings);
     }
 
     @Override
@@ -635,16 +598,21 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
             reassertTask.cancel();
             reassertTask = null;
         }
-        renderer.stop();
+        renderEngine.shutdown();
         identities.clear();
         isolationResults.clear();
         registrations.clear();
         ownedIds.clear();
     }
 
-    /** Rig count, for the Core's status command. */
+    /** Live rig session count, for the Core's status command. */
     public int riggedCount() {
-        return renderer.rigCount();
+        return renderEngine.sessionCount();
+    }
+
+    /** The compiled bundle of one definition, for the inspect command. */
+    public com.mineplus.infrastructure.mob.custom.render.ModelBundle bundle(String definitionId) {
+        return renderEngine.bundle(definitionId);
     }
 
     /**
@@ -657,17 +625,33 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
 
     /** The last pose a rigged mob was given, or {@code null} when it carries no rig. */
     public String poseSnapshot(UUID mobId) {
-        return renderer.poseSnapshot(mobId);
+        return mobId != null && Bukkit.getEntity(mobId) instanceof LivingEntity living
+                ? renderEngine.poseSnapshot(living) : null;
     }
 
     @Override
     public String poseSnapshot(LivingEntity mob) {
-        return mob == null ? null : renderer.poseSnapshot(mob.getUniqueId());
+        return mob == null ? null : renderEngine.poseSnapshot(mob);
     }
 
     @Override
     public boolean playAttack(LivingEntity mob) {
-        return renderer.playAttack(mob);
+        return renderEngine.playAttack(mob);
+    }
+
+    @Override
+    public boolean playAnimation(LivingEntity mob, String clipName) {
+        return renderEngine.playAnimation(mob, clipName);
+    }
+
+    /** The bone-marker debug mode (engine-level, for the mob command). */
+    public boolean boneDebug() {
+        return renderEngine.boneDebug();
+    }
+
+    /** Shows or hides a tiny cube at every bone pivot of every rigged mob. */
+    public void setBoneDebug(boolean on) {
+        renderEngine.setBoneDebug(on);
     }
 
     @Override
@@ -678,12 +662,12 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
 
     @Override
     public String rigFailure(String definitionId) {
-        return renderer.rigFailure(definitionId);
+        return renderEngine.rigFailure(definitionId);
     }
 
     @Override
     public String rigStatus(String definitionId) {
-        return renderer.rigStatus(definitionId);
+        return renderEngine.rigStatus(definitionId);
     }
 
     private static final class Registration {
