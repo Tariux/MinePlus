@@ -43,8 +43,21 @@ reports the failure in the status bar; the ops stay disabled until it compiles.
 - The parsed rig (bones, pivots, rest rotations, per-face UV windows) renders
   live; **clips play in the browser** with the server's exact sampler
   (linear/step/catmullrom, loop modes, additive rest+clip Euler `x→y→z`,
-  yaw frame `180 − bodyYaw`, head look ±75°) — scrub, body-yaw, head-pitch
-  and head-yaw sliders let you pose any frame of any clip.
+  yaw frame `180 − bodyYaw`, head look ±75° on the last `HEAD` bone) — scrub,
+  body-yaw, head-pitch and head-yaw sliders let you pose any frame of any clip.
+- **Real animator mode** — the *actual* `MobAnimator` the engine ticks
+  (constructed exactly like `MobRenderEngine` does it: model clips + the
+  definition's `animations:` aliases + `leg`/`arm` bone detection) runs in the
+  daemon through a scripted timeline at the engine's 20 Hz tick, and the
+  browser plays its per-tick pose output. This exercises the plugin's real
+  clip binding, idle/walk/run crossfades, attack/hurt overlays, death hold and
+  the procedural leg/arm swing fallback — presets: full movement cycle,
+  attack, hurt, death. The state readout shows the animator's own summary
+  (`idle`, `walk+attack`, …) per frame.
+- The rig viewport overlays the spec's **hitbox** (amber wire box) and colors
+  the **attachment markers**: orange = `HAND_R`, blue = `HAND_L`, violet =
+  `ITEM` — so hand-item mounts and head look are checkable before spawning
+  anything in game.
 - Compile report: bone budget (48 max), piece splits with offsets, pack asset
   counts, display estimate per mob, unbound `animations:` aliases.
 - Textures embedded in the file (or the sibling PNG) preview inline;
@@ -83,8 +96,9 @@ No texel baking — surface baking belongs to the texel tool.
 ```
 devtools/asset-lab/
 ├── java/com/mineplus/devtools/assetlab/   # daemon (own JVM, line-JSON over stdio)
-│   ├── AssetDaemon.java                   #   op dispatch: ping/block/mob/item/audit
+│   ├── AssetDaemon.java                   #   op dispatch: ping/block/mob/poses/item/audit
 │   ├── MobOps.java                        #   mob yml/model → parse → compile → rig JSON
+│   ├── PoseOps.java                       #   real MobAnimator scripted-timeline pose track
 │   ├── ItemOps.java                       #   raw item model validation + preview JSON
 │   ├── BlockOps.java                      #   block import + textures + clips
 │   ├── AuditOps.java                      #   batch audit
@@ -113,6 +127,9 @@ Watched roots:
 
 - `GET  /api/inventory` — everything scannable, per category
 - `POST /api/block` `{model}` · `POST /api/mob` `{yml|model[,texture]}`
+- `POST /api/mob-poses` `{yml|model, preset|timeline}` — real-`MobAnimator`
+  pose track (`preset`: `full|attack|hurt|death`, or a custom
+  `timeline: [{duration, speed (blocks/tick), events: [attack|hurt|death]}]`)
 - `POST /api/item` `{model[,textureRoot]}` — textureRoot defaults to the gun folder
 - `POST /api/audit` `{blocks?,mobs?,mobModels?,items?}` — empty body = all roots
 - `GET  /api/asset?p=<path>` — PNGs, restricted to the watched roots
