@@ -242,10 +242,11 @@ public final class PluginContext {
         MobBehaviorApi mobBehaviorApi = new MineplusMobBehaviorApi(mobBehaviorEngine);
 
         // Custom mobs: identity registry, spawn/restore lifecycle and the
-        // per-part visual rig. Installed as the engine's identity resolver so a
-        // custom id's profiles are the only ones its entities ever see.
+        // render engine (retexture variants, per-bone display rigs, fallback
+        // chain). Installed as the engine's identity resolver so a custom id's
+        // profiles are the only ones its entities ever see.
         CustomMobManager customMobs = new CustomMobManager(
-                plugin, packApi, mobBehaviorApi, customMobSettings, rigSettings);
+                plugin, packApi, mobBehaviorApi, customMobSettings);
         mobBehaviorEngine.setIdentityResolver(customMobs);
         customMobs.start();
 
@@ -258,6 +259,9 @@ public final class PluginContext {
         HudService hud = new HudService();
         com.mineplus.infrastructure.virtual.display.DisplayTransport transport =
                 virtualBlockManager.displayTransport();
+        // The mob render engine streams its displays through the same pooled
+        // transport the block rigs use (plain displays when it is off).
+        customMobs.attachTransport(transport);
         StanceService stances = new StanceService(plugin, virtualBlockManager,
                 transport == null
                         ? com.mineplus.infrastructure.virtual.display.DisplayTransportSettings.defaults()

@@ -59,6 +59,7 @@ public final class CustomMobDefinition {
     private final String id;
     private final EntityType baseType;
     private final CustomMobModel model;
+    private final MobRenderSpec renderSpec;
     private final CustomMobAttributes attributes;
     private final String displayName;
     private final boolean showName;
@@ -71,7 +72,8 @@ public final class CustomMobDefinition {
     private final Consumer<LivingEntity> spawnConfigurator;
 
     private CustomMobDefinition(String id, EntityType baseType, CustomMobModel model,
-                                CustomMobAttributes attributes, String displayName, boolean showName,
+                                MobRenderSpec renderSpec, CustomMobAttributes attributes,
+                                String displayName, boolean showName,
                                 boolean persistent, boolean hideBaseWhenRigged, boolean canPickupItems,
                                 VisualMode visual, EntityType goalDonor,
                                 Consumer<MobProfile.Builder> behavior,
@@ -83,6 +85,7 @@ public final class CustomMobDefinition {
             throw new IllegalArgumentException("Custom mob base type must be a pathfinding Mob: " + baseType);
         }
         this.model = model;
+        this.renderSpec = renderSpec;
         this.attributes = attributes == null ? CustomMobAttributes.none() : attributes;
         this.displayName = displayName == null || displayName.isBlank()
                 ? prettify(path()) : displayName;
@@ -135,6 +138,16 @@ public final class CustomMobDefinition {
     /** Visual model, or {@code null} for a behavior-only custom mob (vanilla look). */
     public CustomMobModel model() {
         return model;
+    }
+
+    /**
+     * How the mob renders — the {@code render:} block: presentation type,
+     * model/texture bytes, scale, clip aliases, hand items and fallback.
+     * {@code null} for the deprecated {@link #model()} path, which the engine
+     * adapts to the same pipeline.
+     */
+    public MobRenderSpec renderSpec() {
+        return renderSpec;
     }
 
     public CustomMobAttributes attributes() {
@@ -217,6 +230,7 @@ public final class CustomMobDefinition {
         private final String id;
         private final EntityType baseType;
         private final CustomMobModel model;
+        private MobRenderSpec renderSpec;
         private CustomMobAttributes attributes = CustomMobAttributes.none();
         private String displayName = "";
         private boolean showName;
@@ -236,6 +250,17 @@ public final class CustomMobDefinition {
 
         public Builder attributes(CustomMobAttributes value) {
             this.attributes = value == null ? CustomMobAttributes.none() : value;
+            return this;
+        }
+
+        /**
+         * How the mob renders: {@code RETEXTURE_VANILLA} (vanilla geometry, new
+         * texture), {@code BBMODEL} / {@code JAVA_JSON} (a per-bone display rig),
+         * or {@code NONE}. This is the modern presentation path; {@link #model(CustomMobModel)}
+         * is the deprecated hand-authored one.
+         */
+        public Builder render(MobRenderSpec value) {
+            this.renderSpec = value;
             return this;
         }
 
@@ -310,8 +335,8 @@ public final class CustomMobDefinition {
         }
 
         public CustomMobDefinition build() {
-            return new CustomMobDefinition(id, baseType, model, attributes, displayName, showName,
-                    persistent, hideBaseWhenRigged, canPickupItems, visual, goalDonor,
+            return new CustomMobDefinition(id, baseType, model, renderSpec, attributes, displayName,
+                    showName, persistent, hideBaseWhenRigged, canPickupItems, visual, goalDonor,
                     behavior, spawnConfigurator);
         }
     }

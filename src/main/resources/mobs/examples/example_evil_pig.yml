@@ -1,0 +1,43 @@
+# Example custom-mob definition for the Mineplus core.
+#
+# This file lives in mobs/examples/ so the loader does not pick it up. Copy it
+# to plugins/Mineplus/mobs/ (top level), drop the referenced texture next to it
+# (also in mobs/) and run /mineplus mob reload.
+#
+# id defaults to the file name; a bare id becomes mineplus:<id>.
+id: example_evil_pig
+
+# Required. Any EntityType name works (PIG, VILLAGER, ZOMBIE, ...).
+base-entity: PIG
+
+display-name: "Evil Pig"
+show-name: true
+
+# Optional attribute overrides (only the ones you set are applied).
+attributes:
+  max-health: 12.0
+  movement-speed: 0.28
+
+# Presentation. Types:
+#   retexture_vanilla — the vanilla entity keeps its geometry, only its texture
+#                       is swapped (needs a 1.21.5+ server; older runtimes
+#                       keep the vanilla look and log it). The texture must
+#                       match the vanilla layout (a pig is 64x32).
+#   bbmodel           — a Blockbench .bbmodel rendered as a per-bone display
+#                       rig with its own clips ('file' + usually 'texture').
+#   java_json         — a Java block/item model JSON as one static display.
+#   none              — vanilla look, pack assets still published.
+render:
+  type: retexture_vanilla
+  texture: evil_pig.png
+  # file: model.bbmodel
+  # scale: 1.0
+  # fallback: base_entity   # or generic_cube
+
+# Optional: hang a vanilla material or pack item id on a rig bone.
+# hand-items:
+#   weapon_r: IRON_SWORD
+
+# Optional: state -> clip aliases for the rig animator.
+# animations:
+#   attack: animation.smash

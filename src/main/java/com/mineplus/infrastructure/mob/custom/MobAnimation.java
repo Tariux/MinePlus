@@ -69,6 +69,11 @@ public final class MobAnimation {
         return partName == null ? null : tracks.get(normalizePart(partName));
     }
 
+    /** The normalized part names that carry curves (for pipeline bridges). */
+    java.util.Set<String> trackNames() {
+        return tracks.keySet();
+    }
+
     /** Wraps a playhead into {@code [0, length)} for a looping clip, else clamps it. */
     public float wrap(float seconds) {
         if (lengthSeconds <= 0.0f) {
@@ -118,6 +123,23 @@ public final class MobAnimation {
 
         public int keyCount() {
             return times.length;
+        }
+
+        /** Copies one key's value into {@code out} (pipeline bridge). */
+        void key(int index, float[] out) {
+            out[0] = values[index].x;
+            out[1] = values[index].y;
+            out[2] = values[index].z;
+        }
+
+        /** One key's time in seconds (pipeline bridge). */
+        float keyTime(int index) {
+            return times[index];
+        }
+
+        /** Whether every key of this curve is a hold (pipeline bridge). */
+        boolean isStep() {
+            return step;
         }
 
         /** Samples into {@code out}; copies a key when there are no neighbours. */

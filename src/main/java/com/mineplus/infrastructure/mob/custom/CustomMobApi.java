@@ -138,16 +138,17 @@ public interface CustomMobApi {
     }
 
     /**
-     * Re-reads the authored per-mob presentation overrides
-     * ({@code mobs/<id>.model.json}) and re-attaches live rigs so a cadence or
-     * yaw correction takes effect without a restart.
+     * Plays any authored clip of one rigged mob as a one-shot overlay (the
+     * {@code /mineplus mob anim} command). {@code clipName} is matched
+     * case-insensitively against the model's clip names.
      */
-    default void reloadModelOverrides() {
-        MobModelOverrides.clearCache();
-        refreshRendering();
+    default boolean playAnimation(LivingEntity mob, String clipName) {
+        return false;
     }
 
-    /** Applies new subsystem settings ({@code CUSTOM_MOBS}). */
+    /**
+     * Applies new subsystem settings ({@code CUSTOM_MOBS}).
+     */
     void updateSettings(CustomMobSettings settings);
 
     /** Stops the renderer and forgets runtime state. Idempotent; entities persist. */

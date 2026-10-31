@@ -89,6 +89,8 @@ public final class DisplayTransport {
     private final Map<UUID, Boolean> pendingLod = new HashMap<>();          // playerId -> moved flag
     private final Map<UUID, Double> pendingLodDistance = new HashMap<>();   // playerId -> forced distance (teleports)
     private final Set<UUID> pendingFullUpdate = new HashSet<>();            // players whose LOD must run this tick
+    /** Viewers whose client has no usable resource pack; pack-based content hides from them. */
+    private final Set<UUID> packHiddenViewers = new HashSet<>();
 
     private BukkitTask tickTask;
     private boolean running;
@@ -301,6 +303,7 @@ public final class DisplayTransport {
         pendingLod.remove(id);
         pendingLodDistance.remove(id);
         pendingFullUpdate.remove(id);
+        packHiddenViewers.remove(id);
         packets.discard(player);
         pool.forgetPlayer(id);
         for (RenderedInstance instance : instances.values()) {
@@ -382,6 +385,44 @@ public final class DisplayTransport {
         }
     }
 
+    // ------------------------------------------------------------------ pack visibility channel
+
+    /**
+     * Marks a viewer as unable (or able again) to see pack-based display
+     * content. Hiding is immediate — the viewer's instances despawn — and the
+     * state survives LOD recalculations until reversed. Mob rigs use this so
+     * players without the delivered pack see the vanilla fallback instead of
+     * untextured item displays.
+     */
+    public void setViewerPackHidden(UUID viewerId, boolean hidden) {
+        if (hidden) {
+            if (!packHiddenViewers.add(viewerId)) {
+                return;
+            }
+            for (RenderedInstance instance : instances.values()) {
+                RenderViewState state = instance.viewerStates.get(viewerId);
+                if (state == null || state.lodTier() == LodTier.HIDDEN) {
+                    continue;
+                }
+                Player viewer = Bukkit.getPlayer(viewerId);
+                if (viewer != null) {
+                    packets.despawn(viewer, instance.displays());
+                }
+                addGauge(tierGauge(state.lodTier()), -1);
+                addGauge(tierGauge(LodTier.HIDDEN), 1);
+                state.setLodTier(LodTier.HIDDEN);
+            }
+            requestFlush();
+        } else if (packHiddenViewers.remove(viewerId)) {
+            pendingFullUpdate.add(viewerId);
+        }
+    }
+
+    /** True when the viewer is currently marked pack-hidden. */
+    public boolean isViewerPackHidden(UUID viewerId) {
+        return packHiddenViewers.contains(viewerId);
+    }
+
     // ------------------------------------------------------------------ tick
 
     private void tick() {
@@ -433,6 +474,11 @@ public final class DisplayTransport {
 
     private void applyTier(Player player, RenderedInstance instance, LodTier tier, Location reference) {
         UUID id = player.getUniqueId();
+        if (packHiddenViewers.contains(id)) {
+            // The viewer's client cannot resolve this pack's models: hide the
+            // instance from them regardless of distance.
+            tier = LodTier.HIDDEN;
+        }
         RenderViewState state = instance.viewerStates.get(id);
         LodTier previous = state == null ? LodTier.HIDDEN : state.lodTier();
         if (settings.viewerStateEnabled() && state != null && state.forcedVisible()
