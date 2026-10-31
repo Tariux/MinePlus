@@ -31,7 +31,11 @@ import org.bukkit.util.Vector;
  * through the shared navigator (never a teleport, never a raw velocity hack).
  *
  * <p>The default target set is "a player or a villager": the Evil Pig's role.
- * {@link Builder#target(Predicate)} replaces it for anything else.
+ * {@link Builder#target(Predicate)} replaces it for anything else. A creative or
+ * spectator player is hunted like anyone else — the mob walks up and swings —
+ * but is never damaged or pushed, because the server cannot hurt them anyway.
+ * Excluding them from targeting entirely would leave a hostile mob standing
+ * perfectly still next to the one player testing it.
  *
  * <p>Distances are blocks; intervals and cooldowns are server ticks. The action
  * keeps only per-attacker bookkeeping (current target, cooldown, last repath)
@@ -74,7 +78,7 @@ public final class AttackNearestAction implements BehaviorAction {
             }
         }
 
-        /** Players (not creative/spectator) and villagers, within 16 blocks. */
+        /** Players and villagers, within 16 blocks. */
         public static Options defaults() {
             return new Options(16.0, 2.4, 1.15, 4.0, 20L, 0.35, AttackNearestAction::defaultTarget);
         }
@@ -177,7 +181,10 @@ public final class AttackNearestAction implements BehaviorAction {
     private void strike(Mob attacker, LivingEntity target) {
         // The swing is announced before the damage resolves: a mob that misses
         // still animates, which is what a hunting mob does most of the time.
-        com.mineplus.infrastructure.mob.custom.MobRenderEngine.notifyMeleeSwing(attacker);
+        MobRenderEngine.notifyMeleeSwing(attacker);
+        if (!canHurt(target)) {
+            return;
+        }
         DamageTransactions.apply(target, options.damage(), attacker);
         if (options.knockback() > 0.0) {
             Vector push = target.getLocation().toVector().subtract(attacker.getLocation().toVector());
@@ -231,7 +238,7 @@ public final class AttackNearestAction implements BehaviorAction {
             if (candidate == attacker || candidate.isDead() || !candidate.isValid()) {
                 continue;
             }
-            if (!isEligible(candidate)) {
+            if (!isPrey(candidate)) {
                 continue;
             }
             double distance = candidate.getLocation().distanceSquared(origin);
@@ -243,16 +250,27 @@ public final class AttackNearestAction implements BehaviorAction {
         return best;
     }
 
-    private boolean isEligible(LivingEntity candidate) {
-        if (candidate instanceof Player player
-                && (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR)) {
-            return false;
-        }
+    /**
+     * Creative and spectator players are still prey: a mob whose only nearby
+     * player is in creative would otherwise never pick a target and stand
+     * perfectly still, which reads as broken AI to the very tester checking it.
+     * They are simply never hurt (see {@link #strike}).
+     */
+    private boolean isPrey(LivingEntity candidate) {
         try {
             return options.targetFilter().test(candidate);
         } catch (Throwable brokenFilter) {
             return false;
         }
+    }
+
+    /** {@code false} for the game modes that take no entity damage. */
+    private static boolean canHurt(LivingEntity candidate) {
+        if (!(candidate instanceof Player player)) {
+            return true;
+        }
+        GameMode mode = player.getGameMode();
+        return mode != GameMode.CREATIVE && mode != GameMode.SPECTATOR;
     }
 
     /** Sweeps bookkeeping that outlived its entities. */

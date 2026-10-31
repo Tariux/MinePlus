@@ -11,10 +11,11 @@ Two content phases use the same API:
 | Phase | Model | What changes on the client |
 |---|---|---|
 | Texture-extended mob (Evil Pig) | `CustomMobModel.vanilla(type, png)` | the vanilla geometry with a replacement texture |
-| Fully custom mob | `CustomMobModel.builder(...)` / `builderFor(...)` | arbitrary parts, texture, independent part animation |
+| Fully custom mob | `MobRenderSpec` with a `.bbmodel` / Java model file, or `CustomMobModel.builder(...)` / `builderFor(...)` | the authored bone tree, texture and clips, as displays over a hidden base |
 
-The first phase requires no model authoring at all. The second uses the same
-compiler with author-supplied parts.
+The first phase requires no model authoring at all. The second is the same
+compiler with author-supplied geometry: a Blockbench file is read whole and
+needs no Java-side part table, a hand-authored `CustomMobModel` does.
 
 ---
 
@@ -246,6 +247,14 @@ descriptor for that entity type. Parts are the vanilla boxes (head, body, legs)
 with vanilla pivots and roles; only the texture differs. The hitbox is the
 vanilla one, so gameplay and pathing are unchanged.
 
+On a server that supports data-driven variants (1.21.5+) this render type ships
+a generated texture plus a variant registry entry, and each spawned mob is
+given that variant reflectively. On an older server that channel does not exist,
+so the Core presents the same texture as a part rig built from the vanilla
+descriptor instead — the mob then wears its texture on `ItemDisplay` parts, with
+head look and procedural limb swing like any other rig. `/mobfun rig <id>`
+prints which of the two the definition actually got.
+
 ### Fully custom models
 
 ```java
@@ -271,46 +280,54 @@ CustomMobModel model = CustomMobModel.builderFor(EntityType.PIG, texturePng)
         .build();
 ```
 
-An authored Blockbench entity file is imported instead of re-typed.
-`BedrockMobModel` reads the `.bbmodel` and takes the part layout as an explicit
-mapping, because a model file names elements, not animatable parts:
+An authored Blockbench file is imported whole instead of re-typed. A definition
+points at it through its render spec, and the Core reads the file's own outliner
+as the rig — no part mapping is authored in Java:
 
 ```java
-CustomMobModel model = BedrockMobModel.parse(bbmodelBytes)
-        .textureName("soldier_villager")
-        .part("head", MobPart.Role.HEAD, 0, 24, 0, "head_geo", "nose_geo", "helmet_cap")
-        .part("body", MobPart.Role.BODY, 0, 12, 0, "body_geo", "skirt_geo")
-        .part("right_leg", MobPart.Role.LEG_BACK_RIGHT, -2, 12, 0, "leg_r", "knee_r")
-        .build(texturePng);
+CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER)
+        .visual(CustomMobDefinition.VisualMode.RIG)
+        .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL,
+                        "soldier_villager.bbmodel")
+                .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
+                .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
+                .build())
+        .build();
 ```
 
-Pivots are the model's own (y up, feet at 0) and are converted to the rig's
-convention; `inflate` and the authored per-face UV windows are preserved, so a
-model painted in Blockbench needs no UV re-derivation. Elements an animation
-cannot reach (or a malformed element with no box) are simply never claimed.
-`examples/mineplus-mobfun` registers the Villager Soldier
-(`mobfun:villager_soldier`) this way.
+`BbModelParser` understands both the classic and the 5.0 `.bbmodel` shapes (in
+5.0 the geometry lives in the root `groups` array and the outliner only nests
+and names it; animation tracks arrive as a `keyframes` array rather than the
+named channel objects). Every group becomes a bone with its authored pivot,
+rest rotation and parent, and every element is claimed by its innermost group,
+so a model painted and rigged in Blockbench needs no UV re-derivation and no
+Java-side part table. Elements an animation cannot reach, or a malformed
+element with no box, are simply never claimed. An element rotated on more than
+one axis is baked into synthetic sub-bones, because an `ItemDisplay` pose is a
+single matrix and the reader must not silently drop the rotation.
 
-Part coordinates are vanilla entity-model pixels: `y` grows downward from
-`modelHeightPx` (24 for a standard quadruped), the model front is `-z`, and
-pivots are absolute. `MobPart.Role` tells the rig which vanilla pose applies —
-`HEAD` tracks the entity's look direction, `LEG_*` swings with movement, `BODY`
-and `STATIC` stay put — so a rigged mob animates without a custom animation
-pipeline.
+Part coordinates are vanilla entity-model pixels for a hand-authored
+`CustomMobModel`: `y` grows downward from `modelHeightPx` (24 for a standard
+quadruped), the model front is `-z`, and pivots are absolute. `MobPart.Role`
+tells the rig which vanilla pose applies — `HEAD` tracks the entity's look
+direction, `LEG_*` swings with movement, `BODY` and `STATIC` stay put — so a
+rigged mob animates without a custom animation pipeline.
 
-A file whose outliner is already the rig is imported whole instead:
-`partsFromOutliner()` makes every group a bone (authored pivot, rest rotation
-and parent), the elements directly inside it its geometry, and
-`animationClips()` attaches the file's clips by bone name. `animation.idle` and
-`animation.walk` are blended by movement speed, measured in blocks per second
-from the entity's own velocity: full walk weight at the model's
-`walkSpeedReference` (2 blocks/s by default, overridable in
-`mobs/<id>.model.json`), with the walk clock and the procedural stride phase
-scaled from the same value. An `animation.attack` clip is a one-shot overlay the
-Core plays whenever the mob lands a melee hit (a module can also trigger it
-through `MobRigRenderer.playAttack`). `examples/mineplus-mobfun`
-uses this path for the Villager Soldier (`mobfun:villager_soldier`) and the
-Woodland Trickster (`mobfun:woodland_trickster`, idle + walk + attack).
+Clips bind by name, not by index: `MobAnimator` picks the authored clip whose
+name contains the state word (`idle`/`stand`/`breath`, `walk`, `run`/`sprint`,
+`attack`/`swing`/`melee`, `hurt`/`hit`/`damage`, `death`/`die`), or the alias a
+definition declares with `MobRenderSpec.animation(state, clipName)`. A missing
+clip falls back along run → walk → idle → procedural, so a model with only an
+idle clip still breathes and still swings its legs while moving. The state is
+chosen from the mob's own measured speed (blocks per tick between pose pushes):
+above 0.015 it walks, above 0.16 it runs, and the transitions cross-fade over
+0.15 s. `animation.attack` is a one-shot *overlay*: the Core plays it the moment
+the mob swings (a behavior action calls `MobRenderEngine.playAttack`, or a
+module through `CustomMobApi.playAttack`/`playAnimation` for its own timing),
+and when it ends the bones go back to walk/idle.
+`examples/mineplus-mobfun` uses this path for the Villager Soldier
+(`mobfun:villager_soldier`) and the Woodland Trickster
+(`mobfun:woodland_trickster`, idle + walk + attack).
 
 ### How a model reaches the client
 
@@ -335,18 +352,25 @@ author drew:
   deterministic pieces (`<part>_p2`, `<part>_p3`, …), each its own item model
   and `ItemDisplay` at its own offset. Oversized weapons and long tails are
   normal content, not a modelling error;
-- `BoneRigRenderer` applies each piece's offset in the pose pass, so the
+- the pose pass applies each piece's offset under the same bone matrix, so the
   pieces reassemble into the authored shape and rotate as one bone.
 
-`MobRigRenderer` hides the base entity and presents each part (or piece) as an
+`MobRenderEngine` hides the base entity and presents each part (or piece) as an
 `ItemDisplay` whose `item_model` component points at that model. The rig is
-placed with `R_y(180° − bodyYaw + yawOffset)` — authored models face `-z`, so
-this frame turns the model's front to the entity's own facing — and the head
-bone additionally follows the entity's head yaw and look pitch. A model
+placed with `R_y(180° + yawOffset − heading)` — authored models face `-z`, and
+in this frame the model's front lands exactly on the direction
+`(-sin heading, 0, cos heading)`. `heading` is the direction the mob actually
+walks: every pose pass measures the entity's own position delta and steers the
+rig toward it, easing over the shortest arc, and falls back to the server body
+yaw while the mob stands still (a vanilla mob keeps turning its body toward
+whatever it last looked at, which is not a walk direction). The head bone
+additionally follows the entity's head yaw and look pitch, measured against the
+rig frame rather than the server body yaw so the two cannot add up. A model
 authored facing another axis corrects itself with
-`yawOffsetDegrees(...)` instead of code. All of this rides the existing pack
-delivery — players already receiving the Core pack see the mob with no extra
-download.
+`yawOffsetDegrees(...)` (or `render.yaw-offset` in a mob YAML) instead of code,
+and `/mobfun rig <id> yaw-offset <deg|auto>` probes a value live before it is
+authored. All of this rides the existing pack delivery — players already
+receiving the Core pack see the mob with no extra download.
 
 ### Degradation
 
@@ -362,14 +386,18 @@ layer.
 |---|---|---|
 | `ENABLED` | `true` | Subsystem master switch |
 | `RENDERING` | `true` | Create visual rigs at all |
-| `RENDER_INTERVAL_TICKS` | `1` | Server ticks between rig pose pushes |
+| `RENDER_INTERVAL_TICKS` | `1` | Server ticks between rig pose pushes (the pose loop is scheduled at this cadence, and the animation clocks and measured walk speed scale with it) |
 | `RENDER_INTERPOLATION_TICKS` | `1` | Client-side easing window per pose push; keep equal to the interval or the client lags/snaps |
 | `RENDER_DISTANCE` | `48` | Blocks beyond which a rig stops receiving poses |
 | `MAX_RIGGED_PER_WORLD` | `96` | Hard ceiling of rigged mobs per world |
 | `REMOVE_UNKNOWN_ON_LOAD` | `true` | Remove custom-tagged entities whose definition is gone |
 
-The rig pose task is lazy: it starts with the first attached rig and cancels
-itself when the last one detaches.
+The pose loop runs while the subsystem is on and returns immediately when no rig
+is attached, so an idle server pays one empty-check per interval. A mob with no
+viewer inside `RENDER_DISTANCE` freezes its pose rather than being torn down, and
+a rig detaches by itself when its mob dies or unloads. Raising the interval is
+the cheap knob for a world with hundreds of rigged mobs: it cuts display packets
+in proportion, at the cost of a coarser animation.
 
 ---
 
@@ -394,7 +422,10 @@ Behavior details:
 - Target acquisition is sticky for 60 ticks, so a mob does not flicker between
   two nearby players; the target is re-scanned when it dies, leaves range or
   the stickiness expires.
-- Creative and spectator players are never targeted.
+- Creative and spectator players are hunted like anyone else — the mob walks up
+  and swings at them — but are never damaged or pushed. Excluding those game
+  modes from targeting entirely would leave a hostile mob standing perfectly
+  still next to the one player testing it, which reads as "this mob has no AI".
 - Navigation is throttled (re-path every 10 ticks) and only engages outside
   strike reach; inside reach the mob stops and swings.
 - Damage goes through `DamageTransactions.apply`, so a module listener that
@@ -413,6 +444,9 @@ Behavior details:
 /mobfun fire evilpig force   # force the nearest one, ignoring profile conditions
 /mobfun spawn soldier        # the imported Villager Soldier (mobfun:villager_soldier)
 /mobfun spawn trickster      # the Woodland Trickster (mobfun:woodland_trickster)
+/mobfun rig soldier          # what the definition asks for vs what the Core presents
+/mobfun rig trickster attack # play the authored attack clip on the nearest one
+/mobfun rig soldier yaw-offset 180   # flip a backwards-authored model, live
 /mobfun despawn              # remove every mob spawned through the test bench
 ```
 

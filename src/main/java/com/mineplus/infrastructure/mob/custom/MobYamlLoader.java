@@ -37,6 +37,7 @@ import org.bukkit.plugin.Plugin;
  *   file: model.bbmodel     # model file, relative to the mobs/ folder
  *   texture: skin.png       # texture file, relative to the mobs/ folder
  *   scale: 1.0
+ *   yaw-offset: 0           # degrees; 180 when the model was authored backwards
  *   fallback: base_entity   # base_entity | generic_cube
  * hand-items:
  *   weapon_r: IRON_SWORD    # bone -> vanilla material or pack item id
@@ -233,8 +234,11 @@ public final class MobYamlLoader {
                 "model", "model-file", "file");
         String textureText = str(yaml, migrated, "render.texture", "texture");
         Double scale = num(yaml, migrated, "render.scale", "scale");
+        Double yawOffset = num(yaml, migrated, "render.yaw-offset-degrees", "render.yaw-offset",
+                "yaw-offset-degrees", "yaw-offset");
         String fallbackText = str(yaml, migrated, "render.fallback", "render.fallback-mode", "fallback-mode");
-        if (typeText == null && fileText == null && textureText == null && scale == null && fallbackText == null) {
+        if (typeText == null && fileText == null && textureText == null && scale == null
+                && yawOffset == null && fallbackText == null) {
             return null;
         }
 
@@ -267,6 +271,9 @@ public final class MobYamlLoader {
         }
         if (scale != null && scale > 0.0) {
             spec.scale(scale.floatValue());
+        }
+        if (yawOffset != null) {
+            spec.yawOffsetDegrees(yawOffset.floatValue());
         }
         FallbackMode fallback = fallbackMode(fallbackText);
         if (fallback != null) {

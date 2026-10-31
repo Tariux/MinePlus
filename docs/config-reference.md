@@ -560,7 +560,7 @@ WORLD_EDITS:
 | `MOB_BEHAVIOR.MAX_PIPELINES_PER_RUN` | pipelines 0-512 | Cap on multi-stage mob pipelines (locate → march → act) advanced per run, sharing the same processing budget (default 64). `0` pauses pipeline progress without detaching them |
 | `CUSTOM_MOBS.ENABLED` | `true` / `false` | Custom-mob subsystem master switch (default `true`). `false` makes registration and spawning no-ops; already-registered behavior profiles keep running, rigs detach on the next refresh |
 | `CUSTOM_MOBS.RENDERING` | `true` / `false` | Create per-part display rigs at all (default `true`). `false` leaves the base entity visible — identity, AI isolation, attributes and behavior are unaffected |
-| `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 1). The pose task exists only while a rig is attached |
+| `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 1). The pose loop is scheduled at this cadence and the animation clocks and the mob's measured walk speed scale with it, so raising it only costs smoothness, never timing |
 | `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS` | ticks 1-40 | Client-side interpolation window for each pose push (default 1). Keep it equal to the interval: a shorter window snaps, a longer one lags behind the body |
 | `CUSTOM_MOBS.RENDER_DISTANCE` | blocks 8-256 | Distance beyond which a rig stops receiving pose updates (default 48); the client still culls by its own view range |
 | `CUSTOM_MOBS.MAX_RIGGED_PER_WORLD` | rigs 1-4096 | Hard ceiling of rigged custom mobs per world (default 96). Past it, newly spawned mobs stay visible as their vanilla base |

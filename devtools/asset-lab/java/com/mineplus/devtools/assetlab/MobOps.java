@@ -43,9 +43,9 @@ import org.bukkit.entity.EntityType;
  * }</pre>
  *
  * <p>A {@code yml} input is read with the canonical keys of the Core's
- * {@code MobYamlLoader} ({@code render.type/file/texture/scale}, {@code
- * hand-items}, {@code animations}, {@code hitbox}); legacy aliases are not
- * applied — the loader itself reports those at server load.</p>
+ * {@code MobYamlLoader} ({@code render.type/file/texture/scale/yaw-offset},
+ * {@code hand-items}, {@code animations}, {@code hitbox}); legacy aliases are
+ * not applied — the loader itself reports those at server load.</p>
  */
 final class MobOps {
 
@@ -115,6 +115,7 @@ final class MobOps {
         File textureFile;
         String sourceLabel = "model";
         float scale = 1.0f;
+        float yawOffsetDegrees;
         String fallback = "base_entity";
         Double hitboxWidth;
         Double hitboxHeight;

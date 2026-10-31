@@ -15,20 +15,4 @@ public record MobFaceUvs(Uv north, Uv south, Uv east, Uv west, Uv up, Uv down) {
     /** One face window in texture pixels. */
     public record Uv(float u1, float v1, float u2, float v2) {
     }
-
-    /** The window for a vanilla face key ({@code north}, {@code up}, …), or {@code null}. */
-    public Uv forDirection(String direction) {
-        if (direction == null) {
-            return null;
-        }
-        return switch (direction) {
-            case "north" -> north;
-            case "south" -> south;
-            case "east" -> east;
-            case "west" -> west;
-            case "up" -> up;
-            case "down" -> down;
-            default -> null;
-        };
-    }
 }

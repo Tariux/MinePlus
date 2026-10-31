@@ -1,7 +1,6 @@
 package com.mineplus.infrastructure.mob.custom.rig;
 
 import org.joml.Quaternionf;
-import org.joml.Vector3f;
 
 /**
  * The one place blockbench/model-space math lives, with its conventions stated
@@ -24,10 +23,12 @@ import org.joml.Vector3f;
  *       are y-down, a part table's rest angles enter as {@code (-rx, ry, -rz)}
  *       and its y coordinates as {@code heightPx - y} (the legacy adapter does
  *       this; file parsers are already y-up).</li>
- *   <li>The whole rig is placed with a yaw frame of {@code 180° - bodyYaw}
- *       about the model's up axis: at {@code bodyYaw = 0} the rig faces south
- *       (+z) like the entity it covers, and the model's {@code -z} front
- *       points where the entity walks.</li>
+ *   <li>The whole rig is placed with a yaw frame of {@code 180° + offset -
+ *       heading} about the model's up axis, where {@code heading} is the
+ *       direction the mob actually walks (its body yaw while it stands) and
+ *       {@code offset} is the definition's authored-front correction. At
+ *       {@code heading = 0} the rig faces south (+z) like the entity it covers,
+ *       and the model's {@code -z} front points where the entity walks.</li>
  *   <li>Head look adds to the head bone's Euler: model pitch is
  *       {@code -entityPitch} (positive entity pitch is down) and model yaw is
  *       {@code -(headYaw - bodyYaw)} clamped to ±75°, both inside the same
@@ -76,7 +77,16 @@ public final class BoneTransformMath {
 
     /** Model-space yaw frame for a Bukkit body yaw ({@code 180 - bodyYaw}). */
     public static Quaternionf yawFrame(float bodyYawDegrees, Quaternionf out) {
-        return out.rotationY((180.0f - bodyYawDegrees) * DEG_TO_RAD);
+        return yawFrame(bodyYawDegrees, 0.0f, out);
+    }
+
+    /**
+     * The yaw frame with a per-model offset: {@code 180 + offset - bodyYaw}.
+     * The offset is the author's correction for a model whose front is not
+     * {@code -z} ({@code 180} for a backwards export), never a renderer guess.
+     */
+    public static Quaternionf yawFrame(float bodyYawDegrees, float yawOffsetDegrees, Quaternionf out) {
+        return out.rotationY((180.0f + yawOffsetDegrees - bodyYawDegrees) * DEG_TO_RAD);
     }
 
     /** Clamps a Bukkit yaw delta into the head bone's model yaw (±75°). */
@@ -103,10 +113,5 @@ public final class BoneTransformMath {
 
     private static float clamp(float value, float min, float max) {
         return value < min ? min : Math.min(value, max);
-    }
-
-    /** Extracts a bone's world translation from its composed matrix into {@code out}. */
-    public static Vector3f translationOf(org.joml.Matrix4fc matrix, Vector3f out) {
-        return matrix.getTranslation(out);
     }
 }

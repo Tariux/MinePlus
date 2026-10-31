@@ -1,7 +1,7 @@
 package com.mineplus.devtools.assetlab;
 
 import com.mineplus.pack.PackApi;
-import com.mineplus.pack.PackArtifact;
+import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.PlayerPackState;
 import java.io.File;
 import java.util.LinkedHashMap;

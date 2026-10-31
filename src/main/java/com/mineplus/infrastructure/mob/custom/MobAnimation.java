@@ -59,11 +59,6 @@ public final class MobAnimation {
         return loop;
     }
 
-    /** True when any part has a curve at all. */
-    public boolean hasTracks() {
-        return !tracks.isEmpty();
-    }
-
     /** The curves for one part, looked up by its authored or normalized name. */
     public Track track(String partName) {
         return partName == null ? null : tracks.get(normalizePart(partName));

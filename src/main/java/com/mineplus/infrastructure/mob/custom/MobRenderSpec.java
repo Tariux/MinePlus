@@ -1,11 +1,11 @@
 package com.mineplus.infrastructure.mob.custom;
 
+import com.mineplus.infrastructure.mob.custom.rig.BoneTransformMath;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.bukkit.Material;
-import org.bukkit.entity.EntityType;
 import org.bukkit.entity.ItemDisplay;
 
 /**
@@ -18,8 +18,9 @@ import org.bukkit.entity.ItemDisplay;
  * <ul>
  *   <li>{@link RenderType#RETEXTURE_VANILLA} — the vanilla base entity keeps
  *       its own geometry; only its texture is swapped (1.21.5+ data-driven
- *       variants). This is the <b>only</b> correct way to reskin a vanilla mob:
- *       rebuilding its geometry from a descriptor renders a messy copy.</li>
+ *       variants). Where the server cannot write a variant the engine falls
+ *       back to presenting the same texture on the vanilla part geometry as an
+ *       ordinary rig, so the mob still wears its skin.</li>
  *   <li>{@link RenderType#BBMODEL} — a Blockbench {@code .bbmodel} rendered as
  *       a per-bone display rig with its own clips.</li>
  *   <li>{@link RenderType#JAVA_JSON} — a Java block/item model JSON rendered as
@@ -70,6 +71,7 @@ public final class MobRenderSpec {
     private final Supplier<byte[]> modelBytes;
     private final Supplier<byte[]> textureBytes;
     private final float scale;
+    private final float yawOffsetDegrees;
     private final Map<String, String> animationMap;
     private final Map<String, HandItem> handItems;
     private final FallbackMode fallback;
@@ -77,7 +79,8 @@ public final class MobRenderSpec {
     private final Double hitboxHeight;
 
     private MobRenderSpec(RenderType type, String sourceName, Supplier<byte[]> modelBytes,
-                          Supplier<byte[]> textureBytes, float scale, Map<String, String> animationMap,
+                          Supplier<byte[]> textureBytes, float scale, float yawOffsetDegrees,
+                          Map<String, String> animationMap,
                           Map<String, HandItem> handItems, FallbackMode fallback,
                           Double hitboxWidth, Double hitboxHeight) {
         this.type = type == null ? RenderType.NONE : type;
@@ -85,6 +88,7 @@ public final class MobRenderSpec {
         this.modelBytes = modelBytes;
         this.textureBytes = textureBytes;
         this.scale = scale <= 0.0f ? 1.0f : scale;
+        this.yawOffsetDegrees = BoneTransformMath.wrapDegrees(yawOffsetDegrees);
         this.animationMap = animationMap == null ? Map.of() : Map.copyOf(animationMap);
         this.handItems = handItems == null ? Map.of() : Map.copyOf(handItems);
         this.fallback = fallback == null ? FallbackMode.BASE_ENTITY : fallback;
@@ -120,6 +124,16 @@ public final class MobRenderSpec {
         return scale;
     }
 
+    /**
+     * Extra yaw applied to the rig's frame, in degrees. A model whose authored
+     * front is not Blockbench's {@code -z} (a +z-facing export, a side-facing
+     * donor model) needs {@code 180} / {@code ±90} here instead of a renderer
+     * change; the value is wrapped into {@code (-180, 180]}.
+     */
+    public float yawOffsetDegrees() {
+        return yawOffsetDegrees;
+    }
+
     /** State → clip name aliases (e.g. {@code attack → animation.smash}). */
     public Map<String, String> animationMap() {
         return animationMap;
@@ -142,28 +156,6 @@ public final class MobRenderSpec {
         return hitboxHeight;
     }
 
-    /** The variant registry that covers {@code baseType}, or {@code null}. */
-    public static String variantRegistryFor(EntityType baseType) {
-        if (baseType == null) {
-            return null;
-        }
-        return switch (baseType) {
-            case PIG -> "pig_variant";
-            case COW -> "cow_variant";
-            case CHICKEN -> "chicken_variant";
-            case CAT -> "cat_variant";
-            case WOLF -> "wolf_variant";
-            case FROG -> "frog_variant";
-            case SALMON -> "salmon_variant";
-            default -> null;
-        };
-    }
-
-    /** True when this type's variants support a cold/normal model field. */
-    public static boolean variantHasModelField(EntityType baseType) {
-        return baseType == EntityType.PIG || baseType == EntityType.COW || baseType == EntityType.CHICKEN;
-    }
-
     public static Builder builder(RenderType type, String sourceName) {
         return new Builder(type, sourceName);
     }
@@ -175,6 +167,7 @@ public final class MobRenderSpec {
         private Supplier<byte[]> modelBytes;
         private Supplier<byte[]> textureBytes;
         private float scale = 1.0f;
+        private float yawOffsetDegrees;
         private final Map<String, String> animationMap = new LinkedHashMap<>();
         private final Map<String, HandItem> handItems = new LinkedHashMap<>();
         private FallbackMode fallback = FallbackMode.BASE_ENTITY;
@@ -202,6 +195,12 @@ public final class MobRenderSpec {
             if (value > 0.0f) {
                 this.scale = value;
             }
+            return this;
+        }
+
+        /** Yaw added to the rig frame; for a model not authored facing {@code -z}. */
+        public Builder yawOffsetDegrees(float value) {
+            this.yawOffsetDegrees = value;
             return this;
         }
 
@@ -262,7 +261,7 @@ public final class MobRenderSpec {
                 throw new IllegalArgumentException("Render type RETEXTURE_VANILLA needs textureBytes(...)");
             }
             return new MobRenderSpec(type, sourceName, modelBytes, textureBytes, scale,
-                    animationMap, handItems, fallback, hitboxWidth, hitboxHeight);
+                    yawOffsetDegrees, animationMap, handItems, fallback, hitboxWidth, hitboxHeight);
         }
     }
 }

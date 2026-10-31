@@ -148,14 +148,23 @@ async function listJavaFiles(dir) {
   return out;
 }
 
-function runJavac(args, cwd) {
+async function runJavac(args, cwd) {
+  const argFile = path.join(cwd, `javac_args_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
+  // Use forward slashes for Java @file parsing (backslashes are escape chars in arg files)
+  const normalized = args.map(a => a.replace(/\\/g, '/'));
+  const quoted = normalized.map(a => a.includes(' ') ? '"' + a.replace(/"/g, '\\"') + '"' : a);
+  await fsp.writeFile(argFile, quoted.join('\n'), 'utf8');
+  
   return new Promise((resolve) => {
-    const child = spawn(javacCmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(javacCmd, ['@' + argFile], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', d => { stdout += d; });
     child.stderr.on('data', d => { stderr += d; });
     child.on('error', err => resolve({ code: -1, output: String(err) }));
-    child.on('close', code => resolve({ code, output: stderr + stdout }));
+    child.on('close', async (code) => {
+      try { await fsp.unlink(argFile); } catch {}
+      resolve({ code, output: stderr + stdout });
+    });
   });
 }
 

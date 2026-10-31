@@ -144,8 +144,8 @@ final class AuditOps {
         return resolved + "/" + textures.size();
     }
 
-    private static JsonArray paths(JsonObject request, String key) {
-        JsonArray paths = new JsonArray();
+    private static java.util.List<String> paths(JsonObject request, String key) {
+        java.util.List<String> paths = new java.util.ArrayList<>();
         if (!request.has(key) || !request.get(key).isJsonArray()) {
             return paths;
         }

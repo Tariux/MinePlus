@@ -70,11 +70,21 @@ public final class AssetDaemon {
         JsonObject response = ok(request);
         switch (op) {
             case "ping" -> response.addProperty("pong", true);
-            case "block" -> merge(response, BlockOps.block(request));
-            case "mob" -> merge(response, MobOps.mob(request));
-            case "poses" -> merge(response, PoseOps.poses(request));
-            case "item" -> merge(response, ItemOps.item(request));
-            case "audit" -> merge(response, AuditOps.audit(request));
+            case "block" -> {
+                try { merge(response, BlockOps.block(request)); } catch (Exception e) { response.addProperty("ok", false); response.addProperty("error", e.getMessage()); }
+            }
+            case "mob" -> {
+                try { merge(response, MobOps.mob(request)); } catch (Exception e) { response.addProperty("ok", false); response.addProperty("error", e.getMessage()); }
+            }
+            case "poses" -> {
+                try { merge(response, PoseOps.poses(request)); } catch (Exception e) { response.addProperty("ok", false); response.addProperty("error", e.getMessage()); }
+            }
+            case "item" -> {
+                try { merge(response, ItemOps.item(request)); } catch (Exception e) { response.addProperty("ok", false); response.addProperty("error", e.getMessage()); }
+            }
+            case "audit" -> {
+                try { merge(response, AuditOps.audit(request)); } catch (Exception e) { response.addProperty("ok", false); response.addProperty("error", e.getMessage()); }
+            }
             default -> throw new IllegalArgumentException("unknown op '" + op + "'");
         }
         return response;
