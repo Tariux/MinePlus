@@ -34,3 +34,5 @@ package-lock.json
 
 **.png
 **.class
+
+/graphify-out/

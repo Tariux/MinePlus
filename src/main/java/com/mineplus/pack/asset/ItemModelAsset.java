@@ -196,7 +196,17 @@ public final class ItemModelAsset extends PackAsset {
 
     @Override
     public byte[] serialize() throws IOException {
-        return com.mineplus.pack.compile.ItemModelWriter.modernDefinitionJson(this)
+        return serialize(AppearanceMode.Dispatch.DIRECT);
+    }
+
+    /**
+     * The modern definition JSON for a resolved appearance mode: the direct
+     * model, a {@code range_dispatch} over custom-model-data floats, or a
+     * {@code minecraft:select} over its string list.
+     */
+    public byte[] serialize(AppearanceMode.Dispatch dispatch) throws IOException {
+        return com.mineplus.pack.compile.ItemModelWriter
+                .modernDefinitionJson(this, dispatch == null ? AppearanceMode.Dispatch.DIRECT : dispatch)
                 .getBytes(StandardCharsets.UTF_8);
     }
 

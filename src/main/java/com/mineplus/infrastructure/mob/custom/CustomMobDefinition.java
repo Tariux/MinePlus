@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.mob.custom;
 
 import com.mineplus.infrastructure.mob.MobProfile;
+import com.mineplus.util.DebugLogger;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -13,24 +14,47 @@ import org.bukkit.entity.Mob;
  * …) carrying a Mineplus identity, a visual model, attributes and its own
  * behavior profile.
  *
- * <p><b>Isolation contract.</b> A custom mob never runs vanilla AI: its goal
- * and target selectors are cleared on spawn and on every chunk restore, while
- * AI stays enabled so the Core's navigator can still tick the entity. Its
- * behavior comes exclusively from the profile built by
- * {@link Builder#behavior(Consumer)} and executed by the Core's mob behavior
- * engine. Vanilla mobs of the same base type are untouched — profiles for a
- * custom id are never visible to them and vice versa.</p>
+ * <p><b>Isolation contract.</b> By default a custom mob never runs vanilla AI:
+ * its goal and target selectors (or, for Brain-driven entities like villagers,
+ * its Brain behaviors) are cleared on spawn, on every chunk restore, and again
+ * on the manager's periodic re-assert pass, while AI stays enabled so the
+ * Core's navigator can still tick the entity. Its behavior comes exclusively
+ * from the profile built by {@link Builder#behavior(Consumer)} and executed by
+ * the Core's mob behavior engine. {@link Builder#inheritGoalsFrom(EntityType)}
+ * opts a definition out of that contract: the mob then keeps the vanilla goals
+ * of its base type and is a vanilla brain wearing a custom face. Vanilla mobs
+ * of the same base type are untouched either way — profiles for a custom id are
+ * never visible to them and vice versa.</p>
  *
- * <p><b>Rendering contract.</b> When a {@link CustomMobModel} is supplied and
- * the pack subsystem is available, the base entity is hidden and the model is
- * rendered as per-part {@code ItemDisplay}s driven by the Core. Without a pack
- * the base entity stays visible, so gameplay and behavior still work.</p>
+ * <p><b>Rendering contract.</b> {@link Builder#visual(VisualMode)} picks how
+ * the mob looks. {@link VisualMode#AUTO} (the default) rigs the mob through
+ * the pack subsystem when the server can present per-part models and leaves
+ * the base entity visible when it cannot; {@link VisualMode#BASE} always shows
+ * the vanilla silhouette and only publishes the pack assets, which is what a
+ * texture-only reskin can do on a forward-looking server (a 1.21.1 client has
+ * no entity-model override channel at all); {@link VisualMode#RIG} demands the
+ * rig and falls back to the base only when the pack truly cannot present it.
+ * Without a pack the base entity stays visible in every mode, so gameplay and
+ * behavior still work.</p>
  *
  * <p>Build through {@link #builder(String, EntityType)} or
  * {@link #builder(String, EntityType, CustomMobModel)}; register through
  * {@link CustomMobApi#register(org.bukkit.plugin.Plugin, CustomMobDefinition)}.</p>
  */
 public final class CustomMobDefinition {
+
+    /** How the mob is presented. */
+    public enum VisualMode {
+
+        /** Vanilla silhouette only; the pack assets stay published for other users. */
+        BASE,
+
+        /** Per-part rig when the server can present it, base silhouette when it cannot. */
+        AUTO,
+
+        /** Rig whenever a model exists; a definition that cannot rig reports it. */
+        RIG
+    }
 
     private final String id;
     private final EntityType baseType;
@@ -41,12 +65,15 @@ public final class CustomMobDefinition {
     private final boolean persistent;
     private final boolean hideBaseWhenRigged;
     private final boolean canPickupItems;
+    private final VisualMode visual;
+    private final EntityType goalDonor;
     private final Consumer<MobProfile.Builder> behavior;
     private final Consumer<LivingEntity> spawnConfigurator;
 
     private CustomMobDefinition(String id, EntityType baseType, CustomMobModel model,
                                 CustomMobAttributes attributes, String displayName, boolean showName,
                                 boolean persistent, boolean hideBaseWhenRigged, boolean canPickupItems,
+                                VisualMode visual, EntityType goalDonor,
                                 Consumer<MobProfile.Builder> behavior,
                                 Consumer<LivingEntity> spawnConfigurator) {
         this.id = requireId(id);
@@ -63,6 +90,8 @@ public final class CustomMobDefinition {
         this.persistent = persistent;
         this.hideBaseWhenRigged = hideBaseWhenRigged;
         this.canPickupItems = canPickupItems;
+        this.visual = visual == null ? VisualMode.AUTO : visual;
+        this.goalDonor = goalDonor;
         this.behavior = behavior;
         this.spawnConfigurator = spawnConfigurator;
     }
@@ -135,6 +164,21 @@ public final class CustomMobDefinition {
         return canPickupItems;
     }
 
+    /** How the mob is presented; never {@code null}. */
+    public VisualMode visual() {
+        return visual;
+    }
+
+    /** True when the definition asked to keep its base type's vanilla goals. */
+    public boolean keepsVanillaGoals() {
+        return goalDonor != null;
+    }
+
+    /** The donor type whose vanilla goals this mob keeps, or {@code null} when it is isolated. */
+    public EntityType goalDonor() {
+        return goalDonor;
+    }
+
     /** Optional profile customizer; the manager supplies the type and custom id. */
     public Consumer<MobProfile.Builder> behavior() {
         return behavior;
@@ -179,6 +223,8 @@ public final class CustomMobDefinition {
         private boolean persistent = true;
         private boolean hideBaseWhenRigged = true;
         private boolean canPickupItems;
+        private VisualMode visual = VisualMode.AUTO;
+        private EntityType goalDonor;
         private Consumer<MobProfile.Builder> behavior;
         private Consumer<LivingEntity> spawnConfigurator;
 
@@ -215,6 +261,32 @@ public final class CustomMobDefinition {
             return this;
         }
 
+        /** How the mob is presented (default {@link VisualMode#AUTO}). */
+        public Builder visual(VisualMode value) {
+            this.visual = value == null ? VisualMode.AUTO : value;
+            return this;
+        }
+
+        /**
+         * Keeps the base type's vanilla goals: the Core then does not isolate
+         * this mob, so it behaves like the donor it names while carrying its
+         * custom identity, model and profile actions. Use for content that is
+         * "a real zombie that merely looks like the trickster"; leave unset for
+         * a mob whose every movement comes from its own behavior profile.
+         *
+         * <p>The donor must be the mob's base type — a mob cannot inherit the
+         * goals of a type it is not, so a mismatched donor is ignored and the
+         * isolation contract stays in force.</p>
+         */
+        public Builder inheritGoalsFrom(EntityType donor) {
+            this.goalDonor = donor == null || donor != baseType ? null : donor;
+            if (donor != null && donor != baseType) {
+                DebugLogger.warning("[CustomMobs] '" + id + "' asked to inherit the goals of '" + donor
+                        + "' but its base type is '" + baseType + "'; the mob stays isolated.");
+            }
+            return this;
+        }
+
         public Builder canPickupItems(boolean value) {
             this.canPickupItems = value;
             return this;
@@ -239,7 +311,8 @@ public final class CustomMobDefinition {
 
         public CustomMobDefinition build() {
             return new CustomMobDefinition(id, baseType, model, attributes, displayName, showName,
-                    persistent, hideBaseWhenRigged, canPickupItems, behavior, spawnConfigurator);
+                    persistent, hideBaseWhenRigged, canPickupItems, visual, goalDonor,
+                    behavior, spawnConfigurator);
         }
     }
 }

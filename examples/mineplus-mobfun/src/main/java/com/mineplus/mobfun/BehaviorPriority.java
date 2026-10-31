@@ -42,6 +42,16 @@ final class BehaviorPriority {
      * might bind to the same custom id.
      */
     static final int EVIL_PIG = 50;
+    /**
+     * The Villager Soldier: a custom mob like the Evil Pig, so this value only
+     * arbitrates against another profile on the same custom id.
+     */
+    static final int SOLDIER = 45;
+    /**
+     * The Woodland Trickster: another custom mob; the value only orders it
+     * against another profile bound to the same custom id.
+     */
+    static final int TRICKSTER = 40;
 
     private BehaviorPriority() {
     }

@@ -10,6 +10,7 @@ import com.mineplus.gun.weapon.WeaponDefinition;
 import com.mineplus.infrastructure.combat.BallisticProfile;
 import com.mineplus.infrastructure.combat.ProjectileHandler;
 import com.mineplus.infrastructure.combat.ProjectileHit;
+import com.mineplus.infrastructure.fx.ParticleFx;
 import com.mineplus.infrastructure.fx.Sounds;
 import com.mineplus.infrastructure.input.HeldItemInput;
 import com.mineplus.infrastructure.registry.ItemMagazine;
@@ -646,11 +647,17 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             session.animator.stop();
         }
         session.pose = Pose.NONE;
+        session.sequenceTicks = 0;
         if (!startSequence(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD)) {
-            startPose(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD);
+            if (clientClock) {
+                startPose(player, session, weapon, weapon.reloadClip(), session.reloadTotal, Pose.RELOAD);
+            } else if (!poseOnce(player, session, weapon, weapon.reloadClip(), 0.0f)) {
+                rest(player, session, weapon);
+            }
         }
         Sounds.playTo(player, weapon.soundReloadBegin(), weapon.soundVolume() * 0.85f,
                 Sounds.variance(1.0f, 0.04f), Sound.ITEM_CROSSBOW_LOADING_START);
+        reloadFx(player, ParticleFx.particle(weapon.smokeParticle(), org.bukkit.Particle.SMOKE), 4, 0.10);
         pushHud(player, session, weapon);
         arm();
         return true;
@@ -660,8 +667,18 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         session.reloadRemaining--;
         if (!session.reloadMidPlayed && session.reloadRemaining <= session.reloadTotal / 2) {
             session.reloadMidPlayed = true;
+            // Legacy packs cannot animate per tick without replaying the
+            // equip bob, so a reload is three deliberate poses: the hand
+            // takes the gun down, seats the magazine, and brings it back.
+            if (!clientClock) {
+                poseOnce(player, session, weapon, weapon.reloadClip(), 0.55f);
+            }
             Sounds.playTo(player, weapon.soundReloadMid(), weapon.soundVolume() * 0.7f,
                     Sounds.variance(1.0f, 0.06f), Sound.ITEM_CROSSBOW_LOADING_MIDDLE);
+            // The magazine seats here: a small spark at the weapon is the one
+            // reload beat a packless gun can still show.
+            reloadFx(player, ParticleFx.particle(weapon.sparkParticle(), org.bukkit.Particle.SMALL_FLAME),
+                    5, 0.08);
         }
         if (session.reloadRemaining > 0) {
             return;
@@ -688,6 +705,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         rest(player, session, weapon);
         Sounds.playTo(player, weapon.soundReloadDone(), weapon.soundVolume() * 0.9f,
                 Sounds.variance(1.0f, 0.04f), Sound.ITEM_CROSSBOW_LOADING_END);
+        reloadFx(player, ParticleFx.particle(weapon.smokeParticle(), org.bukkit.Particle.SMOKE), 6, 0.12);
         pushHud(player, session, weapon);
         arm();
     }
@@ -698,6 +716,25 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             return "ammunition";
         }
         return config.ammo().material().name().toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    /**
+     * A small mechanical puff at the weapon — reload feedback that needs no
+     * pack art. Emitted through the Core's budgeted particle service, so a
+     * busy server drops surplus particles instead of paying for them.
+     */
+    private void reloadFx(Player player, org.bukkit.Particle particle, int count, double spread) {
+        if (particle == null) {
+            return;
+        }
+        services.context().particleFx().burst(ParticleFx.Tier.AMBIENT, handLocation(player), particle,
+                count, spread, spread, spread, 0.0);
+    }
+
+    /** Roughly where the held gun sits: in front of and below the eyes. */
+    private static Location handLocation(Player player) {
+        Location eye = player.getEyeLocation();
+        return eye.clone().add(eye.getDirection().multiply(0.45)).subtract(0.0, 0.35, 0.0);
     }
 
     // ------------------------------------------------------------------
@@ -757,6 +794,10 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             session.pendingCycle = false;
             return;
         }
+        if (!clientClock) {
+            playShotPoseLegacy(player, session, weapon);
+            return;
+        }
         String fireClip = weapon.fireClip();
         boolean hasCycle = canCycle(weapon);
         if (startSequence(player, session, weapon, fireClip, FIRE_POSE_TICKS, Pose.FIRE)) {
@@ -783,6 +824,47 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         rest(player, session, weapon);
     }
 
+    /**
+     * The legacy shot presentation: a pose change only where the hand is
+     * <em>supposed</em> to move, never once per round.
+     *
+     * <p>A legacy pack selects a pose with {@code custom_model_data}, and every
+     * rewrite of a held stack replays the client's equip bob. Retiming a
+     * per-shot pose would therefore turn a 400 rpm rifle into a hand that
+     * shakes, which is exactly what "the hand goes down and up" describes.</p>
+     *
+     * <ul>
+     *   <li><b>Pump, bolt —</b> the action is part of the shot. The gun rocks
+     *       into its cycle pose once per round and settles when the cycle is
+     *       over: two slow, deliberate writes at 40–70 rpm.</li>
+     *   <li><b>Semi, burst, auto —</b> no pose write at all. The muzzle flash,
+     *       smoke, tracer, sound and the widening cone carry the shot, and the
+     *       gun never bobs mid-burst.</li>
+     * </ul>
+     */
+    private void playShotPoseLegacy(Player player, Session session, WeaponDefinition weapon) {
+        boolean deliberate = weapon.fireMode() == FireMode.PUMP || weapon.fireMode() == FireMode.BOLT;
+        if (deliberate && canCycle(weapon)
+                && poseOnce(player, session, weapon, weapon.cycleClip(), 0.0f)) {
+            session.pose = Pose.CYCLE;
+            session.sequenceTicks = Math.max(1, weapon.cycleTicks());
+            return;
+        }
+        if (session.pose == Pose.FIRE || session.pose == Pose.CYCLE) {
+            // A previous deliberate pose is still settling; do not restart it.
+            return;
+        }
+        if (session.scoped && weapon.scope()) {
+            startScopeHold(player, session, weapon);
+            return;
+        }
+        if (session.magazine != null && session.magazine.empty()) {
+            // The last round left the gun: show it empty instead of holding a
+            // loaded pose until the (possibly impossible) reload finishes.
+            rest(player, session, weapon);
+        }
+    }
+
     private boolean canCycle(WeaponDefinition weapon) {
         return weapon.cycleTicks() > 0 && weapon.cycleClip() != null
                 && weapon.frames() != null && weapon.frames().hasClip(weapon.cycleClip());
@@ -797,6 +879,16 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     private void playScopePose(Player player, Session session, WeaponDefinition weapon) {
         if (weapon.frames() == null) {
             rest(player, session, weapon);
+            return;
+        }
+        if (!clientClock) {
+            // One pose per toggle: the client's own equip bob hides the switch,
+            // and a static aim pose needs no clock at all.
+            if (session.scoped) {
+                startScopeHold(player, session, weapon);
+            } else {
+                rest(player, session, weapon);
+            }
             return;
         }
         if (session.scoped) {
@@ -816,6 +908,16 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         String clip = weapon.scopeHoldClip();
         if (clip == null || weapon.frames() == null || !weapon.frames().hasClip(clip)) {
             rest(player, session, weapon);
+            return;
+        }
+        if (!clientClock) {
+            if (poseOnce(player, session, weapon, clip, 1.0f)
+                    || poseOnce(player, session, weapon, weapon.scopeInClip(), 1.0f)) {
+                session.pose = Pose.SCOPE_HOLD;
+                session.sequenceTicks = 0;
+            } else {
+                rest(player, session, weapon);
+            }
             return;
         }
         var frameClip = weapon.frames().clip(clip);
@@ -844,12 +946,45 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     }
 
     private void playEquipPose(Player player, Session session, WeaponDefinition weapon) {
+        // Vanilla already plays its draw animation on the slot change that put
+        // the gun in hand; a second, authored draw on top of it is the double
+        // "hand down and up" a legacy pack cannot avoid. Legacy weapons simply
+        // settle into their resting pose.
+        if (!clientClock) {
+            rest(player, session, weapon);
+            return;
+        }
         if (startSequence(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
             return;
         }
         if (!startPose(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
             rest(player, session, weapon);
         }
+    }
+
+    /**
+     * Writes one frame of a clip and stops there.
+     *
+     * <p>This is the legacy pack's whole animation vocabulary: the pose is
+     * chosen from the clip's progress and written once, so the client sees a
+     * single item change per deliberate state transition instead of a rewrite
+     * every tick. Returns {@code false} when the clip or the pose is missing,
+     * letting the caller degrade to the resting pose.</p>
+     */
+    private boolean poseOnce(Player player, Session session, WeaponDefinition weapon,
+                             String clip, float progress) {
+        if (clientClock || weapon.frames() == null || clip == null) {
+            return false;
+        }
+        if (!weapon.frames().hasClip(clip)) {
+            return false;
+        }
+        int state = weapon.frames().stateAtProgress(clip, progress);
+        if (state < 0) {
+            return false;
+        }
+        writeFrame(player, session, weapon, state);
+        return true;
     }
 
     private boolean startPose(Player player, Session session, WeaponDefinition weapon,
@@ -892,7 +1027,14 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                     session.pendingCycle = false;
                     if (!startSequence(player, session, weapon, weapon.cycleClip(),
                             Math.max(1, weapon.cycleTicks()), Pose.CYCLE)) {
-                        startPose(player, session, weapon, weapon.cycleClip(), weapon.cycleTicks(), Pose.CYCLE);
+                        if (clientClock) {
+                            startPose(player, session, weapon, weapon.cycleClip(), weapon.cycleTicks(), Pose.CYCLE);
+                        } else if (poseOnce(player, session, weapon, weapon.cycleClip(), 0.0f)) {
+                            session.pose = Pose.CYCLE;
+                            session.sequenceTicks = Math.max(1, weapon.cycleTicks());
+                        } else {
+                            rest(player, session, weapon);
+                        }
                     }
                 } else if (session.scoped && weapon.scope()) {
                     startScopeHold(player, session, weapon);

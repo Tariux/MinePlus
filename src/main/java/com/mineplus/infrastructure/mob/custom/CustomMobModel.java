@@ -25,6 +25,11 @@ import org.bukkit.entity.EntityType;
  * to place files in the pack by hand. If the pack subsystem is disabled the
  * base entity stays visible as its vanilla type, so behavior remains testable
  * without the visual layer.</p>
+ *
+ * <p>A model may carry {@link MobAnimation} clips (typically the walk and idle
+ * clips of an imported {@code .bbmodel}). Parts form a tree through
+ * {@link MobPart#parent()}, so a clip rotates a bone and everything below it,
+ * exactly as the authored outliner does.</p>
  */
 public final class CustomMobModel {
 
@@ -34,22 +39,25 @@ public final class CustomMobModel {
     private final String textureName;
     private final byte[] texturePng;
     private final List<MobPart> parts;
+    private final List<MobAnimation> animations;
 
     private CustomMobModel(int textureWidth, int textureHeight, int modelHeightPx,
-                           String textureName, byte[] texturePng, List<MobPart> parts) {
+                           String textureName, byte[] texturePng, List<MobPart> parts,
+                           List<MobAnimation> animations) {
         this.textureWidth = textureWidth;
         this.textureHeight = textureHeight;
         this.modelHeightPx = modelHeightPx;
         this.textureName = textureName;
         this.texturePng = texturePng.clone();
         this.parts = List.copyOf(parts);
+        this.animations = List.copyOf(animations);
     }
 
     /** Reuses a published vanilla model and substitutes {@code texturePng}. */
     public static CustomMobModel vanilla(EntityType baseType, byte[] texturePng) {
         VanillaMobModels.VanillaMobParts vanilla = VanillaMobModels.require(baseType);
         return new CustomMobModel(vanilla.textureWidth(), vanilla.textureHeight(),
-                vanilla.modelHeightPx(), "texture", requirePng(texturePng), vanilla.parts());
+                vanilla.modelHeightPx(), "texture", requirePng(texturePng), vanilla.parts(), List.of());
     }
 
     /** Authors a model from parts; {@code textureName} defaults to {@code texture}. */
@@ -92,6 +100,34 @@ public final class CustomMobModel {
         return parts;
     }
 
+    /** The authored clips (walk, idle, …); empty when the model has none. */
+    public List<MobAnimation> animations() {
+        return animations;
+    }
+
+    /** The clip named {@code name} (case-insensitive), or {@code null}. */
+    public MobAnimation animation(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (MobAnimation animation : animations) {
+            if (animation.name().equalsIgnoreCase(name)) {
+                return animation;
+            }
+        }
+        return null;
+    }
+
+    /** True when at least one part actually draws geometry. */
+    public boolean hasGeometry() {
+        for (MobPart part : parts) {
+            if (!part.boxes().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static byte[] requirePng(byte[] png) {
         Objects.requireNonNull(png, "texturePng");
         if (png.length < 8 || (png[0] & 0xFF) != 0x89 || png[1] != 'P' || png[2] != 'N' || png[3] != 'G') {
@@ -108,6 +144,7 @@ public final class CustomMobModel {
         private int modelHeightPx = 24;
         private String textureName = "texture";
         private final List<MobPart> parts = new ArrayList<>();
+        private final List<MobAnimation> animations = new ArrayList<>();
 
         private Builder(int textureWidth, int textureHeight, byte[] texturePng) {
             if (textureWidth <= 0 || textureHeight <= 0) {
@@ -148,12 +185,28 @@ public final class CustomMobModel {
             return this;
         }
 
+        public Builder animation(MobAnimation value) {
+            if (value != null) {
+                animations.add(value);
+            }
+            return this;
+        }
+
+        public Builder animations(List<MobAnimation> value) {
+            if (value != null) {
+                for (MobAnimation animation : value) {
+                    animation(animation);
+                }
+            }
+            return this;
+        }
+
         public CustomMobModel build() {
             if (parts.isEmpty()) {
                 throw new IllegalStateException("Custom mob model needs at least one part");
             }
             return new CustomMobModel(textureWidth, textureHeight, modelHeightPx,
-                    textureName, texturePng, parts);
+                    textureName, texturePng, parts, animations);
         }
     }
 }

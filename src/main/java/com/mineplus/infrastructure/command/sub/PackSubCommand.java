@@ -40,7 +40,7 @@ public final class PackSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/mineplus pack <status|recompile|push <player>>";
+        return "/mineplus pack <status|audit|verify|recompile|push <player>>";
     }
 
     @Override
@@ -80,14 +80,64 @@ public final class PackSubCommand implements SubCommand {
                 }
                 sender.sendMessage(ChatColor.GRAY + " Registered assets: "
                         + context.packSystem().assetRegistry().size());
-                int applied = 0;
-                int online = Bukkit.getOnlinePlayers().size();
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (api.playerPackState(player.getUniqueId()).hasPack()) {
-                        applied++;
-                    }
+                var appearance = context.packSystem().appearance();
+                sender.sendMessage(ChatColor.GRAY + " Appearance: " + ChatColor.WHITE
+                        + context.packSystem().appearanceMode()
+                        + ChatColor.GRAY + " (resolved " + appearance.representation()
+                        + ", dispatch " + appearance.dispatch() + ")");
+                sendValidationSummary(sender, context.packSystem().validationReport());
+                sendPlayerStates(sender);
+                return true;
+            }
+            case "audit" -> {
+                if (!api.isAvailable()) {
+                    sender.sendMessage(ChatColor.RED + "Pack subsystem is disabled.");
+                    return true;
                 }
-                sender.sendMessage(ChatColor.GRAY + " Players with pack: " + applied + "/" + online);
+                com.mineplus.pack.compile.ModelAssetValidator.Report report =
+                        context.packSystem().validationReport();
+                sender.sendMessage(ChatColor.GRAY + " Artifact under audit: " + ChatColor.WHITE
+                        + (api.currentArtifact() == null ? "none compiled"
+                        : api.currentArtifact().artifactName()));
+                if (report.clean()) {
+                    sender.sendMessage(ChatColor.GREEN + " Audit clean: " + report.checked()
+                            + " asset(s) checked, 0 out-of-window elements, 0 unresolved references,"
+                            + " 0 out-of-range UVs, 0 duplicate custom_model_data values.");
+                    return true;
+                }
+                sender.sendMessage(ChatColor.RED + " Audit findings (" + report.warnings().size() + "):");
+                sender.sendMessage(ChatColor.GRAY + "   out-of-window elements: " + report.outOfWindow());
+                sender.sendMessage(ChatColor.GRAY + "   unresolved references: " + report.unresolvedRefs());
+                sender.sendMessage(ChatColor.GRAY + "   UV outside 0..16: " + report.uvOutOfRange());
+                sender.sendMessage(ChatColor.GRAY + "   duplicate custom_model_data: " + report.duplicateCommands());
+                sender.sendMessage(ChatColor.GRAY + "   assets skipped by the compiler: " + report.skipped());
+                int shown = Math.min(20, report.warnings().size());
+                for (int index = 0; index < shown; index++) {
+                    sender.sendMessage(ChatColor.YELLOW + "  - " + report.warnings().get(index));
+                }
+                if (report.warnings().size() > shown) {
+                    sender.sendMessage(ChatColor.GRAY + "  ... and "
+                            + (report.warnings().size() - shown) + " more (full list in the console logs).");
+                }
+                return true;
+            }
+            case "verify" -> {
+                if (!api.isAvailable()) {
+                    sender.sendMessage(ChatColor.RED + "Pack subsystem is disabled.");
+                    return true;
+                }
+                sender.sendMessage(ChatColor.GRAY + "Verifying the served artifact through its own URL...");
+                context.packSystem().verifyDelivery(check -> {
+                    if (check.ok()) {
+                        sender.sendMessage(ChatColor.GREEN + " Delivery verified: " + check.bytes()
+                                + " bytes, " + check.entries() + " zip entries, SHA-1 matches.");
+                        sender.sendMessage(ChatColor.GRAY + " The pack the server hands out is intact — a"
+                                + " client that still shows vanilla is declining, has an older pack cached,"
+                                + " or is behind a proxy that rewrites the URL.");
+                    } else {
+                        sender.sendMessage(ChatColor.RED + " Delivery problem: " + check.detail());
+                    }
+                });
                 return true;
             }
             case "recompile" -> {
@@ -142,7 +192,8 @@ public final class PackSubCommand implements SubCommand {
     public List<String> tabComplete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             List<String> completions = new ArrayList<>();
-            StringUtil.copyPartialMatches(args[0], List.of("status", "recompile", "push"), completions);
+            StringUtil.copyPartialMatches(args[0],
+                    List.of("status", "audit", "verify", "recompile", "push"), completions);
             Collections.sort(completions);
             return completions;
         }
@@ -157,5 +208,61 @@ public final class PackSubCommand implements SubCommand {
             return completions;
         }
         return Collections.emptyList();
+    }
+
+    /** The one-line validation summary of the last compile (counts, then a sample). */
+    private void sendValidationSummary(CommandSender sender,
+                                       com.mineplus.pack.compile.ModelAssetValidator.Report report) {
+        sender.sendMessage(ChatColor.GRAY + " Validation: " + ChatColor.WHITE
+                + report.checked() + " checked, " + report.warnings().size() + " finding(s), "
+                + report.skipped() + " skipped");
+        if (report.outOfWindow() > 0 || report.unresolvedRefs() > 0 || report.uvOutOfRange() > 0
+                || report.duplicateCommands() > 0) {
+            sender.sendMessage(ChatColor.RED + "  defects: " + report.outOfWindow()
+                    + " re-based element(s), " + report.unresolvedRefs() + " unresolved reference(s), "
+                    + report.uvOutOfRange() + " out-of-range UV(s), " + report.duplicateCommands()
+                    + " duplicate custom_model_data — see " + ChatColor.YELLOW + "/mineplus pack audit");
+        }
+        int shown = Math.min(5, report.warnings().size());
+        for (int index = 0; index < shown; index++) {
+            sender.sendMessage(ChatColor.YELLOW + "  - " + report.warnings().get(index));
+        }
+        if (report.warnings().size() > shown) {
+            sender.sendMessage(ChatColor.GRAY + "  ... and "
+                    + (report.warnings().size() - shown) + " more (see console logs).");
+        }
+    }
+
+    /**
+     * Per-player pack state: a mob or item that "does not render" is almost
+     * always a player whose client never applied the pack, so the state of
+     * every online player is printed rather than an aggregate count.
+     */
+    private void sendPlayerStates(CommandSender sender) {
+        PackApi api = context.packApi();
+        int applied = 0;
+        List<Player> online = new ArrayList<>(Bukkit.getOnlinePlayers());
+        sender.sendMessage(ChatColor.GRAY + " Players: " + online.size() + " online");
+        for (Player player : online) {
+            PlayerPackState state = api.playerPackState(player.getUniqueId());
+            if (state.hasPack()) {
+                applied++;
+            }
+            ChatColor color = switch (state) {
+                case APPLIED -> ChatColor.GREEN;
+                case ACCEPTED, REQUESTED -> ChatColor.WHITE;
+                case DECLINED -> ChatColor.YELLOW;
+                case FAILED -> ChatColor.RED;
+                case UNKNOWN -> ChatColor.GRAY;
+            };
+            String playerUrl = api.deliveryUrl(player);
+            sender.sendMessage(ChatColor.GRAY + "  - " + player.getName() + ": " + color + state
+                    + ChatColor.GRAY + " from " + ChatColor.WHITE
+                    + (playerUrl == null ? "no URL resolved" : playerUrl));
+        }
+        if (applied < online.size()) {
+            sender.sendMessage(ChatColor.GRAY + " Applied: " + applied + "/" + online.size()
+                    + ChatColor.WHITE + " (/mineplus pack push <player> re-prompts one player).");
+        }
     }
 }

@@ -38,6 +38,16 @@ public interface PackApi {
     }
 
     /**
+     * The configured appearance mode ({@code PACK.APPEARANCE_MODE});
+     * {@link com.mineplus.pack.asset.AppearanceMode#AUTO} when the subsystem
+     * has no settings or is disabled. Frame state writes need no module
+     * change: {@code ItemFrameWriter} follows the resolved channel.
+     */
+    default com.mineplus.pack.asset.AppearanceMode appearanceMode() {
+        return com.mineplus.pack.asset.AppearanceMode.AUTO;
+    }
+
+    /**
      * Registers a custom item: Mineplus identity, backing vanilla material,
      * and the registered model key that renders it. The item automatically
      * gains {@code ItemRegistry} recognition (PDC identity), and its
@@ -69,6 +79,18 @@ public interface PackApi {
     void registerBlock(PackBlockDefinition definition);
 
     /**
+     * Registers a bone rig: the model whose group hierarchy supplies one
+     * display per bone. The level selects it with {@code "renderBackend":
+     * "pack"} and {@code "renderKind": "bones"} ({@code "renderMode":
+     * "pack_bones"}); placement and collision stay with the ordinary
+     * multiblock lifecycle.
+     *
+     * @param definition the rig definition
+     */
+    default void registerBoneRig(com.mineplus.pack.rig.PackBoneRigDefinition definition) {
+    }
+
+    /**
      * Registers a texture PNG asset.
      *
      * @param namespace asset namespace
@@ -98,14 +120,31 @@ public interface PackApi {
      */
     default void registerGeneratedAsset(String namespace, String path, byte[] bytes) {
     }
+
+    /**
+     * Declares that a generated model path is also a world-display model: the
+     * model may be carried by an {@code ItemDisplay} through
+     * {@link #createModelDisplay}. On servers with the modern
+     * {@code item_model} component this is implicit — the component names the
+     * model directly. On legacy servers a display item can only render a
+     * model through a {@code custom_model_data} override, so the pack reserves
+     * one host-file predicate for the path here. Registering the same path
+     * twice is a no-op, so a subsystem may call it on every reload.
+     *
+     * @param material      the invisible carrier material
+     * @param namespace     model namespace
+     * @param componentPath model path under {@code models/item/} (slashes allowed)
+     */
+    default void registerDisplayModel(org.bukkit.Material material, String namespace, String componentPath) {
+    }
+
     /** Creates the registered item's stack (identity + presentation), or null. */
     ItemStack createItem(String namespace, String id);
 
     /**
      * True when this server can present a generated model through an
      * {@code ItemDisplay} — the capability a world renderer needs to build a
-     * rig out of per-part models. False when the pack is unavailable or the
-     * server predates the {@code item_model} component.
+     * rig out of per-part models. False when the pack subsystem is unavailable.
      */
     default boolean supportsGeneratedModelDisplay() {
         return false;

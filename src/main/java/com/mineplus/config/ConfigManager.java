@@ -45,6 +45,11 @@ public class ConfigManager {
                     MineplusConfig.parseMobBehavior(yamlConfig, com.mineplus.infrastructure.mob.MobBehaviorSettings.defaults()),
                     MineplusConfig.parseCustomMobs(yamlConfig, com.mineplus.infrastructure.mob.custom.CustomMobSettings.defaults()),
                     MineplusConfig.parseCombat(yamlConfig, com.mineplus.infrastructure.combat.CombatSettings.defaults()),
+                    MineplusConfig.parsePerformance(yamlConfig, com.mineplus.infrastructure.perf.PerfSettings.defaults()),
+                    MineplusConfig.parseRigs(yamlConfig, com.mineplus.infrastructure.virtual.rig.RigSettings.defaults()),
+                    MineplusConfig.parseWorldEdits(yamlConfig, com.mineplus.infrastructure.world.WorldEditSettings.defaults()),
+                    MineplusConfig.parseInput(yamlConfig, com.mineplus.infrastructure.input.InputSettings.defaults()),
+                    MineplusConfig.parseVisualUnits(yamlConfig, com.mineplus.infrastructure.fx.unit.VisualUnitSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
         } catch (Exception e) {
@@ -160,6 +165,23 @@ public class ConfigManager {
                       # Auto-start animations declared in multiblock levels ("animations")
                       # or model meta files ("autoplay").
                       AUTOPLAY: true
+                      # TICK: evaluate and apply every pose on the server tick.
+                      # ASYNC_COMPUTE: evaluate poses on the single Mineplus-Pose
+                      # thread, apply on the main thread under MAX_APPLY_PER_TICK.
+                      # ASYNC_SEND: like ASYNC_COMPUTE, plus one shared flush pass.
+                      PIPELINE: ASYNC_COMPUTE
+                      # Display pose writes allowed per tick in async pipelines;
+                      # the remainder carries over to the next tick.
+                      MAX_APPLY_PER_TICK: 512
+                      # Derive idle/walk/swim/airborne/attack clips from the model's
+                      # owning entity (attack > airborne > swim > walk > idle).
+                      # Off by default; explicit AnimationApi calls always win.
+                      AUTO_STATE: false
+                      # IMMEDIATE: cut to the new state. AFTER_CURRENT: let the
+                      # current automatic clip finish its pass first.
+                      TRANSITION: AFTER_CURRENT
+                      # Crossfade length in ticks when a state starts or ends.
+                      TRANSITION_TICKS: 5
 
                     # Texel surface baking: reconstructs a face's texture pixel-by-pixel
                     # out of flat vanilla palette blocks (concretes, powders, terracottas).
@@ -228,6 +250,27 @@ public class ConfigManager {
                       # Packets per bundle; the client rejects bundles above 4096.
                       NETWORK:
                         BUNDLE_LIMIT: 4000
+                        # Weight ceiling per bundle after per-packet accounting
+                        # (metadata/equipment lists count their entries). Keeps
+                        # a few heavy packets from collapsing a bundle.
+                        BUNDLE_WEIGHT_LIMIT: 4096
+                        # Milliseconds per tick spent flushing player queues.
+                        # Unflushed players carry over to the next tick in order;
+                        # 0 flushes everything at once.
+                        FLUSH_BUDGET_MS: 2
+                      # Per-observer render state: LOD tier plus the visibility,
+                      # brightness, equipment, stance and animation override slots
+                      # modules can set without duplicating the model.
+                      VIEWER_STATE:
+                        ENABLED: true
+                      # Observer-only equipment stance channel: one player can see
+                      # an entity in a different stance without the target's real
+                      # inventory changing. Disabled = no listeners, no packets.
+                      STANCES:
+                        ENABLED: false
+                        # Re-send overrides after an inventory close (the client
+                        # resets its equipment view then).
+                        RESEND_ON_INVENTORY_CLOSE: true
 
                     # Resource pack system (Phase 2): compiles registered custom
                     # content (custom items, models, textures) into a generated,
@@ -277,6 +320,22 @@ public class ConfigManager {
                       # The pack also declares a generous supported_formats
                       # range, so newer clients accept it by default.
                       PACK_FORMAT_OVERRIDE: 0
+                      # How item definitions present state:
+                      #   AUTO (default): item_model on 1.21.4+, legacy
+                      #     custom_model_data predicates before it.
+                      #   ITEM_MODEL: item_model definitions where available.
+                      #   RANGE_DISPATCH: custom_model_data floats inside the
+                      #     item definition (works on every modern server).
+                      #   SELECT: custom_model_data strings + minecraft:select;
+                      #     degrades to RANGE_DISPATCH when the server cannot
+                      #     write the string channel.
+                      #   LEGACY: custom_model_data predicates on every version.
+                      APPEARANCE_MODE: AUTO
+                      # Validate models and textures before writing the
+                      # artifact (bone/cube/animation budgets, texture size,
+                      # unresolved textures, duplicate ids, entry collisions).
+                      # Warnings only; the pack still builds.
+                      VALIDATE_ASSETS: true
                       # How pack display entities are lit:
                       #   AUTO (default): non-emissive models use natural world
                       #     light; emissive models get block light = their max
@@ -319,6 +378,60 @@ public class ConfigManager {
                       # actually see it.
                       RADIUS: 48
 
+                    # Performance telemetry and the adaptive degradation valve.
+                    # Telemetry costs one scheduled tick close plus LongAdder
+                    # increments on hot paths; it powers /mineplus perf.
+                    PERFORMANCE:
+                      # Collect counters, per-tick ring rows and /mineplus perf
+                      # output. false makes every recorder a no-op branch.
+                      TELEMETRY: true
+                      # Degrade the animation/network cadence when the pose
+                      # slice stays over budget. Never touches gameplay, damage,
+                      # hit registration or persistence.
+                      ADAPTIVE: true
+                      # Pose apply slice budget per tick, in milliseconds.
+                      POSE_BUDGET_MS: 3
+
+                    # Deferred world edits: bulk block changes drain across
+                    # ticks under a fixed budget instead of spiking one tick.
+                    WORLD_EDITS:
+                      # Master switch; false applies each enqueue immediately
+                      # (the pre-queue behavior) and schedules no task.
+                      ENABLED: false
+                      # Wall-clock budget of one drain pass, in milliseconds
+                      # (0 = no time bound).
+                      MAX_MS_PER_TICK: 2
+                      # Hard ceiling of blocks applied by one drain pass.
+                      MAX_BLOCKS_PER_TICK: 256
+
+                    # Inbound input: optionally read held-item gestures at
+                    # network arrival instead of waiting for the next tick's
+                    # Bukkit event. Off by default; the event path is unchanged
+                    # while disabled and is the fallback whenever the fast path
+                    # cannot be installed.
+                    INPUT:
+                      # Install one Netty handler (named mineplus_input) per
+                      # player and drain its samples at tick start. Any failure
+                      # logs once and permanently falls back to events.
+                      FAST_PATH: false
+
+                    # Composed visual units: a hit's flash, dust, surface decal
+                    # and sound advance as one unit under one budget instead of
+                    # independent effects. Off by default; when off the service
+                    # has no task and allocates nothing.
+                    VISUAL_UNITS:
+                      # Master switch; false leaves every module's direct
+                      # particle/sound calls exactly as they are today.
+                      ENABLED: false
+                      # Live-unit ceiling; over it the lowest-priority unit is
+                      # dropped first (the newcomer when it is the lowest).
+                      MAX_ACTIVE: 64
+                      # Units admitted per tick.
+                      MAX_SPAWN_PER_TICK: 16
+                      # Advance-pass wall-clock budget in milliseconds
+                      # (0 = no time bound); the remainder waits a tick.
+                      MAX_MS_PER_TICK: 1
+
                     # Mob behavior engine: budgeted, distance-gated execution of
                     # entity behavior profiles registered by modules (actions like
                     # grazing, planting, or torch lighting around moving mobs).
@@ -359,11 +472,19 @@ public class ConfigManager {
                       # no-ops (existing custom mobs keep their profiles).
                       ENABLED: true
                       # Build per-part visual rigs (hidden base + ItemDisplays).
-                      # Rigs need the pack subsystem and the item_model component;
-                      # otherwise the base entity stays visible.
+                      # Rigs need the pack subsystem; the modern representation
+                      # names each part model in the item_model component and a
+                      # legacy one reaches it through a reserved custom_model_data
+                      # override. Without the pack the base entity stays visible.
                       RENDERING: true
-                      # Server ticks between rig pose pushes.
-                      RENDER_INTERVAL_TICKS: 2
+                      # Server ticks between rig pose pushes. Keep at 1: a pose
+                      # pushed every other tick needs a 2-tick client window to
+                      # look smooth, and any window longer than the cadence lags.
+                      RENDER_INTERVAL_TICKS: 1
+                      # Ticks a display eases its transformation over. 1 matches
+                      # the push cadence; raise it only to soften a coarse
+                      # RENDER_INTERVAL_TICKS.
+                      RENDER_INTERPOLATION_TICKS: 1
                       # Blocks beyond which a rig stops receiving pose updates.
                       RENDER_DISTANCE: 48
                       # Hard ceiling of rigged custom mobs per world.
@@ -371,6 +492,19 @@ public class ConfigManager {
                       # Remove a custom-tagged entity whose definition is not
                       # registered when its chunk loads.
                       REMOVE_UNKNOWN_ON_LOAD: true
+
+                    # Bone rigs: pack levels declaring renderKind: "bones" render
+                    # as one ItemDisplay per bone instead of one per cube.
+                    RIGS:
+                      # Master switch; false keeps every pack level on its
+                      # per-cube virtual/pack path.
+                      ENABLED: false
+                      # Hard ceiling of display bones per rendered rig; a larger
+                      # model falls back to its other renderer.
+                      MAX_DISPLAYS_PER_INSTANCE: 64
+                      # Spawn invisible barrier-sized displays for bones tagged
+                      # "hitbox" (opt-in ray-trace targets).
+                      HITBOX_BONES: false
                     """;
             try {
                 Files.writeString(configFile.toPath(), defaultConfigContent);

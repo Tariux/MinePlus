@@ -102,12 +102,26 @@ Registration is owner-scoped:
 | `persistent(boolean)` | `true` | Survive chunk unloads and restarts |
 | `hideBaseWhenRigged(boolean)` | `true` | Hide the vanilla base entity once a rig covers it |
 | `canPickupItems(boolean)` | `false` | Allow item pickup |
+| `visual(VisualMode)` | `AUTO` | `BASE` never rigs (vanilla look), `AUTO` rigs when the pack can present it, `RIG` insists and logs loudly when it cannot |
 | `attributes(CustomMobAttributes)` | none | Attribute overrides |
 | `behavior(Consumer<MobProfile.Builder>)` | idle | The mob's entire behavior |
+| `inheritGoalsFrom(EntityType)` | none | Keep the vanilla goals of the base type (the donor must be the base type) instead of isolating |
 | `spawnConfigurator(Consumer<LivingEntity>)` | none | Last-word setup after identity/attributes |
 
 Base types must be pathfinding `Mob`s — the Core navigates them with their own
-vanilla walk, which needs the vanilla AI to stay enabled (see below).
+vanilla walk, which needs the vanilla AI to stay enabled (see below). Because
+clearing the goals leaves nothing else to turn the body, every path request
+also points the vanilla look control at the destination: the mob faces where it
+is walking instead of sliding along its frozen spawn direction, and the rig's
+yaw frame follows that body yaw. A vanilla path request is refused while the
+entity is airborne or not yet on the ground, so the engine's periodic re-path
+is what starts a walk whose first request arrived during the spawn fall.
+
+`AUTO` is the right default: a retexture of a vanilla model *is* a rig on a
+1.21.1 client, because the only way to replace a mob's look server-side is to
+hide the entity and present its parts. Use `BASE` only for a mob that is meant
+to keep its vanilla skin (a pure behavior showcase), and `RIG` when a missing
+rig is a bug you want reported rather than absorbed.
 
 ### Attributes
 
@@ -116,6 +130,23 @@ vanilla walk, which needs the vanilla AI to stay enabled (see below).
 `knockbackResistance`. Unset fields keep the vanilla value. Health is applied as
 a new maximum and filled on a fresh spawn; on a chunk restore the saved health
 is clamped to the maximum instead of being healed back to full.
+
+A mob that should move like something other than its base type starts from that
+type's real values instead of guessed ones:
+
+```java
+CustomMobAttributes.builder()
+        .fromTemplate(EntityType.IRON_GOLEM)   // read once from a throwaway donor
+        .maxHealth(60.0).movementSpeed(0.3).attackDamage(6.0)
+        .followRange(28.0).armor(10.0).knockbackResistance(0.3)
+        .build();
+```
+
+`fromTemplate` spawns one donor entity, reads its attributes, removes it and
+caches the template for the JVM, so a villager-based soldier walks like a golem
+instead of like a villager. Only the fields you do not override come from the
+template, and `overrideCount()` reports how many explicit overrides the mob
+carries.
 
 ### Behavior
 
@@ -135,6 +166,46 @@ On spawn and on every chunk restore the Core clears the entity's goal and
 target selectors (`MobAiIsolation.isolate`) while leaving AI enabled. The
 navigator still ticks the mob's own vanilla walk, so movement looks and behaves
 like a vanilla mob, but no vanilla goal or target decides anything.
+
+The navigation, look, Brain and selector handles are resolved against the
+**live handle's runtime class**, never the declared return type of
+`getHandle()`. CraftBukkit is free to declare that bridge loosely —
+`CraftVillager.getHandle()` returns `Entity` — and a plan built from the
+declared type finds no navigation, look control or Brain at all: the villager
+keeps its vanilla brain and cannot be steered. Resolving from the live handle
+makes the guarantee hold for goal-driven and Brain-driven mobs alike.
+
+Brain-driven mobs (villagers, piglins, axolotls) run their behaviors out of a
+`Brain`, not the goal selectors, so isolation clears the Brain's **activities**
+— the active-behavior map and the behavior/task collections, all keyed by the
+vanilla `Activity` enum. It never touches the Brain's memory or sensor
+*registries*: `Brain.getMemory` throws
+`IllegalStateException: Unregistered memory fetched: minecraft:last_slept` for a
+type it no longer has registered, and that exception then fires on every
+neighbour that reads the mob — an iron golem's village stroll goal asks each
+villager whether it wants a golem, so one over-eager clear spammed a stack trace
+per tick for every golem in the village. The containers to clear are classified
+once at runtime from a live Brain (which keys are `Activity` enums), so the rule
+holds on reobfuscated mappings, and clearing a memory *value* is fine while
+emptying the *registration* is not.
+
+Isolation is a claim the Core must be able to prove, so it is never silent:
+
+- `MobAiIsolation.Result` / `CustomMobApi.isolationLabel(entity)` report what was
+  actually cleared (selectors, Brain activities, both, or nothing);
+- `CustomMobApi.rigFailure(id)` reports why a mob renders as its base instead of
+  its rig, and a definition that asked for `VisualMode.RIG` logs a warning once
+  with that reason;
+- if the Brain's activity containers cannot be identified, the Core says so
+  ("its vanilla behaviors stay enabled") rather than leaving a half-isolated,
+  corrupted mob.
+- isolation is re-asserted periodically, not only on spawn and chunk load, so a
+  mob that a plugin or a vanilla event hands back to its AI gets re-isolated.
+
+A mob that genuinely needs its vanilla brain — a villager that must keep trading
+or breeding — asks for it explicitly with `inheritGoalsFrom(baseType)`, which
+skips the clear and reports "on donor AI" in every status line. That is a
+decision, not an accident, and the status output shows which it is.
 
 ### Identity survives restarts
 
@@ -200,12 +271,46 @@ CustomMobModel model = CustomMobModel.builderFor(EntityType.PIG, texturePng)
         .build();
 ```
 
+An authored Blockbench entity file is imported instead of re-typed.
+`BedrockMobModel` reads the `.bbmodel` and takes the part layout as an explicit
+mapping, because a model file names elements, not animatable parts:
+
+```java
+CustomMobModel model = BedrockMobModel.parse(bbmodelBytes)
+        .textureName("soldier_villager")
+        .part("head", MobPart.Role.HEAD, 0, 24, 0, "head_geo", "nose_geo", "helmet_cap")
+        .part("body", MobPart.Role.BODY, 0, 12, 0, "body_geo", "skirt_geo")
+        .part("right_leg", MobPart.Role.LEG_BACK_RIGHT, -2, 12, 0, "leg_r", "knee_r")
+        .build(texturePng);
+```
+
+Pivots are the model's own (y up, feet at 0) and are converted to the rig's
+convention; `inflate` and the authored per-face UV windows are preserved, so a
+model painted in Blockbench needs no UV re-derivation. Elements an animation
+cannot reach (or a malformed element with no box) are simply never claimed.
+`examples/mineplus-mobfun` registers the Villager Soldier
+(`mobfun:villager_soldier`) this way.
+
 Part coordinates are vanilla entity-model pixels: `y` grows downward from
 `modelHeightPx` (24 for a standard quadruped), the model front is `-z`, and
 pivots are absolute. `MobPart.Role` tells the rig which vanilla pose applies —
 `HEAD` tracks the entity's look direction, `LEG_*` swings with movement, `BODY`
 and `STATIC` stay put — so a rigged mob animates without a custom animation
 pipeline.
+
+A file whose outliner is already the rig is imported whole instead:
+`partsFromOutliner()` makes every group a bone (authored pivot, rest rotation
+and parent), the elements directly inside it its geometry, and
+`animationClips()` attaches the file's clips by bone name. `animation.idle` and
+`animation.walk` are blended by movement speed, measured in blocks per second
+from the entity's own velocity: full walk weight at the model's
+`walkSpeedReference` (2 blocks/s by default, overridable in
+`mobs/<id>.model.json`), with the walk clock and the procedural stride phase
+scaled from the same value. An `animation.attack` clip is a one-shot overlay the
+Core plays whenever the mob lands a melee hit (a module can also trigger it
+through `MobRigRenderer.playAttack`). `examples/mineplus-mobfun`
+uses this path for the Villager Soldier (`mobfun:villager_soldier`) and the
+Woodland Trickster (`mobfun:woodland_trickster`, idle + walk + attack).
 
 ### How a model reaches the client
 
@@ -214,14 +319,34 @@ The Core compiles the model into pack assets:
 1. the texture PNG under `textures/item/entity/<path>/texture.png`;
 2. one item model per part under `models/item/entity/<path>/<part>.json`,
    with vanilla box-UV windows converted to element face windows (the same
-   cross layout Blockbench derives);
+   cross layout Blockbench derives) — or, for an imported model, its authored
+   per-face windows copied unchanged;
 3. one item definition per part under `items/entity/<path>/<part>.json`.
 
-`MobRigRenderer` hides the base entity and presents each part as an
-`ItemDisplay` whose `item_model` component points at that part's model. Displays
-are positioned with the entity's body yaw (and look pitch for the head), so the
-rig follows the mob. All of this rides the existing pack delivery — players
-already receiving the Core pack see the mob with no extra download.
+**The client element window.** An item model is rendered inside a fixed
+−16..32 px box; an element outside it is clamped and collapses into a
+missing-texture cube. Every part is therefore compiled to fit, whatever the
+author drew:
+
+- the writer keeps the vanilla `+8` item anchor and only records the extra
+  pixel shift a part needs (usually none); a part that overshoots by a couple
+  of pixels is shifted inside the window instead of being re-authored;
+- a part that still spans more than 48 px on an axis is sliced into
+  deterministic pieces (`<part>_p2`, `<part>_p3`, …), each its own item model
+  and `ItemDisplay` at its own offset. Oversized weapons and long tails are
+  normal content, not a modelling error;
+- `BoneRigRenderer` applies each piece's offset in the pose pass, so the
+  pieces reassemble into the authored shape and rotate as one bone.
+
+`MobRigRenderer` hides the base entity and presents each part (or piece) as an
+`ItemDisplay` whose `item_model` component points at that model. The rig is
+placed with `R_y(180° − bodyYaw + yawOffset)` — authored models face `-z`, so
+this frame turns the model's front to the entity's own facing — and the head
+bone additionally follows the entity's head yaw and look pitch. A model
+authored facing another axis corrects itself with
+`yawOffsetDegrees(...)` instead of code. All of this rides the existing pack
+delivery — players already receiving the Core pack see the mob with no extra
+download.
 
 ### Degradation
 
@@ -237,7 +362,8 @@ layer.
 |---|---|---|
 | `ENABLED` | `true` | Subsystem master switch |
 | `RENDERING` | `true` | Create visual rigs at all |
-| `RENDER_INTERVAL_TICKS` | `2` | Server ticks between rig pose pushes |
+| `RENDER_INTERVAL_TICKS` | `1` | Server ticks between rig pose pushes |
+| `RENDER_INTERPOLATION_TICKS` | `1` | Client-side easing window per pose push; keep equal to the interval or the client lags/snaps |
 | `RENDER_DISTANCE` | `48` | Blocks beyond which a rig stops receiving poses |
 | `MAX_RIGGED_PER_WORLD` | `96` | Hard ceiling of rigged mobs per world |
 | `REMOVE_UNKNOWN_ON_LOAD` | `true` | Remove custom-tagged entities whose definition is gone |
@@ -281,16 +407,18 @@ Behavior details:
 ## Testing a custom mob
 
 ```
-/mobfun status              # registered showcases, including custom mobs
-/mobfun evilpig on|off      # register/unregister the Evil Pig
-/mobfun spawn evilpig       # spawn a custom mob in front of you and force-fire it
-/mobfun fire evilpig force  # force the nearest one, ignoring profile conditions
-/mobfun despawn             # remove every mob spawned through the test bench
+/mobfun status               # registered showcases, including custom mobs
+/mobfun evilpig on|off       # register/unregister the Evil Pig
+/mobfun spawn evilpig        # spawn a custom mob in front of you and force-fire it
+/mobfun fire evilpig force   # force the nearest one, ignoring profile conditions
+/mobfun spawn soldier        # the imported Villager Soldier (mobfun:villager_soldier)
+/mobfun spawn trickster      # the Woodland Trickster (mobfun:woodland_trickster)
+/mobfun despawn              # remove every mob spawned through the test bench
 ```
 
 `forceFire` dispatches by identity, so the report describes the custom profile
-even though the entity's `EntityType` is `PIG`. A failure means the profile or
-its conditions blocked the action — never that the wrong profile ran.
+even though the entity's `EntityType` is `PIG` or `VILLAGER`. A failure means the
+profile or its conditions blocked the action — never that the wrong profile ran.
 
 ---
 

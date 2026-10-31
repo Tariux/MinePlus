@@ -2,8 +2,10 @@ package com.mineplus.mobfun;
 
 import com.mineplus.infrastructure.mob.custom.CustomMobApi;
 import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
+import com.mineplus.infrastructure.mob.custom.CustomMobModel;
 import java.util.Locale;
 import java.util.function.Supplier;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -84,8 +86,31 @@ public final class CustomMobShowcase implements MobFunShowcaseEntry {
     }
 
     public String statusLine() {
-        return "  " + label + " (custom " + baseType.name().toLowerCase(Locale.ROOT)
-                + (definition == null ? "" : " " + definition.id()) + "): "
-                + (enabled ? "ON" : "OFF");
+        StringBuilder line = new StringBuilder("  ").append(label).append(" (custom ")
+                .append(baseType.name().toLowerCase(Locale.ROOT))
+                .append(definition == null ? "" : " " + definition.id()).append("): ")
+                .append(enabled ? "ON" : "OFF");
+        if (definition == null) {
+            return line.toString();
+        }
+        CustomMobModel model = definition.model();
+        line.append(ChatColor.GRAY).append(" — visual ").append(definition.visual())
+                .append(", ").append(model == null ? "no model" : model.parts().size() + " part(s)"
+                        + (model.animations().isEmpty() ? " procedural"
+                        : " clips " + model.animations().size()))
+                .append(", ").append(definition.attributes().overrideCount()).append(" attribute(s)")
+                .append(definition.keepsVanillaGoals() ? " on donor AI" : " isolated")
+                .append(ChatColor.WHITE).append(", live ").append(api.liveCount(definition.id()));
+        return line.toString();
+    }
+
+    /** The live definition while the showcase is on, for the rig/pack diagnostics. */
+    public CustomMobDefinition definition() {
+        return definition;
+    }
+
+    /** The Core's custom-mob API this showcase registers through. */
+    public CustomMobApi api() {
+        return api;
     }
 }

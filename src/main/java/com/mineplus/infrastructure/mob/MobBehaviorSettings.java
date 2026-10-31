@@ -71,7 +71,7 @@ public record MobBehaviorSettings(
                 section.getBoolean("ENABLED", defaults.enabled()),
                 clamp(section.getInt("INTERVAL_TICKS", defaults.intervalTicks()), 1, 40),
                 clamp(section.getInt("STAGGER_BUCKETS", defaults.staggerBuckets()), 1, 40),
-                clamp(section.getInt("SCAN_RADIUS_CHUNKS", defaults.scanRadiusChunks()), 1, 8),
+                clamp(section.getInt("SCAN_RADIUS_CHUNKS", defaults.scanRadiusChunks()), 1, 16),
                 Math.max(0L, section.getLong("BUDGET_MILLIS_PER_RUN", defaults.budgetMillisPerRun())),
                 clamp(section.getInt("MAX_BLOCK_EDITS_PER_RUN", defaults.maxBlockEditsPerRun()), 0, 4096),
                 clamp(section.getInt("MAX_ENTITY_SPAWNS_PER_RUN", defaults.maxEntitySpawnsPerRun()), 0, 256),

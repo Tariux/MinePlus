@@ -15,6 +15,10 @@ import java.util.Locale;
  *       {@code BlockDisplay} carrying an allocated pack-block carrier state
  *       (the pack block axis). The client resolves the carrier's overridden
  *       blockstate model; collision still comes from the virtual lattice.</li>
+ *   <li>{@link #BONES} — the geometry model split into one {@code ItemDisplay}
+ *       per bone of its group hierarchy (the pack bone-rig axis). Fewer
+ *       displays than cubes, posed per bone; collision still comes from the
+ *       virtual lattice.</li>
  * </ul>
  *
  * <p>Only meaningful for pack backends; the virtual engine always renders the
@@ -23,7 +27,8 @@ import java.util.Locale;
 public enum RenderKind {
 
     MODEL,
-    BLOCK;
+    BLOCK,
+    BONES;
 
     /** Parses a definition/config value; unknown or blank values fall back to {@link #MODEL}. */
     public static RenderKind fromKey(String key) {
@@ -32,6 +37,7 @@ public enum RenderKind {
         }
         return switch (key.trim().toLowerCase(Locale.ROOT)) {
             case "block", "block_display", "display" -> BLOCK;
+            case "bones", "bone", "bone_rig", "rig" -> BONES;
             default -> MODEL;
         };
     }

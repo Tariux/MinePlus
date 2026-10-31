@@ -42,12 +42,16 @@ public final class FlockSteering {
         double pushX = 0.0;
         double pushZ = 0.0;
         for (Mob neighbour : neighbours) {
-            if (neighbour == null || neighbour == member || neighbour.isDead() || !neighbour.isValid()
-                    || neighbour.getWorld() != here.getWorld()) {
+            if (neighbour == null || neighbour == member || neighbour.isDead() || !neighbour.isValid()) {
                 continue;
             }
-            double dx = here.getX() - neighbour.getX();
-            double dz = here.getZ() - neighbour.getZ();
+            // Entity#getX/getZ are Paper-only; the location works everywhere.
+            Location other = neighbour.getLocation();
+            if (other.getWorld() != here.getWorld()) {
+                continue;
+            }
+            double dx = here.getX() - other.getX();
+            double dz = here.getZ() - other.getZ();
             double distance = Math.hypot(dx, dz);
             if (distance >= radius) {
                 continue;

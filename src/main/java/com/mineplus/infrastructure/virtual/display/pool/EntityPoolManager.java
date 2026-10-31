@@ -24,6 +24,7 @@ public final class EntityPoolManager {
     private final NmsAdapter nms;
     private final PacketOptimizer packets;
     private final int maxIdlePerWorld;
+    private final com.mineplus.infrastructure.perf.PerfRegistry perf;
 
     private final Map<UUID, Deque<PooledDisplay>> idleBlocks = new HashMap<>();
     private final Map<UUID, Deque<PooledDisplay>> idleItems  = new HashMap<>();
@@ -33,9 +34,15 @@ public final class EntityPoolManager {
     private long created, reused, destroyed;
 
     public EntityPoolManager(NmsAdapter nms, PacketOptimizer packets, int maxIdlePerWorld) {
+        this(nms, packets, maxIdlePerWorld, null);
+    }
+
+    public EntityPoolManager(NmsAdapter nms, PacketOptimizer packets, int maxIdlePerWorld,
+                             com.mineplus.infrastructure.perf.PerfRegistry perf) {
         this.nms = nms;
         this.packets = packets;
         this.maxIdlePerWorld = maxIdlePerWorld;
+        this.perf = perf;
     }
 
     public PooledDisplay acquireBlock(World world) {
@@ -52,6 +59,7 @@ public final class EntityPoolManager {
             reused++;
         }
         d.setInUse(true);
+        updateIdleGauge();
         return d;
     }
 
@@ -69,6 +77,7 @@ public final class EntityPoolManager {
             reused++;
         }
         d.setInUse(true);
+        updateIdleGauge();
         return d;
     }
 
@@ -100,6 +109,7 @@ public final class EntityPoolManager {
         } else {
             pool.addFirst(d);
         }
+        updateIdleGauge();
     }
 
     public void destroy(PooledDisplay d) {
@@ -133,6 +143,17 @@ public final class EntityPoolManager {
         idleItems.clear();
         byEntityId.clear();
         byUniqueId.clear();
+        updateIdleGauge();
+    }
+
+    private void updateIdleGauge() {
+        if (perf == null) {
+            return;
+        }
+        int idle = 0;
+        for (Deque<PooledDisplay> pool : idleBlocks.values()) idle += pool.size();
+        for (Deque<PooledDisplay> pool : idleItems.values()) idle += pool.size();
+        perf.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.IDLE_POOLED, idle);
     }
 
     public record Stats(long created, long reused, long destroyed, int live) {}

@@ -43,7 +43,7 @@ public final class DisplayTransport {
     public static final class RenderedInstance {
         private final UUID id;
         private final List<PooledDisplay> displays = new ArrayList<>();
-        private final Map<UUID, LodTier> viewers = new HashMap<>();
+        private final Map<UUID, RenderViewState> viewerStates = new HashMap<>();
         private boolean animated;
 
         RenderedInstance(UUID id) {
@@ -52,7 +52,16 @@ public final class DisplayTransport {
 
         public UUID id()                       { return id; }
         public List<PooledDisplay> displays()  { return displays; }
-        public Map<UUID, LodTier> viewers()    { return viewers; }
+        /** Per-observer state (LOD tier plus the observer-side override channels). */
+        public Map<UUID, RenderViewState> viewerStates() { return viewerStates; }
+        /** Compatibility accessor: a snapshot of the per-viewer LOD tiers. */
+        public Map<UUID, LodTier> viewers() {
+            Map<UUID, LodTier> tiers = new HashMap<>(viewerStates.size());
+            for (Map.Entry<UUID, RenderViewState> entry : viewerStates.entrySet()) {
+                tiers.put(entry.getKey(), entry.getValue().lodTier());
+            }
+            return tiers;
+        }
         public boolean isAnimated()            { return animated; }
         void setAnimated(boolean animated)     { this.animated = animated; }
     }
@@ -72,6 +81,7 @@ public final class DisplayTransport {
     private final EntityPoolManager pool;
     private final PacketOptimizer packets;
     private final DisplayTransportSettings settings;
+    private final com.mineplus.infrastructure.perf.PerfRegistry perf;
 
     private final Map<UUID, RenderedInstance> instances = new HashMap<>();
     private final Map<Long, Set<RenderedInstance>> byChunk = new HashMap<>();
@@ -84,12 +94,15 @@ public final class DisplayTransport {
     private boolean running;
     private long tickCounter;
 
-    private DisplayTransport(JavaPlugin plugin, DisplayTransportSettings settings) {
+    private DisplayTransport(JavaPlugin plugin, DisplayTransportSettings settings,
+                             com.mineplus.infrastructure.perf.PerfRegistry perf) {
         this.plugin = plugin;
         this.settings = settings;
+        this.perf = perf;
         this.nms = NmsAdapterFactory.create();
-        this.packets = new PacketOptimizer(nms, settings.bundleLimit());
-        this.pool = new EntityPoolManager(nms, packets, settings.maxIdlePooledPerWorld());
+        this.packets = new PacketOptimizer(nms, settings.bundleLimit(),
+                settings.bundleWeightLimit(), settings.flushBudgetMs(), perf);
+        this.pool = new EntityPoolManager(nms, packets, settings.maxIdlePooledPerWorld(), perf);
     }
 
     /**
@@ -97,7 +110,16 @@ public final class DisplayTransport {
      * runtime NMS surface is unsupported; the caller falls back to the legacy path.
      */
     public static DisplayTransport start(JavaPlugin plugin, DisplayTransportSettings settings) {
-        DisplayTransport transport = new DisplayTransport(plugin, settings);
+        return start(plugin, settings, null);
+    }
+
+    /**
+     * @param perf telemetry registry shared with the rest of the Core (may be
+     *             {@code null}); receives display/viewer gauges and network rows
+     */
+    public static DisplayTransport start(JavaPlugin plugin, DisplayTransportSettings settings,
+                                         com.mineplus.infrastructure.perf.PerfRegistry perf) {
+        DisplayTransport transport = new DisplayTransport(plugin, settings, perf);
         transport.startTicking();
         DebugLogger.info("[DisplayTransport] started for server " + transport.nms.version()
                 + " (lod full=" + settings.lodFullRange() + " static=" + settings.lodStaticRange() + ")");
@@ -131,6 +153,12 @@ public final class DisplayTransport {
         pendingLod.clear();
         packets.flush();
         pool.shutdown();
+        if (perf != null) {
+            perf.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.ACTIVE_DISPLAYS, 0);
+            perf.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_FULL, 0);
+            perf.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_STATIC, 0);
+            perf.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_HIDDEN, 0);
+        }
     }
 
     // ------------------------------------------------------------------ spawning (driven by VirtualBlockManager)
@@ -140,9 +168,23 @@ public final class DisplayTransport {
      * returned display (block state, transform) works exactly like the legacy entity.
      */
     public PooledDisplay beginInstance(UUID instanceId, WorldLike world) {
+        return begin(instanceId, world, false);
+    }
+
+    /**
+     * Acquires one pooled {@code ItemDisplay} for a rendered instance — the
+     * item-model peer of {@link #beginInstance}. Used by bone rigs, whose
+     * visuals are item displays rather than block displays.
+     */
+    public PooledDisplay beginItemInstance(UUID instanceId, WorldLike world) {
+        return begin(instanceId, world, true);
+    }
+
+    private PooledDisplay begin(UUID instanceId, WorldLike world, boolean item) {
         RenderedInstance instance = instances.computeIfAbsent(instanceId, RenderedInstance::new);
-        PooledDisplay display = pool.acquireBlock(world.world());
+        PooledDisplay display = item ? pool.acquireItem(world.world()) : pool.acquireBlock(world.world());
         instance.displays().add(display);
+        addGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.ACTIVE_DISPLAYS, 1);
         return display;
     }
 
@@ -192,8 +234,10 @@ public final class DisplayTransport {
         for (PooledDisplay d : instance.displays()) {
             pool.release(d);
         }
+        addGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.ACTIVE_DISPLAYS,
+                -instance.displays().size());
         instance.displays().clear();
-        instance.viewers().clear();
+        instance.viewerStates().clear();
         removeFromChunkIndex(instance);
         requestFlush();
     }
@@ -222,15 +266,25 @@ public final class DisplayTransport {
     public void flushDeltas(UUID instanceId) {
         RenderedInstance instance = instances.get(instanceId);
         if (instance == null) return;
-        List<Player> receivers = new ArrayList<>(instance.viewers().size());
-        for (Map.Entry<UUID, LodTier> e : instance.viewers.entrySet()) {
-            if (e.getValue() != LodTier.FULL) continue;
+        List<Player> receivers = new ArrayList<>(instance.viewerStates().size());
+        for (Map.Entry<UUID, RenderViewState> e : instance.viewerStates.entrySet()) {
+            if (e.getValue().lodTier() != LodTier.FULL) continue;
             Player p = Bukkit.getPlayer(e.getKey());
             if (p != null) receivers.add(p);
         }
         for (PooledDisplay d : instance.displays()) {
             packets.broadcastDelta(d, receivers);
         }
+    }
+
+    /**
+     * Per-observer state of one rendered instance, or {@code null} when the
+     * viewer is not tracked for it. State is transport-owned; mutate it on the
+     * main thread and the next LOD pass honours the tier/flags.
+     */
+    public RenderViewState viewerState(UUID instanceId, UUID viewerId) {
+        RenderedInstance instance = instances.get(instanceId);
+        return instance == null ? null : instance.viewerStates.get(viewerId);
     }
 
     // ------------------------------------------------------------------ viewer management
@@ -250,7 +304,10 @@ public final class DisplayTransport {
         packets.discard(player);
         pool.forgetPlayer(id);
         for (RenderedInstance instance : instances.values()) {
-            instance.viewers.remove(id);
+            RenderViewState removed = instance.viewerStates.remove(id);
+            if (removed != null) {
+                addGauge(tierGauge(removed.lodTier()), -1);
+            }
         }
     }
 
@@ -268,7 +325,10 @@ public final class DisplayTransport {
     public void handleWorldChange(Player player) {
         UUID id = player.getUniqueId();
         for (RenderedInstance instance : instances.values()) {
-            instance.viewers.remove(id);
+            RenderViewState removed = instance.viewerStates.remove(id);
+            if (removed != null) {
+                addGauge(tierGauge(removed.lodTier()), -1);
+            }
         }
         pendingLodDistance.put(id, Double.MAX_VALUE);
         pendingFullUpdate.add(id);
@@ -307,12 +367,17 @@ public final class DisplayTransport {
         Set<RenderedInstance> inChunk = byChunk.get(chunkKey(chunk.getX(), chunk.getZ()));
         if (inChunk == null) return;
         for (RenderedInstance instance : inChunk) {
-            for (Map.Entry<UUID, LodTier> entry : new HashMap<>(instance.viewers).entrySet()) {
+            for (Map.Entry<UUID, RenderViewState> entry : new HashMap<>(instance.viewerStates).entrySet()) {
+                LodTier tier = entry.getValue().lodTier();
                 Player viewer = Bukkit.getPlayer(entry.getKey());
-                if (viewer != null && entry.getValue() != LodTier.HIDDEN) {
-                    packets.despawn(viewer, instance.displays());
+                if (tier != LodTier.HIDDEN) {
+                    if (viewer != null) {
+                        packets.despawn(viewer, instance.displays());
+                    }
+                    addGauge(tierGauge(tier), -1);
+                    addGauge(tierGauge(LodTier.HIDDEN), 1);
                 }
-                instance.viewers.put(entry.getKey(), LodTier.HIDDEN);
+                entry.getValue().setLodTier(LodTier.HIDDEN);
             }
         }
     }
@@ -368,14 +433,29 @@ public final class DisplayTransport {
 
     private void applyTier(Player player, RenderedInstance instance, LodTier tier, Location reference) {
         UUID id = player.getUniqueId();
-        LodTier previous = instance.viewers.getOrDefault(id, LodTier.HIDDEN);
+        RenderViewState state = instance.viewerStates.get(id);
+        LodTier previous = state == null ? LodTier.HIDDEN : state.lodTier();
+        if (settings.viewerStateEnabled() && state != null && state.forcedVisible()
+                && tier == LodTier.HIDDEN) {
+            // The observer pinned this model visible: freeze it instead of hiding it.
+            tier = LodTier.STATIC;
+        }
         if (previous == tier) return;
+        if (state != null) {
+            addGauge(tierGauge(previous), -1);
+        }
+        addGauge(tierGauge(tier), 1);
+        if (state == null) {
+            state = new RenderViewState(tier);
+            instance.viewerStates.put(id, state);
+        } else {
+            state.setLodTier(tier);
+        }
 
         if (tier == LodTier.HIDDEN) {
             if (previous != LodTier.HIDDEN) {
                 packets.despawn(player, instance.displays());
             }
-            instance.viewers.put(id, LodTier.HIDDEN);
             return;
         }
         boolean needsFullState = previous == LodTier.HIDDEN
@@ -385,7 +465,6 @@ public final class DisplayTransport {
                 packets.spawnOrResync(player, d);
             }
         }
-        instance.viewers.put(id, tier);
     }
 
     private void indexChunk(RenderedInstance instance, Location origin) {
@@ -417,6 +496,20 @@ public final class DisplayTransport {
 
     private void flush() {
         packets.flush();
+    }
+
+    private void addGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge gauge, long delta) {
+        if (perf != null) {
+            perf.addGauge(gauge, delta);
+        }
+    }
+
+    private static com.mineplus.infrastructure.perf.PerfRegistry.Gauge tierGauge(LodTier tier) {
+        return switch (tier) {
+            case FULL -> com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_FULL;
+            case STATIC -> com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_STATIC;
+            case HIDDEN -> com.mineplus.infrastructure.perf.PerfRegistry.Gauge.VIEWERS_HIDDEN;
+        };
     }
 
     // ------------------------------------------------------------------ metrics

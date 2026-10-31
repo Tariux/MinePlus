@@ -78,6 +78,7 @@ public final class Ballistics {
 
     private volatile Settings settings = Settings.defaults();
     private volatile boolean enabled = true;
+    private volatile com.mineplus.infrastructure.fx.unit.VisualUnitService visualUnits;
     private BukkitTask task;
 
     private long totalRounds;
@@ -96,6 +97,15 @@ public final class Ballistics {
         Ballistics ballistics = new Ballistics(plugin, particles);
         ballistics.start();
         return ballistics;
+    }
+
+    /**
+     * Binds the composed visual-unit service; block impacts are then emitted as
+     * one unit (flash + dust + decal + sound). {@code null} or a disabled
+     * service leaves the existing per-effect path untouched.
+     */
+    public void setVisualUnits(com.mineplus.infrastructure.fx.unit.VisualUnitService visualUnits) {
+        this.visualUnits = visualUnits;
     }
 
     /**
@@ -630,6 +640,14 @@ public final class Ballistics {
      * impact event still gets one — silence on impact reads as a missed hit.
      */
     private void emitImpact(Location at, BallisticProfile profile) {
+        com.mineplus.infrastructure.fx.unit.VisualUnitService units = visualUnits;
+        if (units != null && units.enabled()
+                && units.impact(at, com.mineplus.infrastructure.fx.unit.ImpactProfile.from(profile))) {
+            // One composed unit owns the flash, dust, decal and sound; the
+            // per-effect path below is the fallback when it is disabled or the
+            // budget refused the unit.
+            return;
+        }
         emitImpactFx(at, profile);
         String event = profile.impactSound() == null || profile.impactSound().isBlank()
                 ? profile.fallbackSound()

@@ -1,5 +1,6 @@
 package com.mineplus.pack;
 
+import com.mineplus.pack.asset.AppearanceMode;
 import org.bukkit.configuration.file.FileConfiguration;
 
 /**
@@ -25,6 +26,9 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param maxCachedArtifacts how many {@code mp-<hash>.zip} artifacts to keep before pruning
  * @param packFormatOverride non-zero overrides the detected {@code pack.mcmeta} pack_format
  * @param lighting           how pack display entities are lit (see {@link PackLighting})
+ * @param appearanceMode     how item definitions present state (see {@link AppearanceMode})
+ * @param validateAssets     validate models/textures before writing the artifact
+ *                           (warnings only; the pack still builds)
  */
 public record PackSettings(
         boolean enabled,
@@ -37,8 +41,29 @@ public record PackSettings(
         int promptDelayTicks,
         int maxCachedArtifacts,
         int packFormatOverride,
-        PackLighting lighting
+        PackLighting lighting,
+        AppearanceMode appearanceMode,
+        boolean validateAssets
 ) {
+
+    /** Positional constructor of the pre-appearance-mode settings (defaults applied). */
+    public PackSettings(
+            boolean enabled,
+            PackDeliveryMode deliveryMode,
+            String localHost,
+            int localPort,
+            String publicUrl,
+            String staticUrl,
+            String promptMessage,
+            int promptDelayTicks,
+            int maxCachedArtifacts,
+            int packFormatOverride,
+            PackLighting lighting
+    ) {
+        this(enabled, deliveryMode, localHost, localPort, publicUrl, staticUrl, promptMessage,
+                promptDelayTicks, maxCachedArtifacts, packFormatOverride, lighting,
+                AppearanceMode.AUTO, true);
+    }
 
     public PackSettings {
         localHost = localHost == null || localHost.isBlank() ? "0.0.0.0" : localHost.trim();
@@ -50,11 +75,12 @@ public record PackSettings(
         maxCachedArtifacts = Math.max(1, maxCachedArtifacts);
         packFormatOverride = Math.max(0, packFormatOverride);
         lighting = lighting == null ? PackLighting.AUTO : lighting;
+        appearanceMode = appearanceMode == null ? AppearanceMode.AUTO : appearanceMode;
     }
 
     public static PackSettings defaults() {
         return new PackSettings(true, PackDeliveryMode.LOCAL, "0.0.0.0", 8163,
-                "", "", "", 60, 8, 0, PackLighting.AUTO);
+                "", "", "", 60, 8, 0, PackLighting.AUTO, AppearanceMode.AUTO, true);
     }
 
     public static PackSettings parse(FileConfiguration yaml, PackSettings fallback) {
@@ -78,7 +104,9 @@ public record PackSettings(
                 delivery == null ? defaults.promptDelayTicks() : delivery.getInt("PROMPT_DELAY_TICKS", defaults.promptDelayTicks()),
                 cache == null ? defaults.maxCachedArtifacts() : cache.getInt("MAX_ARTIFACTS", defaults.maxCachedArtifacts()),
                 root.getInt("PACK_FORMAT_OVERRIDE", defaults.packFormatOverride()),
-                PackLighting.fromKey(root.getString("LIGHTING"), defaults.lighting())
+                PackLighting.fromKey(root.getString("LIGHTING"), defaults.lighting()),
+                AppearanceMode.fromKey(root.getString("APPEARANCE_MODE")),
+                root.getBoolean("VALIDATE_ASSETS", defaults.validateAssets())
         );
     }
 }

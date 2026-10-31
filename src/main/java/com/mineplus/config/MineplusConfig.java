@@ -4,10 +4,15 @@ import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
 import com.mineplus.infrastructure.virtual.display.DisplayTransportSettings;
+import com.mineplus.infrastructure.virtual.rig.RigSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
+import com.mineplus.infrastructure.world.WorldEditSettings;
 import com.mineplus.infrastructure.combat.CombatSettings;
+import com.mineplus.infrastructure.fx.unit.VisualUnitSettings;
+import com.mineplus.infrastructure.input.InputSettings;
 import com.mineplus.infrastructure.mob.MobBehaviorSettings;
 import com.mineplus.infrastructure.mob.custom.CustomMobSettings;
+import com.mineplus.infrastructure.perf.PerfSettings;
 import com.mineplus.infrastructure.render.RenderPolicy;
 import com.mineplus.pack.PackSettings;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -24,6 +29,11 @@ public class MineplusConfig {
     private final MobBehaviorSettings mobBehavior;
     private final CustomMobSettings customMobs;
     private final CombatSettings combat;
+    private final PerfSettings performance;
+    private final RigSettings rigs;
+    private final WorldEditSettings worldEdits;
+    private final InputSettings input;
+    private final VisualUnitSettings visualUnits;
     private final int updateCheckResourceId;
 
     public MineplusConfig() {
@@ -128,6 +138,139 @@ public class MineplusConfig {
             CombatSettings combat,
             int updateCheckResourceId
     ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, mobBehavior, customMobs, combat, PerfSettings.defaults(), updateCheckResourceId);
+    }
+
+    /** Canonical constructor; new settings groups thread through here. */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
+            CombatSettings combat,
+            PerfSettings performance,
+            int updateCheckResourceId
+    ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, mobBehavior, customMobs, combat, performance, null, updateCheckResourceId);
+    }
+
+    /**
+     * Canonical constructor; new settings groups thread through here.
+     *
+     * @param rigs bone-rig limits ({@code RIGS}); {@code null} = defaults
+     */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
+            CombatSettings combat,
+            PerfSettings performance,
+            RigSettings rigs,
+            int updateCheckResourceId
+    ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, mobBehavior, customMobs, combat, performance, rigs, null, updateCheckResourceId);
+    }
+
+    /**
+     * Canonical constructor; new settings groups thread through here.
+     *
+     * @param rigs       bone-rig limits ({@code RIGS}); {@code null} = defaults
+     * @param worldEdits deferred world-edit budget ({@code WORLD_EDITS});
+     *                   {@code null} = defaults
+     */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
+            CombatSettings combat,
+            PerfSettings performance,
+            RigSettings rigs,
+            WorldEditSettings worldEdits,
+            int updateCheckResourceId
+    ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, mobBehavior, customMobs, combat, performance, rigs, worldEdits, null,
+                updateCheckResourceId);
+    }
+
+    /**
+     * Canonical constructor; new settings groups thread through here.
+     *
+     * @param rigs       bone-rig limits ({@code RIGS}); {@code null} = defaults
+     * @param worldEdits deferred world-edit budget ({@code WORLD_EDITS});
+     *                   {@code null} = defaults
+     * @param input      inbound input fast path ({@code INPUT}); {@code null} = defaults
+     */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
+            CombatSettings combat,
+            PerfSettings performance,
+            RigSettings rigs,
+            WorldEditSettings worldEdits,
+            InputSettings input,
+            int updateCheckResourceId
+    ) {
+        this(additionalDebugLogs, virtualRendering, animation, texelBaking, displayTransport, pack,
+                renderPolicy, mobBehavior, customMobs, combat, performance, rigs, worldEdits, input, null,
+                updateCheckResourceId);
+    }
+
+    /**
+     * Canonical constructor; new settings groups thread through here.
+     *
+     * @param rigs        bone-rig limits ({@code RIGS}); {@code null} = defaults
+     * @param worldEdits  deferred world-edit budget ({@code WORLD_EDITS});
+     *                    {@code null} = defaults
+     * @param input       inbound input fast path ({@code INPUT}); {@code null} = defaults
+     * @param visualUnits composed visual-unit budgets ({@code VISUAL_UNITS});
+     *                    {@code null} = defaults
+     */
+    public MineplusConfig(
+            boolean additionalDebugLogs,
+            VirtualRenderingSettings virtualRendering,
+            AnimationSettings animation,
+            TexelBakingSettings texelBaking,
+            DisplayTransportSettings displayTransport,
+            PackSettings pack,
+            RenderPolicy renderPolicy,
+            MobBehaviorSettings mobBehavior,
+            CustomMobSettings customMobs,
+            CombatSettings combat,
+            PerfSettings performance,
+            RigSettings rigs,
+            WorldEditSettings worldEdits,
+            InputSettings input,
+            VisualUnitSettings visualUnits,
+            int updateCheckResourceId
+    ) {
         this.additionalDebugLogs = additionalDebugLogs;
         this.virtualRendering = virtualRendering == null
                 ? VirtualRenderingSettings.defaults()
@@ -141,6 +284,11 @@ public class MineplusConfig {
         this.mobBehavior = mobBehavior == null ? MobBehaviorSettings.defaults() : mobBehavior;
         this.customMobs = customMobs == null ? CustomMobSettings.defaults() : customMobs;
         this.combat = combat == null ? CombatSettings.defaults() : combat;
+        this.performance = performance == null ? PerfSettings.defaults() : performance;
+        this.rigs = rigs == null ? RigSettings.defaults() : rigs;
+        this.worldEdits = worldEdits == null ? WorldEditSettings.defaults() : worldEdits;
+        this.input = input == null ? InputSettings.defaults() : input;
+        this.visualUnits = visualUnits == null ? VisualUnitSettings.defaults() : visualUnits;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
     }
 
@@ -188,6 +336,31 @@ public class MineplusConfig {
         return combat;
     }
 
+    /** Performance telemetry + adaptive valve settings ({@code PERFORMANCE}). */
+    public PerfSettings getPerformance() {
+        return performance;
+    }
+
+    /** Bone-rig limits ({@code RIGS}). */
+    public RigSettings getRigs() {
+        return rigs;
+    }
+
+    /** Deferred world-edit queue budget ({@code WORLD_EDITS}). */
+    public WorldEditSettings getWorldEdits() {
+        return worldEdits;
+    }
+
+    /** Inbound input fast-path settings ({@code INPUT}). */
+    public InputSettings getInput() {
+        return input;
+    }
+
+    /** Composed visual-unit budgets ({@code VISUAL_UNITS}). */
+    public VisualUnitSettings getVisualUnits() {
+        return visualUnits;
+    }
+
     public int getUpdateCheckResourceId() {
         return updateCheckResourceId;
     }
@@ -222,7 +395,14 @@ public class MineplusConfig {
                 section.getBoolean("ENABLED", defaults.enabled()),
                 section.getInt("TICK_INTERVAL_TICKS", defaults.tickIntervalTicks()),
                 section.getInt("INTERPOLATION_TICKS", defaults.interpolationTicks()),
-                section.getBoolean("AUTOPLAY", defaults.autoplay())
+                section.getBoolean("AUTOPLAY", defaults.autoplay()),
+                com.mineplus.infrastructure.virtual.animation.PosePipeline.fromKey(
+                        section.getString("PIPELINE"), defaults.pipeline()),
+                section.getInt("MAX_APPLY_PER_TICK", defaults.maxApplyPerTick()),
+                section.getBoolean("AUTO_STATE", defaults.autoState()),
+                com.mineplus.infrastructure.virtual.animation.TransitionMode.fromKey(
+                        section.getString("TRANSITION"), defaults.transition()),
+                section.getInt("TRANSITION_TICKS", defaults.transitionTicks())
         );
     }
 
@@ -253,5 +433,25 @@ public class MineplusConfig {
 
     public static CombatSettings parseCombat(FileConfiguration yaml, CombatSettings fallback) {
         return CombatSettings.parse(yaml, fallback);
+    }
+
+    public static PerfSettings parsePerformance(FileConfiguration yaml, PerfSettings fallback) {
+        return PerfSettings.parse(yaml, fallback);
+    }
+
+    public static RigSettings parseRigs(FileConfiguration yaml, RigSettings fallback) {
+        return RigSettings.parse(yaml, fallback);
+    }
+
+    public static WorldEditSettings parseWorldEdits(FileConfiguration yaml, WorldEditSettings fallback) {
+        return WorldEditSettings.parse(yaml, fallback);
+    }
+
+    public static InputSettings parseInput(FileConfiguration yaml, InputSettings fallback) {
+        return InputSettings.parse(yaml, fallback);
+    }
+
+    public static VisualUnitSettings parseVisualUnits(FileConfiguration yaml, VisualUnitSettings fallback) {
+        return VisualUnitSettings.parse(yaml, fallback);
     }
 }

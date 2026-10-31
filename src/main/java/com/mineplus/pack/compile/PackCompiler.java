@@ -7,7 +7,9 @@ import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.pack.PackFormat;
 import com.mineplus.pack.PackSettings;
+import com.mineplus.pack.asset.AppearanceMode;
 import com.mineplus.pack.asset.BlockModelAsset;
+import com.mineplus.pack.asset.GeneratedAsset;
 import com.mineplus.pack.asset.ItemModelAsset;
 import com.mineplus.pack.asset.ModelAsset;
 import com.mineplus.pack.asset.PackAsset;
@@ -56,11 +58,32 @@ public final class PackCompiler {
     private final VirtualBlockManager virtualBlockManager;
     private final PackCache cache;
     private final PackSettings settings;
+    private volatile com.mineplus.infrastructure.perf.PerfRegistry perf;
+    /** Non-fatal content diagnostics of the last compile ({} when validation is off). */
+    private volatile ModelAssetValidator.Report lastReport = ModelAssetValidator.Report.EMPTY;
 
     public PackCompiler(VirtualBlockManager virtualBlockManager, PackCache cache, PackSettings settings) {
         this.virtualBlockManager = virtualBlockManager;
         this.cache = cache;
         this.settings = settings;
+    }
+
+    /** Telemetry sink for compile durations (may be {@code null}). */
+    public void setPerfRegistry(com.mineplus.infrastructure.perf.PerfRegistry perf) {
+        this.perf = perf;
+    }
+
+    /** Timed wrapper around the compile body: reports duration and run count. */
+    public PackArtifact compile(List<PackAsset> snapshot) {
+        long started = System.nanoTime();
+        PackArtifact artifact = compileInternal(snapshot);
+        com.mineplus.infrastructure.perf.PerfRegistry registry = perf;
+        if (registry != null) {
+            registry.setGauge(com.mineplus.infrastructure.perf.PerfRegistry.Gauge.PACK_COMPILE_MILLIS,
+                    (System.nanoTime() - started) / 1_000_000L);
+            registry.add(com.mineplus.infrastructure.perf.PerfRegistry.Counter.PACK_COMPILES, 1);
+        }
+        return artifact;
     }
 
     /**
@@ -95,13 +118,19 @@ public final class PackCompiler {
      *
      * @return the artifact, or {@code null} when nothing was compilable
      */
-    public PackArtifact compile(List<PackAsset> snapshot) {
+    public PackArtifact compileInternal(List<PackAsset> snapshot) {
         if (snapshot.isEmpty()) {
             return null;
         }
         String bukkitVersion = org.bukkit.Bukkit.getBukkitVersion();
         int packFormat = PackFormat.packFormat(bukkitVersion, settings.packFormatOverride());
-        PackFormat.ItemRepresentation representation = PackFormat.itemRepresentation(bukkitVersion);
+        AppearanceMode.Resolved appearance = settings.appearanceMode().resolve(
+                PackFormat.itemRepresentation(bukkitVersion),
+                com.mineplus.pack.item.ItemFrameWriter.supportsStringState());
+        PackFormat.ItemRepresentation representation = appearance.representation();
+        AppearanceMode.Dispatch dispatch = appearance.dispatch();
+        ModelAssetValidator validator = new ModelAssetValidator(
+                virtualBlockManager, settings.validateAssets());
         long start = System.nanoTime();
         List<PackAsset> failed = new ArrayList<>();
 
@@ -121,12 +150,12 @@ public final class PackCompiler {
                     blockAssets.add(blockAsset);
                     continue;
                 }
-                byte[] bytes = serialized(asset);
+                byte[] bytes = serialized(asset, dispatch);
                 if (bytes == null) {
                     failed.add(asset);
                     continue;
                 }
-                entries.put(asset.zipEntryPath(), bytes);
+                putEntry(entries, asset.zipEntryPath(), bytes, validator);
             }
             if (representation == PackFormat.ItemRepresentation.LEGACY_CUSTOM_MODEL_DATA) {
                 // Legacy items live in shared per-material host files, not their
@@ -135,14 +164,23 @@ public final class PackCompiler {
                     entries.remove(item.modernEntryPath());
                 }
                 for (Map.Entry<String, byte[]> legacy : ItemModelWriter.legacyHostFiles(itemsOnly(snapshot)).entrySet()) {
-                    entries.put(legacy.getKey(), legacy.getValue());
+                    putEntry(entries, legacy.getKey(), legacy.getValue(), validator);
                 }
             }
             // Block host files are representation-independent: a BlockDisplay
             // has no per-entity model dispatch on any client version.
             for (Map.Entry<String, byte[]> host : BlockStateWriter.hostFiles(blockAssets).entrySet()) {
-                entries.put(host.getKey(), host.getValue());
+                putEntry(entries, host.getKey(), host.getValue(), validator);
             }
+
+            // The client-window gate runs on the artifact's own bytes, after
+            // every writer, before hashing: the corrected geometry is what the
+            // artifact hash, the filename and the client download all describe.
+            ModelGeometryGuard.Report guard = ModelGeometryGuard.enforce(entries);
+            validator.checkAssets(snapshot);
+            validator.checkArtifactEntries(entries, guard);
+            lastReport = validator.report(snapshot.size(), failed.size());
+            logWarnings(lastReport);
 
             if (entries.isEmpty()) {
                 // Nothing survived: do not publish an empty artifact; keep the previous one.
@@ -232,8 +270,37 @@ public final class PackCompiler {
         return items;
     }
 
+    /** Adds one entry, reporting a path another asset already wrote. */
+    private static void putEntry(Map<String, byte[]> entries, String path, byte[] bytes,
+                                 ModelAssetValidator validator) {
+        if (entries.put(path, bytes) != null) {
+            validator.entryCollision(path);
+        }
+    }
+
+    /** Debug log of the last validation pass: a bounded sample plus a total. */
+    private static void logWarnings(ModelAssetValidator.Report report) {
+        List<String> warnings = report.warnings();
+        if (warnings.isEmpty()) {
+            return;
+        }
+        int shown = Math.min(12, warnings.size());
+        for (int index = 0; index < shown; index++) {
+            DebugLogger.warning("[PackValidator] " + warnings.get(index));
+        }
+        if (warnings.size() > shown) {
+            DebugLogger.warning("[PackValidator] " + (warnings.size() - shown)
+                    + " further warning(s); see /mineplus pack status.");
+        }
+    }
+
+    /** Content diagnostics of the last compile. */
+    public ModelAssetValidator.Report lastReport() {
+        return lastReport;
+    }
+
     /** Serialized bytes with per-content-hash memoization; null when the asset fails. */
-    private byte[] serialized(PackAsset asset) {
+    private byte[] serialized(PackAsset asset, AppearanceMode.Dispatch dispatch) {
         String hash;
         try {
             hash = asset.contentHash();
@@ -242,7 +309,9 @@ public final class PackCompiler {
         }
         // Include the output path: the same model registered as both an item
         // and a block shares its source-file hash but serializes differently.
-        String cacheKey = hash + "|" + asset.zipEntryPath();
+        // The appearance dispatch is part of the output too (a plain model and
+        // its range/select wrapper share one asset hash).
+        String cacheKey = hash + "|" + asset.zipEntryPath() + "|" + dispatch;
         byte[] cached = serializedCache.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -282,8 +351,13 @@ public final class PackCompiler {
                     originMode = null;
                 }
                 bytes = model.serialize(virtualModel, originMode, model.namespace());
-            } else if (asset instanceof ItemModelAsset) {
-                bytes = asset.serialize();
+            } else if (asset instanceof ItemModelAsset item) {
+                bytes = item.serialize(dispatch);
+            } else if (asset instanceof GeneratedAsset generated) {
+                // Synthesized files (bone rigs, custom mob models and their
+                // textures) carry their bytes directly: they have no on-disk
+                // source and no virtual model to serialize.
+                bytes = generated.serialize();
             } else if (asset instanceof TextureAsset || asset instanceof RawAsset) {
                 bytes = asset.serialize();
             } else {

@@ -31,6 +31,22 @@ public final class MineplusAnimationApi implements AnimationApi {
     }
 
     @Override
+    public boolean playAnimation(UUID instanceId, String animation, AnimationPlayback playback,
+                                 int priority, int fadeInTicks, int fadeOutTicks) {
+        UUID renderedModelId = resolve(instanceId);
+        return renderedModelId != null
+                && animationManager.play(renderedModelId, animation, playback, priority, fadeInTicks, fadeOutTicks);
+    }
+
+    @Override
+    public void clearAutoState(UUID instanceId) {
+        UUID renderedModelId = resolve(instanceId);
+        if (renderedModelId != null) {
+            animationManager.clearAutoState(renderedModelId);
+        }
+    }
+
+    @Override
     public boolean stopAnimation(UUID instanceId, String animation) {
         UUID renderedModelId = resolve(instanceId);
         return renderedModelId != null && animationManager.stop(renderedModelId, animation);

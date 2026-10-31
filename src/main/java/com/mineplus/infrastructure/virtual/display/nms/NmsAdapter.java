@@ -49,6 +49,16 @@ public interface NmsAdapter {
     /** Wraps packets into one bundle packet: the client applies them atomically in one frame. */
     Object bundle(List<Object> packets);
 
+    /**
+     * Relative wire/protocol cost of a packet, used to keep a bundle under the
+     * client's weight ceiling. The default treats every packet as one unit;
+     * adapters may estimate per type (metadata entry count, equipment slots).
+     * Implementations must never throw.
+     */
+    default int packetWeight(Object packet) {
+        return 1;
+    }
+
     void send(Player player, Object packet);
 
     /** Moves the server-side (never ticked) entity so packets built afterwards reflect the new pos/rot. */

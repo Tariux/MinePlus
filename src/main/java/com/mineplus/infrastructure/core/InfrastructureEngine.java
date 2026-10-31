@@ -72,6 +72,20 @@ public final class InfrastructureEngine {
             ItemRegistry itemRegistry,
             AnimationSettings animationSettings
     ) {
+        this(plugin, virtualBlockManager, itemRegistry, animationSettings, null);
+    }
+
+    /**
+     * @param perf performance registry the animation runtime reports pose
+     *             slices to (may be {@code null} for embedded/test bootstrap)
+     */
+    public InfrastructureEngine(
+            MineplusPlugin plugin,
+            VirtualBlockManager virtualBlockManager,
+            ItemRegistry itemRegistry,
+            AnimationSettings animationSettings,
+            com.mineplus.infrastructure.perf.PerfRegistry perf
+    ) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.registry = new MultiBlockRegistry();
@@ -82,6 +96,7 @@ public final class InfrastructureEngine {
         this.persistenceFacade = new PersistenceFacade(PersistenceConfig.defaults(plugin.getDataFolder()), plugin.getLogger());
         this.persistenceFacade.initialize();
         this.animationManager = new ModelAnimationManager(plugin, virtualBlockManager);
+        this.animationManager.setPerfRegistry(perf);
         this.animationManager.updateSettings(animationSettings);
         this.renderingManager = new ModelRenderingManager(virtualBlockManager);
         this.upgradeManager = new UpgradeManager(itemManager);

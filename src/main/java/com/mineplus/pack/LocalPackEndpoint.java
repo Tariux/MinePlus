@@ -121,7 +121,7 @@ final class LocalPackEndpoint {
             }
             exchange.getResponseHeaders().set("Content-Type", "application/zip");
             exchange.getResponseHeaders().set("Content-Length", String.valueOf(file.length()));
-            exchange.getResponseHeaders().set("Cache-Control", "public, max-age=86400");
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
             exchange.sendResponseHeaders(200, file.length());
             try (InputStream in = Files.newInputStream(file.toPath());
                  OutputStream out = exchange.getResponseBody()) {
