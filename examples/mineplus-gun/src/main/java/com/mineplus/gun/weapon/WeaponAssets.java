@@ -28,8 +28,10 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>The module jar is the source of truth. Every file under
  * {@code defaults/guns/<id>/} is mirrored into the Core's pack staging area:
- * {@code models/…​.json} becomes {@code pack/mineplusgun/models/item/<id>/…},
- * and the folder's per-weapon texture becomes
+ * {@code models/…} becomes {@code pack/mineplusgun/models/item/<id>/…} — a
+ * {@code .bbmodel} rides along as the authoring source {@link WeaponBbModels}
+ * bakes into frames, and the pack never sees it because only {@code .json}
+ * registers — and the folder's per-weapon texture becomes
  * {@code pack/mineplusgun/textures/item/<id>.png}. The sound set under
  * {@code defaults/sounds/} is mirrored into {@code pack/mineplusgun/sounds/}.
  * Nothing vanilla is overridden.</p>
@@ -71,6 +73,10 @@ public final class WeaponAssets {
             }
         }
         plugin.getLogger().info("[MineplusGun] Installed " + installed + " asset file(s).");
+        // A folder that ships only a Blockbench project gets its frames from it,
+        // before anything reads the folder: the densifier, the classifier and the
+        // pack all consume what is on disk.
+        WeaponBbModels.bakeAll(plugin, context);
         // Densify and complete the installed animation before anyone reads the
         // folder: frame discovery and the pack both consume what is on disk.
         WeaponAnimations.generateAll(plugin, context);
@@ -265,7 +271,7 @@ public final class WeaponAssets {
         }
         String id = rest.substring(0, slash);
         String relative = rest.substring(slash + 1);
-        if (relative.startsWith("models/") && relative.toLowerCase(Locale.ROOT).endsWith(".json")) {
+        if (relative.startsWith("models/") && isOneOf(relative, ".json", ".bbmodel")) {
             return MODEL_INSTALL + id + "/" + relative.substring("models/".length());
         }
         if (!relative.contains("/") && relative.toLowerCase(Locale.ROOT).endsWith(".png")) {

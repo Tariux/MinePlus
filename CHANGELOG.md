@@ -7,6 +7,149 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Weapons (`Mineplus` + MineplusGun) — Blockbench clips become gun animations
+
+#### Added
+
+- **`pack.item.BbClipBaker`** — the Core now compiles a Blockbench project's
+  *animations* into the static posed item models a framed weapon needs, because
+  an item model has no animation channel. `rest()` bakes the unposed model and
+  `poses(model, style, clip, n)` samples one clip at `n` evenly spaced times.
+  Each pose is split across the two carriers the format can express: the bone
+  the model hangs from folds onto the item's per-context `display` transform
+  (no range limit there), every other bone becomes one element hinge
+  `rotation {origin, axis, angle}` on its own cubes — exact for a single-axis
+  turn plus an axial shift. A scale channel, a hinge past ±45° and a bone
+  turning about more than one axis are returned as `issues` and degraded (the
+  envelope of the posed box), never dropped in silence. The fold's invariant is
+  that an identity clip reproduces the authored `display` byte for byte.
+- **`.bbmodel` gun folders** — MineplusGun's `WeaponBbModels` bakes every
+  installed gun folder that ships a Blockbench source at install time, before
+  the densifier, the frame classifier and the pack read the folder: `fire` →
+  `<id>_fire_N`, `lever_cycle`/`bolt`/`pump` → `<id>_cycle_N`, `zoom`/`aim` →
+  `<id>_scope_in_N` + `<id>_scope_hold` + `<id>_scope_out_N` (the inward frames
+  reversed, so the gun comes down instead of snapping to its lowest aim pose),
+  `reload` → `<id>_loading_N`, `equip` → `<id>_equip_N`. A break-action file
+  authors its two halves as separate clips, and they map to the two roles the
+  runtime already plays: `break_load` (barrels open, shells in) is the reload,
+  `close` (the snap shut) is the between-shots cycle. An `idle` clip is not
+  baked — a held item cannot be rewritten per frame — a role that ends up with
+  no frames still gets the module's synthesized fallback, and a baked file the
+  source no longer produces is swept.
+- **Two Blockbench rifles in the shop** — `longmark` (AMETHYST_SHARD carrier,
+  lever-action BOLT marksman rifle: 6 rounds, 19 dmg, 190-block range,
+  penetration 2, clips `fire` 0.45 s, `lever_cycle` 0.9 s, `zoom` 0.6 s) and
+  `longshot` (QUARTZ carrier, 8-round semi-automatic scoped repeater with every
+  role authored, reload 2.2 s = the 44-tick reload it already configured). Both
+  shoot scoped or from the hip.
+- **Three more Blockbench guns** — `hawk_eye` (BLAZE_ROD carrier, SNIPER,
+  break-action BOLT marksman rifle with **no scope**: 5 rounds, 18.5 dmg,
+  165-block range, penetration 1, and the tightest hip-fire cone in the set
+  because it has no glass to fall back on — 37 baked states from `fire`,
+  `break_load`, `close`), `double_boom` (COAL carrier, twin-barrel SHOTGUN:
+  2 rounds, 14 pellets at 5.2, 130 rpm so both barrels go fast and a 24-tick
+  snap-shut cycle, 37 baked states from the same three clips) and `peacemaker`
+  (IRON_NUGGET carrier, PISTOL revolver: 6 rounds, 12.5 dmg, 70-block range,
+  22 baked states from `fire` and `reload`). The bake and the frame classifier
+  were verified offline against the built jars, so every clip these files carry
+  reaches a role the runtime actually plays; `peacemaker`'s `inspect` flourish
+  is reported and skipped, since a held item has no per-frame channel to play it
+  on. All three carriers are new to the set, which matters beyond looks: the
+  pack plays a clip on the item's own cooldown clock and the client keys that
+  cooldown per material, so two guns sharing one material would animate
+  each other.
+- **The scope reticle overlay** — `settings.scope-gui: true` (default) makes the
+  left-click scope trigger also raise `gun.scope.ScopeGui`: five rows of black
+  frame with one clear cross through the middle, which lands on the player's own
+  sight line because the panel is screen-centred. A click on the sight line is
+  `WeaponRuntime.fireScoped` — the same `shoot` path a right-click press takes,
+  so the veto event, the round, recoil, pose and HUD cannot differ between a
+  scoped and an unscoped shot — the corner cell reads the live magazine and the
+  reserve, every container click and drag is swallowed, and closing the screen
+  (Esc, E, death, a reload starting, the gun leaving the hand) unscopes through
+  the weapon's own `scope_out` pose. A server cannot rotate or zoom a modern
+  client's view, so this is the scope the client will actually show.
+
+#### Fixed
+
+- **`animation: {fire: 0.45}` disabled a gun's authored clips** — the value was
+  read as a *clip name*, so every shipped weapon resolved a clip called `0.45`,
+  found nothing, and fell back to synthesized frames while its real authored
+  animation sat unused. A number on a role is now the authored clip length in
+  seconds (converted to pose ticks, clamped 1..60) and a string still renames
+  the clip, which is what each spelling was always meant to say.
+
+### Custom mobs (`Mineplus` + MineplusMobFun) — the game engine can own the mind, and a crowd gets cheap
+
+#### Added
+
+- **Two minds per definition** — `CustomMobDefinition.vanillaAi()` (mob YAML:
+  `ai: vanilla`) keeps the base type's own goal and target selectors instead of
+  clearing them, and registers **no behavior profile at all**, so the server
+  pathfinds, walks, hunts, swings and kills the mob and the plugin only dresses
+  it up. The base type *is* the AI choice: an `IRON_GOLEM` base guards and hunts
+  monsters, a `ZOMBIE` base hunts players and villagers. A donor type that
+  disagrees with the base is rejected (the mob stays isolated) and
+  `keepsVanillaGoals()` is the predicate the manager, the render engine and the
+  module command layer branch on.
+- **A rigged mob keeps being a real entity** — `MobRenderSpec.hitbox(w, h)`
+  sizes the base through the Paper-only `Entity#setSize` (probed reflectively, so
+  Spigot simply keeps the base type's hitbox), `HurtFeedback` chooses the damage
+  cue (`PARTICLES` — a throttled `Particle.CRIT` burst through the shared
+  `ParticleFx` budget — `FLASH` — the base revealed for 8 ticks — or `NONE`), and
+  `render/MobShadowAssets` generates a soft ground-shadow plate (`shade:false` +
+  `blend:true`) sized from the hitbox or an explicit `render.shadow` radius,
+  because the display rig replaces the model whose vanilla shadow went with it.
+- **Cost controls** — `CUSTOM_MOBS.RENDER_NEAR_DISTANCE` (default 20) drops a rig
+  beyond it to a quarter pose cadence with its interpolation window widened to
+  match, `CUSTOM_MOBS.SHADOWS` toggles the shadow plate globally, and a rig no
+  viewer is inside `RENDER_DISTANCE` of is released entirely (displays despawn,
+  the real base model shows) and rebuilt on return with an 8-block hysteresis
+  band. Each pose slot is diffed against the value last pushed (0.0015 blocks /
+  0.0008 matrix) so an idle mob sends no packets, and the viewer set is
+  snapshotted once per world per pass instead of once per mob.
+- **`/mineplus mob cost`** prints the live breakdown — rigs posing, rigs at
+  quarter rate, rigs released, the display entity count behind them, the pose
+  cadence and the per-world cap — with the tuning keys named next to it.
+  `/mineplus mob inspect` and `/mobfun rig` now label which mind runs a mob, and
+  `MobFunShowcaseEntry.steersByCoreActions()` lets `/mobfun spawn|fire` say
+  honestly that an engine-owned mob has nothing to force.
+- **`mobs/examples/example_vanilla_ai_mob.yml`** — a complete engine-owned
+  example (`forest_stalker`, a zombie base with a bbmodel rig, `hitbox`,
+  `shadow`, `hurt-feedback` and an `animations.attack` alias), extracted next to
+  the Evil Pig example on first start.
+
+#### Changed
+
+- **The base entity is made invisible, never untracked** — `MobRenderEngine`
+  uses `LivingEntity#setInvisible(true)` instead of `Player#hideEntity`, so the
+  client keeps the entity in its world: it stays looked-at, targeted, damaged,
+  knocked back, body-blocked and killed by the ordinary rules, and its hurt and
+  death states render. `hideEntity`/`showEntity` remain only for the `ItemDisplay`
+  entities of a rig.
+- **MobFun's two heavy showcases stopped re-implementing a mob** — the Villager
+  Soldier moved from a villager base plus `AttackNearestAction` to an
+  `IRON_GOLEM` base with `vanillaAi()`, and the Woodland Trickster from a
+  villager base to a `ZOMBIE` base with `vanillaAi()`, both with no behavior
+  profile and no priority entry (`BehaviorPriority.SOLDIER`/`TRICKSTER` removed).
+  The trickster is daylight-safe through a reflective
+  `Zombie#setShouldBurnInDay(false)` probe with a fire-resistance fallback in its
+  `spawnConfigurator`. The Evil Pig stays Core-steered — a vanilla pig would
+  never hunt.
+- **Death follows the authored clip when there is one** — `syncBasePresentation`
+  reveals the base only when the rig is absent or released, so a mob with a
+  `death` clip plays it once instead of double-playing it under the vanilla
+  collapse, and one without still shows the engine's own death animation.
+- **An engine-owned mob's attack clip is cued by its own damage event** — the
+  melee listener is gated on the vanilla-AI flag, so a Core-steered mob's
+  action-driven overlay is no longer restarted when its damage lands.
+- Docs updated across the board: `docs/custom-mobs.md` gained the mind-ownership
+  comparison, the YAML definition reference and the crowd-cost section;
+  `docs/config-reference.md` mirrors the regenerated `CUSTOM_MOBS` block;
+  `docs/developer-api.md` documents the mind contract and the new cost controls;
+  `AGENTS.md` and `examples/mineplus-mobfun/README.md` describe the engine-owned
+  soldier and trickster.
+
 ### Custom mobs (`Mineplus`) — Rig facing, retexture fallback, animation and hunting fixes
 
 #### Fixed
@@ -50,11 +193,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardcoded to one tick and the setting was read by nothing; it now schedules
   the loop and scales the animation clocks and the measured speed with the
   interval, so raising it cuts display packets without desynchronizing clips.
+  `RENDER_INTERPOLATION_TICKS` is likewise never eased over a window shorter
+  than that cadence: a 1-tick window with a 4-tick interval used to finish
+  easing three ticks before the next sample arrived and the rig snapped.
 - **`/mobfun rig <id>` reports facing** — each live mob line prints the rig
   heading beside the server body yaw, and `/mobfun rig <id> yaw-offset
   <deg|auto>` probes a facing offset on a running server before it is authored
   into the definition. The stale "Overrides: `mobs/<id>.model.json`" line is
-  gone: nothing in the Core reads that file.
+  gone: nothing in the Core reads that file. The MobFun README followed — it
+  still described the soldier as imported through a class that no longer exists
+  and listed two custom mobs where there are now three.
 
 #### Removed
 
@@ -64,7 +212,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PackReport.Builder.isBroken`, `CustomMobAttributes.templatedAttributeNames`,
   `BoneTransformMath.translationOf`, the unused `TransportMobBackend` identity
   matrix, `MobRenderSpec.variantRegistryFor` / `variantHasModelField` and the
-  module's unread `overridesFile` / `relative` helpers.
+  module's unread `overridesFile` / `relative` helpers. A sweep of the whole
+  repository for the same class of leftovers removed nine imports nothing
+  referenced (`Ballistics`, `ItemMagazine`, `DisplayTransport`,
+  `BoneRigRenderer`, `PackSystem`, `GrowPlantsAction`, `TransportMobBackend`,
+  `MobRenderEngine`) and the parser's never-populated `cubesByElement` map.
 
 ### Core engine (`Mineplus`) — Composed visual impact units
 

@@ -10,6 +10,17 @@ id: example_evil_pig
 # Required. Any EntityType name works (PIG, VILLAGER, ZOMBIE, ...).
 base-entity: PIG
 
+# Who owns the mob's mind.
+#   core (default) — the Core clears the base type's vanilla goals and steers
+#                    the mob through its behavior profile; a definition with no
+#                    profile just stands still.
+#   vanilla        — the game engine runs it: the mob paths, walks, swings,
+#                    recoils and dies exactly like its base type, with no plugin
+#                    scan cost and client-smooth motion. Pick a base whose own AI
+#                    already does the job (ZOMBIE hunts players, IRON_GOLEM
+#                    guards). See example_soldier_vanilla_ai.yml.
+# ai: core
+
 display-name: "Evil Pig"
 show-name: true
 
@@ -32,7 +43,25 @@ render:
   texture: evil_pig.png
   # file: model.bbmodel
   # scale: 1.0
+  # yaw-offset: 0           # 180 when the model was authored backwards
   # fallback: base_entity   # or generic_cube
+  #
+  # How a rig that covers the vanilla silhouette reacts to damage:
+  #   particles (default) — a crit burst on the mob each hit
+  #   flash             — the base entity is revealed for a few ticks instead
+  #   none              — no extra feedback (the base still flashes when visible)
+  # hurt-feedback: particles
+  #
+  # Ground shadow plate under the rig: true (default, sized from the hitbox),
+  # a radius in blocks, or false/none to remove it.
+  # shadow: true
+
+# Optional hitbox override (blocks, feet-anchored). Applied through
+# Entity#setSize where the server exposes it; elsewhere the base type's own box
+# stays in force and the loader logs nothing about it.
+# hitbox:
+#   width: 0.6
+#   height: 1.9
 
 # Optional: hang a vanilla material or pack item id on a rig bone.
 # hand-items:

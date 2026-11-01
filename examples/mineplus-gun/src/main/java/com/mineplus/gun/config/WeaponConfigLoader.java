@@ -49,7 +49,8 @@ public final class WeaponConfigLoader {
                 config.getString("settings.hud.template", null),
                 (int) clamp(config.getDouble("settings.hud.low-ammo-threshold", 3), 0, 64),
                 worldSet(config.getStringList("settings.disabled-worlds")),
-                config.getBoolean("settings.pvp-only", false)
+                config.getBoolean("settings.pvp-only", false),
+                config.getBoolean("settings.scope-gui", true)
         );
 
         Material ammoMaterial = material(config.getString("ammo.material", "GOLD_NUGGET"),
@@ -149,13 +150,17 @@ public final class WeaponConfigLoader {
                 .scopeSpreadMultiplier(clamp(s.getDouble("aim.spread-multiplier", 0.3), 0.0, 2.0))
                 .scopeMovePenaltyMultiplier(clamp(s.getDouble("aim.move-multiplier", 1.5), 0.0, 5.0))
                 .scopeRecoilMultiplier(clamp(s.getDouble("aim.recoil-multiplier", 0.7), 0.0, 5.0))
-                .reloadClip(s.getString("animation.reload", "reload"))
-                .cycleClip(s.getString("animation.cycle", "cycle"))
-                .fireClip(s.getString("animation.fire", "fire"))
-                .scopeInClip(s.getString("animation.scope-in", "scope_in"))
-                .scopeHoldClip(s.getString("animation.scope-hold", "scope_hold"))
-                .scopeOutClip(s.getString("animation.scope-out", "scope_out"))
-                .equipClip(s.getString("animation.equip", "equip"))
+                .reloadClip(clipName(s, "reload", "reload"))
+                .cycleClip(clipName(s, "cycle", "cycle"))
+                .fireClip(clipName(s, "fire", "fire"))
+                .scopeInClip(clipName(s, "scope-in", "scope_in"))
+                .scopeHoldClip(clipName(s, "scope-hold", "scope_hold"))
+                .scopeOutClip(clipName(s, "scope-out", "scope_out"))
+                .equipClip(clipName(s, "equip", "equip"))
+                .firePoseTicks(poseTicks(s, "fire", 4))
+                .scopeInTicks(poseTicks(s, "scope-in", 6))
+                .scopeOutTicks(poseTicks(s, "scope-out", 5))
+                .equipTicks(poseTicks(s, "equip", 8))
                 .muzzleParticle(s.getString("fx.muzzle", "SMOKE"))
                 .flashParticle(s.getString("fx.flash", "FLAME"))
                 .smokeParticle(s.getString("fx.smoke", "LARGE_SMOKE"))
@@ -264,6 +269,34 @@ public final class WeaponConfigLoader {
             }
         }
         return set;
+    }
+
+    /**
+     * The clip name of one animation role.
+     *
+     * <p>{@code animation.<role>} carries two different authoring facts, and the
+     * shape of the value decides which: a <b>string</b> renames the clip a
+     * weapon plays (for a pack whose frames use another vocabulary), a
+     * <b>number</b> is the clip's authored length in seconds and leaves the name
+     * at its default. Reading a number as a name is what silently turned every
+     * shipped {@code animation.fire: 0.45} into a clip called "0.45", so the two
+     * are told apart here rather than by a key per meaning.</p>
+     */
+    private static String clipName(ConfigurationSection s, String role, String fallback) {
+        Object value = s.get("animation." + role);
+        if (value == null || value instanceof Number) {
+            return fallback;
+        }
+        return String.valueOf(value);
+    }
+
+    /** How long one pose clip plays: its authored seconds, or the runtime default. */
+    private static int poseTicks(ConfigurationSection s, String role, int fallbackTicks) {
+        if (!(s.get("animation." + role) instanceof Number span)) {
+            return fallbackTicks;
+        }
+        double seconds = span.doubleValue();
+        return seconds <= 0.0 ? fallbackTicks : (int) clamp(Math.round(seconds * 20.0), 1, 60);
     }
 
     private static double clamp(double value, double min, double max) {

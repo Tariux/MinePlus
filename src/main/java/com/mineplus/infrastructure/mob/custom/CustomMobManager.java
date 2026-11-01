@@ -119,6 +119,15 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     }
 
     /**
+     * Late particle-service injection: the shared {@link
+     * com.mineplus.infrastructure.fx.ParticleFx} budget is built after the mob
+     * subsystem, and a hurt rigged mob degrades to its hurt clip alone without it.
+     */
+    public void setParticleFx(com.mineplus.infrastructure.fx.ParticleFx particleFx) {
+        renderEngine.setParticleFx(particleFx);
+    }
+
+    /**
      * Installs the event listeners. Idempotent; called once by the Core's
      * bootstrap, so chunk restores work before any module registers a
      * definition.
@@ -200,7 +209,9 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         }
 
         MobProfile profile = buildProfile(definition);
-        behaviorApi.register(owner, profile);
+        if (profile != null) {
+            behaviorApi.register(owner, profile);
+        }
         Registration registration = new Registration(owner, definition, profile);
         registrations.put(definition.id(), registration);
         ownedIds.computeIfAbsent(owner, key -> ConcurrentHashMap.newKeySet()).add(definition.id());
@@ -219,14 +230,26 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         }
     }
 
+    /**
+     * The mob's behavior profile, or {@code null} when it needs none.
+     *
+     * <p>A definition without a behavior consumer still gets an idle profile —
+     * but only when the Core owns its mind. A mob that keeps the vanilla goals
+     * of its base type is steered by the server engine, so registering an idle
+     * profile for it would only cost a scan slot and say nothing.</p>
+     */
     private MobProfile buildProfile(CustomMobDefinition definition) {
-        MobProfile.Builder builder = MobProfile.builder(definition.baseType(), definition.id());
         Consumer<MobProfile.Builder> behavior = definition.behavior();
         if (behavior == null) {
-            builder.action(IDLE_ACTION, 30.0);
-        } else {
-            behavior.accept(builder);
+            if (definition.keepsVanillaGoals()) {
+                return null;
+            }
+            MobProfile.Builder idle = MobProfile.builder(definition.baseType(), definition.id());
+            idle.action(IDLE_ACTION, 30.0);
+            return idle.build();
         }
+        MobProfile.Builder builder = MobProfile.builder(definition.baseType(), definition.id());
+        behavior.accept(builder);
         return builder.build();
     }
 
@@ -241,7 +264,9 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
             return;
         }
         registrations.remove(id);
-        behaviorApi.unregister(owner, registration.profile);
+        if (registration.profile != null) {
+            behaviorApi.unregister(owner, registration.profile);
+        }
         Set<String> owned = ownedIds.get(owner);
         if (owned != null) {
             owned.remove(id);
@@ -322,6 +347,11 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
             return null;
         }
         applyDefinition(living, registration.definition, true);
+        // The caller aimed the spawn: honor the yaw/pitch of the location and
+        // drop any horizontal spawn slide, so a mob faces the way it was placed
+        // instead of a random quarter turn. Vanilla AI takes the body from there.
+        living.setVelocity(living.getVelocity().setX(0.0).setZ(0.0));
+        living.setRotation(location.getYaw(), location.getPitch());
         try {
             if (configurator != null) {
                 configurator.accept(living);
@@ -685,9 +715,15 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         return renderEngine.rigStatus(definitionId);
     }
 
+    /** The live render cost of every rig, for {@code /mineplus mob cost}. */
+    public String costSnapshot() {
+        return renderEngine.costSnapshot();
+    }
+
     private static final class Registration {
         private final Plugin owner;
         private final CustomMobDefinition definition;
+        /** {@code null} for a mob whose mind stays with the vanilla engine. */
         private final MobProfile profile;
 
         private Registration(Plugin owner, CustomMobDefinition definition, MobProfile profile) {

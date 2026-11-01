@@ -26,6 +26,7 @@ import org.bukkit.plugin.Plugin;
  * <pre>
  * id: evil_pig              # optional; defaults to the file name
  * base-entity: PIG          # required
+ * ai: vanilla               # vanilla (the game steers it) | core (its profile does); default core
  * display-name: "Evil Pig"
  * show-name: true
  * attributes:
@@ -39,11 +40,24 @@ import org.bukkit.plugin.Plugin;
  *   scale: 1.0
  *   yaw-offset: 0           # degrees; 180 when the model was authored backwards
  *   fallback: base_entity   # base_entity | generic_cube
+ *   shadow: true            # false | true | a radius in blocks
+ *   hurt-feedback: particles # particles | flash | none
+ * hitbox:
+ *   width: 0.9
+ *   height: 2.1
  * hand-items:
  *   weapon_r: IRON_SWORD    # bone -> vanilla material or pack item id
  * animations:
  *   attack: animation.smash # state -> clip alias
  * </pre>
+ *
+ * <p><b>Who owns the mob's mind.</b> {@code ai: vanilla} hands the whole brain to
+ * the server engine — the mob walks, hunts, swings, recoils and dies like its
+ * base type, with client-interpolated movement and no scan cost — and Mineplus
+ * only dresses it up. That works only for a base type whose vanilla AI already
+ * does the job (an {@code IRON_GOLEM} guards, a {@code ZOMBIE} hunts), so
+ * {@code base-entity} is the real decision. {@code ai: core} (the default)
+ * clears the vanilla goals and lets the behavior profile steer the mob.</p>
  *
  * <p><b>Legacy key aliases.</b> Older drafts spelled several keys differently;
  * every alias below still parses and is reported once per file at load, so
@@ -169,6 +183,16 @@ public final class MobYamlLoader {
         if (persistent != null) {
             builder.persistent(persistent);
         }
+        String aiText = str(yaml, migrated, "ai", "behavior-owner");
+        if (aiText != null) {
+            switch (aiText.trim().toLowerCase(Locale.ROOT)) {
+                case "vanilla", "vanilla-ai", "game", "engine" -> builder.vanillaAi();
+                case "core", "isolated", "profile", "plugin" -> {
+                    // The default: the behavior profile owns the mob's mind.
+                }
+                default -> problems.add("unknown 'ai: " + aiText + "' (use vanilla or core)");
+            }
+        }
 
         CustomMobAttributes.Builder attributes = CustomMobAttributes.builder();
         Double maxHealth = num(yaml, migrated, "attributes.max-health", "attributes.health", "health");
@@ -237,8 +261,11 @@ public final class MobYamlLoader {
         Double yawOffset = num(yaml, migrated, "render.yaw-offset-degrees", "render.yaw-offset",
                 "yaw-offset-degrees", "yaw-offset");
         String fallbackText = str(yaml, migrated, "render.fallback", "render.fallback-mode", "fallback-mode");
+        Object shadowValue = yaml.get("render.shadow");
+        String hurtText = str(yaml, migrated, "render.hurt-feedback", "hurt-feedback");
         if (typeText == null && fileText == null && textureText == null && scale == null
-                && yawOffset == null && fallbackText == null) {
+                && yawOffset == null && fallbackText == null && shadowValue == null
+                && hurtText == null) {
             return null;
         }
 
@@ -278,6 +305,13 @@ public final class MobYamlLoader {
         FallbackMode fallback = fallbackMode(fallbackText);
         if (fallback != null) {
             spec.fallback(fallback);
+        }
+        applyShadow(spec, shadowValue, problems);
+        MobRenderSpec.HurtFeedback hurt = hurtFeedback(hurtText);
+        if (hurt != null) {
+            spec.hurtFeedback(hurt);
+        } else if (hurtText != null) {
+            problems.add("unknown render.hurt-feedback '" + hurtText + "' (use particles, flash or none)");
         }
         ConfigurationSection hitbox = yaml.getConfigurationSection("hitbox");
         if (hitbox != null) {
@@ -328,6 +362,45 @@ public final class MobYamlLoader {
         return switch (text.trim().toLowerCase(Locale.ROOT)) {
             case "base_entity", "base", "vanilla" -> FallbackMode.BASE_ENTITY;
             case "generic_cube", "cube" -> FallbackMode.GENERIC_CUBE;
+            default -> null;
+        };
+    }
+
+    /** {@code render.shadow}: {@code false} turns the plate off, a number pins its radius. */
+    private void applyShadow(MobRenderSpec.Builder spec, Object value, List<String> problems) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Boolean on) {
+            spec.shadow(on.booleanValue());
+            return;
+        }
+        if (value instanceof Number radius) {
+            spec.shadowRadius(radius.floatValue());
+            return;
+        }
+        String text = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
+        switch (text) {
+            case "true", "on", "auto", "yes" -> spec.shadow(true);
+            case "false", "off", "none", "no" -> spec.shadow(false);
+            default -> {
+                try {
+                    spec.shadowRadius(Float.parseFloat(text));
+                } catch (NumberFormatException unreadable) {
+                    problems.add("render.shadow '" + text + "' is neither true/false nor a radius");
+                }
+            }
+        }
+    }
+
+    private MobRenderSpec.HurtFeedback hurtFeedback(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        return switch (text.trim().toLowerCase(Locale.ROOT)) {
+            case "particles", "particle", "sparks", "crit" -> MobRenderSpec.HurtFeedback.PARTICLES;
+            case "flash", "vanilla", "model" -> MobRenderSpec.HurtFeedback.FLASH;
+            case "none", "off", "clip" -> MobRenderSpec.HurtFeedback.NONE;
             default -> null;
         };
     }

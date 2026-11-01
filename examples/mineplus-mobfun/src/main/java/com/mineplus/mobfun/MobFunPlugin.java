@@ -24,12 +24,13 @@ import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
-import org.bukkit.entity.Enemy;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.IronGolem;
-import org.bukkit.entity.Player;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Snowman;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 /**
  * MobFun — Mob behavior showcase module for the Mineplus Core.
@@ -82,25 +83,37 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       texture, no vanilla AI at all, and one Core action
  *       ({@code attack_nearest}) that hunts the nearest player or villager.
  *       Registered through {@code CustomMobApi}; spawned through
- *       {@code /mobfun spawn evilpig}.</li>
- *   <li><b>Villager Soldier</b> — a fully authored custom mob: the Blockbench
- *       soldier model ({@code mobs/soldier_villager.bbmodel}, a 22-group rig
- *       with per-face UVs and its own {@code walk}/{@code idle} clips) on a
- *       villager base, armed with a spear and one Core action
- *       ({@code attack_nearest}) that hunts hostile mobs. It is the showcase
- *       for the Core's {@code BBMODEL} render pipeline: the outliner becomes the render rig and
- *       the file's clips are played by the Core, so the legs swing while it
- *       walks and the whole rig breathes while it stands. Spawned through
+ *       {@code /mobfun spawn evilpig}. A pig's own AI would never hunt
+ *       anything, so this one is deliberately steered by the plugin.</li>
+ *   <li><b>Villager Soldier</b> — a fully authored custom mob whose <em>mind
+ *       belongs to the game engine</em>: the Blockbench soldier model
+ *       ({@code mobs/soldier_villager.bbmodel}, a 22-group rig with per-face
+ *       UVs and its own {@code walk}/{@code idle} clips) on an iron-golem base
+ *       with {@code vanillaAi()}. It guards like a golem because it <i>is</i>
+ *       one — pathfinding, stride, swing, hurt recoil and death are the
+ *       server's, interpolated by the client like any real mob, and no behavior
+ *       profile is registered for it. It is also the showcase for the Core's
+ *       {@code BBMODEL} render pipeline: the outliner becomes the render rig
+ *       and the file's clips are played by the Core, so the legs swing while the
+ *       golem walks and the whole rig breathes while it stands. Spawned through
  *       {@code /mobfun spawn soldier}.</li>
- *   <li><b>Woodland Trickster</b> — a second fully authored custom mob
- *       ({@code mobs/woodland_trickster.bbmodel}) on a villager base: the
- *       file's own bone tree (body, head, hood, cloth, arms, legs) with its
- *       authored rest rotations, and three clips — {@code animation.idle},
- *       {@code animation.walk} and {@code animation.attack}. Idle and walk
- *       blend by movement; the attack clip is played by the Core's rig whenever
- *       the mob lands a hit. It hunts players. Spawned through
- *       {@code /mobfun spawn trickster}.</li>
+ *   <li><b>Woodland Trickster</b> — a second authored custom mob
+ *       ({@code mobs/woodland_trickster.bbmodel}) on a zombie base, likewise
+ *       {@code vanillaAi()}: it hunts players the way a zombie does, and stays
+ *       abroad in daylight. The file's own bone tree (body, head, hood, cloth,
+ *       arms, legs) with its authored rest rotations carries three clips —
+ *       {@code animation.idle}, {@code animation.walk} and
+ *       {@code animation.attack}. Idle and walk blend by the speed the engine
+ *       actually moves it at; the attack clip overlays the moment the zombie
+ *       swings. Spawned through {@code /mobfun spawn trickster}.</li>
  * </ul>
+ *
+ * <p><b>Two minds.</b> Every profile showcase above, and the Evil Pig, runs on
+ * the Core's behavior engine because no vanilla brain does their job. The
+ * soldier and the trickster instead keep their base type's own AI
+ * ({@code vanillaAi()}) — the pattern for content that is "a real mob wearing a
+ * custom face": smoother movement, real attack timing, and damage, knockback,
+ * pushing and death exactly like the mob it is built on, at zero scan cost.</p>
  *
  * <p>Rates are tuned for demonstration (fires are observable within seconds
  * to minutes, not the reference mod's natural half-hour pacing); modules
@@ -234,13 +247,13 @@ public final class MobFunPlugin extends JavaPlugin {
         if (hasBoth("Villager Soldier",
                 "mobs/soldier_villager.bbmodel", "mobs/soldier_villager.png")) {
             showcases.add(new CustomMobShowcase(this, context.customMobs(), "soldier", "Villager Soldier",
-                    EntityType.VILLAGER, this::soldierDefinition));
+                    EntityType.IRON_GOLEM, this::soldierDefinition));
         }
 
         if (hasBoth("Woodland Trickster",
                 "mobs/woodland_trickster.bbmodel", "mobs/woodland_trickster.png")) {
             showcases.add(new CustomMobShowcase(this, context.customMobs(), "trickster", "Woodland Trickster",
-                    EntityType.VILLAGER, this::tricksterDefinition));
+                    EntityType.ZOMBIE, this::tricksterDefinition));
         }
 
         for (MobFunShowcaseEntry showcase : showcases) {
@@ -320,35 +333,41 @@ public final class MobFunPlugin extends JavaPlugin {
     }
 
     /**
-     * The Villager Soldier: an imported Blockbench model on a villager base
-     * with one job — guard the village. Vanilla AI is cleared by the Core, so
-     * the spear only moves through {@code attack_nearest}, aimed at hostile
-     * mobs rather than players or villagers.
+     * The Villager Soldier: an imported Blockbench model on an iron-golem base,
+     * with one job — guard the village.
      *
      * <p>The {@code BBMODEL} spec hands the raw file to the Core: every
      * outliner group becomes a render bone (pivot, parent, geometry), so the
      * spear hand, the helmet and the knees articulate exactly as authored, and
      * the file's {@code animation.walk} and {@code animation.idle} clips drive
-     * them, blended by movement speed. Nothing is hand-mapped, so re-exporting
-     * the model with more groups or other clips needs no code change. The
-     * sibling PNG resolves the file's texture reference even for non-embedded
-     * exports.</p>
+     * them, blended by the speed the golem actually moves at. Nothing is
+     * hand-mapped, so re-exporting the model with more groups or other clips
+     * needs no code change. The sibling PNG resolves the file's texture
+     * reference even for non-embedded exports.</p>
      *
-     * <p>It moves like an iron golem: the attribute profile starts from
-     * {@link EntityType#IRON_GOLEM}'s captured defaults (health, knockback,
-     * scale, gravity and the rest of the golem's numbers), and only the fields
-     * below deviate from that template. Health and armor are deliberately high:
-     * the rig detaches on death (a displayed mob has no corpse), and a showcase
-     * that a single shotgun blast erases cannot be inspected while it reacts to
-     * damage.</p>
+     * <p>{@code vanillaAi()} is the reason it feels alive: pathfinding, the
+     * stride, the swing, the hurt recoil and the death are the game engine's
+     * own, so the client interpolates them like it does for any real mob
+     * instead of waiting for the plugin's next tick. A golem already hunts
+     * monsters — the target filter {@code attack_nearest} used to hand-roll —
+     * so this definition declares no behavior profile at all and the behavior
+     * engine never spends a scan slot on it.</p>
+     *
+     * <p>Its body numbers also come from {@link EntityType#IRON_GOLEM}'s
+     * captured defaults (health, knockback, scale, gravity and the rest of the
+     * golem's numbers); only the fields below deviate. Health and armor are
+     * deliberately high: a showcase that a single shotgun blast erases cannot be
+     * inspected while it reacts to damage.</p>
      */
     private CustomMobDefinition soldierDefinition() {
-        return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER)
+        return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.IRON_GOLEM)
                 .displayName("Villager Soldier")
                 .visual(CustomMobDefinition.VisualMode.RIG)
+                .vanillaAi()
                 .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "soldier_villager.bbmodel")
                         .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
                         .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
+                        .hitbox(0.7, 2.1)
                         .build())
                 .attributes(CustomMobAttributes.builder()
                         .fromTemplate(EntityType.IRON_GOLEM)
@@ -359,40 +378,41 @@ public final class MobFunPlugin extends JavaPlugin {
                         .armor(10.0)
                         .knockbackResistance(0.3)
                         .build())
-                .behavior(profile -> profile
-                        .priority(BehaviorPriority.SOLDIER)
-                        .action(AttackNearestAction.builder()
-                                .searchRadius(20.0)
-                                .reach(3.4)
-                                .speed(1.2)
-                                .damage(6.0)
-                                .cooldownTicks(26L)
-                                .knockback(0.45)
-                                .target(candidate -> candidate instanceof Enemy)
-                                .build(), 1.0))
                 .build();
     }
 
     /**
-     * The Woodland Trickster: a small hunched woodland creature on a villager
-     * base that hunts players. Its rig is the bbmodel file's own bone tree
-     * (hood over head, cloth over the legs) and its clips drive the whole
-     * pose: idle breathing while it stands, a leg/arm swing while it walks,
-     * and a one-shot punch the Core plays when it swings — not only when it
-     * lands.
+     * The Woodland Trickster: a small hunched woodland creature that is a real
+     * zombie wearing a trickster. Its rig is the bbmodel file's own bone tree
+     * (hood over head, cloth over the legs) and its clips drive the whole pose:
+     * idle breathing while it stands, a leg/arm swing while it walks, and a
+     * one-shot punch the Core plays when it swings — not only when it lands.
      *
-     * <p>Its body numbers come from {@link EntityType#ZOMBIE}: the template is
-     * captured once and supplies attack knockback, scale and gravity, while the
-     * four fields below are this creature's own. Nothing here reaches a real
-     * zombie — the profile is keyed to the custom id.</p>
+     * <p>{@code vanillaAi()} hands the mind to the server: a zombie already
+     * hunts players and villagers, walks by its own pathfinding, recoils when hit
+     * and collapses when killed, so every one of those is the engine's and is
+     * client-interpolated. The Core's attack notification still fires the punch
+     * clip when the zombie swings, which is the only animation work left for the
+     * plugin; with no behavior profile declared, the behavior engine never scans
+     * this mob.</p>
+     *
+     * <p>The base is a zombie, so it would burn in daylight —
+     * {@link #makeDaylightSafe(LivingEntity)} makes it a woodland creature that
+     * keeps its schedule instead. Its body numbers come from
+     * {@link EntityType#ZOMBIE}: the template is captured once and supplies
+     * attack knockback, scale and gravity, while the fields below are this
+     * creature's own. Nothing here reaches a real zombie — the definition is
+     * keyed to the custom id.</p>
      */
     private CustomMobDefinition tricksterDefinition() {
-        return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.VILLAGER)
+        return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.ZOMBIE)
                 .displayName("Woodland Trickster")
                 .visual(CustomMobDefinition.VisualMode.RIG)
+                .vanillaAi()
                 .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "woodland_trickster.bbmodel")
                         .modelBytes(() -> loadResource("mobs/woodland_trickster.bbmodel"))
                         .textureBytes(() -> loadResource("mobs/woodland_trickster.png"))
+                        .hitbox(0.6, 1.9)
                         .build())
                 .attributes(CustomMobAttributes.builder()
                         .fromTemplate(EntityType.ZOMBIE)
@@ -403,18 +423,26 @@ public final class MobFunPlugin extends JavaPlugin {
                         .armor(2.0)
                         .knockbackResistance(0.1)
                         .build())
-                .behavior(profile -> profile
-                        .priority(BehaviorPriority.TRICKSTER)
-                        .action(AttackNearestAction.builder()
-                                .searchRadius(16.0)
-                                .reach(2.6)
-                                .speed(1.2)
-                                .damage(4.0)
-                                .cooldownTicks(24L)
-                                .knockback(0.35)
-                                .target(candidate -> candidate instanceof Player)
-                                .build(), 1.0))
+                .spawnConfigurator(this::makeDaylightSafe)
                 .build();
+    }
+
+    /**
+     * A zombie base that hunts by day as well as by night. Paper's
+     * {@code Zombie#setShouldBurnInDay(false)} is the clean route; it is a
+     * Paper-only API, so it is probed reflectively (this module links on Spigot
+     * too) and, where it is absent, an infinite ambient fire-resistance effect
+     * covers the daylight instead.
+     */
+    private void makeDaylightSafe(LivingEntity entity) {
+        try {
+            entity.getClass().getMethod("setShouldBurnInDay", boolean.class).invoke(entity, false);
+            return;
+        } catch (ReflectiveOperationException | RuntimeException absent) {
+            getLogger().fine("[MobFun] No setShouldBurnInDay on this server; using fire resistance.");
+        }
+        entity.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE,
+                PotionEffect.INFINITE_DURATION, 0, false, false));
     }
 
     private byte[] loadResource(String path) {

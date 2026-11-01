@@ -98,8 +98,6 @@ public final class BbModelParser {
         private final Map<String, Integer> elementBoneIndex = new HashMap<>();
         /** Format 5.0: group uuid -> the root {@code groups} entry holding its real data. */
         private final Map<String, JsonObject> groupsByUuid = new HashMap<>();
-        /** element uuid -> the cube parsed for it, in element order. */
-        private final Map<String, List<ModelCube>> cubesByElement = new LinkedHashMap<>();
         private final Map<String, Boolean> molangWarned = new HashMap<>();
         private boolean pixelUvWarned;
         private boolean pixelUvSeen;
@@ -398,9 +396,6 @@ public final class BbModelParser {
 
             int textureIndex = element.has("texture") && element.get("texture").isJsonPrimitive()
                     ? element.get("texture").getAsInt() : -1;
-            if (textureIndex >= textures.size()) {
-                textureIndex = textures.size() - 1;
-            }
 
             Map<String, ModelCube.Uv> faces = new LinkedHashMap<>();
             boolean boxUv = boxUvDefault;
@@ -423,6 +418,20 @@ public final class BbModelParser {
                 faces.put("south", new ModelCube.Uv(u + d + w + d, v + d, u + d + w + d + w, v + d + h));
                 faces.put("up", new ModelCube.Uv(u + d, v, u + d + w, v + d));
                 faces.put("down", new ModelCube.Uv(u + d + w, v + d, u + d + w + w, v + 2 * d));
+                // Also read texture index from faces if not set at element level
+                if (textureIndex < 0 && element.has("faces") && element.get("faces").isJsonObject()) {
+                    JsonObject faceObject = element.getAsJsonObject("faces");
+                    for (String direction : new String[]{"north", "south", "east", "west", "up", "down"}) {
+                        JsonElement faceElement = faceObject.get(direction);
+                        if (faceElement != null && faceElement.isJsonObject()) {
+                            JsonObject face = faceElement.getAsJsonObject();
+                            if (face.has("texture") && face.get("texture").isJsonPrimitive()) {
+                                textureIndex = face.get("texture").getAsInt();
+                                break;
+                            }
+                        }
+                    }
+                }
             } else if (element.has("faces") && element.get("faces").isJsonObject()) {
                 JsonObject faceObject = element.getAsJsonObject("faces");
                 // Blockbench stores per-face UVs normalized to their texture; the
@@ -437,6 +446,9 @@ public final class BbModelParser {
                         continue;
                     }
                     JsonObject face = faceElement.getAsJsonObject();
+                    if (textureIndex < 0 && face.has("texture") && face.get("texture").isJsonPrimitive()) {
+                        textureIndex = face.get("texture").getAsInt();
+                    }
                     float[] uv = floatArrayOr(face.get("uv"), Float.NaN, 4);
                     if (uv.length < 4 || Float.isNaN(uv[0])) {
                         continue;
@@ -459,6 +471,9 @@ public final class BbModelParser {
                                 uv[2] * texW, uv[3] * texH));
                     }
                 }
+            }
+            if (textureIndex >= textures.size()) {
+                textureIndex = Math.max(-1, textures.size() - 1);
             }
             return new ModelCube(x1, y1, z1, x2, y2, z2, inflate, textureIndex, faces);
         }

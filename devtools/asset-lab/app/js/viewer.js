@@ -1,6 +1,22 @@
-// Three.js viewport for the Asset Lab: mob rigs (per-bone pose playback),
-// raw item models (element rotation groups) and block models (baked cube
-// matrices), all rendered with the same conventions the server pipeline uses.
+// Three.js viewport for the Asset Lab.
+//
+// It is a *renderer for the pipeline's own output*, not a second implementation
+// of it: geometry comes from the daemon's emitted display list (the exact
+// `DisplayEmitter` transforms and `Display.Brightness` the server pushes) and
+// materials/lighting come from `shading.js` (vanilla per-face multipliers, the
+// 80%-per-light-level response). There are no scene lights here on purpose —
+// `MeshBasicMaterial` with vertex-colour face shading reproduces what the
+// client's shader does, whereas a lit material would add a diffuse model the
+// game does not have.
+//
+// Layers (toggled through `setLayer`, driven by the Lighting panel):
+//   reference — the model's own textures on the model's own cubes: what the
+//               author drew, so a UV-window bug is visible.
+//   game      — the display list the server emits: what the client actually
+//               receives (BlockDisplay plates, palette colours, brightness).
+//   pack      — the JSON model the pack backend ships, textured and FLAT,
+//               because shipped models carry `shade:false` + `ambientocclusion:false`.
+//   wire / markers / guides — outlines, bone pivots, hitbox and anchor cell.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -9,11 +25,12 @@ import {
     quatRotAxis, rigLocalMatrix, rigYawFrame, headPitchModel, headYawModel,
     sampleCurve, wrapClipTime,
 } from './geom.js';
+import {
+    BOX_FACE_ORDER, MaterialFactory, displayLight, lightScale, lightTint,
+    shadeBoxGeometry, Lighting,
+} from './shading.js';
 
-// BoxGeometry face order: +x, -x, +y, -y, +z, -z → east, west, up, down, south, north
-const BOX_FACE_ORDER = ['east', 'west', 'up', 'down', 'south', 'north'];
-
-// Face axis conventions — must match the pipeline's face mapping.
+// Face axis conventions — must match the pipeline's face mapping (CubeFace.java).
 export const FACE_AXES = {
     north: { n: 2, pos: false, u: 0, v: 1 },
     south: { n: 2, pos: true, u: 0, v: 1 },
@@ -23,13 +40,14 @@ export const FACE_AXES = {
     down: { n: 1, pos: false, u: 0, v: 2 },
 };
 
-const MISSING = 0xff00ff; // what the client shows for a missing texture
+/** A display that carries no light of its own: it renders in the world's light. */
+const NATURAL = Object.freeze({ lightEmission: 0, brightness: null });
 
-function flatArray(m) {
-    const out = new Float32Array(16);
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) out[c * 4 + r] = m[c * 4 + r];
-    return out;
-}
+/**
+ * A face the author omitted draws nothing in game (the cube stays hollow there),
+ * so its material group is hidden rather than texturised.
+ */
+const HIDDEN_FACE = new THREE.MeshBasicMaterial({ visible: false });
 
 export class Viewer {
     constructor(container) {
@@ -50,29 +68,41 @@ export class Viewer {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
 
-        this.scene.add(new THREE.AmbientLight(0xffffff, 1.4));
-        const dir = new THREE.DirectionalLight(0xffffff, 1.6);
-        dir.position.set(5, 10, 7);
-        this.scene.add(dir);
-        const dir2 = new THREE.DirectionalLight(0xffffff, 0.6);
-        dir2.position.set(-6, 4, -5);
-        this.scene.add(dir2);
-
         this.grid = new THREE.GridHelper(16, 16, 0x3a3f4a, 0x2b2f38);
         this.scene.add(this.grid);
 
-        this.content = new THREE.Group();
-        this.markers = new THREE.Group();
-        this.markers.visible = false;
-        this.scene.add(this.content, this.markers);
+        this.groups = {
+            reference: new THREE.Group(),
+            game: new THREE.Group(),
+            pack: new THREE.Group(),
+            wire: new THREE.Group(),
+            markers: new THREE.Group(),
+            guides: new THREE.Group(),
+        };
+        this.groups.game.visible = false;
+        this.groups.pack.visible = false;
+        this.groups.wire.visible = false;
+        this.groups.markers.visible = false;
+        this.groups.guides.visible = false;
+        for (const group of Object.values(this.groups)) this.scene.add(group);
+        // Named group the mob/item panels render their textured geometry into.
+        this.content = this.groups.reference;
+
+        this.factory = new MaterialFactory();
+        this.lighting = null;
+        this.setLighting(new Lighting());
+
+        // Every mesh whose appearance depends on the light state, so a lighting
+        // change rewrites its materials without rebuilding the scene.
+        this.litMeshes = new Set();
 
         this.unitGeo = new THREE.BoxGeometry(1, 1, 1);
         this.unitGeo.translate(0.5, 0.5, 0.5);
         this.markerGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
-        this.markerMats = new Map(); // color -> MeshBasicMaterial (shared, survives clear)
-        this.markerMat = this.markerMaterial(0xff5533);
-        this.textures = new Map(); // cache key -> THREE.Texture | null
+        this.markerMats = new Map();
+        this.textures = new Map(); // cache key -> THREE.Texture
 
+        this.doubleSided = false;
         this.rig = null; // live rig state while a mob is shown
 
         this.lastTime = performance.now();
@@ -99,24 +129,34 @@ export class Viewer {
         this.renderer.setSize(w, h);
     }
 
-    clear() {
-        this.rig = null;
-        for (const child of [...this.content.children]) {
-            this.content.remove(child);
-            if (child.geometry && child.geometry !== this.unitGeo) {
-                try { child.geometry.dispose(); } catch { /* shared */ }
-            }
-            const materials = Array.isArray(child.material) ? child.material
-                : (child.material ? [child.material] : []);
-            for (const material of materials) {
-                try { material.dispose(); } catch { /* shared */ }
-            }
-        }
-        for (const child of [...this.markers.children]) this.markers.remove(child);
+    // ---------------------------------------------------------------- state
+
+    /** Shares the Lighting object the panels mutate. */
+    setLighting(lighting) {
+        this.lighting = lighting;
+        lighting.onChange(() => this.refreshLights());
+        this.refreshLights();
+    }
+
+    setLayer(name, visible) {
+        const group = this.groups[name];
+        if (!group) return;
+        group.visible = !!visible;
+        if (name === 'wire' && visible) this.buildWireframes();
+    }
+
+    getLayer(name) {
+        return this.groups[name] ? this.groups[name].visible : false;
+    }
+
+    /** Client face culling is the honest default; double-side is a debug aid. */
+    setDoubleSided(enabled) {
+        this.doubleSided = !!enabled;
+        this.refreshLights();
     }
 
     setMarkersVisible(visible) {
-        this.markers.visible = visible;
+        this.groups.markers.visible = !!visible;
     }
 
     /** Attachment-coded marker materials: hands/items stand out from plain bones. */
@@ -127,6 +167,21 @@ export class Viewer {
             this.markerMats.set(color, mat);
         }
         return mat;
+    }
+
+    clear() {
+        this.rig = null;
+        for (const group of Object.values(this.groups)) {
+            for (const child of [...group.children]) {
+                group.remove(child);
+                if (child.geometry && child.geometry !== this.unitGeo) {
+                    try { child.geometry.dispose(); } catch { /* shared */ }
+                }
+            }
+        }
+        // Materials are cached and shared by light/texture key, so they are never
+        // disposed here — only by MaterialFactory.dispose().
+        this.litMeshes.clear();
     }
 
     // ---------------------------------------------------------------- textures
@@ -160,10 +215,9 @@ export class Viewer {
 
     /**
      * Position-driven UV assignment on a unit [0..1]³ box geometry, mirroring
-     * the pipeline's face-axis convention. `windowFor(face)` returns
-     * {u1, v1, u2, v2, rotation} in texture pixels plus `spanU`/`spanV` — the
-     * pixel span the window is normalized by (texture width/height, or 16 for
-     * vanilla item UV units).
+     * the pipeline's face-axis convention. `faceInfos` maps a BoxGeometry group
+     * index to {face, info} where info is {u1, v1, u2, v2, rotation, spanU,
+     * spanV} in texture pixels.
      */
     applyFaceUvs(geometry, faceInfos) {
         const uv = geometry.attributes.uv;
@@ -192,8 +246,84 @@ export class Viewer {
         uv.needsUpdate = true;
     }
 
-    faceMaterials(cubeFaces, textureInfoFor) {
-        const materials = [];
+    // ---------------------------------------------------------------- lighting
+
+    /**
+     * Re-derives every light-dependent material and per-face shade attribute.
+     * Called on any Lighting change and after an option toggle.
+     */
+    refreshLights() {
+        const world = this.lighting.world();
+        for (const mesh of this.litMeshes) this.applyLight(mesh, world);
+    }
+
+    applyLight(mesh, world = this.lighting.world()) {
+        const data = mesh.userData;
+        const light = displayLight(data.display ?? NATURAL, world);
+        const shadeOn = (data.shade === null ? this.lighting.faceShade : data.shade) === true;
+        if (data.shadable) {
+            shadeBoxGeometry(mesh.geometry, shadeOn);
+            mesh.geometry.attributes.color.needsUpdate = true;
+        }
+        const side = this.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+        if (data.faces) {
+            mesh.material = data.faces.map(face => !face.present ? HIDDEN_FACE : this.factory.material({
+                map: face.map ?? this.factory.missingTexture(),
+                alphaTest: 0.1,
+                light,
+                tint: this.lighting.tint,
+                side,
+            }));
+        } else {
+            mesh.material = this.factory.material({
+                map: data.spec.map ?? null,
+                rgb: data.spec.rgb ?? 0x808080,
+                alphaTest: data.spec.alphaTest ?? 0,
+                light,
+                tint: this.lighting.tint,
+                side,
+            });
+        }
+        data.light = light;
+        data.lightScale = lightScale(light);
+        data.tint = lightTint(light, this.lighting.tint);
+    }
+
+    /**
+     * Registers a mesh for lighting updates and applies the current light.
+     * @param data {spec|faces, display, shade: true|false|null, shadable}
+     */
+    track(mesh, data) {
+        mesh.userData = {
+            spec: data.spec ?? null,
+            faces: data.faces ?? null,
+            display: data.display ?? null,
+            shade: data.shade === undefined ? null : data.shade,
+            shadable: data.shadable !== false,
+        };
+        this.litMeshes.add(mesh);
+        this.applyLight(mesh);
+        return mesh;
+    }
+
+    // ---------------------------------------------------------------- geometry
+
+    flatArray(m) {
+        const out = new Float32Array(16);
+        for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) out[c * 4 + r] = m[c * 4 + r];
+        return out;
+    }
+
+    /**
+     * A textured box with per-face UV windows and one material per face. A face
+     * whose texture did not resolve gets the client's `missingno` checker rather
+     * than a flat magenta quad, so the failure sits exactly where it is.
+     *
+     * `shade`: true forces the vanilla face multipliers, false forces flat (a
+     * pack model that ships `shade:false`), null follows the Lighting toggle.
+     */
+    addTexturedBox(group, matrix, cubeFaces, textureInfoFor, options = {}) {
+        const faces = [];
         const faceInfos = new Map();
         for (let i = 0; i < BOX_FACE_ORDER.length; i++) {
             const face = BOX_FACE_ORDER[i];
@@ -201,28 +331,176 @@ export class Viewer {
             const usable = info && Number.isFinite(info.u1) && Number.isFinite(info.v1)
                 && Number.isFinite(info.u2) && Number.isFinite(info.v2)
                 && Math.abs(info.u2 - info.u1) > 1e-6 && Math.abs(info.v2 - info.v1) > 1e-6;
-            const texture = usable ? textureInfoFor(face, info) : null;
-            if (usable && texture) {
-                materials.push(new THREE.MeshLambertMaterial({
-                    map: texture, side: THREE.DoubleSide, alphaTest: 0.5,
-                }));
-                faceInfos.set(i, { face, info });
-            } else {
-                materials.push(new THREE.MeshLambertMaterial({ color: MISSING }));
+            if (!usable) {
+                faces.push({ present: false });
+                continue;
             }
+            const texture = textureInfoFor(face, info);
+            faces.push({ present: true, map: texture ?? null });
+            faceInfos.set(i, { face, info });
         }
-        return { materials, faceInfos };
-    }
-
-    addCubeMesh(matrix, cubeFaces, textureInfoFor) {
-        const { materials, faceInfos } = this.faceMaterials(cubeFaces, textureInfoFor);
         const geometry = this.unitGeo.clone();
         if (faceInfos.size > 0) this.applyFaceUvs(geometry, faceInfos);
-        const mesh = new THREE.Mesh(geometry, materials);
+        const mesh = new THREE.Mesh(geometry, null);
         mesh.matrixAutoUpdate = false;
-        mesh.matrix.fromArray(flatArray(matrix));
-        this.content.add(mesh);
+        mesh.matrix.fromArray(this.flatArray(matrix));
+        group.add(mesh);
+        this.track(mesh, {
+            faces,
+            shade: options.shade,
+            display: options.display ?? null,
+        });
         return mesh;
+    }
+
+    /**
+     * One entry of the server's emitted display list, reproduced verbatim:
+     * `T(t)·R(lr)·S(s)·R(rr)` from the values read straight out of
+     * `EmittedDisplay` — already block-space, because the emitter composed the
+     * cube matrix in, so multiplying by it again would double the transform.
+     */
+    addDisplayMesh(display, options = {}) {
+        const geometry = this.unitGeo.clone();
+        const mesh = new THREE.Mesh(geometry, null);
+        mesh.matrixAutoUpdate = false;
+        mesh.matrix.fromArray(this.flatArray(
+            mat4Mul(mat4Trs(display.t, display.lr, display.s),
+                mat4Trs([0, 0, 0], display.rr, [1, 1, 1]))));
+        (options.group ?? this.groups.game).add(mesh);
+        this.track(mesh, {
+            spec: { rgb: display.rgb ?? 0x808080, alphaTest: 0 },
+            display: { lightEmission: display.lightEmission ?? 0, brightness: display.brightness ?? null },
+            shade: true, // a BlockDisplay is a real block: the client shades its faces
+        });
+        mesh.userData.rgbSource = display.rgbSource ?? 'palette';
+        mesh.userData.displayKind = display.kind ?? 'cube';
+        return mesh;
+    }
+
+    /** Display/mesh outlines, built on demand so the layer toggle is a flip. */
+    buildWireframes() {
+        for (const group of [this.groups.reference, this.groups.game, this.groups.pack]) {
+            for (const mesh of group.children) {
+                if (!mesh.isMesh || mesh.userData.wire) continue;
+                const edges = new THREE.LineSegments(
+                    new THREE.EdgesGeometry(mesh.geometry),
+                    new THREE.LineBasicMaterial({ color: 0x9aa4b5, transparent: true, opacity: 0.5 }));
+                edges.matrixAutoUpdate = false;
+                edges.matrix.copy(mesh.matrix);
+                mesh.userData.wire = edges;
+                this.groups.wire.add(edges);
+            }
+        }
+    }
+
+    /** Wires are built per render, so a layer left on keeps following new meshes. */
+    afterRender() {
+        if (this.groups.wire.visible) this.buildWireframes();
+    }
+
+    // ---------------------------------------------------------------- responses
+
+    /**
+     * Renders a `block`/`bake` op response: the reference cubes (model textures)
+     * and the game display list (what the client is handed), in separate layers
+     * so the two can be compared.
+     */
+    renderVirtual(response) {
+        this.clear();
+        const textures = response.textures ?? [];
+        const byName = new Map(textures.map(t => [t.name, t]));
+        const resW = response.resolution?.width ?? 16;
+        const resH = response.resolution?.height ?? 16;
+
+        for (const cube of response.cubes ?? []) {
+            const matrix = mat4Mul(
+                mat4Trs(cube.t, cube.lr, cube.s),
+                mat4Trs([0, 0, 0], cube.rr, [1, 1, 1]));
+            const faces = {};
+            for (const [name, face] of Object.entries(cube.faces ?? {})) {
+                faces[name] = {
+                    u1: face.u1, v1: face.v1, u2: face.u2, v2: face.v2,
+                    rotation: face.rotation ?? 0, spanU: resW, spanV: resH,
+                };
+            }
+            this.addTexturedBox(this.groups.reference, matrix, faces, (faceName) => {
+                const info = byName.get(cube.faces?.[faceName]?.texture);
+                return info && info.resolved && info.path ? this.textureFromPath(info.path) : null;
+            });
+        }
+
+        for (const display of response.displays ?? []) this.addDisplayMesh(display);
+
+        this.applyOriginGuides(response);
+        this.focus();
+        this.afterRender();
+    }
+
+    /** Anchor convention made visible: one block cell at the model origin. */
+    applyOriginGuides(response) {
+        const box = new THREE.BoxGeometry(1, 1, 1);
+        // CENTER/LEGACY anchors at the block centre on the ground plane; GRID
+        // anchors at the corner, which is what a multi-block structure needs.
+        box.translate(response.originMode === 'GRID' ? 0.5 : 0, 0.5,
+            response.originMode === 'GRID' ? 0.5 : 0);
+        const edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(box),
+            new THREE.LineBasicMaterial({ color: 0x6ee7b7, transparent: true, opacity: 0.7 }));
+        box.dispose();
+        this.groups.guides.add(edges);
+    }
+
+    /** `block` op entry point (the name the blocks panel calls). */
+    renderBlock(response) {
+        this.renderVirtual(response);
+    }
+
+    /** `bake` op entry point: reference + the real emitted display list. */
+    renderBake(response) {
+        this.renderVirtual(response);
+        this.setLayer('game', true);
+    }
+
+    /**
+     * Renders the pack backend's shipped element model (the JSON inside a
+     * compiled artifact) with the model's own textures. Flat by default: pack
+     * models carry `shade:false` and `ambientocclusion:false`, so the client
+     * draws them with no directional multipliers at all.
+     */
+    renderPackModel(model, resolveTexture) {
+        for (const element of model.elements ?? []) {
+            let elementMatrix = mat4Translate(-0.5, -0.5, -0.5);
+            if (element.rotation) {
+                const r = element.rotation;
+                const q = quatRotAxis(r.axis, r.angle);
+                const origin = [r.origin[0] / 16, r.origin[1] / 16, r.origin[2] / 16];
+                elementMatrix = mat4Mul(elementMatrix, mat4Mul(
+                    mat4Mul(mat4Translate(origin[0], origin[1], origin[2]),
+                        mat4Trs([0, 0, 0], q, [1, 1, 1])),
+                    mat4Translate(-origin[0], -origin[1], -origin[2])));
+            }
+            const faces = {};
+            for (const [name, face] of Object.entries(element.faces ?? {})) {
+                const uv = face.uv ?? [0, 0, 16, 16];
+                faces[name] = {
+                    u1: uv[0], v1: uv[1], u2: uv[2], v2: uv[3],
+                    rotation: face.rotation ?? 0, spanU: 16, spanV: 16,
+                    textureKey: (face.texture ?? '').replace(/^#/, ''),
+                };
+            }
+            this.addTexturedBox(
+                this.groups.pack,
+                mat4Mul(elementMatrix, mat4Box(element.from.map(v => v / 16),
+                    element.to.map(v => v / 16))),
+                faces,
+                (faceName) => {
+                    const key = faces[faceName]?.textureKey;
+                    return key ? resolveTexture(key) : null;
+                },
+                { shade: element.shade === false ? false : element.shade === true ? true : false });
+        }
+        this.groups.pack.visible = true;
+        this.afterRender();
     }
 
     // ---------------------------------------------------------------- mob rig
@@ -238,6 +516,18 @@ export class Viewer {
         const bones = response.bones ?? [];
         const textures = response.textures ?? [];
         const scale = response.spec?.scale ?? 1;
+        const yawOffset = response.spec?.yawOffsetDegrees ?? 0;
+        // Pack-emitted rigs ship `shade:false`, so the client draws them flat.
+        const shade = response.shading ? !!response.shading.faceShade : false;
+        const rigDisplay = response.brightness?.overrides
+            ? {
+                lightEmission: 0,
+                brightness: {
+                    sky: response.brightness.sky ?? 15,
+                    block: response.brightness.block ?? 0,
+                },
+            }
+            : NATURAL;
 
         const boneInfos = bones.map(b => ({
             index: b.index,
@@ -290,6 +580,7 @@ export class Viewer {
                 (cube.to[1] + inflate) / 16,
                 (cube.to[2] + inflate) / 16,
             ];
+            const box = mat4Box(min, max);
             const faces = {};
             for (const [name, uv] of Object.entries(cube.faces ?? {})) {
                 faces[name] = {
@@ -298,10 +589,9 @@ export class Viewer {
                     spanV: response.textureHeight || 64,
                 };
             }
-            const textureIndex = cube.textureIndex;
-            const mesh = this.addCubeMesh(mat4Box(min, max), faces,
-                () => textureFor(textureIndex));
-            bone.meshes.push({ mesh, box: mat4Box(min, max) });
+            const mesh = this.addTexturedBox(this.groups.reference, box, faces,
+                () => textureFor(cube.textureIndex), { shade, display: rigDisplay });
+            bone.meshes.push({ mesh, box });
         }
 
         const markers = [];
@@ -312,7 +602,7 @@ export class Viewer {
                 : 0xff5533;
             const marker = new THREE.Mesh(this.markerGeo, this.markerMaterial(color));
             marker.matrixAutoUpdate = false;
-            this.markers.add(marker);
+            this.groups.markers.add(marker);
             markers.push({ bone: bone.index, mesh: marker });
         }
 
@@ -327,8 +617,9 @@ export class Viewer {
             const outline = new THREE.LineSegments(edges,
                 new THREE.LineBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85 }));
             outline.matrixAutoUpdate = false;
-            this.content.add(outline);
+            this.groups.guides.add(outline);
         }
+        this.addShadow(response.shadowPlate);
 
         const clips = new Map();
         for (const clip of response.animations ?? []) clips.set(clip.name, clip);
@@ -338,6 +629,7 @@ export class Viewer {
             markers,
             clips,
             scale,
+            yawOffset,
             playhead: 0,
             playing: false,
             clipName: null,
@@ -348,6 +640,22 @@ export class Viewer {
         };
         this.updateRig(0);
         this.focus();
+        this.afterRender();
+    }
+
+    /**
+     * The mob ground shadow: a flat, alpha-blended quad with no face shading,
+     * because that is what the engine ships (`shade:false` + `blend:true`).
+     */
+    addShadow(spec) {
+        if (!spec || !spec.width || !spec.height) return;
+        const geometry = new THREE.PlaneGeometry(spec.width, spec.height);
+        geometry.rotateX(-Math.PI / 2);
+        const plate = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+            color: 0x000000, transparent: true, opacity: spec.opacity ?? 0.25, depthWrite: false,
+        }));
+        plate.position.set(spec.offsetX ?? 0, spec.offsetY ?? 0.001, spec.offsetZ ?? 0);
+        this.groups.guides.add(plate);
     }
 
     /**
@@ -377,7 +685,7 @@ export class Viewer {
             }
         }
         const clip = !rig.poseTrack && rig.clipName ? rig.clips.get(rig.clipName) : null;
-        const yawFrame = rigYawFrame(rig.bodyYaw);
+        const yawFrame = rigYawFrame(rig.bodyYaw, rig.yawOffset ?? 0);
         const headPitch = headPitchModel(rig.headPitch);
         const headYaw = headYawModel(rig.headYaw, rig.bodyYaw);
         const out = [0, 0, 0];
@@ -431,12 +739,12 @@ export class Viewer {
                 : mat4Mul(yawFrame, local);
             absolutes[bone.index] = absolute;
             for (const { mesh, box } of bone.meshes) {
-                mesh.matrix.fromArray(flatArray(mat4Mul(absolute, box)));
+                mesh.matrix.fromArray(this.flatArray(mat4Mul(absolute, box)));
+                if (mesh.userData.wire) mesh.userData.wire.matrix.copy(mesh.matrix);
             }
         }
-        for (const { bone, mesh } of rig.markers) {
-            const a = absolutes[bone];
-            mesh.matrix.fromArray(flatArray(a));
+        for (const { bone: index, mesh } of rig.markers) {
+            mesh.matrix.fromArray(this.flatArray(absolutes[index]));
         }
     }
 
@@ -518,6 +826,8 @@ export class Viewer {
             return tj && tj.png && tj.png.found && tj.png.pngBase64
                 ? this.textureFromBase64(tj.png.pngBase64) : null;
         };
+        // Weapon frames ship through the pack, where shading is off.
+        const shade = response.shading ? !!response.shading.faceShade : false;
 
         for (const element of response.elements ?? []) {
             let elementMatrix = mat4Translate(-0.5, -0.5, -0.5); // center the item
@@ -533,57 +843,22 @@ export class Viewer {
             const min = [element.from[0] / 16, element.from[1] / 16, element.from[2] / 16];
             const max = [element.to[0] / 16, element.to[1] / 16, element.to[2] / 16];
             const faces = {};
+            const keys = {};
             for (const [name, face] of Object.entries(element.faces ?? {})) {
                 const uv = face.uv ?? [0, 0, 16, 16];
                 faces[name] = {
                     u1: uv[0], v1: uv[1], u2: uv[2], v2: uv[3],
-                    rotation: face.rotation ?? 0,
+                    rotation: face.rotation ?? 0, spanU: 16, spanV: 16,
                 };
+                keys[name] = (face.texture ?? '').startsWith('#') ? face.texture.slice(1) : null;
             }
-            const resolved = {};
-            for (const [name, face] of Object.entries(element.faces ?? {})) {
-                const key = (face.texture ?? '').startsWith('#') ? face.texture.slice(1) : null;
-                resolved[name] = key;
-            }
-            this.addCubeMesh(mat4Mul(elementMatrix, mat4Box(min, max)), faces,
-                (faceName) => {
-                    const key = resolved[faceName];
-                    return key != null ? pngFor(key) : null;
-                });
+            this.addTexturedBox(this.groups.reference,
+                mat4Mul(elementMatrix, mat4Box(min, max)), faces,
+                (faceName) => (keys[faceName] != null ? pngFor(keys[faceName]) : null),
+                { shade: element.shade === undefined ? shade : element.shade });
         }
         this.focus();
-    }
-
-    // ---------------------------------------------------------------- block
-
-    /** Renders a `block` op response: baked cube matrices, texel-style. */
-    renderBlock(response) {
-        this.clear();
-        const textures = response.textures ?? [];
-        const pathFor = (name) => {
-            const info = textures.find(t => t.name === name);
-            return info && info.resolved && info.path ? info.path : null;
-        };
-        const resW = response.resolution?.width ?? 16;
-        const resH = response.resolution?.height ?? 16;
-        for (const cube of response.cubes ?? []) {
-            const matrix = mat4Mul(
-                mat4Trs(cube.t, cube.lr, cube.s),
-                mat4Trs([0, 0, 0], cube.rr, [1, 1, 1]));
-            const faces = {};
-            for (const [name, face] of Object.entries(cube.faces ?? {})) {
-                faces[name] = {
-                    u1: face.u1, v1: face.v1, u2: face.u2, v2: face.v2,
-                    rotation: face.rotation ?? 0, spanU: resW, spanV: resH,
-                };
-            }
-            this.addCubeMesh(matrix, faces,
-                (faceName) => {
-                    const path = pathFor(cube.faces?.[faceName]?.texture);
-                    return path ? this.textureFromPath(path) : null;
-                });
-        }
-        this.focus();
+        this.afterRender();
     }
 
     // ---------------------------------------------------------------- camera
@@ -592,13 +867,16 @@ export class Viewer {
         const box = new THREE.Box3();
         const v = new THREE.Vector3();
         let any = false;
-        for (const mesh of this.content.children) {
-            for (let c = 0; c < 8; c++) {
-                const p = new THREE.Vector3(c & 1 ? 1 : 0, c & 2 ? 1 : 0, c & 4 ? 1 : 0);
-                p.applyMatrix4(new THREE.Matrix4().fromArray(mesh.matrix.elements));
-                if (!isFinite(p.x)) continue;
-                box.expandByPoint(p);
-                any = true;
+        for (const group of [this.groups.reference, this.groups.game, this.groups.pack]) {
+            for (const mesh of group.children) {
+                if (!mesh.isMesh) continue;
+                for (let c = 0; c < 8; c++) {
+                    const p = new THREE.Vector3(c & 1 ? 1 : 0, c & 2 ? 1 : 0, c & 4 ? 1 : 0);
+                    p.applyMatrix4(mesh.matrix);
+                    if (!isFinite(p.x)) continue;
+                    box.expandByPoint(p);
+                    any = true;
+                }
             }
         }
         if (!any) return;

@@ -84,10 +84,13 @@ public final class MineplusPlugin extends JavaPlugin {
             getLogger().warning("Could not create " + dir + "; YAML mob definitions are unavailable.");
             return null;
         }
-        try {
-            saveResource("mobs/examples/example_evil_pig.yml", false);
-        } catch (IllegalArgumentException resourceMissing) {
-            getLogger().warning("Example mob definition is missing from the jar: " + resourceMissing);
+        for (String example : new String[] {"example_evil_pig.yml", "example_vanilla_ai_mob.yml"}) {
+            try {
+                saveResource("mobs/examples/" + example, false);
+            } catch (IllegalArgumentException resourceMissing) {
+                getLogger().warning("Example mob definition " + example + " is missing from the jar: "
+                        + resourceMissing);
+            }
         }
         com.mineplus.infrastructure.mob.custom.MobYamlLoader loader =
                 new com.mineplus.infrastructure.mob.custom.MobYamlLoader(

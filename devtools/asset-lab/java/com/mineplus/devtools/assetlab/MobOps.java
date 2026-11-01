@@ -77,6 +77,10 @@ final class MobOps {
         }
         if (spec.type == RenderKind.NONE) {
             response.addProperty("renderType", "NONE");
+            response.add("shading", BakeOps.shading("vanilla-entity", true,
+                    "no rig at all: the base entity is the vanilla model, so the client shades"
+                            + " it normally"));
+            response.add("brightness", rigBrightness());
             response.addProperty("status", "OK");
             response.addProperty("summary", "vanilla look; no model to validate");
             return response;
@@ -183,6 +187,11 @@ final class MobOps {
         Double scale = yaml.isSet("render.scale") ? yaml.getDouble("render.scale") : null;
         if (scale != null && scale > 0.0) {
             spec.scale = scale.floatValue();
+        }
+        if (yaml.isSet("render.yaw-offset-degrees")) {
+            spec.yawOffsetDegrees = (float) yaml.getDouble("render.yaw-offset-degrees");
+        } else if (yaml.isSet("render.yaw-offset")) {
+            spec.yawOffsetDegrees = (float) yaml.getDouble("render.yaw-offset");
         }
         String fallbackText = yaml.getString("render.fallback");
         if (fallbackText != null && !fallbackText.isBlank()) {
@@ -326,10 +335,59 @@ final class MobOps {
         assets.addProperty("displayModels", pack.displayModels().size());
         response.add("packAssets", assets);
         response.addProperty("statusLine", bundle.statusLine());
+        response.add("shading", rigShading());
+        response.add("brightness", rigBrightness());
+    }
+
+    /**
+     * How a rigged mob is lit by the client. The pack rig path ships every part
+     * with {@code shade:false} on each element and {@code ambientocclusion:false}
+     * at the model root, so parts render FLAT in game — no per-face directional
+     * multiplier, unlike a virtual BlockDisplay.
+     *
+     * @see com.mineplus.infrastructure.mob.custom.render.PackModelEmitter (its
+     *      {@code boneModel} pins {@code ambientocclusion:false} and its
+     *      {@code element} pins {@code shade:false})
+     */
+    static JsonObject rigShading() {
+        return BakeOps.shading("pack-item", false,
+                "PackModelEmitter writes every rig element with shade:false and every bone"
+                        + " model with ambientocclusion:false, so the client applies no"
+                        + " per-face directional multiplier to a rigged mob: rig parts"
+                        + " render flat");
+    }
+
+    /**
+     * Whether a rig's displays ever get a server light override. They do not: the
+     * mob render engine spawns its parts through the display backends, and neither
+     * backend (nor {@code MobRenderEngine} itself) calls {@code setBrightness} —
+     * so a rig lights with natural world light. The pack block/item renderers do
+     * override ({@code PackBlockRenderer:130}, {@code PackModelRenderer:137}), but
+     * only under {@code PackLighting.AUTO} for emissive models, and that is the
+     * multiblock axis, not the mob rig axis.
+     */
+    static JsonObject rigBrightness() {
+        JsonObject json = new JsonObject();
+        json.addProperty("overrides", false);
+        json.add("sky", null);
+        json.add("block", null);
+        json.addProperty("source", "MobRenderEngine:1585 -> EntityMobBackend:44-56,"
+                + " TransportMobBackend:40-50 (no setBrightness call anywhere in"
+                + " infrastructure/mob/custom)");
+        json.addProperty("rule", "a rig ItemDisplay inherits the world light at the mob's"
+                + " position; the server never pins a brightness for mob visuals");
+        return json;
     }
 
     private static void appendRetexture(JsonObject response, Spec spec) {
         response.addProperty("renderType", "RETEXTURE_VANILLA");
+        // A retextured mob keeps the vanilla entity model, so the client shades it
+        // exactly like any vanilla mob (per-face multipliers) and no brightness
+        // override is ever applied by the plugin.
+        response.add("shading", BakeOps.shading("vanilla-entity", true,
+                "the base entity renders its own vanilla model with the replacement texture,"
+                        + " so the client applies the usual per-face directional multipliers"));
+        response.add("brightness", rigBrightness());
         if (spec.textureFile == null || !spec.textureFile.isFile()) {
             response.addProperty("status", "BROKEN");
             response.addProperty("summary", "the replacement texture file is missing");
@@ -391,6 +449,7 @@ final class MobOps {
         sj.addProperty("showName", spec.showName);
         sj.addProperty("type", spec.type.name());
         sj.addProperty("scale", spec.scale);
+        sj.addProperty("yawOffsetDegrees", spec.yawOffsetDegrees);
         sj.addProperty("fallback", spec.fallback);
         if (spec.hitboxWidth != null) {
             JsonArray hitbox = new JsonArray();

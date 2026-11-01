@@ -68,7 +68,8 @@ public record GunConfig(
             String hudTemplate,
             int lowAmmoThreshold,
             Set<String> disabledWorlds,
-            boolean pvpOnly
+            boolean pvpOnly,
+            boolean scopeOverlay
     ) {
         public Settings {
             language = language == null || language.isBlank() ? "en" : language;

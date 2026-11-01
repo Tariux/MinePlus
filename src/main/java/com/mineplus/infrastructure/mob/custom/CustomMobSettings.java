@@ -21,10 +21,21 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @param renderInterpolationTicks client-side interpolation window in ticks;
  *                              passed to {@code setInterpolationDuration} so the
  *                              client smooths between pose updates; lower values
- *                              look smoother but cost more bandwidth
- * @param renderDistance        blocks beyond which a rig stops receiving pose
- *                              updates (the client also culls by view range)
+ *                              look smoother but cost more bandwidth. The rig
+ *                              never eases over a window shorter than the pose
+ *                              cadence, so raising {@code RENDER_INTERVAL_TICKS}
+ *                              raises this floor with it
+ * @param renderDistance        blocks beyond which a rig is released entirely:
+ *                              its displays despawn, the base entity is shown,
+ *                              and the rig is rebuilt when a viewer comes back
+ *                              (hysteresis keeps a mob walking the border from
+ *                              thrashing)
+ * @param renderNearDistance    blocks inside which a rig is posed at full rate;
+ *                              beyond it the pose cadence drops to a quarter
  * @param maxRiggedPerWorld     hard ceiling of rigged custom mobs per world
+ * @param shadows               whether a rigged mob carries a ground shadow
+ *                              plate (the mob's own vanilla shadow is not
+ *                              rendered while its rig covers it)
  * @param removeUnknownOnLoad   whether a custom-tagged entity whose definition
  *                              is not registered is removed on chunk load
  */
@@ -34,7 +45,9 @@ public record CustomMobSettings(
         int renderIntervalTicks,
         int renderInterpolationTicks,
         int renderDistance,
+        int renderNearDistance,
         int maxRiggedPerWorld,
+        boolean shadows,
         boolean removeUnknownOnLoad
 ) {
 
@@ -42,11 +55,12 @@ public record CustomMobSettings(
         renderIntervalTicks = clamp(renderIntervalTicks, 1, 40);
         renderInterpolationTicks = clamp(renderInterpolationTicks, 1, 40);
         renderDistance = clamp(renderDistance, 8, 256);
+        renderNearDistance = clamp(renderNearDistance, 4, renderDistance);
         maxRiggedPerWorld = clamp(maxRiggedPerWorld, 1, 4096);
     }
 
     public static CustomMobSettings defaults() {
-        return new CustomMobSettings(true, true, 1, 1, 48, 96, true);
+        return new CustomMobSettings(true, true, 1, 1, 48, 20, 48, true, true);
     }
 
     public static CustomMobSettings parse(FileConfiguration yaml, CustomMobSettings fallback) {
@@ -61,7 +75,9 @@ public record CustomMobSettings(
                 section.getInt("RENDER_INTERVAL_TICKS", defaults.renderIntervalTicks()),
                 section.getInt("RENDER_INTERPOLATION_TICKS", defaults.renderInterpolationTicks()),
                 section.getInt("RENDER_DISTANCE", defaults.renderDistance()),
+                section.getInt("RENDER_NEAR_DISTANCE", defaults.renderNearDistance()),
                 section.getInt("MAX_RIGGED_PER_WORLD", defaults.maxRiggedPerWorld()),
+                section.getBoolean("SHADOWS", defaults.shadows()),
                 section.getBoolean("REMOVE_UNKNOWN_ON_LOAD", defaults.removeUnknownOnLoad())
         );
     }

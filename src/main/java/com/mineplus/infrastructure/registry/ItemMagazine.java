@@ -1,6 +1,5 @@
 package com.mineplus.infrastructure.registry;
 
-import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
