@@ -254,6 +254,9 @@ public final class PluginContext {
         // shot and retires when nothing is in flight; the held-item listener
         // only routes once a module installs a handler.
         ParticleFx particleFx = new ParticleFx();
+        // Hurt feedback on a rigged mob is a particle burst: its own model, the
+        // one that would flash red, is the model the rig covers.
+        customMobs.setParticleFx(particleFx);
         Ballistics ballistics = new Ballistics(plugin, particleFx);
         HeldItemInput heldItemInput = new HeldItemInput(plugin);
         HudService hud = new HudService();

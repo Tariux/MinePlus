@@ -47,8 +47,10 @@ export async function openItem(ctx, file) {
 
 export function showItem(ctx, response) {
     ctx.viewer.renderItem(response);
+    ctx.shading = response.shading ?? null;
     const textures = response.textures ?? {};
     const textureKeys = Object.keys(textures);
+    const unshaded = (response.elements ?? []).filter(e => e.shade === false).length;
     ctx.details(`
       <h2>${esc(response.name ?? 'item')}</h2>
       <div class="card verdict">
@@ -59,10 +61,18 @@ export function showItem(ctx, response) {
           ['file', esc(shortPath(response.file))],
           ['parent', esc(response.parent ?? '—')],
           ['gui light', esc(response.guiLight ?? 'front-side (default)')],
+          ['ambientocclusion', response.ambientocclusion === undefined ? '—' : String(response.ambientocclusion)],
           ['texture size', response.textureSize ? `${response.textureSize.width}×${response.textureSize.height}` : ''],
           ['elements', response.elementCount],
           ['out of window', response.outOfWindow ?? 0],
       ]))}
+      ${section('Client shading', `
+        <p>${response.ambientocclusion === false
+            ? 'The model pins <code>ambientocclusion:false</code>, so the client adds no baked AO around element edges.'
+            : 'The model leaves ambient occlusion on.'}</p>
+        <p class="muted small">${unshaded > 0
+            ? `${unshaded} of ${response.elements.length} element(s) pin <code>shade:false</code> and are drawn here without the vanilla face multipliers; the rest keep them.`
+            : 'No element pins <code>shade:false</code>, so every face gets the vanilla multipliers (up 1.0, north/south 0.8, east/west 0.6, down 0.5).'}</p>`)}
       ${section('Findings', findings(response.findings))}
       ${textureKeys.length > 0 ? section('Textures', `<table class="grid">
           <tr><th></th><th>key</th><th>resolved target</th><th>png</th></tr>

@@ -6,6 +6,7 @@ import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.config.WeaponConfigLoader;
 import com.mineplus.gun.feature.CombatFeature;
 import com.mineplus.gun.feature.HudFeature;
+import com.mineplus.gun.feature.ScopeFeature;
 import com.mineplus.gun.feature.ShopFeature;
 import com.mineplus.gun.feature.WeaponFeature;
 import com.mineplus.gun.hud.AmmoHud;
@@ -86,6 +87,7 @@ public final class MineplusGunPlugin extends JavaPlugin {
         features.add(new CombatFeature(this, context, services));
         features.add(new HudFeature(this, context, services));
         features.add(new ShopFeature(this, context, services));
+        features.add(new ScopeFeature(this, context, services));
 
         for (ModuleFeature feature : features) {
             feature.start();

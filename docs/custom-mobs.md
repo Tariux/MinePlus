@@ -1,17 +1,20 @@
 # Custom Mobs
 
 Mineplus custom mobs add *new* mobs to a server without touching vanilla ones.
-A custom mob is a real vanilla base entity (`PIG`, `ZOMBIE`, `VILLAGER`, …) that
-the Core gives a Mineplus identity, an optional visual model, attribute
-overrides and a behavior profile of its own. Vanilla AI is cleared, so the mob
-does exactly what the plugin says and nothing else.
+A custom mob is a real vanilla base entity (`PIG`, `ZOMBIE`, `IRON_GOLEM`,
+`VILLAGER`, …) that the Core gives a Mineplus identity, an optional visual model
+and attribute overrides. Its **mind** is then the author's choice: either the
+Core clears the vanilla goals and steers the mob through its behavior profile,
+or `vanillaAi()` leaves the goals alone and lets the server's own engine run it
+([Whose mind runs the mob?](#whose-mind-runs-the-mob)). Either way the entity
+stays a genuine, hittable, pushable mob — the plugin only dresses it up.
 
 Two content phases use the same API:
 
 | Phase | Model | What changes on the client |
 |---|---|---|
-| Texture-extended mob (Evil Pig) | `CustomMobModel.vanilla(type, png)` | the vanilla geometry with a replacement texture |
-| Fully custom mob | `MobRenderSpec` with a `.bbmodel` / Java model file, or `CustomMobModel.builder(...)` / `builderFor(...)` | the authored bone tree, texture and clips, as displays over a hidden base |
+| Texture-extended mob (Evil Pig) | `MobRenderSpec` `RETEXTURE_VANILLA` (or `CustomMobModel.vanilla(type, png)`) | the vanilla geometry with a replacement texture |
+| Fully custom mob | `MobRenderSpec` with a `.bbmodel` / Java model file, or `CustomMobModel.builder(...)` / `builderFor(...)` | the authored bone tree, texture and clips, as displays over an invisible base |
 
 The first phase requires no model authoring at all. The second is the same
 compiler with author-supplied geometry: a Blockbench file is read whole and
@@ -22,14 +25,15 @@ needs no Java-side part table, a hand-authored `CustomMobModel` does.
 ## The Evil Pig (first phase)
 
 `examples/mineplus-mobfun` registers the Evil Pig as a complete working
-example:
+example — a Core-steered mob, because no vanilla pig hunts anyone:
 
 ```java
-CustomMobDefinition evilPig = CustomMobDefinition.builder(
-                "mobfun:evil_pig", EntityType.PIG,
-                CustomMobModel.vanilla(EntityType.PIG, texturePng))
+CustomMobDefinition evilPig = CustomMobDefinition.builder("mobfun:evil_pig", EntityType.PIG)
         .displayName("Evil Pig")
         .showName(true)
+        .render(MobRenderSpec.builder(MobRenderSpec.RenderType.RETEXTURE_VANILLA, "evil_pig.png")
+                .textureBytes(() -> evilPigTexture)
+                .build())
         .attributes(CustomMobAttributes.builder()
                 .maxHealth(12.0)
                 .movementSpeed(0.28)
@@ -55,7 +59,10 @@ context.customMobs().register(this, evilPig);
 The texture is a standard 64×32 pig sheet, embedded as a jar resource
 (`mobs/evil_pig.png`) and shipped to clients through the Core's resource pack.
 The mob attacks players and villagers; it does nothing else, because nothing
-else was declared.
+else was declared — its vanilla goals were cleared. The Villager Soldier and the
+Woodland Trickster in the same module are the other half of the axis: `.bbmodel`
+mobs on an `IRON_GOLEM` and a `ZOMBIE` base with `vanillaAi()`, so the server
+runs them and the plugin only poses their rigs.
 
 Test it in game:
 
@@ -101,12 +108,14 @@ Registration is owner-scoped:
 | `displayName(String)` | prettified path | Custom name |
 | `showName(boolean)` | `false` | Float the name above the mob |
 | `persistent(boolean)` | `true` | Survive chunk unloads and restarts |
-| `hideBaseWhenRigged(boolean)` | `true` | Hide the vanilla base entity once a rig covers it |
+| `hideBaseWhenRigged(boolean)` | `true` | Make the vanilla base invisible once a rig covers it |
 | `canPickupItems(boolean)` | `false` | Allow item pickup |
 | `visual(VisualMode)` | `AUTO` | `BASE` never rigs (vanilla look), `AUTO` rigs when the pack can present it, `RIG` insists and logs loudly when it cannot |
 | `attributes(CustomMobAttributes)` | none | Attribute overrides |
-| `behavior(Consumer<MobProfile.Builder>)` | idle | The mob's entire behavior |
-| `inheritGoalsFrom(EntityType)` | none | Keep the vanilla goals of the base type (the donor must be the base type) instead of isolating |
+| `render(MobRenderSpec)` | none | Presentation: type, model/texture bytes, scale, yaw offset, hitbox, hurt feedback, shadow, clip aliases, hand items |
+| `behavior(Consumer<MobProfile.Builder>)` | see below | The mob's behavior, run by the Core's behavior engine |
+| `vanillaAi()` | off | **The game engine keeps the mob's mind**: no isolation, no profile, no scan cost — see [Whose mind runs the mob?](#whose-mind-runs-the-mob) |
+| `inheritGoalsFrom(EntityType)` | none | The explicit form of the same idea (the donor must be the base type; a mismatch is ignored and the mob stays isolated) |
 | `spawnConfigurator(Consumer<LivingEntity>)` | none | Last-word setup after identity/attributes |
 
 Base types must be pathfinding `Mob`s — the Core navigates them with their own
@@ -157,16 +166,154 @@ exactly the [Mob Behavior API](developer-api.md#mob-behavior-api). A custom mob
 without a behavior consumer gets an idle profile and stands still — the correct
 default once vanilla AI is gone.
 
+That last sentence does not apply to a `vanillaAi()` definition: it registers
+**no profile at all**, because the server's own AI already moves it and an idle
+profile would only cost a scan slot.
+
+---
+
+## Whose mind runs the mob?
+
+A custom mob has two possible minds, and picking the right one is the single
+biggest quality decision in this axis.
+
+| | Core AI (the default) | `vanillaAi()` |
+|---|---|---|
+| Who pathfinds, walks, attacks, recoils, dies | the plugin's behavior engine, on its own tick budget | the server's own mob AI, on its own tick |
+| Client motion | interpolated only as far as the pose push allows | interpolated natively, like any real mob |
+| Behavior-engine cost per mob | one profile slot in every scan pass | zero (no profile is registered) |
+| What you author | a `BehaviorAction` (or a bundled one such as `AttackNearestAction`) | nothing — you pick a base type whose AI already fits |
+| Attack clip on the rig | the action calls `playAttack` | the engine's own melee swing fires it (`EntityDamageByEntityEvent`) |
+
+**Use `vanillaAi()` whenever the content is "a real mob wearing a custom
+face".** A soldier that should guard like a golem is an `IRON_GOLEM`; a
+creature that should hunt players is a `ZOMBIE`. A mob can only keep the goals
+of the type it actually is, so the base entity *is* the AI choice:
+
+```java
+CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.IRON_GOLEM)
+        .visual(CustomMobDefinition.VisualMode.RIG)
+        .vanillaAi()                        // golem AI: patrol, hunt monsters, protect
+        .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL,
+                        "soldier_villager.bbmodel")
+                .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
+                .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
+                .hitbox(0.7, 2.1)           // the visible model, not the golem's box
+                .build())
+        .attributes(CustomMobAttributes.builder()
+                .fromTemplate(EntityType.IRON_GOLEM)
+                .maxHealth(60.0).armor(10.0).build())
+        .build();                           // note: no behavior(...) at all
+```
+
+Everything else still applies: identity, PDC tag, persistence, attributes,
+name, rig, clip blending, hurt feedback and the shadow plate. Only the mind
+changes hands.
+
+**Use Core AI when no vanilla mob does the job.** A pig that hunts players
+(`mobfun:evil_pig`) has no vanilla equivalent — a real pig wanders and flees —
+so it stays isolated and steered by its profile. The same goes for anything
+long-range or scripted: journeys, crews, pipelines and village raids are
+`BehaviorAction`/`MobPipeline` content and always have been.
+
+A `spawnConfigurator` is still the place for base-type quirks that would spoil
+the fiction. The Woodland Trickster is a zombie, and a zombie burns at sunrise,
+so it asks for the Paper toggle through a probe (Spigot has no such method) and
+falls back to ambient fire resistance:
+
+```java
+.spawnConfigurator(entity -> {
+    try {
+        entity.getClass().getMethod("setShouldBurnInDay", boolean.class)
+                .invoke(entity, false);
+        return;
+    } catch (ReflectiveOperationException absent) {
+        entity.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE,
+                PotionEffect.INFINITE_DURATION, 0, false, false));
+    }
+})
+```
+
+In YAML the same choice is one key (`ai: vanilla` — see
+[the loader's contract](#the-yaml-definition-mobsyml) and
+`src/main/resources/mobs/examples/example_vanilla_ai_mob.yml`).
+
+---
+
+## The YAML definition (`mobs/*.yml`)
+
+An operator can add a mob without writing Java: every top-level `.yml` in
+`plugins/Mineplus/mobs/` is one definition, read by `MobYamlLoader` on start and
+on `/mineplus mob reload`. The jar ships `mobs/examples/` (not scanned — the
+loader only reads the folder's top level) with one worked example of each mind:
+`example_evil_pig.yml` (Core-steered retexture) and
+`example_vanilla_ai_mob.yml` (engine-owned bbmodel mob).
+
+```yaml
+id: forest_stalker          # defaults to the file name; a bare id gets mineplus:
+base-entity: ZOMBIE         # required, and must be a pathfinding Mob
+ai: vanilla                 # vanilla | core (default) — whose mind runs it
+display-name: "Forest Stalker"
+show-name: true
+persistent: true
+
+attributes:                 # only what differs from the base entity
+  max-health: 30.0
+  movement-speed: 0.32
+  attack-damage: 4.0
+  follow-range: 24.0
+  armor: 2.0
+
+render:
+  type: bbmodel             # bbmodel | retexture_vanilla | java_json | none
+  file: forest_stalker.bbmodel      # relative to mobs/
+  texture: forest_stalker.png       # relative to mobs/
+  scale: 1.0
+  yaw-offset: 0             # 180 when the model was authored backwards
+  fallback: base_entity     # or generic_cube
+  hurt-feedback: particles  # particles | flash | none
+  shadow: true              # true | a radius in blocks | false
+  # hand-items:             # bone -> vanilla material or pack item id
+  #   weapon_r: IRON_SWORD
+  # animations:             # state -> clip alias
+  #   attack: animation.pounce
+
+hitbox:                     # blocks, feet-anchored (see the note below)
+  width: 0.6
+  height: 1.9
+```
+
+Rules worth knowing:
+
+- Model and texture paths are relative to `mobs/`, so copy the `.bbmodel` and
+  its PNG next to the YAML.
+- A file that cannot be parsed, names an unknown `base-entity`, or points at a
+  missing model/texture is **skipped with a logged reason**; a broken YAML never
+  registers a half-described mob, and never takes the others down with it.
+- Legacy key spellings (`base:`, top-level `render-type:` / `model:` /
+  `texture:` / `scale:`, `hand_items:`, `attributes.health`) still parse and are
+  reported once per file with the new spelling.
+- `hitbox:` is applied through `Entity#setSize`, which is a Paper API. On plain
+  Spigot the method does not exist, the box stays the base type's own, and the
+  Core logs it once under `ADDITIONAL_DEBUG_LOGS` — a mob remains fully
+  hittable either way, only its box differs from the drawn one.
+- `/mineplus mob inspect <id>` prints the parsed result: base, mind owner,
+  render source, hitbox, hurt feedback, shadow, clip aliases and every bone.
+
 ---
 
 ## What the Core guarantees
 
-### No vanilla AI, on every path
+### When the Core owns the mind: no vanilla AI, on every path
 
-On spawn and on every chunk restore the Core clears the entity's goal and
-target selectors (`MobAiIsolation.isolate`) while leaving AI enabled. The
-navigator still ticks the mob's own vanilla walk, so movement looks and behaves
-like a vanilla mob, but no vanilla goal or target decides anything.
+Unless the definition asked for `vanillaAi()`, on spawn and on every chunk
+restore the Core clears the entity's goal and target selectors
+(`MobAiIsolation.isolate`) while leaving AI enabled. The navigator still ticks
+the mob's own vanilla walk, so movement looks and behaves like a vanilla mob,
+but no vanilla goal or target decides anything. A `vanillaAi()` mob is skipped
+by all three paths — spawn, chunk restore and the periodic re-assert sweep —
+and reports `vanilla goals kept` as its isolation result, which is the intended
+state rather than a failed clear.
 
 The navigation, look, Brain and selector handles are resolved against the
 **live handle's runtime class**, never the declared return type of
@@ -285,12 +432,14 @@ points at it through its render spec, and the Core reads the file's own outliner
 as the rig — no part mapping is authored in Java:
 
 ```java
-CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.VILLAGER)
+CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.IRON_GOLEM)
         .visual(CustomMobDefinition.VisualMode.RIG)
+        .vanillaAi()                        // the golem's own AI runs it
         .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL,
                         "soldier_villager.bbmodel")
                 .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
                 .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
+                .hitbox(0.7, 2.1)
                 .build())
         .build();
 ```
@@ -322,12 +471,17 @@ idle clip still breathes and still swings its legs while moving. The state is
 chosen from the mob's own measured speed (blocks per tick between pose pushes):
 above 0.015 it walks, above 0.16 it runs, and the transitions cross-fade over
 0.15 s. `animation.attack` is a one-shot *overlay*: the Core plays it the moment
-the mob swings (a behavior action calls `MobRenderEngine.playAttack`, or a
-module through `CustomMobApi.playAttack`/`playAnimation` for its own timing),
-and when it ends the bones go back to walk/idle.
+the mob swings — a Core-steered action calls `MobRenderEngine.playAttack` when
+it swings, and for a `vanillaAi()` mob the engine's own melee hit
+(`EntityDamageByEntityEvent` with the mob as damager) is what fires it, so the
+clip lands on the swing rather than only on the damage — or a module through
+`CustomMobApi.playAttack`/`playAnimation` for its own timing. When it ends the
+bones go back to walk/idle. For a `vanillaAi()` mob the measured speed that
+chooses idle/walk/run is the distance the *server* actually moved the entity, so
+the rig's gait follows the engine's stride instead of a plugin's intention.
 `examples/mineplus-mobfun` uses this path for the Villager Soldier
-(`mobfun:villager_soldier`) and the Woodland Trickster
-(`mobfun:woodland_trickster`, idle + walk + attack).
+(`mobfun:villager_soldier`, iron-golem base) and the Woodland Trickster
+(`mobfun:woodland_trickster`, zombie base, idle + walk + attack).
 
 ### How a model reaches the client
 
@@ -355,10 +509,11 @@ author drew:
 - the pose pass applies each piece's offset under the same bone matrix, so the
   pieces reassemble into the authored shape and rotate as one bone.
 
-`MobRenderEngine` hides the base entity and presents each part (or piece) as an
-`ItemDisplay` whose `item_model` component points at that model. The rig is
-placed with `R_y(180° + yawOffset − heading)` — authored models face `-z`, and
-in this frame the model's front lands exactly on the direction
+`MobRenderEngine` makes the base entity invisible and presents each part (or
+piece) as an `ItemDisplay` whose `item_model` component points at that model (see
+[A rigged mob is still a real entity](#a-rigged-mob-is-still-a-real-entity)). The
+rig is placed with `R_y(180° + yawOffset − heading)` — authored models face
+`-z`, and in this frame the model's front lands exactly on the direction
 `(-sin heading, 0, cos heading)`. `heading` is the direction the mob actually
 walks: every pose pass measures the entity's own position delta and steers the
 rig toward it, easing over the shortest arc, and falls back to the server body
@@ -372,6 +527,38 @@ and `/mobfun rig <id> yaw-offset <deg|auto>` probes a value live before it is
 authored. All of this rides the existing pack delivery — players already
 receiving the Core pack see the mob with no extra download.
 
+### A rigged mob is still a real entity
+
+Hiding the mob's own model must not hide the mob. The base entity is therefore
+made **invisible** (`LivingEntity#setInvisible`), never removed from the client:
+its hitbox, collision, push-back, targeting, sounds, damage state, knockback and
+death all stay exactly as the server computed them, and only the model is
+transparent. Removing the entity from the client instead — the obvious shortcut —
+silently costs all of that: players cannot look at or hit the mob, a gun shot
+passes through it, nothing pushes it, and it has no hurt tint or collapse to
+show.
+
+Because the rig *draws* the mob, the three things a real entity normally
+communicates through its own model are restored by the render engine instead:
+
+| Need | What happens |
+|---|---|
+| "I hit it" | `MobRenderSpec.HurtFeedback.PARTICLES` (default) — a `CRIT` burst at the mob's chest on every hit, throttled to one per four pose passes and emitted through the shared `ParticleFx` budget. `FLASH` instead reveals the real model for 8 ticks so the vanilla red tint plays; `NONE` stays quiet. Either way the rig also plays its authored `hurt` clip when one exists. |
+| "It is standing here" | a generated ground-shadow plate (`render/MobShadowAssets`, one `ItemDisplay` under the mob, `shade:false` + `blend:true`), sized from the hitbox width or from `render.shadow: <blocks>`; `shadow: false` (or `CUSTOM_MOBS.SHADOWS: false`) removes it. Needs the pack, like every other display. |
+| "Its body is this big" | `MobRenderSpec.hitbox(width, height)` / `hitbox:` in YAML, applied through Paper's `Entity#setSize` where it exists (probed once; plain Spigot keeps the base type's box and logs it). |
+
+Death is handled the same way: a rig with an authored `death` clip plays it as a
+one-shot and the session tears down when the clip ends; a rig without one
+releases its displays so the **engine's own** collapse, smoke and drop play
+instead, held for `DEATH_HOLD_SECONDS`. A mob never vanishes mid-death.
+
+Every one of those is per-viewer correct: a player whose client has not accepted
+the resource pack cannot receive the rig's displays at all, so while any nearby
+viewer is in that state the base model stays visible rather than leaving an
+invisible hitbox nobody can see. `/mobfun rig <id>` prints `base hidden` /
+`base visible` per mob, and `/mineplus mob inspect <id>` prints the hurt, shadow
+and hitbox the definition asked for.
+
 ### Degradation
 
 If the pack subsystem is unavailable, disabled, or the server has no
@@ -382,22 +569,46 @@ layer.
 
 ### Cost controls (`CUSTOM_MOBS`)
 
+The base entity of a custom mob costs exactly what the vanilla mob it wraps
+costs — that part of the lag budget is the server's, and a `vanillaAi()` mob
+adds nothing to it at all. What the plugin adds is the **rig**: one
+`ItemDisplay` (or more, for a multi-piece bone) per bone, posed on a schedule.
+Every knob below bounds that.
+
 | Key | Default | Effect |
 |---|---|---|
 | `ENABLED` | `true` | Subsystem master switch |
 | `RENDERING` | `true` | Create visual rigs at all |
 | `RENDER_INTERVAL_TICKS` | `1` | Server ticks between rig pose pushes (the pose loop is scheduled at this cadence, and the animation clocks and measured walk speed scale with it) |
-| `RENDER_INTERPOLATION_TICKS` | `1` | Client-side easing window per pose push; keep equal to the interval or the client lags/snaps |
-| `RENDER_DISTANCE` | `48` | Blocks beyond which a rig stops receiving poses |
-| `MAX_RIGGED_PER_WORLD` | `96` | Hard ceiling of rigged mobs per world |
+| `RENDER_INTERPOLATION_TICKS` | `1` | Client-side easing window per pose push; the engine raises it to the interval when it is shorter, so a slowed loop still glides |
+| `RENDER_DISTANCE` | `48` | Blocks beyond which a rig is **released**: its despawn, the base entity shows again, and the rig is rebuilt when a viewer returns (8 blocks of hysteresis keep a mob walking the border from thrashing) |
+| `RENDER_NEAR_DISTANCE` | `20` | Blocks inside which a rig poses at full rate; beyond it, at a quarter cadence with the interpolation window widened to match, so the motion stays smooth at a fraction of the packets |
+| `MAX_RIGGED_PER_WORLD` | `48` | Hard ceiling of rigged mobs per world; the rest keep their base entity and log the reason once |
+| `SHADOWS` | `true` | Give a rigged mob its generated ground-shadow plate |
 | `REMOVE_UNKNOWN_ON_LOAD` | `true` | Remove custom-tagged entities whose definition is gone |
 
-The pose loop runs while the subsystem is on and returns immediately when no rig
-is attached, so an idle server pays one empty-check per interval. A mob with no
-viewer inside `RENDER_DISTANCE` freezes its pose rather than being torn down, and
-a rig detaches by itself when its mob dies or unloads. Raising the interval is
-the cheap knob for a world with hundreds of rigged mobs: it cuts display packets
-in proportion, at the cost of a coarser animation.
+On top of the settings, the pose pass itself is written to be free when nothing
+changed:
+
+- **one viewer snapshot per pass.** Every rig used to walk the online-player
+  list and allocate distance checks of its own; a crowd made that a
+  mob-times-player loop per tick. The list and each viewer's pack state are now
+  gathered once per pass and read by every rig without allocating.
+- **per-display dirty check.** Each display remembers the position and the 16
+  matrix floats it was last sent (`PoseSlot`); a pose that moved neither (by
+  more than 1.5 mm, or 0.0008 of a matrix unit) pushes no packet at all. A mob
+  standing idle therefore costs nearly nothing, which is the common case in a
+  herd or a patrol.
+- **staggered wake-ups.** Each session starts its pose cadence offset by its own
+  id hash, so a hundred quarter-rate rigs do not all push on the same tick.
+- **`ParticleFx` budgets** for hurt feedback, and **hysteresis** on release.
+
+Read the live cost with `/mineplus mob cost` (posed rigs, displays, how many are
+at quarter rate or released, cadence and cap), and per definition with
+`/mineplus mob validate`. Raising `RENDER_INTERVAL_TICKS` or lowering
+`RENDER_NEAR_DISTANCE` is the cheap knob for a world with hundreds of rigged
+mobs; giving a heavy mob `ai: vanilla` is the one that removes the rig's work
+from the behavior engine entirely.
 
 ---
 
@@ -448,22 +659,58 @@ Behavior details:
 /mobfun rig trickster attack # play the authored attack clip on the nearest one
 /mobfun rig soldier yaw-offset 180   # flip a backwards-authored model, live
 /mobfun despawn              # remove every mob spawned through the test bench
+/mineplus mob cost           # how many rigs are posed, quarter-rated or released
 ```
 
 `forceFire` dispatches by identity, so the report describes the custom profile
-even though the entity's `EntityType` is `PIG` or `VILLAGER`. A failure means the
-profile or its conditions blocked the action — never that the wrong profile ran.
+even though the entity's `EntityType` is `PIG`, `ZOMBIE` or `IRON_GOLEM`. A
+failure means the profile or its conditions blocked the action — never that the
+wrong profile ran.
+
+A `vanillaAi()` showcase has no profile to force, so `/mobfun spawn soldier` and
+`/mobfun fire soldier` say so instead of printing an empty action list: the
+engine owns its mind, and the test to run is to stand in front of it and watch it
+path, hunt, recoil and die. `/mobfun rig soldier` remains the diagnostic that
+describes the visual half — and its `Definition:` line states which mind the
+definition asked for, so a mob that "does nothing" is instantly separated into
+"the profile is blocked" versus "the engine's AI is busy or has nothing to
+target".
 
 ---
 
 ## Checklist for a new custom mob
 
-1. Decide the base type — it must be a vanilla `Mob` (pathfinding).
+1. Decide the mind first. Is this "a real mob wearing a custom face"? Then pick
+   the base type whose vanilla AI already does the job and call `vanillaAi()` —
+   movement, attack timing, recoil and death come out smooth because the server
+   produces them, and the behavior engine never scans the mob. If no vanilla mob
+   does it (a hunting pig, a pilgrim, a raid leader), leave the default and
+   author the profile. Either way the base type must be a pathfinding `Mob`.
 2. Add the texture PNG as a jar resource (or generate it), keeping the vanilla
-   sheet layout if you use `CustomMobModel.vanilla`.
-3. Build the `CustomMobDefinition`: id, base type, model, attributes, behavior.
-4. Register it on module enable (`context.customMobs().register(this, def)`),
+   sheet layout if you use `CustomMobModel.vanilla`. A `.bbmodel` needs no
+   layout rule — its outliner becomes the rig and its clips bind by name.
+3. Build the `CustomMobDefinition`: id, base type, render spec (or model),
+   attributes, behavior or `vanillaAi()`.
+4. Describe the *drawn* body, not the base type's: `render(...).hitbox(w, h)`
+   when the model is smaller or larger than the vanilla silhouette, and leave
+   `hurt-feedback` and `shadow` at their defaults unless the mob needs the real
+   model to flash instead of a spark burst.
+5. Register it on module enable (`context.customMobs().register(this, def)`),
    unregister on disable.
-5. Optionally expose a spawn command or spawner hook.
-6. Verify with `/mobfun spawn`-style force-fire that the action list is what you
-   expect, and that no vanilla behavior shows through.
+6. Optionally expose a spawn command or spawner hook.
+7. Verify with `/mobfun spawn`-style force-fire that the action list is what you
+   expect (for a Core-steered mob), or that it behaves like its base type and
+   takes damage, knockback and a killing blow like one (for `vanillaAi()`).
+8. Then read the rig itself with `/mobfun rig <id>`: it prints what the
+   definition asks for, what the Core actually presented, each live mob's
+   isolation result, its pose source and its rig heading beside the server body
+   yaw, and whether its base model is hidden. "It looks like a plain villager"
+   has several different causes — pack not delivered, model failed to parse, rig
+   cap, render toggle, isolation failure — and this separates them in one
+   command. A backwards-facing model shows as a rig heading that disagrees with
+   the walk direction on every line; correct it with `/mobfun rig <id>
+   yaw-offset 180`, and if that fixes it, author the value into the definition.
+9. With a crowd of them, check `/mineplus mob cost`: posed rigs, display
+   entities, how many are quarter-rated or released. If it is heavy, tune
+   `RENDER_NEAR_DISTANCE` / `RENDER_INTERVAL_TICKS` / `MAX_RIGGED_PER_WORLD` —
+   or move the mob to `vanillaAi()`, which is both cheaper and smoother.

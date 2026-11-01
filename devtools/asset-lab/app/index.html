@@ -19,17 +19,21 @@
         <span id="brand">asset lab</span>
         <span class="dot" id="dot-code" title="pipeline code"></span>
         <span class="dot" id="dot-daemon" title="op daemon"></span>
+        <span class="dot" id="dot-settings" title="deployed settings.mp.yml"></span>
         <span id="status-text">starting…</span>
         <span class="spacer"></span>
         <button id="btn-recompile" class="btn small" title="Recompile pipeline + restart daemon (code hot reload)">↻ Recompile</button>
         <label class="inline small"><input type="checkbox" id="btn-markers"> bone markers</label>
         <button id="btn-frame" class="btn small" title="Frame the camera on the current content">Frame</button>
+        <button id="btn-help" class="btn small" title="How this bridge works and what it approximates">?</button>
     </header>
 
     <nav id="tabs">
         <button data-tab="mobs" class="active">Mobs <span class="badge" id="count-mobs">0</span></button>
         <button data-tab="items">Items <span class="badge" id="count-items">0</span></button>
         <button data-tab="blocks">Blocks <span class="badge" id="count-blocks">0</span></button>
+        <button data-tab="bake">Bake <span class="badge" id="count-bake">0</span></button>
+        <button data-tab="pack">Pack <span class="badge" id="count-pack">0</span></button>
         <button data-tab="textures">Textures <span class="badge" id="count-textures">0</span></button>
         <button data-tab="audit">Audit</button>
     </nav>
@@ -39,23 +43,18 @@
             <div class="tab-list active" data-tab="mobs" id="list-mobs"></div>
             <div class="tab-list" data-tab="items" id="list-items"></div>
             <div class="tab-list" data-tab="blocks" id="list-blocks"></div>
+            <div class="tab-list" data-tab="bake" id="list-bake"></div>
+            <div class="tab-list" data-tab="pack" id="list-pack"></div>
             <div class="tab-list" data-tab="textures" id="list-textures"></div>
             <div class="tab-list" data-tab="audit" id="list-audit"></div>
         </aside>
 
-        <main id="viewport"></main>
+        <main id="viewport">
+            <div id="stage"></div>
+        </main>
 
         <aside id="right">
-            <div id="details">
-                <h2>Asset Lab</h2>
-                <div class="card">
-                    <p>Validate mobs, items and blocks <b>before going in game</b>:
-                    pick an asset on the left — it runs through the same pipeline
-                    classes the server uses and renders here with the same math.</p>
-                    <p class="muted">Green = clean, amber = renders with findings,
-                    red = broken. The Audit tab checks everything at once.</p>
-                </div>
-            </div>
+            <div id="details"></div>
         </aside>
     </div>
 

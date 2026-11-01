@@ -21,7 +21,8 @@ import org.bukkit.util.StringUtil;
 /**
  * {@code /mineplus mob} — operator tooling for custom mobs: list, spawn, the
  * YAML definition reload, per-mob pack validation, a model inspector, the
- * one-shot clip player and the bone-marker debug toggle.
+ * one-shot clip player, the bone-marker debug toggle and the live render-cost
+ * readout ({@code cost}) that answers "is this crowd of rigs too heavy?".
  */
 public final class MobSubCommand implements SubCommand {
 
@@ -45,7 +46,7 @@ public final class MobSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/mineplus mob <list|spawn|reload|validate|inspect|anim|bones|pack> ...";
+        return "/mineplus mob <list|spawn|reload|validate|inspect|anim|bones|pack|cost> ...";
     }
 
     @Override
@@ -113,6 +114,15 @@ public final class MobSubCommand implements SubCommand {
                 packSummary(sender);
                 return true;
             }
+            case "cost" -> {
+                sender.sendMessage(ChatColor.GOLD + "Rig cost: " + ChatColor.WHITE
+                        + context.customMobManager().costSnapshot());
+                sender.sendMessage(ChatColor.GRAY + "Lower it with CUSTOM_MOBS.RENDER_DISTANCE / "
+                        + "RENDER_NEAR_DISTANCE / RENDER_INTERVAL_TICKS / MAX_RIGGED_PER_WORLD,"
+                        + " or by giving a heavy mob 'ai: vanilla' so the server runs it and the"
+                        + " Core registers no profile at all.");
+                return true;
+            }
             default -> {
                 return false;
             }
@@ -130,8 +140,9 @@ public final class MobSubCommand implements SubCommand {
         for (CustomMobDefinition definition : definitions) {
             String render = definition.renderSpec() == null
                     ? "legacy model" : definition.renderSpec().type().name();
+            String mind = definition.keepsVanillaGoals() ? "engine AI" : "core AI";
             sender.sendMessage(ChatColor.YELLOW + "- " + definition.id()
-                    + ChatColor.GRAY + " [" + definition.baseType() + ", " + render + "]"
+                    + ChatColor.GRAY + " [" + definition.baseType() + ", " + render + ", " + mind + "]"
                     + " live " + mobs.liveCount(definition.id())
                     + ChatColor.AQUA + " " + String.valueOf(mobs.rigStatus(definition.id())));
         }
@@ -193,6 +204,12 @@ public final class MobSubCommand implements SubCommand {
         sender.sendMessage(ChatColor.GOLD + "Mob " + ChatColor.WHITE + definition.id());
         sender.sendMessage(ChatColor.YELLOW + "Base: " + ChatColor.WHITE + definition.baseType()
                 + ChatColor.GRAY + " persistent=" + definition.persistent());
+        sender.sendMessage(ChatColor.YELLOW + "Mind: " + ChatColor.WHITE
+                + (definition.keepsVanillaGoals()
+                ? "the game engine — it keeps " + definition.baseType() + "'s own goals, walks,"
+                + " attacks, recoils and dies by the server's rules"
+                : "the Core behavior engine — vanilla goals cleared, every action comes"
+                + " from its behavior profile"));
         MobRenderSpec spec = definition.renderSpec();
         if (spec == null) {
             sender.sendMessage(ChatColor.YELLOW + "Render: " + ChatColor.GRAY + "legacy model path");
@@ -200,6 +217,12 @@ public final class MobSubCommand implements SubCommand {
             sender.sendMessage(ChatColor.YELLOW + "Render: " + ChatColor.WHITE + spec.type()
                     + ChatColor.GRAY + " source '" + spec.sourceName() + "'"
                     + " scale=" + spec.scale() + " fallback=" + spec.fallback());
+            sender.sendMessage(ChatColor.YELLOW + "Body: " + ChatColor.WHITE
+                    + (spec.hitboxWidth() == null
+                    ? "base type's hitbox" : spec.hitboxWidth() + " x " + spec.hitboxHeight())
+                    + ChatColor.GRAY + ", hurt feedback " + spec.hurtFeedback()
+                    + ", shadow " + (spec.shadowRadius() == null ? "derived from the hitbox"
+                    : spec.shadowRadius() <= 0.0f ? "off" : spec.shadowRadius() + " blocks"));
             sender.sendMessage(ChatColor.YELLOW + "Clip aliases: " + ChatColor.WHITE
                     + (spec.animationMap().isEmpty() ? "-" : spec.animationMap().toString()));
             sender.sendMessage(ChatColor.YELLOW + "Hand items: " + ChatColor.WHITE
@@ -296,7 +319,8 @@ public final class MobSubCommand implements SubCommand {
         if (args.length == 1) {
             List<String> completions = new ArrayList<>();
             StringUtil.copyPartialMatches(args[0],
-                    List.of("list", "spawn", "reload", "validate", "inspect", "anim", "bones", "pack"),
+                    List.of("list", "spawn", "reload", "validate", "inspect", "anim", "bones", "pack",
+                            "cost"),
                     completions);
             Collections.sort(completions);
             return completions;

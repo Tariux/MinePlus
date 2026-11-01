@@ -1,0 +1,51 @@
+# Example: a custom mob whose mind belongs to the game engine.
+#
+# This file lives in mobs/examples/ so the loader does not pick it up. Copy it
+# to plugins/Mineplus/mobs/ (top level), put the .bbmodel and its PNG next to it,
+# and run /mineplus mob reload.
+#
+# The pattern for content that is "a real mob wearing a custom face": the plugin
+# only dresses the entity up (identity, model, attributes, name) and the server's
+# own AI runs it — pathfinding, stride, swing timing, hurt recoil, knockback,
+# pushing and the death animation are vanilla, so they interpolate smoothly on
+# the client and cost no behavior-engine scan at all.
+#
+# Choose a base entity whose vanilla AI already does the job, because a mob can
+# only keep the goals of the type it actually is:
+#   ZOMBIE      hunts players and villagers   → a monster that attacks people
+#   IRON_GOLEM  patrols and attacks monsters  → a guard
+#   WOLF        follows and bites its target  → a pet-like attacker
+# A base whose AI does *not* fit (a pig that should hunt) stays on `ai: core`
+# and gets a behavior profile instead — see example_evil_pig.yml.
+
+id: forest_stalker
+base-entity: ZOMBIE
+ai: vanilla
+
+display-name: "Forest Stalker"
+show-name: true
+
+attributes:
+  max-health: 30.0
+  movement-speed: 0.32
+  attack-damage: 4.0
+  follow-range: 24.0
+  armor: 2.0
+
+render:
+  type: bbmodel
+  file: forest_stalker.bbmodel
+  texture: forest_stalker.png
+  # The outliner groups become the rig's bones and the file's clips are played
+  # by name (idle / walk / run / attack / hurt / death), so an authored
+  # animation.attack plays the moment the zombie swings — the engine's melee hit
+  # notifies the rig, no code needed. Aliases are available for other names:
+  animations:
+    attack: animation.pounce
+  # The visible model is not the zombie's silhouette, so match the hitbox to it:
+  # width and height in blocks, feet-anchored.
+  hitbox:
+    width: 0.6
+    height: 1.9
+  shadow: true
+  hurt-feedback: particles

@@ -49,6 +49,16 @@ public interface MobFunShowcaseEntry {
      */
     LivingEntity spawn(Location location);
 
+    /**
+     * Whether {@code /mobfun spawn|fire} has Core behavior actions to force on
+     * this mob. A custom mob whose mind belongs to the game engine declares no
+     * profile, so it answers {@code false} and the command reports the
+     * engine-owned behavior instead of an empty action list.
+     */
+    default boolean steersByCoreActions() {
+        return true;
+    }
+
     /** One status line ({@code "  Label (type): ON"}). */
     String statusLine();
 }

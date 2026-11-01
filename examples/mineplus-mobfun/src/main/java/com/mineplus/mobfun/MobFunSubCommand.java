@@ -6,6 +6,7 @@ import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import com.mineplus.infrastructure.mob.custom.CustomMobApi;
 import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
 import com.mineplus.infrastructure.mob.custom.CustomMobModel;
+import com.mineplus.infrastructure.mob.custom.MobRenderSpec;
 import com.mineplus.pack.PackApi;
 import com.mineplus.pack.compile.PackArtifact;
 import java.util.ArrayList;
@@ -188,9 +189,14 @@ public final class MobFunSubCommand implements SubCommand {
         entity.setPersistent(true);
         spawnedTestMobs.add(entity.getUniqueId());
 
-        sender.sendMessage(ChatColor.GREEN + "Spawned " + showcase.label() + " in front of you"
-                + (ignoreConditions ? " (forcing actions, conditions ignored):" : " (forcing actions):"));
-        reportFire(sender, entity, ignoreConditions);
+        if (showcase.steersByCoreActions()) {
+            sender.sendMessage(ChatColor.GREEN + "Spawned " + showcase.label() + " in front of you"
+                    + (ignoreConditions ? " (forcing actions, conditions ignored):" : " (forcing actions):"));
+            reportFire(sender, entity, ignoreConditions);
+        } else {
+            sender.sendMessage(ChatColor.GREEN + "Spawned " + showcase.label() + " in front of you.");
+            reportEngineOwnedMind(sender, showcase);
+        }
         return true;
     }
 
@@ -215,9 +221,27 @@ public final class MobFunSubCommand implements SubCommand {
                     + " within " + (int) FIRE_SEARCH_RADIUS + " blocks. Use /mobfun spawn " + showcase.id() + ".");
             return true;
         }
+        if (!showcase.steersByCoreActions()) {
+            sender.sendMessage(ChatColor.GREEN + showcase.label() + " is on the nearest mob:");
+            reportEngineOwnedMind(sender, showcase);
+            return true;
+        }
         sender.sendMessage(ChatColor.GREEN + "Forcing " + showcase.label() + " actions on the nearest mob:");
         reportFire(sender, target, ignoreConditions);
         return true;
+    }
+
+    /**
+     * A note for a mob the plugin only dresses up: the server's own AI runs it,
+     * so there is no profile action to force and 'forcing' would mean nothing.
+     */
+    private void reportEngineOwnedMind(CommandSender sender, MobFunShowcaseEntry showcase) {
+        sender.sendMessage(ChatColor.GRAY + "The game engine owns this mob's mind: it is a real "
+                + showcase.entityType().name().toLowerCase(Locale.ROOT)
+                + " wearing a custom model, so it paths, walks, swings, recoils and dies by the"
+                + " server's own rules with no plugin actions to force.");
+        sender.sendMessage(ChatColor.GRAY + "Inspect the visual side with /mobfun rig " + showcase.id()
+                + " (and 'attack' to play its attack clip).");
     }
 
     /** {@code /mobfun despawn}: remove every test mob this command spawned. */
@@ -468,6 +492,26 @@ public final class MobFunSubCommand implements SubCommand {
         return Float.isNaN(value) ? "n/a" : String.format(Locale.ROOT, "%.1f", value);
     }
 
+    /** What the definition draws the mob with — the {@code render:} spec or a legacy part model. */
+    private static String renderSummary(CustomMobDefinition definition) {
+        MobRenderSpec spec = definition.renderSpec();
+        if (spec != null) {
+            return switch (spec.type()) {
+                case BBMODEL, JAVA_JSON -> spec.type() + " " + spec.sourceName()
+                        + ", hitbox " + (spec.hitboxWidth() == null
+                        ? "base type's" : spec.hitboxWidth() + "x" + spec.hitboxHeight())
+                        + ", hurt " + spec.hurtFeedback()
+                        + ", shadow " + (spec.shadowRadius() == null ? "derived"
+                        : spec.shadowRadius() <= 0.0f ? "off" : spec.shadowRadius() + " blocks");
+                case RETEXTURE_VANILLA -> "vanilla geometry, texture " + spec.sourceName();
+                case NONE -> "vanilla model";
+            };
+        }
+        CustomMobModel model = definition.model();
+        return model == null ? "vanilla model (no render spec)"
+                : model.parts().size() + " part(s), " + model.animations().size() + " clip(s)";
+    }
+
     private boolean reportRig(CommandSender sender, String idToken, boolean attack) {
         CustomMobShowcase custom = customShowcase(sender, idToken);
         if (custom == null) {
@@ -477,15 +521,15 @@ public final class MobFunSubCommand implements SubCommand {
         CustomMobApi api = custom.api();
         sender.sendMessage(ChatColor.DARK_GREEN + definition.id() + " — " + definition.displayName());
 
-        CustomMobModel model = definition.model();
         sender.sendMessage(ChatColor.DARK_GREEN + "Definition: " + ChatColor.WHITE
                 + definition.baseType().name().toLowerCase(Locale.ROOT) + " base, visual "
                 + definition.visual() + ", hideBase=" + definition.hideBaseWhenRigged()
-                + ", " + (model == null ? "no model" : model.parts().size() + " part(s), "
-                + model.animations().size() + " clip(s)")
+                + ", " + renderSummary(definition)
                 + ", " + definition.attributes().overrideCount() + " attribute override(s)"
                 + (definition.keepsVanillaGoals()
-                ? " (vanilla goals of " + definition.goalDonor() + " kept)" : " (isolated)"));
+                ? " — MIND: the game engine (a real " + definition.goalDonor().name().toLowerCase(Locale.ROOT)
+                + ", nothing for /mobfun fire to force)"
+                : " — MIND: the Core's behavior engine (vanilla goals cleared)"));
         if (attack && sender instanceof Player player) {
             LivingEntity mob = nearestLiveMobs(player, api.liveMobs(definition.id()), 1).stream()
                     .findFirst().orElse(null);

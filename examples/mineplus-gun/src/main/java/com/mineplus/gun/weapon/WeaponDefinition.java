@@ -81,6 +81,17 @@ public final class WeaponDefinition {
     private final String scopeOutClip;
     private final String equipClip;
 
+    /**
+     * How long a pose clip plays, in ticks. A clip's authored length is a fact
+     * about the model, not about the gun's mechanics, so an author writes it next
+     * to the clip's name ({@code animation.fire: 0.45}) and the runtime plays the
+     * sequence over exactly that span.
+     */
+    private final int firePoseTicks;
+    private final int scopeInTicks;
+    private final int scopeOutTicks;
+    private final int equipTicks;
+
     private final String muzzleParticle;
     private final String flashParticle;
     private final String smokeParticle;
@@ -144,6 +155,10 @@ public final class WeaponDefinition {
         this.scopeHoldClip = normalizeClip(b.scopeHoldClip);
         this.scopeOutClip = normalizeClip(b.scopeOutClip);
         this.equipClip = normalizeClip(b.equipClip);
+        this.firePoseTicks = Math.max(1, b.firePoseTicks);
+        this.scopeInTicks = Math.max(1, b.scopeInTicks);
+        this.scopeOutTicks = Math.max(1, b.scopeOutTicks);
+        this.equipTicks = Math.max(1, b.equipTicks);
         this.muzzleParticle = b.muzzleParticle;
         this.flashParticle = b.flashParticle;
         this.smokeParticle = b.smokeParticle;
@@ -343,6 +358,11 @@ public final class WeaponDefinition {
     public String scopeOutClip() { return scopeOutClip; }
     public String equipClip() { return equipClip; }
 
+    public int firePoseTicks() { return firePoseTicks; }
+    public int scopeInTicks() { return scopeInTicks; }
+    public int scopeOutTicks() { return scopeOutTicks; }
+    public int equipTicks() { return equipTicks; }
+
     public String muzzleParticle() { return muzzleParticle; }
     public String flashParticle() { return flashParticle; }
     public String smokeParticle() { return smokeParticle; }
@@ -423,6 +443,11 @@ public final class WeaponDefinition {
         private String scopeOutClip = "scope_out";
         private String equipClip = "equip";
 
+        private int firePoseTicks = 4;
+        private int scopeInTicks = 6;
+        private int scopeOutTicks = 5;
+        private int equipTicks = 8;
+
         private String muzzleParticle = "SMOKE";
         private String flashParticle = "FLAME";
         private String smokeParticle = "LARGE_SMOKE";
@@ -489,6 +514,11 @@ public final class WeaponDefinition {
         public Builder scopeHoldClip(String v) { this.scopeHoldClip = v; return this; }
         public Builder scopeOutClip(String v) { this.scopeOutClip = v; return this; }
         public Builder equipClip(String v) { this.equipClip = v; return this; }
+
+        public Builder firePoseTicks(int v) { this.firePoseTicks = v; return this; }
+        public Builder scopeInTicks(int v) { this.scopeInTicks = v; return this; }
+        public Builder scopeOutTicks(int v) { this.scopeOutTicks = v; return this; }
+        public Builder equipTicks(int v) { this.equipTicks = v; return this; }
 
         public Builder muzzleParticle(String v) { this.muzzleParticle = v; return this; }
         public Builder flashParticle(String v) { this.flashParticle = v; return this; }

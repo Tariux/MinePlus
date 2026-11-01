@@ -8,7 +8,6 @@ import org.bukkit.Location;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.joml.Matrix4f;
-import org.joml.Matrix4fc;
 
 /**
  * The packet-path backend: pooled item displays streamed through the Core's

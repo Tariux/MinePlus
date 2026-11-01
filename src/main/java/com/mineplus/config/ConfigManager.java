@@ -464,31 +464,50 @@ public class ConfigManager {
                       MAX_PIPELINES_PER_RUN: 64
 
                     # Custom mobs: vanilla base entities carrying a Mineplus
-                    # identity, their own visual model and Core-driven behavior.
-                    # A custom mob never runs vanilla AI; its behavior comes from
-                    # profiles bound to its id, never to the base entity type.
+                    # identity, their own visual model and their own behavior.
+                    # A definition chooses its mind: isolated (every move comes
+                    # from a Core profile bound to its id) or 'ai: vanilla',
+                    # which keeps the base type's own goals so the mob walks,
+                    # hunts, swings and dies exactly like that mob and the
+                    # plugin only dresses it up.
                     CUSTOM_MOBS:
                       # Master switch; false makes registration and spawning
                       # no-ops (existing custom mobs keep their profiles).
                       ENABLED: true
-                      # Build per-part visual rigs (hidden base + ItemDisplays).
-                      # Rigs need the pack subsystem; the modern representation
-                      # names each part model in the item_model component and a
-                      # legacy one reaches it through a reserved custom_model_data
-                      # override. Without the pack the base entity stays visible.
+                      # Build per-part visual rigs (base model covered +
+                      # ItemDisplays). Rigs need the pack subsystem; the modern
+                      # representation names each part model in the item_model
+                      # component and a legacy one reaches it through a reserved
+                      # custom_model_data override. Without the pack the base
+                      # entity stays visible.
+                      # A rigged mob is still the real entity: it keeps its
+                      # hitbox, so it can be looked at, hit, pushed and killed,
+                      # and its base model is only hidden from the render.
                       RENDERING: true
                       # Server ticks between rig pose pushes. Keep at 1: a pose
                       # pushed every other tick needs a 2-tick client window to
                       # look smooth, and any window longer than the cadence lags.
+                      # Mobs beyond RENDER_NEAR_DISTANCE cost a quarter of this
+                      # rate, and a rig nobody is near costs nothing at all.
                       RENDER_INTERVAL_TICKS: 1
                       # Ticks a display eases its transformation over. 1 matches
                       # the push cadence; raise it only to soften a coarse
                       # RENDER_INTERVAL_TICKS.
                       RENDER_INTERPOLATION_TICKS: 1
-                      # Blocks beyond which a rig stops receiving pose updates.
+                      # Blocks beyond which a rig is released entirely: its
+                      # displays despawn and the mob shows its real base model
+                      # again until a viewer comes back inside it.
                       RENDER_DISTANCE: 48
-                      # Hard ceiling of rigged custom mobs per world.
-                      MAX_RIGGED_PER_WORLD: 96
+                      # Blocks inside which a rig is posed at full rate; beyond
+                      # it every fourth pose pass runs.
+                      RENDER_NEAR_DISTANCE: 20
+                      # Hard ceiling of rigged custom mobs per world. A mob over
+                      # the cap renders as its base entity and plays normally.
+                      MAX_RIGGED_PER_WORLD: 48
+                      # Draw a soft ground shadow plate under a rigged mob. The
+                      # mob's own shadow is not rendered while its rig covers it,
+                      # so this is what keeps a custom mob from looking airborne.
+                      SHADOWS: true
                       # Remove a custom-tagged entity whose definition is not
                       # registered when its chunk loads.
                       REMOVE_UNKNOWN_ON_LOAD: true

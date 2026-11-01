@@ -105,7 +105,7 @@ A weapon module ships definitions and presentation; the Core owns the shot. Same
 
 Damage the Core's ballistics applies needs nothing from you (`ProjectileHandler.STANDARD`); damage you compute yourself (melee, explosions) goes through `DamageTransactions.apply(victim, amount, attacker)` so your own listener does not double-count it.
 
-> 📁 **Working module:** [`examples/mineplus-gun`](../examples/mineplus-gun/README.md) — firearms with file-discovered frame animations, right-click fire, left-click scope, automatic reload and a Vault shop.
+> 📁 **Working module:** [`examples/mineplus-gun`](../examples/mineplus-gun/README.md) — firearms with file-discovered frame animations (a gun folder may ship one Blockbench project and have its clips baked into frames at install), right-click fire, a left-click scope that raises a click-to-fire reticle overlay, automatic reload and a Vault shop.
 >
 > 📖 **API detail:** [Combat Services](developer-api.md#combat-services)
 

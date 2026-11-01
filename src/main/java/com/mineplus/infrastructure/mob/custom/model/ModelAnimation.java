@@ -50,6 +50,25 @@ public final class ModelAnimation {
             return times.length;
         }
 
+        /** The time of the first key, or {@link Float#MAX_VALUE} for an empty curve. */
+        public float firstTime() {
+            return times.length == 0 ? Float.MAX_VALUE : times[0];
+        }
+
+        /**
+         * Samples with the semantics an author sees in Blockbench: a channel the
+         * playhead has not reached yet contributes nothing, so a clip whose first
+         * key sits at 0.25 s starts from the rest pose instead of jumping to that
+         * key. From the last key on both samplers hold.
+         */
+        public void sampleFromRest(float time, float[] out) {
+            if (times.length == 0 || time < times[0]) {
+                out[0] = out[1] = out[2] = 0.0f;
+                return;
+            }
+            sample(time, out);
+        }
+
         /**
          * Samples into {@code out[0..2]}; copies a key when there is no neighbour.
          * Catmullrom uses the two keys on each side of the segment (clamped).

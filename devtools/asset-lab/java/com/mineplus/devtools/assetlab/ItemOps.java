@@ -97,6 +97,13 @@ final class ItemOps {
 
         response.addProperty("parent", strOrNull(root, "parent"));
         response.addProperty("guiLight", strOrNull(root, "gui_light"));
+        // What the client actually does with light for this file: ambient
+        // occlusion is a root flag that defaults to TRUE when the model omits it,
+        // and the pack's own writers pin it (and every element's shade) to false,
+        // so a baked gun frame renders flat exactly as shipped.
+        response.addProperty("ambientocclusion",
+                root.has("ambientocclusion") && root.get("ambientocclusion").isJsonPrimitive()
+                        ? root.get("ambientocclusion").getAsBoolean() : true);
 
         JsonObject display = root.has("display") && root.get("display").isJsonObject()
                 ? root.getAsJsonObject("display") : null;
@@ -227,6 +234,11 @@ final class ItemOps {
         JsonObject json = result.json;
         json.addProperty("index", index);
         json.addProperty("name", label);
+        // Per-element flat-shading flag as the client reads it: an absent "shade"
+        // means the element IS shaded (vanilla default true). Pack writers emit
+        // shade:false, so those elements must render without directional shading.
+        json.addProperty("shade", Json.flag(
+                element.has("shade") ? element.get("shade") : null, true));
 
         float[] from = float3(element, "from", null);
         float[] to = float3(element, "to", null);

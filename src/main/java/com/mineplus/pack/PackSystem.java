@@ -2,7 +2,6 @@ package com.mineplus.pack;
 
 import com.mineplus.infrastructure.core.multiblock.render.ModelRenderingManager;
 import com.mineplus.infrastructure.registry.ItemRegistry;
-import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.infrastructure.virtual.rig.BoneRigAssetWriter;

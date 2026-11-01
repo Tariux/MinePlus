@@ -6,6 +6,7 @@ import com.mineplus.gun.config.GunConfig;
 import com.mineplus.gun.event.WeaponFireEvent;
 import com.mineplus.gun.event.WeaponHitEvent;
 import com.mineplus.gun.event.WeaponReloadEvent;
+import com.mineplus.gun.scope.ScopeGui;
 import com.mineplus.gun.weapon.WeaponDefinition;
 import com.mineplus.infrastructure.combat.BallisticProfile;
 import com.mineplus.infrastructure.combat.ProjectileHandler;
@@ -60,11 +61,6 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
 
     /** Ticks an empty gun waits before reloading itself. */
     private static final int AUTO_RELOAD_DELAY_TICKS = 6;
-    /** How long the shot pose is held. */
-    private static final int FIRE_POSE_TICKS = 4;
-    private static final int SCOPE_IN_TICKS = 6;
-    private static final int SCOPE_OUT_TICKS = 5;
-    private static final int EQUIP_TICKS = 8;
     /** Minimum gap between two hit-marker sounds (a shotgun lands many pellets). */
     private static final long HITMARK_INTERVAL_MILLIS = 90L;
     private static final double RECOIL_EPSILON = 0.01;
@@ -99,6 +95,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             if (player == null) {
                 continue;
             }
+            closeScopeView(player, session);
             if (session.magazine != null) {
                 services.itemFactory().magazine().flush(player, session.magazine);
             }
@@ -231,6 +228,10 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
      * Left-click: scopes a weapon that has one, and is otherwise swallowed.
      * The gesture never reaches vanilla, which keeps the left button free for
      * future aimed actions without ever punching, mining or attacking.
+     *
+     * <p>Scoping also raises the reticle overlay when the config asks for one:
+     * the screen is the scope, so its clicks are the trigger and leaving it is
+     * the unscope.</p>
      */
     @Override
     public boolean onPrimaryPress(Player player, ItemStack held) {
@@ -241,6 +242,11 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         Session session = ensure(player, held, weapon);
         if (session != null && weapon.scope() && !session.reloading) {
             session.scoped = !session.scoped;
+            if (session.scoped) {
+                openScopeView(player, session, weapon);
+            } else {
+                closeScopeView(player, session);
+            }
             playScopePose(player, session, weapon);
             pushHud(player, session, weapon);
             Sounds.playTo(player, "block.lever.click", 0.35f, session.scoped ? 1.7f : 1.4f,
@@ -248,6 +254,71 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             arm();
         }
         return true;
+    }
+
+    /**
+     * One scoped round, asked for by a click on the reticle overlay's sight
+     * line. Everything a right-click press does — the veto event, the round,
+     * the recoil, the pose, the HUD — is the same {@link #shoot} path, so a
+     * shot through the scope can never differ from a shot beside it.
+     */
+    public boolean fireScoped(Player player) {
+        if (player == null) {
+            return false;
+        }
+        Session session = sessions.get(player.getUniqueId());
+        if (session == null || !session.scoped) {
+            return false;
+        }
+        WeaponDefinition weapon = resolve(player.getInventory().getItemInMainHand());
+        if (weapon == null || weapon != session.weapon) {
+            return false;
+        }
+        return shoot(player, session, weapon);
+    }
+
+    /**
+     * The reticle overlay closed — by its own key, by another screen, by death.
+     * The scope goes with it, with the weapon's own scope-out pose.
+     */
+    public void onScopeOverlayClosed(Player player) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUniqueId());
+        if (session == null || session.scopeView == null) {
+            return;
+        }
+        session.scopeView = null;
+        if (!session.scoped) {
+            return;
+        }
+        session.scoped = false;
+        playScopePose(player, session, session.weapon);
+        pushHud(player, session, session.weapon);
+        Sounds.playTo(player, "block.lever.click", 0.35f, 1.4f, Sound.BLOCK_LEVER_CLICK);
+        arm();
+    }
+
+    private void openScopeView(Player player, Session session, WeaponDefinition weapon) {
+        GunConfig config = services.config();
+        if (config == null || !config.settings().scopeOverlay()) {
+            return;
+        }
+        int loaded = session.magazine == null ? weapon.magazine() : session.magazine.rounds();
+        int reserve = AmmoSupply.rounds(player, config.ammo().material(), config.ammo().itemsPerRound());
+        session.scopeView = ScopeGui.open(services, player, weapon, loaded, reserve);
+    }
+
+    /** Lowers the overlay without touching the scope state — the caller owns that. */
+    private void closeScopeView(Player player, Session session) {
+        if (session.scopeView == null) {
+            return;
+        }
+        session.scopeView = null;
+        if (player.isOnline()) {
+            player.closeInventory();
+        }
     }
 
     /** F: reload (the Core consumes the swap so the item stays in hand). */
@@ -333,6 +404,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         for (Session session : new ArrayList<>(sessions.values())) {
             Player player = Bukkit.getPlayer(session.playerId);
             if (player != null) {
+                closeScopeView(player, session);
                 if (session.magazine != null) {
                     services.itemFactory().magazine().flush(player, session.magazine);
                 }
@@ -347,6 +419,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         if (session == null) {
             return;
         }
+        closeScopeView(player, session);
         if (session.animator != null) {
             session.animator.stop();
         }
@@ -641,6 +714,8 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         session.reloadMidPlayed = false;
         session.autoReloadDelay = 0;
         session.scoped = false;
+        // The hand goes down to work the magazine, so the sight goes with it.
+        closeScopeView(player, session);
         session.pendingCycle = false;
         session.burstRemaining = 0;
         if (session.animator != null) {
@@ -800,7 +875,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         }
         String fireClip = weapon.fireClip();
         boolean hasCycle = canCycle(weapon);
-        if (startSequence(player, session, weapon, fireClip, FIRE_POSE_TICKS, Pose.FIRE)) {
+        if (startSequence(player, session, weapon, fireClip, weapon.firePoseTicks(), Pose.FIRE)) {
             session.pendingCycle = hasCycle;
             return;
         }
@@ -808,7 +883,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                 && weapon.frames() != null && weapon.frames().hasClip(fireClip);
         if (hasFire) {
             session.pendingCycle = hasCycle;
-            startPose(player, session, weapon, fireClip, FIRE_POSE_TICKS, Pose.FIRE);
+            startPose(player, session, weapon, fireClip, weapon.firePoseTicks(), Pose.FIRE);
             return;
         }
         if (hasCycle) {
@@ -892,13 +967,15 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             return;
         }
         if (session.scoped) {
-            if (!startSequence(player, session, weapon, weapon.scopeInClip(), SCOPE_IN_TICKS, Pose.SCOPE_IN)
-                    && !startPose(player, session, weapon, weapon.scopeInClip(), SCOPE_IN_TICKS, Pose.SCOPE_IN)) {
+            if (!startSequence(player, session, weapon, weapon.scopeInClip(), weapon.scopeInTicks(),
+                    Pose.SCOPE_IN)
+                    && !startPose(player, session, weapon, weapon.scopeInClip(), weapon.scopeInTicks(),
+                            Pose.SCOPE_IN)) {
                 startScopeHold(player, session, weapon);
             }
-        } else if (!startSequence(player, session, weapon, weapon.scopeOutClip(), SCOPE_OUT_TICKS,
+        } else if (!startSequence(player, session, weapon, weapon.scopeOutClip(), weapon.scopeOutTicks(),
                 Pose.SCOPE_OUT)
-                && !startPose(player, session, weapon, weapon.scopeOutClip(), SCOPE_OUT_TICKS,
+                && !startPose(player, session, weapon, weapon.scopeOutClip(), weapon.scopeOutTicks(),
                         Pose.SCOPE_OUT)) {
             rest(player, session, weapon);
         }
@@ -954,10 +1031,10 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             rest(player, session, weapon);
             return;
         }
-        if (startSequence(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
+        if (startSequence(player, session, weapon, weapon.equipClip(), weapon.equipTicks(), Pose.EQUIP)) {
             return;
         }
-        if (!startPose(player, session, weapon, weapon.equipClip(), EQUIP_TICKS, Pose.EQUIP)) {
+        if (!startPose(player, session, weapon, weapon.equipClip(), weapon.equipTicks(), Pose.EQUIP)) {
             rest(player, session, weapon);
         }
     }
@@ -1105,6 +1182,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             return;
         }
         session.hudSignature = signature;
+        if (session.scopeView != null) {
+            session.scopeView.setRounds(mag, reserve);
+        }
         float progress = session.reloading
                 ? 1.0f - session.reloadRemaining / (float) Math.max(1, session.reloadTotal)
                 : mag / (float) Math.max(1, weapon.magazine());
@@ -1170,6 +1250,8 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         private boolean scoped;
         private boolean autoHeld;
         private boolean pendingCycle;
+        /** The reticle overlay raised while scoped, or null when there is none. */
+        private ScopeGui scopeView;
         private String hudSignature;
         private int frameState = Integer.MIN_VALUE;
         /** Ticks left in the client-clock sequence being played, 0 when idle. */

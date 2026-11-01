@@ -45,6 +45,20 @@ public final class MobRenderSpec {
         GENERIC_CUBE
     }
 
+    /**
+     * How a mob whose base model is covered by a rig still tells the player it
+     * took damage. The rig replaces the vanilla silhouette, so the vanilla red
+     * flash has nothing to draw on; the engine restores the feedback instead.
+     */
+    public enum HurtFeedback {
+        /** Nothing extra — the hurt clip alone carries the signal. */
+        NONE,
+        /** A short red burst at the torso, under the shared particle budget. */
+        PARTICLES,
+        /** The base model is revealed for the hurt window and flashes red. */
+        FLASH
+    }
+
     /** An item (vanilla material or pack item id) hung on a rig bone. */
     public record HandItem(Material material, String packItemId,
                            ItemDisplay.ItemDisplayTransform transform) {
@@ -75,6 +89,8 @@ public final class MobRenderSpec {
     private final Map<String, String> animationMap;
     private final Map<String, HandItem> handItems;
     private final FallbackMode fallback;
+    private final HurtFeedback hurtFeedback;
+    private final Float shadowRadius;
     private final Double hitboxWidth;
     private final Double hitboxHeight;
 
@@ -82,6 +98,7 @@ public final class MobRenderSpec {
                           Supplier<byte[]> textureBytes, float scale, float yawOffsetDegrees,
                           Map<String, String> animationMap,
                           Map<String, HandItem> handItems, FallbackMode fallback,
+                          HurtFeedback hurtFeedback, Float shadowRadius,
                           Double hitboxWidth, Double hitboxHeight) {
         this.type = type == null ? RenderType.NONE : type;
         this.sourceName = sourceName == null || sourceName.isBlank() ? "model" : sourceName;
@@ -92,6 +109,8 @@ public final class MobRenderSpec {
         this.animationMap = animationMap == null ? Map.of() : Map.copyOf(animationMap);
         this.handItems = handItems == null ? Map.of() : Map.copyOf(handItems);
         this.fallback = fallback == null ? FallbackMode.BASE_ENTITY : fallback;
+        this.hurtFeedback = hurtFeedback == null ? HurtFeedback.PARTICLES : hurtFeedback;
+        this.shadowRadius = shadowRadius;
         this.hitboxWidth = hitboxWidth;
         this.hitboxHeight = hitboxHeight;
     }
@@ -148,6 +167,19 @@ public final class MobRenderSpec {
         return fallback;
     }
 
+    /** How a rigged mob reacts to damage; never {@code null}. */
+    public HurtFeedback hurtFeedback() {
+        return hurtFeedback;
+    }
+
+    /**
+     * Radius of the ground shadow plate in blocks. {@code null} derives it from
+     * the hitbox width, {@code 0} removes the shadow.
+     */
+    public Float shadowRadius() {
+        return shadowRadius;
+    }
+
     public Double hitboxWidth() {
         return hitboxWidth;
     }
@@ -171,6 +203,8 @@ public final class MobRenderSpec {
         private final Map<String, String> animationMap = new LinkedHashMap<>();
         private final Map<String, HandItem> handItems = new LinkedHashMap<>();
         private FallbackMode fallback = FallbackMode.BASE_ENTITY;
+        private HurtFeedback hurtFeedback = HurtFeedback.PARTICLES;
+        private Float shadowRadius;
         private Double hitboxWidth;
         private Double hitboxHeight;
 
@@ -242,6 +276,24 @@ public final class MobRenderSpec {
             return this;
         }
 
+        /** How the mob reacts to damage once its rig covers the vanilla silhouette. */
+        public Builder hurtFeedback(HurtFeedback value) {
+            this.hurtFeedback = value == null ? HurtFeedback.PARTICLES : value;
+            return this;
+        }
+
+        /** Ground shadow radius in blocks; {@code 0} removes the shadow. */
+        public Builder shadowRadius(float value) {
+            this.shadowRadius = Math.max(0.0f, value);
+            return this;
+        }
+
+        /** Turns the derived ground shadow on or off. */
+        public Builder shadow(boolean value) {
+            this.shadowRadius = value ? null : Float.valueOf(0.0f);
+            return this;
+        }
+
         /** Overrides the base entity's hitbox (blocks; feet-anchored). */
         public Builder hitbox(double width, double height) {
             if (width > 0.0 && height > 0.0) {
@@ -261,7 +313,8 @@ public final class MobRenderSpec {
                 throw new IllegalArgumentException("Render type RETEXTURE_VANILLA needs textureBytes(...)");
             }
             return new MobRenderSpec(type, sourceName, modelBytes, textureBytes, scale,
-                    yawOffsetDegrees, animationMap, handItems, fallback, hitboxWidth, hitboxHeight);
+                    yawOffsetDegrees, animationMap, handItems, fallback, hurtFeedback,
+                    shadowRadius, hitboxWidth, hitboxHeight);
         }
     }
 }

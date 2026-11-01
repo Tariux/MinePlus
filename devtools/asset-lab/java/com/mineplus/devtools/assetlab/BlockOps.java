@@ -26,18 +26,22 @@ import javax.imageio.ImageIO;
 
 /**
  * The daemon's {@code block} op: run the real block pipeline classes
- * ({@link BbModelImporter}, {@link ModelMeta}, {@link TextureImageStore}) on
- * one {@code .bbmodel} and return everything the web viewer needs — cubes with
+ * ({@link BbModelImporter}, {@link ModelMeta}, {@link TextureImageStore}) on one
+ * {@code .bbmodel} and return everything the web viewer needs — cubes with
  * their baked transforms, per-face UV windows, texture resolvability with the
  * actual PNGs, the resolved origin mode and the model's animation clips.
  *
- * <p>Deliberately <b>no texel baking</b> — surface baking is the texel tool's
- * domain; this op validates presentation and mechanism (origin anchoring,
- * collision mode, autoplay clips, texture windows) the way the server's virtual
- * block system consumes them. Kept fully separate from the texel devtool.</p>
+ * <p>It also reports what both render backends would show for this same model:
+ * the real {@link com.mineplus.infrastructure.virtual.DisplayEmitter} display
+ * list of the virtual axis (plain per-face plates, no texel plans — that is the
+ * {@code bake} op's job, and it shares this file's emission helper), plus the
+ * real {@code ModelJsonWriter} block-space model JSON of the pack axis. The
+ * numbers the pipeline computes are the numbers the browser draws.</p>
  *
- * <p>Request: {@code {"op":"block","model":".../model.bbmodel","textureRoot":"..."}}
- * (textureRoot optional, defaults to the model's folder).</p>
+ * <p>Request:
+ * {@code {"op":"block","model":".../model.bbmodel","textureRoot":"...",
+ * "perFaceRendering":true,"namespace":"mineplus"}} (textureRoot optional,
+ * defaults to the model's folder).</p>
  */
 final class BlockOps {
 
@@ -118,6 +122,28 @@ final class BlockOps {
         response.add("textures", texturesJson);
         response.add("cubes", cubesJson(model, resolvedTextures));
         response.add("animations", animationsJson(model));
+
+        // The real emitted display list, exactly as the server's spawn path builds it
+        // for a plain virtual block: DisplayEmitter.emitCube(cube, perFaceRendering,
+        // null, resolution, null) — no texel plans, so no brightness floor either
+        // (VirtualBlockManager:540 gates the floor on texel plans existing).
+        boolean perFaceRendering = Json.bool(request, "perFaceRendering", true);
+        response.addProperty("perFaceRendering", perFaceRendering);
+        // The audit asks for counts only; the viewer wants the plate list.
+        boolean includeDisplays = Json.bool(request, "includeDisplays", true);
+        BakeOps.appendDisplays(response, model, modelFile, store, null, null,
+                0, perFaceRendering, includeDisplays);
+        response.add("shading", BakeOps.virtualBlockShading());
+        response.add("brightness", BakeOps.brightnessPolicy(0));
+
+        // What the pack backend would ship for this same model: the real
+        // ModelJsonWriter block-space serialization, verbatim — the exact same
+        // object shape the bake op emits so the browser has one code path.
+        // The audit passes wantPack:false to stay fast; the viewer wants it inline.
+        if (Json.bool(request, "wantPack", true)) {
+            BakeOps.appendPackModel(response, model, originMode,
+                    Json.str(request, "namespace", "mineplus"), key);
+        }
 
         int unresolved = 0;
         for (int i = 0; i < texturesJson.size(); i++) {

@@ -120,6 +120,37 @@ serialized virtual model — the frame-animated axis used by weapons:
   modern dispatch and the legacy predicates read it. A module never branches
   on the server version to animate a framed item.
 
+#### Blockbench clips to framed poses (`BbClipBaker`)
+
+`com.mineplus.pack.item.BbClipBaker` turns a Blockbench project's *animations*
+into the frame files the axis above consumes, so an author rigs a gun in
+Blockbench and the pack still gets plain static item models:
+
+- `rest(model, style)` bakes the unposed model, `poses(model, style, clip, n)`
+  samples one clip at `n` evenly spaced times and returns `n` models, and
+  `clips(model)` / `lengthSeconds(model, clip)` report what was authored.
+- Each sampled pose is decomposed into two carries the format *can* express:
+  the bone the whole model hangs from folds onto the item's per-context
+  `display` transform (`rotation`/`translation`/`scale` have no range limit),
+  and every other bone becomes an element hinge — one `rotation`
+  `{origin, axis, angle}` on that bone's own cubes, exact for a single-axis
+  turn plus an axial shift.
+- What the format cannot carry is reported, never hidden: a scale channel
+  (an item model has no scale), a hinge past ±45° (the limit an element
+  rotation is documented to carry), and a bone turning about more than one
+  axis, which falls back to its posed axis-aligned envelope.
+- Everything outside the authored display is deterministic: `format_version`
+  `1.21.6`, the six held contexts + `gui`/`ground`/`fixed`/`on_shelf`, and the
+  texture reference the caller's `Style` names.
+
+> 📁 The MineplusGun module bakes its gun folders this way
+> (`com.mineplus.gun.weapon.WeaponBbModels`): a gun folder that ships one
+> `<id>.bbmodel` gets `<id>_idle`, `<id>_fire_N`, `<id>_cycle_N`,
+> `<id>_scope_in_N`, `<id>_scope_hold`, `<id>_scope_out_N` and `<id>_loading_N`
+> written next to it at install, and the existing file-name classifier takes it
+> from there. An `idle` clip is deliberately not baked — a held item cannot be
+> rewritten per frame.
+
 ## Block rendering (pack blocks)
 
 Items have the additive `item_model` component; blocks have no per-entity model

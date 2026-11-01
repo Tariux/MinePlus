@@ -13,7 +13,7 @@ The final gun system. Every piece of the first implementation (bow/crossbow
 carriers, left-click fire, per-shot stack writes, hand-rolled frame lists, the
 retired nine-gun Western arsenal) is deleted, not deprecated. What is left:
 
-- four shipped guns driven entirely by `config.yml`;
+- twelve shipped guns driven entirely by `config.yml`;
 - presentation **discovered from the model files themselves** — no frame list
   to keep in sync;
 - right-click to fire, left-click reserved for the scope, F to reload, empty
@@ -32,17 +32,18 @@ retired nine-gun Western arsenal) is deleted, not deprecated. What is left:
 | Commands | `/mpgun …` and `/mineplus gun …` |
 | Item axis | `PackApi.registerItem` (additive `item_model`; legacy `CustomModelData` fallback) |
 | Physics | tick-stepped simulated rounds (gravity, drag, penetration, ricochet, falloff, knockback) |
-| Input | the Core's held-item seam: right-click fires, left-click scopes and is otherwise swallowed, swap-hands reloads |
-| Presentation | Core `ItemFrames` + `ItemFrameAnimator`, states discovered from `defaults/guns/<id>/models/` |
+| Input | the Core's held-item seam: right-click fires, left-click scopes and is otherwise swallowed, swap-hands reloads; a scoped gun's overlay turns a click on its sight line into a shot |
+| Presentation | Core `ItemFrames` + `ItemFrameAnimator`, states discovered from `defaults/guns/<id>/models/` — JSON frames directly, or baked from a `<id>.bbmodel` by Core `pack.item.BbClipBaker` |
 | Economy | Vault; all prices config-driven; admins/bypass-permission never charged |
-| Assets | 4 guns (`pistol`, `shotgun`, `rifle`, `battle_rifle`) with 28 authored frame models, densified at install to 51–53 frame states per gun, 4 sprites and 21 sound samples under the `mineplusgun` namespace |
+| Assets | 12 guns (`pistol`, `shotgun`, `rifle`, `battle_rifle`, `rust_shot`, `frontier_eye`, `boom_stick`, `longmark`, `longshot`, `hawk_eye`, `double_boom`, `peacemaker`) with 63 authored frame models and 5 Blockbench sources, densified and baked at install, 12 sprites and 21 sound samples under the `mineplusgun` namespace |
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | **Right-click** | Fire. One press shoots; `AUTO` keeps firing while the Core's trigger reports the hold. |
-| **Left-click** | Toggle the scope on weapons with `aim.scope: true`. On every gun the gesture is swallowed: no punch, no mining, no block interaction, no vanilla melee. |
+| **Left-click** | Toggle the scope on weapons with `aim.scope: true`, and with `settings.scope-gui: true` raise the reticle overlay with it. On every gun the gesture is swallowed: no punch, no mining, no block interaction, no vanilla melee. |
+| **Click in the scope overlay** | Fire one scoped round — the same shot path the right button takes. Esc, E or any other screen closes it, and closing unscopes. |
 | **F (swap hands)** | Reload. The Core consumes the swap, so the gun never leaves the hand. |
 | — | An empty gun starts reloading by itself a few ticks after the last shot, if the reserve can supply a round. |
 
@@ -58,7 +59,14 @@ tightens the cone, `aim.move-multiplier` punishes moving while aimed,
 `aim.recoil-multiplier` softens recoil, the HUD reads `SCOPE` and the gun rises
 into a held sights pose (generated if the pack has none) and lowers when you
 leave it. A true client zoom needs a per-version packet (Spigot 1.21.1 exposes
-no FOV API), so it is deliberately not faked here.
+no FOV API), so it is deliberately not faked here. What the module does give you
+is the sight picture the client will actually show: `ScopeGui` opens a five-row
+black frame with one clear cross through its middle, the panel is screen-centred
+so that cross sits exactly where the player's own sight line already is, and the
+click that lands in it goes through `WeaponRuntime.fireScoped`, which is the
+ordinary shoot path with the scope state already set. Right-click hip-fire
+returns the moment the overlay is gone, and a reload closes it because the hand
+has to come down to work the magazine.
 
 ## Recoil is dispersion
 
@@ -90,11 +98,33 @@ name suffix after `<id>_`:
 
 **Every one of them is optional.** The shipped packs author `idle`, `primed`
 and `loading_N`; install-time densification (below) fills in the rest, so these
-four guns animate a reload, a shot, an action cycle, a draw and a scope — and
+guns animate a reload, a shot, an action cycle, a draw and a scope — and
 they still fire, reload, scope and sell even if a folder has only `idle`. A
 folder with a single `idle` model is a valid gun. A gun with no models at all
 is a valid gun on its vanilla carrier. Adding a weapon is a folder plus a
 config entry; no code, no frame list, no per-gun pose authoring.
+
+A folder may instead ship **one `<id>.bbmodel`** — the Blockbench project with
+the animation clips inside it. `WeaponBbModels` bakes it into the suffixes above
+through the Core's `pack.item.BbClipBaker` before the densifier, the classifier
+or the pack read the folder, so a clip named `fire` becomes `fire_N`, a
+`lever_cycle` becomes `cycle_N`, a `zoom` becomes `scope_in_N` plus the held
+`scope_hold` and the reversed `scope_out_N`, and a `reload` becomes `loading_N`.
+A break-action file authors its two halves separately: `break_load` (the barrels
+swing open, shells go in) is the **reload**, and `close` (the snap shut) is the
+**cycle** the runtime plays between shots. The whole-model pose folds onto the
+item's `display` transform and each part hinge onto an element rotation, which is
+what the format can express; a scale channel, a hinge past ±45° or a bone turning
+on two axes is logged as an issue and degraded rather than dropped, and the
+`.bbmodel` itself never enters the pack (only `.json` registers). An `idle` clip
+is deliberately not baked — a held item cannot be rewritten every frame, so the
+resting pose is authored once and the client's own clock does the rest. Five guns
+ship this way: `longmark` (36 baked states from its 4 clips), `longshot` (73 from
+8, every role authored), `hawk_eye` (37 from 4 — `break_load`/`close` give it a
+reload and a cycle, and it has no scope clip because it has no scope),
+`double_boom` (37 from the same 4) and `peacemaker` (22 from 3 usable of 4; its
+`inspect` flourish is reported and skipped, since a held item has no flourish
+channel). The frame files are generated on the server, so they are not in the jar.
 
 An explicit `frames:` block in the config overrides discovery for that weapon,
 so a server owner can retime or re-skin a gun without rebuilding the jar.
@@ -142,6 +172,14 @@ Cadence is `⌈1200 / fire.rpm⌉` ticks; `PUMP`/`BOLT` wait for
 | `shotgun` | SHOTGUN, PUMP, 70 rpm, cycle 14 t | 4 ×8 pellets / 60 t | 5.0 ×8 | idle, primed, 8 × loading |
 | `rifle` | RIFLE, BOLT, 40 rpm, cycle 24 t, scoped | 5 / 44 t | 18.0 (+1 penetration) | idle, primed, 6 × loading |
 | `battle_rifle` | RIFLE, AUTO, 420 rpm, scoped | 20 / 48 t | 9.5 | idle, primed, 6 × loading |
+| `rust_shot` | PISTOL, SEMI, 180 rpm | 6 / 44 t | 11 | idle, primed, 4 × loading, 3 × cycle, fire |
+| `frontier_eye` | RIFLE, BOLT, 46 rpm, cycle 26 t, scoped | 7 / 52 t | 16.5 (+1 penetration) | idle, primed, 3 × loading, 3 × cycle, fire, scope in/hold/out |
+| `boom_stick` | SHOTGUN, SEMI, 75 rpm, cycle 20 t, 10 pellets | 2 / 58 t | 5.5 ×10 | idle, primed, 3 × loading, 2 × cycle, fire |
+| `longmark` | RIFLE, BOLT, 48 rpm, cycle 18 t, scoped | 6 / 56 t | 19 (+2 penetration) | baked from `longmark.bbmodel`: fire, lever_cycle, zoom |
+| `longshot` | RIFLE, SEMI, 150 rpm, cycle 12 t, scoped | 8 / 44 t | 13 (+1 penetration) | baked from `longshot.bbmodel`: every role authored |
+| `hawk_eye` | SNIPER, BOLT, 50 rpm, cycle 20 t, **no scope** | 5 / 50 t | 18.5 (+1 penetration) | baked from `hawk_eye.bbmodel`: fire, break_load → reload, close → cycle |
+| `double_boom` | SHOTGUN, SEMI, 130 rpm, cycle 24 t, 14 pellets | 2 / 54 t | 5.2 ×14 | baked from `double_boom.bbmodel`: same three clips |
+| `peacemaker` | PISTOL, SEMI, 160 rpm | 6 / 46 t | 12.5 | baked from `peacemaker.bbmodel`: fire (cylinder index inside it), reload |
 
 Each round carries per-weapon velocity, gravity, drag, range, spread,
 falloff, headshot multiplier, penetration, ricochet and **knockback**, plus
@@ -245,7 +283,7 @@ instead of breaking the module.
 | Section | Key | Meaning |
 |---|---|---|
 | `settings.hud` | `mode`, `template`, `low-ammo-threshold` | `ACTIONBAR`/`BOSSBAR`/`OFF`, template over `{mag} {reserve}` (`{weapon}`, `{mode}` available); `RELOADING`/`SCOPE` appended while true |
-| `settings` | `language`, `disabled-worlds`, `pvp-only` | gameplay gating (a disabled world's gun behaves as a plain carrier) and the player-only damage filter |
+| `settings` | `language`, `disabled-worlds`, `pvp-only`, `scope-gui` | gameplay gating (a disabled world's gun behaves as a plain carrier), the player-only damage filter, and whether the scope trigger raises the reticle overlay |
 | _not here_ | round and particle budgets | owned by the **Core** (`BALLISTICS.*`, `PARTICLE_FX.*` in `plugins/Mineplus/settings.mp.yml`) and shared across every module |
 | `ammo` | `material`, `items-per-round` | the reload reserve |
 | `economy` | `mode`, `price-multiplier`, `price-scale` | `VAULT`/`FREE` and price formatting |
@@ -256,7 +294,7 @@ instead of breaking the module.
 | `weapons.<id>.ballistics` | `damage`, `velocity`, `gravity`, `drag`, `range`, `spread-degrees`, `falloff-*`, `headshot-multiplier`, `penetration`, `ricochet`, `knockback`, `hitbox-expansion`, `tracer-spacing` | one round's physics |
 | `weapons.<id>.accuracy` | `move`, `air`, `sprint`, `recoil-per-shot`, `recoil-recovery`, `recoil-max` | the dispersion model |
 | `weapons.<id>.aim` | `scope`, `spread-multiplier`, `move-multiplier`, `recoil-multiplier` | the left-click scope state |
-| `weapons.<id>.animation` | `reload`, `cycle`, `fire`, `scope-in`, `scope-hold`, `scope-out`, `equip` | clip names to play; an unknown name simply plays nothing |
+| `weapons.<id>.animation` | `reload`, `cycle`, `fire`, `scope-in`, `scope-hold`, `scope-out`, `equip` | two spellings per role: a **string** renames that role's clip (a Blockbench `lever_cycle` is a `cycle`), a **number** is the authored clip length in seconds and sets how long the pose is held. The reload and cycle poses take their length from `ammo.reload-ticks` and `fire.cycle-ticks`, which also meter the weapon |
 | `weapons.<id>.fx` | particles and `sound-*` names | the Core's effect stack; unknown names degrade, never throw |
 
 ## Commands

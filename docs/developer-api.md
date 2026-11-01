@@ -361,6 +361,7 @@ otherwise re-implement badly. The pieces are:
 | `DamageTransactions` | static | Damage attribution that cannot double-count: `apply(victim, amount, attacker)` and the re-entrancy guard for melee |
 | `ItemMagazine` / `ItemState` | registry | Countable item state (rounds) live in memory while held, persisted to PDC when the stack leaves the hand |
 | `ItemFrames` / `ItemFrameWriter` | pack item | Idle / loaded / reload / fire frame math for `item_model` presentation, and the writer that puts one state on the stack |
+| `BbClipBaker` | pack item | Compiles a Blockbench project's animation clips into those frames: `rest` + `poses(model, style, clip, n)`, the whole-model pose folded onto the item `display` and part hinges onto element rotations, with what the item-model format cannot carry returned as reported issues |
 | `TriggerState` | input | The per-player press state: one physical click resolves to one press, however many packets the client sent for it |
 | `InputSettings` / `HeldItemInput.updateSettings` | input | `INPUT.FAST_PATH` toggles the optional Netty read-ahead; gestures still resolve through the same `TriggerState` fold and never deliver twice |
 
@@ -729,10 +730,14 @@ marches there and raids it as a pipeline, and the pilgrim villagers above.
 ## Custom Mobs
 
 `context.customMobs()` registers a **new mob**, not a new behavior on a vanilla
-one. A custom mob is an ordinary vanilla base entity (`PIG`, `ZOMBIE`, …) that
-carries a Mineplus identity, its own visual model, its own attributes and its
-own behavior profile. Vanilla mobs of the same base type are untouched in both
-directions: custom profiles are dispatched by custom id, never by entity type.
+one. A custom mob is an ordinary vanilla base entity (`PIG`, `ZOMBIE`,
+`IRON_GOLEM`, …) that carries a Mineplus identity, its own visual model and its
+own attributes. The **mind** is the author's choice: a behavior profile owned by
+the Core's mob engine (`.behavior(...)`, vanilla goals cleared), or the base
+type's own goals (`.vanillaAi()`), in which case the server pathfinds, hunts,
+swings and kills and the plugin only dresses it up. Vanilla mobs of the same
+base type are untouched in both directions: custom profiles are dispatched by
+custom id, never by entity type.
 
 ```java
 CustomMobApi mobs = context.customMobs();
@@ -752,21 +757,35 @@ mobs.register(this, evilPig);                        // main thread only
 LivingEntity pig = mobs.spawn(location, "mymod:evil_pig");
 ```
 
-### The isolation contract
+### The mind contract
 
-- **No vanilla AI.** On spawn and on every chunk restore the Core clears the
-  entity's goal and target selectors through `MobAiIsolation` while leaving AI
-  enabled — the navigator still ticks the mob's own vanilla walk, but nothing
-  in the mob decides anything. Every action comes from the definition's
-  behavior profile, evaluated by the mob behavior engine. The reflective plan
-  is resolved from the entity's **live handle class**, so a CraftBukkit bridge
-  declared as `Entity getHandle()` (CraftVillager) still yields the real
-  navigation, look control and Brain.
+- **Two minds, one author choice.** `.behavior(...)` builds a profile and the
+  Core clears the entity's goal and target selectors through `MobAiIsolation` on
+  spawn, on every chunk restore and in the periodic re-assert sweep, while
+  leaving AI enabled — the navigator still ticks the mob's own vanilla walk, but
+  nothing in the mob decides anything. `.vanillaAi()` asks for the opposite: the
+  base type's goals are kept, so an `IRON_GOLEM` base guards and hunts monsters
+  and a `ZOMBIE` base hunts players and villagers, with **no profile registered
+  at all** (the behavior engine never sees these mobs, so a crowd of them costs
+  the server nothing beyond ordinary mob AI). The rig then animates from the
+  engine's real position deltas. A donor type that differs from the base is
+  rejected and the mob stays isolated — the base type *is* the mind.
+  `CustomMobDefinition.keepsVanillaGoals()` is the predicate the rest of the
+  code (and `/mobfun fire`) uses to know which mind is running.
+- **Isolation is reflective.** When the Core does clear goals, the plan is read
+  from the entity's **live handle class**, so a CraftBukkit bridge declared as
+  `Entity getHandle()` (CraftVillager) still yields the real navigation, look
+  control and Brain.
+- **The base entity stays live in the client.** A rig hides it with
+  `LivingEntity#setInvisible(true)`, not by untracking it, so the mob keeps its
+  hitbox: it can be looked at, targeted, damaged, knocked back, pushed and
+  killed by the ordinary rules. `hideEntity`/`showEntity` are used only on the
+  `ItemDisplay` entities that make up the rig.
 - **Identity is persisted, not positional.** The id lives in PDC
   (`custom_mob_id`), with a scoreboard tag as the cheap discovery path and a
   live `UUID → id` cache for the engine sweep. A definition registered later
   picks its already-loaded mobs back up; a chunk reload re-applies identity,
-  attributes (health is clamped, not refilled) and isolation.
+  attributes (health is clamped, not refilled) and the mind setting.
 - **Unknown ids never fall back to vanilla.** A tagged entity whose definition
   is not registered is still isolated, and — once at least one definition
   exists — removed on chunk load (`CUSTOM_MOBS.REMOVE_UNKNOWN_ON_LOAD`). This
@@ -794,8 +813,9 @@ PNG, one item model per part, one item definition per part — the vanilla box-U
 cross layout is converted to element face windows exactly as Blockbench derives
 it. Parts are kept inside the client's -16..32 px element window (shifted, or
 split into `<part>_p2`, … when larger than 48 px) and each piece becomes its
-own display, reassembled by the pose pass. `MobRenderEngine` then hides the base
-entity and presents every part/piece as an `ItemDisplay` carrying that part's
+own display, reassembled by the pose pass. `MobRenderEngine` then makes the base
+entity invisible (it stays tracked, and therefore hittable and pushable) and
+presents every part/piece as an `ItemDisplay` carrying that part's
 `item_model` (a legacy server reaches the same models through the pack's
 reserved `custom_model_data` overrides), driven on
 `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` with the client-side window set by
@@ -804,10 +824,20 @@ model cannot be resolved the base entity simply stays visible: behavior,
 identity and persistence are unaffected, so a custom mob is always testable
 without the visual layer.
 
-Rig cost is bounded by `RENDER_DISTANCE` (no pose pushes past it),
+Rig cost is bounded by `RENDER_NEAR_DISTANCE` (a rig beyond it poses at a
+quarter cadence with the interpolation window widened to match),
+`RENDER_DISTANCE` (beyond it the rig is **released**: its displays despawn and
+the mob renders as its base entity until a viewer returns, with an 8-block
+hysteresis band so a mob pacing the border never thrashes),
 `MAX_RIGGED_PER_WORLD`, and a pose task that only exists while at least one rig
-is attached. `refreshRendering()` re-evaluates every live custom mob after a
-pack reload; `/mineplus pack recompile` and a settings reload call it for you.
+is attached. Each pose pass diffs every slot against the one it pushed last
+(position to 0.0015 blocks, matrix to 0.0008) and skips the packet when nothing
+moved, so an idle mob costs almost nothing, and it reads the viewer set once for
+the whole world instead of once per mob. `/mineplus mob cost` prints the live
+breakdown: rigs posing, rigs at quarter rate, rigs released, and the display
+entity count behind them. `refreshRendering()` re-evaluates every live custom
+mob after a pack reload; `/mineplus pack recompile` and a settings reload call
+it for you.
 
 ### Attributes and spawning
 

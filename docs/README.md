@@ -31,10 +31,10 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 The complete data-format encyclopedia: multiblock JSON schema, machine recipe JSON schema, `.bbmodel` model handling, per-model `.meta.json` overrides, the `settings.mp.yml` rendering-engine keys, the full texture-name catalog, and the Blockbench designer guidelines.
 
 ### [Developer API](developer-api.md)
-The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, the shared combat services (ballistics, held-item input, magazines, particle budgets), the mob behavior engine (profiles, conditions, journeys, crews, world-edit grants), custom mobs (identity, AI isolation, per-part display rigs), and how the core runtime behaves under your feature code.
+The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, the shared combat services (ballistics, held-item input, magazines, particle budgets), the mob behavior engine (profiles, conditions, journeys, crews, world-edit grants), custom mobs (identity, the two-mind contract — a Core profile or the base type's own engine AI — and per-part display rigs), and how the core runtime behaves under your feature code.
 
 ### [Custom Mobs](custom-mobs.md)
-Adding new mobs without touching vanilla ones: the definition/model/attributes/behavior contract, the texture-extended phase (Evil Pig) and the fully custom model phase, AI isolation, identity across restarts, cost controls, and the bundled `AttackNearestAction`.
+Adding new mobs without touching vanilla ones: the definition/model/attributes contract, the texture-extended phase (Evil Pig) and the fully custom model phase, **whose mind runs the mob** (a Core behavior profile or the base type's own engine AI), why a rigged mob is still a real entity (hitbox, damage, push, shadow, death), identity across restarts, the cost controls behind a crowd, and the bundled `AttackNearestAction`.
 
 ### [Extension Workflows](extension-workflows.md)
 The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced framework) plus runtime administration and model-debugging tips.
@@ -61,7 +61,7 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
 | [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon + Gear + Wine + Cabinet + pack showcases) |
 | [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms with file-discovered frame animations, right-click shooting, left-click scopes, ammunition economy and a Vault shop on the Core's ballistics, held-item input and magazine services |
-| [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch, pilgrim villagers and the Evil Pig + Villager Soldier custom mobs on the Core's mob behavior and custom-mob APIs |
+| [`mineplus-mobfun/`](../examples/mineplus-mobfun/README.md) | Module | Smart-mob module: grazers, reforesting pig, lamplighter, florist bee, golem builders, necromancer witch, pilgrim villagers, plus the three custom mobs — the Core-steered Evil Pig, the engine-owned Villager Soldier (an iron golem wearing a model) and Woodland Trickster (a zombie wearing one) — on the Core's mob behavior and custom-mob APIs |
 
 For building your own module, follow the canonical recipe in
 [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md).

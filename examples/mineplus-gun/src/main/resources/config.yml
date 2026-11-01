@@ -12,10 +12,17 @@
 #   idle | rest | base                 resting pose
 #   primed | loaded | ready            loaded pose (shown while rounds remain)
 #   loading_N | reload_N | load_N      reload frames, sorted numerically
-#   fire | shoot | shot                shot pose
-#   scope_in | scope_hold | scope_out  scope poses
-#   cycle | bolt | pump | rack         action cycle after a shot
-#   equip | draw | raise               draw pose
+#   fire_N | shoot_N | shot_N          shot frames, sorted numerically
+#   scope_in_N | scope_hold | scope_out_N   scope poses
+#   cycle_N | bolt_N | pump_N | rack_N action cycle after a shot
+#   equip_N | draw_N | raise_N         draw pose
+# A folder may instead ship ONE "<id>.bbmodel": every Blockbench clip in it is
+# baked into the frames above when the module installs (a clip named *fire*
+# becomes fire_N, *lever_cycle* becomes cycle_N, *zoom* becomes scope_in_N plus
+# the scope_hold/scope_out_N poses, *reload* or *break_load* becomes loading_N
+# and *close* — the snap-shut half of a break action — becomes cycle_N). An
+# `idle` clip is never baked — a held item cannot be rewritten per frame — and a
+# clip whose name says nothing recognisable is reported, not guessed.
 # Everything is optional: a gun with only <id>_idle fires, reloads and scopes
 # without ever changing pose. A weapon with no models at all still works on its
 # vanilla carrier. An explicit `frames:` block (same schema as Core content)
@@ -24,7 +31,11 @@
 # Controls
 #   RIGHT-CLICK   fire (hold for automatic fire)
 #   LEFT-CLICK    scope on/off; otherwise fully swallowed — never punches,
-#                 mines or interacts
+#                 mines or interacts. With settings.scope-gui on, scoping also
+#                 opens a reticle overlay: the sight line is the gap in the
+#                 black frame, clicking it fires a scoped round, and closing the
+#                 overlay (Esc, E, or any other screen) unscopes. Hip-fire on
+#                 the right button keeps working the moment you leave the scope.
 #   F (swap)      reload; an empty gun reloads itself shortly after the last shot
 #   Minecraft sends no event for an arbitrary key, so bind the reload key by
 #   rebinding "Swap Item With Offhand" to F; the gun consumes the swap so the
@@ -44,6 +55,14 @@
 # reload_begin, reload_mid, reload_done, empty). An unknown custom event falls
 # back to a vanilla sound instead of silencing the weapon.
 #
+# A weapon's `animation:` block has two spellings per role (reload, cycle, fire,
+# scope-in, scope-hold, scope-out, equip): a STRING renames that role's clip —
+# the clip baked from a Blockbench clip called `lever_cycle` is a `cycle` — and a
+# NUMBER is the authored clip length in SECONDS, which is how long the pose is
+# held on screen. The reload pose and the action-cycle pose take their length
+# from `ammo.reload-ticks` and `fire.cycle-ticks` instead, because those numbers
+# also meter the weapon.
+#
 # `backing-material` is the vanilla item the gun is built on. Keep it UNIQUE
 # per weapon: on 1.21.4+ the pack plays each clip on the item's own cooldown
 # clock, and the client keeps that cooldown per material — two guns sharing a
@@ -57,6 +76,8 @@
 
 settings:
   language: en
+  scope-gui: true              # the scope trigger opens a reticle overlay;
+                               # clicking the sight line fires a scoped round
   hud:
     mode: ACTIONBAR            # ACTIONBAR | BOSSBAR | OFF
     # One quiet line: loaded/reserve. `{mag}` is tinted white, red when low and
@@ -335,3 +356,216 @@ weapons:
       reload: 1.8
       cycle: 0.5
       fire: 0.5
+
+  # --- Lever-action marksman rifle (Blockbench clips: fire, lever_cycle, zoom)
+  longmark:
+    display-name: "&dLongmark"
+    category: WEAPON
+    type: RIFLE
+    backing-material: AMETHYST_SHARD
+    price: 3600
+    ammo: { magazine: 6, reload-ticks: 56, type: longgrain }
+    fire: { mode: BOLT, rpm: 48, cycle-ticks: 18 }
+    ballistics:
+      damage: 19.0
+      headshot-multiplier: 2.6
+      velocity: 4.8
+      gravity: 0.018
+      drag: 0.006
+      penetration: 2
+      range: 190
+      spread-degrees: 0.5
+      falloff-start: 80
+      falloff-per-block: 0.012
+      knockback: 0.5
+    accuracy:
+      move: 1.1
+      air: 3.4
+      sprint: 5.0
+      recoil-per-shot: 0.7
+      recoil-recovery: 0.22
+      recoil-max: 3.2
+    aim: { scope: true, spread-multiplier: 0.22, move-multiplier: 1.6, recoil-multiplier: 0.5 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:rifle_shot"
+    animation:
+      fire: 0.45
+      scope-in: 0.6
+      scope-out: 0.6
+
+  # --- Scoped repeater, every clip authored (reload, cycle, equip, fire, zoom)
+  longshot:
+    display-name: "&aLongshot"
+    category: WEAPON
+    type: RIFLE
+    backing-material: QUARTZ
+    price: 2900
+    ammo: { magazine: 8, reload-ticks: 44, type: 7.62 }
+    fire: { mode: SEMI, rpm: 150, cycle-ticks: 12 }
+    ballistics:
+      damage: 13.0
+      headshot-multiplier: 2.4
+      velocity: 4.4
+      gravity: 0.02
+      drag: 0.009
+      penetration: 1
+      range: 150
+      spread-degrees: 0.6
+      falloff-start: 60
+      falloff-per-block: 0.018
+      knockback: 0.4
+    accuracy:
+      move: 1.0
+      air: 3.0
+      sprint: 4.4
+      recoil-per-shot: 0.6
+      recoil-recovery: 0.26
+      recoil-max: 3.0
+    aim: { scope: true, spread-multiplier: 0.25, move-multiplier: 1.7, recoil-multiplier: 0.5 }
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:rifle_shot"
+    animation:
+      reload: 2.2
+      fire: 0.45
+      equip: 0.45
+      scope-in: 0.3
+      scope-out: 0.3
+
+  # --- Break-action marksman rifle, iron sights only (Blockbench clips:
+  #     fire, break_load, close). No `aim.scope`: the sight line is the barrel,
+  #     so its base cone is what a scoped gun only reaches behind glass.
+  hawk_eye:
+    display-name: "&5Hawk-Eye"
+    category: WEAPON
+    type: SNIPER
+    backing-material: BLAZE_ROD
+    price: 2750
+    ammo: { magazine: 5, reload-ticks: 50, type: longgrain }
+    fire: { mode: BOLT, rpm: 50, cycle-ticks: 20 }
+    ballistics:
+      damage: 18.5
+      headshot-multiplier: 2.5
+      velocity: 4.6
+      gravity: 0.02
+      drag: 0.008
+      penetration: 1
+      range: 165
+      spread-degrees: 0.8
+      falloff-start: 70
+      falloff-per-block: 0.016
+      knockback: 0.5
+    accuracy:
+      move: 0.9
+      air: 3.0
+      sprint: 4.2
+      recoil-per-shot: 0.85
+      recoil-recovery: 0.26
+      recoil-max: 3.2
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:rifle_shot"
+    animation:
+      fire: 0.5
+
+  # --- Twin-barrel break action (Blockbench clips: fire, break_load, close).
+  #     Fast second barrel, heavy shot, short reach, and the longest snap-shut
+  #     cycle in the set because both barrels relock at once.
+  double_boom:
+    display-name: "&9Double Boom"
+    category: WEAPON
+    type: SHOTGUN
+    backing-material: COAL
+    price: 2200
+    ammo: { magazine: 2, reload-ticks: 54, type: heavygauge }
+    fire: { mode: SEMI, rpm: 130, cycle-ticks: 24, pellets: 14 }
+    ballistics:
+      damage: 5.2
+      headshot-multiplier: 1.4
+      velocity: 2.7
+      gravity: 0.05
+      drag: 0.038
+      range: 24
+      spread-degrees: 11.5
+      falloff-start: 7
+      falloff-per-block: 0.13
+      knockback: 1.0
+    accuracy:
+      move: 0.7
+      air: 2.6
+      sprint: 3.6
+      recoil-per-shot: 2.0
+      recoil-recovery: 0.28
+      recoil-max: 6.0
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: LARGE_SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:shotgun_shot"
+    animation:
+      fire: 0.5
+
+  # --- Side-cocked revolver (Blockbench clips: fire, reload; its `inspect`
+  #     clip is reported and skipped — a held item has no flourish channel).
+  #     No `cycle-ticks`: the authored fire clip already carries the cylinder
+  #     index, so nothing is held between shots but the trigger reset.
+  peacemaker:
+    display-name: "&ePeacemaker"
+    category: WEAPON
+    type: PISTOL
+    backing-material: IRON_NUGGET
+    price: 900
+    ammo: { magazine: 6, reload-ticks: 46, type: 45scrap }
+    fire: { mode: SEMI, rpm: 160 }
+    ballistics:
+      damage: 12.5
+      headshot-multiplier: 2.3
+      velocity: 3.3
+      gravity: 0.036
+      drag: 0.016
+      range: 70
+      spread-degrees: 1.7
+      falloff-start: 22
+      falloff-per-block: 0.042
+      knockback: 0.5
+    accuracy:
+      move: 0.8
+      air: 3.0
+      sprint: 4.0
+      recoil-per-shot: 0.8
+      recoil-recovery: 0.32
+      recoil-max: 3.0
+    fx:
+      muzzle: SMOKE
+      flash: FLAME
+      smoke: SMOKE
+      spark: SMALL_FLAME
+      tracer: CRIT
+      impact: CRIT
+      impact-smoke: CLOUD
+      sound-fire: "mineplusgun:pistol_shot"
+    animation:
+      fire: 0.3

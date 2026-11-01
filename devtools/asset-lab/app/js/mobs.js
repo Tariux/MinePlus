@@ -2,7 +2,7 @@
 // (.bbmodel), opened through the daemon's real mob pipeline.
 
 import { postJson } from './api.js';
-import { esc, chip, section, kv, list, findings, texThumb } from './ui.js';
+import { esc, chip, section, kv, list, findings, texThumb, shadingCard, brightnessCard } from './ui.js';
 
 export function initMobs(ctx) {
     renderList(ctx);
@@ -31,6 +31,7 @@ function renderList(ctx) {
 
 /** Full mob presentation: rig (or retexture verdict) + details. */
 export async function showMob(ctx, response) {
+    ctx.shading = response.shading ?? null;
     const retexture = response.renderType === 'RETEXTURE_VANILLA';
     const none = response.renderType === 'NONE';
     if (retexture || none) {
@@ -107,6 +108,8 @@ function mobDetails(r) {
             ({ code: a.state, message: `clip '${a.clip}' not found in the model` }))));
     }
 
+    html += shadingCard(r.shading);
+    html += brightnessCard(r.brightness);
     html += section('Parser issues', findings(r.issues));
     html += section('Compile report reasons', findings(r.reasons));
     return html;

@@ -124,9 +124,9 @@ export function rigLocalMatrix(rel, euler, scale) {
     return m;
 }
 
-/** Model-space yaw frame for a body yaw: R_y(180 − bodyYaw). */
-export function rigYawFrame(bodyYawDeg) {
-    return mat4Trs([0, 0, 0], quatRotY(180 - bodyYawDeg), [1, 1, 1]);
+/** Model-space yaw frame for a body yaw: R_y(180 + yawOffset − bodyYaw). */
+export function rigYawFrame(bodyYawDeg, yawOffsetDeg = 0) {
+    return mat4Trs([0, 0, 0], quatRotY(180 + yawOffsetDeg - bodyYawDeg), [1, 1, 1]);
 }
 
 export function clamp(value, min, max) {

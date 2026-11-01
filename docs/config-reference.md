@@ -446,17 +446,53 @@ MOB_BEHAVIOR:
   MAX_SUSTAINED_PER_RUN: 64
   MAX_PIPELINES_PER_RUN: 64
 
-# Custom mobs: vanilla base entities carrying a Mineplus identity, behaviour
-# profile and (optionally) a per-part display rig. These keys bound only the
-# visual cost; behaviour runs on the shared MOB_BEHAVIOR engine. Lazy: costs
-# nothing until a module registers a definition.
+# Custom mobs: vanilla base entities carrying a Mineplus
+# identity, their own visual model and their own behavior.
+# A definition chooses its mind: isolated (every move comes
+# from a Core profile bound to its id) or 'ai: vanilla',
+# which keeps the base type's own goals so the mob walks,
+# hunts, swings and dies exactly like that mob and the
+# plugin only dresses it up.
 CUSTOM_MOBS:
+  # Master switch; false makes registration and spawning
+  # no-ops (existing custom mobs keep their profiles).
   ENABLED: true
+  # Build per-part visual rigs (base model covered +
+  # ItemDisplays). Rigs need the pack subsystem; the modern
+  # representation names each part model in the item_model
+  # component and a legacy one reaches it through a reserved
+  # custom_model_data override. Without the pack the base
+  # entity stays visible.
+  # A rigged mob is still the real entity: it keeps its
+  # hitbox, so it can be looked at, hit, pushed and killed,
+  # and its base model is only hidden from the render.
   RENDERING: true
+  # Server ticks between rig pose pushes. Keep at 1: a pose
+  # pushed every other tick needs a 2-tick client window to
+  # look smooth, and any window longer than the cadence lags.
+  # Mobs beyond RENDER_NEAR_DISTANCE cost a quarter of this
+  # rate, and a rig nobody is near costs nothing at all.
   RENDER_INTERVAL_TICKS: 1
+  # Ticks a display eases its transformation over. 1 matches
+  # the push cadence; raise it only to soften a coarse
+  # RENDER_INTERVAL_TICKS.
   RENDER_INTERPOLATION_TICKS: 1
+  # Blocks beyond which a rig is released entirely: its
+  # displays despawn and the mob shows its real base model
+  # again until a viewer comes back inside it.
   RENDER_DISTANCE: 48
-  MAX_RIGGED_PER_WORLD: 96
+  # Blocks inside which a rig is posed at full rate; beyond
+  # it every fourth pose pass runs.
+  RENDER_NEAR_DISTANCE: 20
+  # Hard ceiling of rigged custom mobs per world. A mob over
+  # the cap renders as its base entity and plays normally.
+  MAX_RIGGED_PER_WORLD: 48
+  # Draw a soft ground shadow plate under a rigged mob. The
+  # mob's own shadow is not rendered while its rig covers it,
+  # so this is what keeps a custom mob from looking airborne.
+  SHADOWS: true
+  # Remove a custom-tagged entity whose definition is not
+  # registered when its chunk loads.
   REMOVE_UNKNOWN_ON_LOAD: true
 
 # Performance telemetry and the adaptive degradation valve. Telemetry powers
@@ -559,11 +595,13 @@ WORLD_EDITS:
 | `MOB_BEHAVIOR.MAX_SUSTAINED_PER_RUN` | entities 0-512 | Cap on scenario-claimed entities the sustained sweep advances per run even with no player near them — journeys and camps tick on (default 64) |
 | `MOB_BEHAVIOR.MAX_PIPELINES_PER_RUN` | pipelines 0-512 | Cap on multi-stage mob pipelines (locate → march → act) advanced per run, sharing the same processing budget (default 64). `0` pauses pipeline progress without detaching them |
 | `CUSTOM_MOBS.ENABLED` | `true` / `false` | Custom-mob subsystem master switch (default `true`). `false` makes registration and spawning no-ops; already-registered behavior profiles keep running, rigs detach on the next refresh |
-| `CUSTOM_MOBS.RENDERING` | `true` / `false` | Create per-part display rigs at all (default `true`). `false` leaves the base entity visible — identity, AI isolation, attributes and behavior are unaffected |
+| `CUSTOM_MOBS.RENDERING` | `true` / `false` | Create per-part display rigs at all (default `true`). `false` leaves the base entity visible — identity, attributes and behavior are unaffected. A rig never removes the base: it is made invisible, so the mob keeps its hitbox and stays hittable, pushable and killable |
 | `CUSTOM_MOBS.RENDER_INTERVAL_TICKS` | ticks 1-40 | Server ticks between rig pose pushes (default 1). The pose loop is scheduled at this cadence and the animation clocks and the mob's measured walk speed scale with it, so raising it only costs smoothness, never timing |
-| `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS` | ticks 1-40 | Client-side interpolation window for each pose push (default 1). Keep it equal to the interval: a shorter window snaps, a longer one lags behind the body |
-| `CUSTOM_MOBS.RENDER_DISTANCE` | blocks 8-256 | Distance beyond which a rig stops receiving pose updates (default 48); the client still culls by its own view range |
-| `CUSTOM_MOBS.MAX_RIGGED_PER_WORLD` | rigs 1-4096 | Hard ceiling of rigged custom mobs per world (default 96). Past it, newly spawned mobs stay visible as their vanilla base |
+| `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS` | ticks 1-40 | Client-side interpolation window for each pose push (default 1). The engine never eases over a window shorter than `RENDER_INTERVAL_TICKS` — a smaller value is raised to it, so a slowed pose loop still glides instead of snapping |
+| `CUSTOM_MOBS.RENDER_DISTANCE` | blocks 8-256 | Distance beyond which a rig is **released entirely** (default 48): its displays despawn and the mob renders as its real base entity until a viewer returns. An 8-block hysteresis band keeps a mob pacing the border from rebuilding a rig every pass |
+| `CUSTOM_MOBS.RENDER_NEAR_DISTANCE` | blocks 4-`RENDER_DISTANCE` | Distance inside which a rig is posed at full rate (default 20). Beyond it the pose cadence drops to a quarter, so a crowd that is merely visible costs a fraction of a crowd that is close. Clamped to `RENDER_DISTANCE` |
+| `CUSTOM_MOBS.MAX_RIGGED_PER_WORLD` | rigs 1-4096 | Hard ceiling of rigged custom mobs per world (default 48). Past it a mob renders as its base entity and its engine-owned or profile-owned behaviour is unaffected |
+| `CUSTOM_MOBS.SHADOWS` | `true` / `false` | Draw the soft ground shadow plate under a rigged mob (default `true`). A rig replaces the base model, so the vanilla shadow disappears with it — this plate is what stops a custom mob from looking airborne. `render.shadow` in a mob YAML can override it per definition with a radius or `false` |
 | `CUSTOM_MOBS.REMOVE_UNKNOWN_ON_LOAD` | `true` / `false` | Remove a custom-tagged entity whose definition is no longer registered when its chunk loads (default `true`). Unknown entities are AI-isolated either way, never turned back into vanilla mobs |
 
 ---

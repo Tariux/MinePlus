@@ -312,6 +312,30 @@ public final class CustomMobDefinition {
             return this;
         }
 
+        /**
+         * Hands this mob's whole mind to the vanilla server engine: it keeps the
+         * goal and target selectors of its own base type, walks, hunts, swings,
+         * recoils and dies exactly like that mob, and the Mineplus layer only
+         * dresses it up (identity, attributes, model, name).
+         *
+         * <p>This is the right mode for content that is "a real zombie that
+         * merely looks like the trickster": nothing is re-implemented, so the
+         * movement, pathfinding, attack timing, knockback and death animation
+         * are the game's own and are interpolated by the client like any other
+         * mob. Pick a base type whose vanilla AI already does the job — an
+         * {@code IRON_GOLEM} guards, a {@code ZOMBIE} hunts players — because a
+         * mob cannot inherit the goals of a type it is not.</p>
+         *
+         * <p>A definition in this mode normally declares no
+         * {@link #behavior(Consumer)}: the Core then registers no profile for it
+         * at all, so the behavior engine never spends a scan slot on it. Any
+         * behavior consumer is still honored on top of the vanilla goals.</p>
+         */
+        public Builder vanillaAi() {
+            this.goalDonor = baseType;
+            return this;
+        }
+
         public Builder canPickupItems(boolean value) {
             this.canPickupItems = value;
             return this;
