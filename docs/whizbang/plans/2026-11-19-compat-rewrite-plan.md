@@ -164,10 +164,10 @@
 - Consumes: existing clip name-matching/alias scheme (`idle`/`walk`/`run`/`attack`/`hurt`/`death` + `animationMap` aliases).
 - Produces: bounded-time crossfade between base-layer clips and one-shot overlays (same public call signatures; `MobRenderEngine` unchanged); optional clip slots `sit`, `eat`, `ambient` joining the name-matching chain; a model without the new clips behaves exactly as today.
 
-- [ ] **Step 1: RED — pipeline-test checks**: crossfade continuity (pose at blend boundaries equals source at t=0 and target at t=1 within EPS), no per-tick allocation in the blend path (assert via a re-used buffer contract — pose map identity across frames), new slot name-matching picks `sit`/`eat`/`ambient` and degrades to idle when absent, rest-pose output for a clip-less model is bit-identical to today (golden values from current run).
-- [ ] **Step 2: GREEN** — implement the crossfade (blend window from `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS`, no new settings unless required) and the three slots.
-- [ ] **Step 3: `gradle testRunners -q` → PASS.**
-- [ ] **Step 4: Commit** — `feat: mob animator crossfade + sit/eat/ambient clip slots`.
+- [x] **Step 1: RED — pipeline-test checks**: crossfade continuity (pose at blend boundaries equals source at t=0 and target at t=1 within EPS), no per-tick allocation in the blend path (assert via a re-used buffer contract — pose map identity across frames), new slot name-matching picks `sit`/`eat`/`ambient` and degrades to idle when absent, rest-pose output for a clip-less model is bit-identical to today (golden values from current run).
+- [x] **Step 2: GREEN** — implement the crossfade (blend window from `CUSTOM_MOBS.RENDER_INTERPOLATION_TICKS`, no new settings unless required) and the three slots.
+- [x] **Step 3: `gradle testRunners -q` → PASS.**
+- [x] **Step 4: Commit** — `feat: mob animator crossfade + sit/eat/ambient clip slots`.
 
 ### Task 10: `WanderAction` + `GuardAnchorAction`
 

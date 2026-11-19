@@ -31,6 +31,7 @@ public final class MobAnimator {
         IDLE,
         WALK,
         RUN,
+        SIT,
         DEATH
     }
 
@@ -62,18 +63,24 @@ public final class MobAnimator {
     private static final float PROCEDURAL_LEG_AMPLITUDE = 42.0f;
     private static final float PROCEDURAL_ARM_AMPLITUDE = 30.0f;
     private static final float STRIDE_BLOCKS_PER_CYCLE = 1.6f;
+    private static final float AMBIENT_MIN_SECONDS = 12.0f;
+    private static final float AMBIENT_SPAN_SECONDS = 16.0f;
 
     private final Map<String, ModelAnimation> animations;
     private final Map<String, String> aliases;
     private final Map<String, BonePose> poses = new HashMap<>();
     private final List<String> legBones;
     private final List<String> armBones;
+    private final java.util.Random ambientRoll = new java.util.Random();
 
     private ModelAnimation idleClip;
     private ModelAnimation walkClip;
     private ModelAnimation runClip;
+    private ModelAnimation sitClip;
     private ModelAnimation attackClip;
     private ModelAnimation hurtClip;
+    private ModelAnimation eatClip;
+    private ModelAnimation ambientClip;
     private ModelAnimation deathClip;
     private ModelAnimation overlayClip;
 
@@ -85,7 +92,11 @@ public final class MobAnimator {
     private float crossfade = 1.0f;
     private float attackTime = Float.MAX_VALUE;
     private float hurtTime = Float.MAX_VALUE;
+    private float eatTime = Float.MAX_VALUE;
+    private float ambientTime = Float.MAX_VALUE;
+    private float ambientCountdown = AMBIENT_MIN_SECONDS + AMBIENT_SPAN_SECONDS;
     private float overlayTime = Float.MAX_VALUE;
+    private boolean sitting;
     private boolean dead;
 
     /**
@@ -103,8 +114,11 @@ public final class MobAnimator {
         idleClip = resolve("idle", "stand", "breath");
         walkClip = resolve("walk");
         runClip = resolve("run", "sprint");
+        sitClip = resolve("sit");
         attackClip = resolve("attack", "swing", "melee");
         hurtClip = resolve("hurt", "hit", "damage");
+        eatClip = resolve("eat", "graze", "feed");
+        ambientClip = resolve("ambient", "idle_ambient");
         deathClip = resolve("death", "die");
         if (runClip == null) {
             runClip = walkClip;
@@ -157,6 +171,28 @@ public final class MobAnimator {
         }
     }
 
+    /** Plays the eat/graze overlay once. {@code false} when the model has no eat clip. */
+    public boolean notifyEat() {
+        if (eatClip == null || dead) {
+            return false;
+        }
+        eatTime = 0.0f;
+        return true;
+    }
+
+    /** Whether the base layer is held on the sit clip. */
+    public boolean sitting() {
+        return sitting;
+    }
+
+    /**
+     * Holds the base layer on the sit clip (a model without one simply stays
+     * idle). Cleared by movement logic or the module; a dead mob ignores it.
+     */
+    public void setSitting(boolean sitting) {
+        this.sitting = sitting && !dead;
+    }
+
     /** Plays any authored clip as a one-shot overlay (the {@code anim} command). */
     public boolean playOverlay(ModelAnimation clip) {
         if (clip == null || dead) {
@@ -188,9 +224,12 @@ public final class MobAnimator {
         stridePhase += Math.max(0.0f, speedBlocksPerTick) / STRIDE_BLOCKS_PER_CYCLE;
         attackTime += Math.max(0.0f, deltaSeconds);
         hurtTime += Math.max(0.0f, deltaSeconds);
+        eatTime += Math.max(0.0f, deltaSeconds);
+        ambientTime += Math.max(0.0f, deltaSeconds);
         overlayTime += Math.max(0.0f, deltaSeconds);
 
         State target = dead ? State.DEATH
+                : sitting && sitClip != null ? State.SIT
                 : speedBlocksPerTick > RUN_SPEED_THRESHOLD && runClip != null ? State.RUN
                 : speedBlocksPerTick > WALK_SPEED_THRESHOLD && walkClip != null ? State.WALK
                 : State.IDLE;
@@ -200,6 +239,7 @@ public final class MobAnimator {
             crossfade = 0.0f;
         }
         crossfade = Math.min(1.0f, crossfade + deltaSeconds / CROSSFADE_SECONDS);
+        maybeFireAmbient(deltaSeconds);
 
         for (BonePose pose : poses.values()) {
             pose.reset();
@@ -216,7 +256,7 @@ public final class MobAnimator {
             sample(previous, previous.wrap(time), 1.0f - blend);
         }
         if (current != null) {
-            sample(current, current.wrap(time), 1.0f);
+            sample(current, current.wrap(time), blend);
         } else {
             procedural(baseState, speedBlocksPerTick);
         }
@@ -229,9 +269,38 @@ public final class MobAnimator {
         if (hurtWeight > 0.0f) {
             sample(hurtClip, hurtClip.wrap(hurtTime), hurtWeight);
         }
+        float eatWeight = overlayWeight(eatTime, eatClip);
+        if (eatWeight > 0.0f) {
+            sample(eatClip, eatClip.wrap(eatTime), eatWeight);
+        }
+        float ambientWeight = overlayWeight(ambientTime, ambientClip);
+        if (ambientWeight > 0.0f) {
+            sample(ambientClip, ambientClip.wrap(ambientTime), ambientWeight);
+        }
         float extraWeight = overlayWeight(overlayTime, overlayClip);
         if (extraWeight > 0.0f) {
             sample(overlayClip, overlayClip.wrap(overlayTime), extraWeight);
+        }
+    }
+
+    /**
+     * Fires the ambient clip on a randomized idle cadence while no other
+     * overlay is playing — a rigged mob at rest stays alive on its own.
+     */
+    private void maybeFireAmbient(float deltaSeconds) {
+        if (ambientClip == null || dead || baseState == State.WALK || baseState == State.RUN) {
+            return;
+        }
+        if (overlayWeight(attackTime, attackClip) > 0.0f
+                || overlayWeight(hurtTime, hurtClip) > 0.0f
+                || overlayWeight(eatTime, eatClip) > 0.0f
+                || overlayWeight(overlayTime, overlayClip) > 0.0f) {
+            return;
+        }
+        ambientCountdown -= deltaSeconds;
+        if (ambientCountdown <= 0.0f) {
+            ambientTime = 0.0f;
+            ambientCountdown = AMBIENT_MIN_SECONDS + ambientRoll.nextFloat() * AMBIENT_SPAN_SECONDS;
         }
     }
 
@@ -239,6 +308,7 @@ public final class MobAnimator {
         return switch (state) {
             case RUN -> runClip;
             case WALK -> walkClip;
+            case SIT -> sitClip;
             case DEATH -> deathClip;
             default -> idleClip;
         };
@@ -330,6 +400,12 @@ public final class MobAnimator {
         if (hurtTime < overlayLength(hurtClip)) {
             line.append("+hurt");
         }
+        if (eatTime < overlayLength(eatClip)) {
+            line.append("+eat");
+        }
+        if (ambientTime < overlayLength(ambientClip)) {
+            line.append("+ambient");
+        }
         if (overlayTime < overlayLength(overlayClip)) {
             line.append("+anim");
         }
@@ -345,8 +421,11 @@ public final class MobAnimator {
         out.put("idle", clipName(idleClip));
         out.put("walk", clipName(walkClip));
         out.put("run", clipName(runClip));
+        out.put("sit", clipName(sitClip));
         out.put("attack", clipName(attackClip));
         out.put("hurt", clipName(hurtClip));
+        out.put("eat", clipName(eatClip));
+        out.put("ambient", clipName(ambientClip));
         out.put("death", clipName(deathClip));
         return out;
     }

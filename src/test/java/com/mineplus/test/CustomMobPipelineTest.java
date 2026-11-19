@@ -14,6 +14,7 @@ import com.mineplus.infrastructure.mob.custom.render.ModelBundle;
 import com.mineplus.infrastructure.mob.custom.render.ModelBundleCompiler;
 import com.mineplus.infrastructure.mob.custom.render.PngUtil;
 import com.mineplus.infrastructure.mob.custom.rig.BoneTransformMath;
+import com.mineplus.infrastructure.mob.custom.rig.MobAnimator;
 import com.mineplus.pack.PackApi;
 import com.mineplus.pack.PlayerPackState;
 import com.mineplus.pack.block.PackBlockDefinition;
@@ -55,6 +56,8 @@ public final class CustomMobPipelineTest {
         bbmodelFixture();
         bbmodelFormat5Fixture();
         emitterWindowFitting();
+        mobAnimatorBaseLayer();
+        mobAnimatorSlots();
         if (failures.isEmpty()) {
             System.out.println("CustomMobPipelineTest: all checks passed");
             return;
@@ -541,6 +544,98 @@ public final class CustomMobPipelineTest {
     }
 
     // ------------------------------------------------------------------
+
+    private static ModelAnimation clip(String name, float lengthSeconds, boolean loop,
+                                       String bone, float endDegrees) {
+        return ModelAnimation.builder(name)
+                .lengthSeconds(lengthSeconds)
+                .loopMode(loop ? ModelAnimation.LoopMode.LOOP : ModelAnimation.LoopMode.ONCE)
+                .key(bone, "rotation", 0.0f, 0.0f, 0.0f, 0.0f, ModelAnimation.Interpolation.LINEAR)
+                .key(bone, "rotation", lengthSeconds, endDegrees, 0.0f, 0.0f, ModelAnimation.Interpolation.LINEAR)
+                .build();
+    }
+
+    private static void mobAnimatorBaseLayer() {
+        ModelAnimation idle = clip("idle", 2.0f, true, "body", 0.0f);
+        ModelAnimation walk = clip("walk", 1.0f, true, "body", 30.0f);
+
+        MobAnimator empty = new MobAnimator(Map.of(), Map.of(), List.of(), List.of());
+        empty.tick(0.1f, 0.0f);
+        check("clip-less idle pose is empty", empty.poses().isEmpty());
+
+        MobAnimator animator = new MobAnimator(
+                Map.of("idle", idle, "walk", walk), Map.of(), List.of(), List.of());
+        animator.tick(0.1f, 0.0f);
+        Map<String, MobAnimator.BonePose> first = animator.poses();
+        check("idle clip samples zero rotation", near(first.get("body").rotationX, 0.0f));
+        animator.tick(0.1f, 0.0f);
+        check("pose map is reused across ticks", animator.poses() == first);
+        check("pose instances are reused", animator.poses().get("body") == first.get("body"));
+
+        animator.tick(1.0e-4f, 0.2f);
+        check("crossfade starts from the source pose",
+                Math.abs(animator.poses().get("body").rotationX) < 0.05f);
+        animator.tick(0.1f, 0.2f);
+        animator.tick(0.1f, 0.2f);
+        check("crossfade reaches the target pose",
+                Math.abs(animator.poses().get("body").rotationX - 30.0f * 0.4f) < 0.05f);
+    }
+
+    private static void mobAnimatorSlots() {
+        ModelAnimation idle = clip("idle", 2.0f, true, "body", 0.0f);
+        ModelAnimation walk = clip("walk", 1.0f, true, "body", 30.0f);
+        ModelAnimation sit = clip("sit", 2.0f, true, "body", 0.0f);
+        ModelAnimation eat = clip("eat", 0.8f, false, "body", 10.0f);
+        ModelAnimation ambient = clip("ambient", 0.5f, false, "body", 5.0f);
+        Map<String, ModelAnimation> animations = new HashMap<>();
+        animations.put("idle", idle);
+        animations.put("walk", walk);
+        animations.put("sit", sit);
+        animations.put("eat", eat);
+        animations.put("ambient", ambient);
+
+        MobAnimator animator = new MobAnimator(animations, Map.of(), List.of(), List.of());
+        Map<String, String> binding = animator.binding();
+        check("sit slot binds", "sit".equals(binding.get("sit")));
+        check("eat slot binds", "eat".equals(binding.get("eat")));
+        check("ambient slot binds", "ambient".equals(binding.get("ambient")));
+
+        animator.tick(0.05f, 0.0f);
+        animator.setSitting(true);
+        animator.tick(0.05f, 0.0f);
+        check("sitting switches the base layer", animator.snapshot().startsWith("sit"));
+        animator.setSitting(false);
+        animator.tick(0.05f, 0.0f);
+        check("standing up returns to idle", animator.snapshot().startsWith("idle"));
+
+        MobAnimator noSit = new MobAnimator(Map.of("idle", idle, "walk", walk), Map.of(), List.of(), List.of());
+        noSit.setSitting(true);
+        noSit.tick(0.05f, 0.0f);
+        check("sitting without a sit clip stays idle", noSit.snapshot().startsWith("idle"));
+
+        MobAnimator eater = new MobAnimator(animations, Map.of(), List.of(), List.of());
+        eater.notifyEat();
+        eater.tick(0.05f, 0.0f);
+        check("eat overlay plays", eater.snapshot().contains("+eat"));
+        eater.tick(1.0f, 0.0f);
+        check("eat overlay ends", !eater.snapshot().contains("+eat"));
+
+        boolean ambientFired = false;
+        MobAnimator ambience = new MobAnimator(animations, Map.of(), List.of(), List.of());
+        for (int i = 0; i < 320 && !ambientFired; i++) {
+            ambience.tick(0.1f, 0.0f);
+            ambientFired = ambience.snapshot().contains("+ambient");
+        }
+        check("ambient self-fires while idle", ambientFired);
+
+        boolean ambientWhileWalking = false;
+        MobAnimator walker = new MobAnimator(animations, Map.of(), List.of(), List.of());
+        for (int i = 0; i < 320 && !ambientWhileWalking; i++) {
+            walker.tick(0.1f, 0.2f);
+            ambientWhileWalking = walker.snapshot().contains("+ambient");
+        }
+        check("ambient never fires while walking", !ambientWhileWalking);
+    }
 
     private static void check(String name, boolean condition) {
         if (!condition) {
