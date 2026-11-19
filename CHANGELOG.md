@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Minecraft 26.3 compatibility rewrite (runtime 1.21.0 -> 26.3)
+
+#### Fixed
+
+- **Calendar-version parsing.** The version tables indexed the *minor* field of
+  a calendar version (`26.1.2`) as if it were the `21` of `1.21.x`, so on a
+  26.x server the pack subsystem emitted the pre-1.20 pack format **15** and
+  the item representation read as legacy. Both now resolve through one shared
+  milestone comparator (`util/ServerVersion`), and `pack/PackFormat` no longer
+  keeps a private parser.
+- **Custom mob attribute templates** no longer compile against the
+  pre-1.21.3 `Attribute.GENERIC_*` constants - a latent runtime break on
+  1.21.3+ servers. Template capture resolves through
+  `MobAttributes.resolveAttribute`, which tolerates both spellings and skips
+  attributes a server has renamed away.
+- **NMS plan cache poisoning.** A failed `getHandle` resolution is no longer
+  cached permanently; the next entity of that type retries (warn-once per
+  class).
+- **Mob variant datapack on 26.x** wrote no manifest at all (its format table
+  returned -1 for any non-1.x major); it now carries the real 26.x data-pack
+  formats and the `min_format`/`max_format` manifest shape.
+- **Mob animator base-layer transitions** sampled the incoming clip at full
+  weight (a fade-out, not a crossfade); the incoming clip now blends by the
+  transition clock, so idle/walk/run and the death hold are true crossfades.
+
+#### Changed
+
+- **Pack formats are real.** The table carries the researched numbers for
+  1.21.7/8 (64), 1.21.9/10 (69), 1.21.11 (75), 26.1 (84), 26.2 (88) and
+  26.3 (97.1) - formats carry a decimal tail from the 1.21.9 era on. On
+  1.21.9+ (and calendar) servers `pack.mcmeta` is written in the new
+  `min_format`/`max_format` shape that replaced `pack_format`; older servers
+  keep the classic `pack_format` + `supported_formats` shape. Artifact hashes
+  change accordingly (new artifact name, fresh download).
+- **One Folia probe.** The seven copies of the `RegionizedServer` check are
+  one `util/SchedulerCompat` (`repeat`, `repeatOnMainScheduler`,
+  `runForPlayer`, `runNow`); `HeldItemInput`'s trigger sweep is gated too.
+- `/mineplus status` gained a seam table: server version + Folia, live mob AI
+  isolation state, pack subsystem availability + resolved format, held-item
+  fast-path state.
+
+#### Added
+
+- **`Mind` authoring API** (`CustomMobDefinition.Builder#mind`) - `vanillaAi()`,
+  `vanillaGoalsOf(donor)`, `coreProfile(...)` and `coreIdle()` spell the whole
+  "who drives this mob" decision in one value; the older builder methods keep
+  working as the same mechanism. `CustomMobApi#mindSnapshot()` prints one line
+  per definition (mind + live count).
+- **Special-mob AI**: `WanderAction` (home-anchored idle strolls) and
+  `GuardAnchorAction` (hold a post, face the nearest threat) bundled actions;
+  the Evil Pig showcase now wanders between fights. `MobAnimator` gained
+  optional `sit`/`eat`/`ambient` clip slots - `ambient` self-fires on a
+  randomized idle cadence - plus `setSitting`/`notifyEat`.
+- `docs/whizbang/` holds the approved design and execution plan for this
+  rewrite; `CustomMobPipelineTest`, `CompatVersionTest`, `SchedulerCompatTest`,
+  `AttributeSeamTest` and `WanderGuardDecisionTest` run under
+  `gradle testRunners`.
+
 ### Weapons (`Mineplus` + MineplusGun) — Blockbench clips become gun animations
 
 #### Added
