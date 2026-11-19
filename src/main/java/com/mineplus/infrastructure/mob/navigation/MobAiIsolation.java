@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.mob.navigation;
 
+import com.mineplus.util.DebugLogger;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 
@@ -59,6 +60,19 @@ public final class MobAiIsolation {
     private MobAiIsolation() {
     }
 
+    private static volatile boolean unreachableWarned;
+    private static volatile Result lastResult = Result.NOT_A_MOB;
+
+    /**
+     * The last isolation outcome the runtime produced — surfaced by
+     * {@code /mineplus status}. An operator whose custom mobs misbehave reads
+     * this first: {@code NOT ISOLATED} means vanilla AI is still driving the
+     * mob, which is a version-surface problem, not a profile problem.
+     */
+    public static String lastIsolationLabel() {
+        return lastResult.label();
+    }
+
     /**
      * Clears {@code entity}'s vanilla goals and target, keeping AI enabled.
      * Also clears the Brain for Brain-driven entities (villagers, piglins, etc.)
@@ -88,28 +102,42 @@ public final class MobAiIsolation {
         mob.setTarget(null);
         NmsEntityPlan plan = NmsEntityPlan.forEntity(entity);
         if (plan == null) {
-            return Result.UNREACHABLE;
+            return unreachable(mob);
         }
         boolean goals;
         boolean brain;
         try {
             Object handle = plan.getHandle.invoke(entity);
             if (handle == null) {
-                return Result.UNREACHABLE;
+                return unreachable(mob);
             }
             goals = plan.clearGoals(handle);
             brain = plan.clearBrain(handle);
         } catch (Throwable unavailable) {
-            return Result.UNREACHABLE;
+            return unreachable(mob);
         }
+        Result result;
         if (goals && brain) {
-            return Result.GOALS_AND_BRAIN;
+            result = Result.GOALS_AND_BRAIN;
+        } else if (goals) {
+            result = Result.GOALS;
+        } else if (brain) {
+            result = Result.BRAIN;
+        } else {
+            result = unreachable(mob);
         }
-        if (goals) {
-            return Result.GOALS;
-        }
-        if (brain) {
-            return Result.BRAIN;
+        lastResult = result;
+        return result;
+    }
+
+    /** Logs an unreachable isolation once — silent vanilla AI is the worst outcome. */
+    private static Result unreachable(Mob mob) {
+        lastResult = Result.UNREACHABLE;
+        if (!unreachableWarned) {
+            unreachableWarned = true;
+            DebugLogger.warning("[CustomMobs] vanilla AI isolation could not reach the NMS surface on "
+                    + mob.getType().name() + "; custom mobs of this kind keep their vanilla goals. "
+                    + "See /mineplus status for the live isolation state.");
         }
         return Result.UNREACHABLE;
     }
