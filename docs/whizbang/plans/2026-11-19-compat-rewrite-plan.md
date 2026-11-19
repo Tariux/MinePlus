@@ -79,11 +79,11 @@
 - Consumes: `MobAttributes.attribute(String canonical)` (exists, private, cached both-spellings probe).
 - Produces: `MobAttributes.resolveAttribute(String canonicalName)` (public static, null when the runtime enum lacks the attribute); `CustomMobAttributes.TEMPLATE_ATTRIBUTES` built from canonical names via that resolver, filtered to non-null.
 
-- [ ] **Step 1: RED — test** that `MobAttributes.resolveAttribute("MAX_HEALTH")` is non-null on the stub classpath and `resolveAttribute("DEFINITELY_NOT_REAL")` is null without throwing; method missing = compile RED.
-- [ ] **Step 2: GREEN** — make the resolver public; replace the ten `Attribute.GENERIC_*` literals with canonical-name resolution; fix the doc comment that claims GENERIC-less naming while using `GENERIC_` spellings; template capture skips attributes the runtime does not have (log once at capture).
-- [ ] **Step 3: Verification sweep (compile-level, no code unless a gap appears):** confirm `Sounds`, `ParticleFx`, `MobYamlLoader.entityType` are already throw-safe (they are, per reading — record in ledger).
-- [ ] **Step 4: `gradle testRunners -q` → PASS; `gradle build -q` green.**
-- [ ] **Step 5: Commit** — `compat: reflective attribute resolution in custom mob templates (fixes 1.21.3+ rename break)`.
+- [x] **Step 1: RED — test** that `MobAttributes.resolveAttribute("MAX_HEALTH")` is non-null on the stub classpath and `resolveAttribute("DEFINITELY_NOT_REAL")` is null without throwing; method missing = compile RED.
+- [x] **Step 2: GREEN** — make the resolver public; replace the ten `Attribute.GENERIC_*` literals with canonical-name resolution; fix the doc comment that claims GENERIC-less naming while using `GENERIC_` spellings; template capture skips attributes the runtime does not have (log once at capture).
+- [x] **Step 3: Verification sweep (compile-level, no code unless a gap appears):** confirm `Sounds`, `ParticleFx`, `MobYamlLoader.entityType` are already throw-safe (they are, per reading — record in ledger).
+- [x] **Step 4: `gradle testRunners -q` → PASS; `gradle build -q` green.**
+- [x] **Step 5: Commit** — `compat: reflective attribute resolution in custom mob templates (fixes 1.21.3+ rename break)`.
 
 ### Task 4: NMS plan-cache poisoning fix + probe refresh
 

@@ -35,8 +35,6 @@ public final class MobAttributes {
     private static final double MIN_PATH_RANGE = 8.0;
     private static final double MAX_PATH_RANGE = 48.0;
 
-    private static volatile Attribute followRange;
-    private static volatile boolean resolved;
     /** Canonical name (without the GENERIC_ prefix) -> resolved attribute. */
     private static final Map<String, Optional<Attribute>> ATTRIBUTES = new ConcurrentHashMap<>();
 
@@ -85,7 +83,7 @@ public final class MobAttributes {
         if (entity == null || canonicalName == null || canonicalName.isBlank()) {
             return false;
         }
-        Attribute attribute = attribute(canonicalName);
+        Attribute attribute = resolveAttribute(canonicalName);
         if (attribute == null) {
             return false;
         }
@@ -106,7 +104,7 @@ public final class MobAttributes {
         if (entity == null || canonicalName == null) {
             return fallback;
         }
-        Attribute attribute = attribute(canonicalName);
+        Attribute attribute = resolveAttribute(canonicalName);
         if (attribute == null) {
             return fallback;
         }
@@ -114,9 +112,21 @@ public final class MobAttributes {
         return instance == null ? fallback : instance.getValue();
     }
 
-    /** Resolves a canonical attribute name, trying the GENERIC_ spelling first. */
-    private static Attribute attribute(String canonicalName) {
+    /**
+     * Resolves a canonical attribute name ({@code MAX_HEALTH}, …) against this
+     * runtime, trying the GENERIC_ spelling first. {@code null} when the
+     * runtime enum has no such attribute — never throws. Also tolerates the
+     * prefixed spelling and any case, so tables written for one era keep
+     * working on the other.
+     */
+    public static Attribute resolveAttribute(String canonicalName) {
+        if (canonicalName == null) {
+            return null;
+        }
         String key = canonicalName.trim().toUpperCase(Locale.ROOT);
+        if (key.isEmpty()) {
+            return null;
+        }
         return ATTRIBUTES.computeIfAbsent(key, name -> {
             Attribute found = field("GENERIC_" + name);
             if (found == null) {
@@ -127,19 +137,7 @@ public final class MobAttributes {
     }
 
     private static Attribute followRangeAttribute() {
-        if (!resolved) {
-            synchronized (MobAttributes.class) {
-                if (!resolved) {
-                    Attribute found = field("GENERIC_FOLLOW_RANGE");
-                    if (found == null) {
-                        found = field("FOLLOW_RANGE");
-                    }
-                    followRange = found;
-                    resolved = true;
-                }
-            }
-        }
-        return followRange;
+        return resolveAttribute("FOLLOW_RANGE");
     }
 
     private static Attribute field(String name) {

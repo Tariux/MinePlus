@@ -29,13 +29,25 @@ public final class CustomMobAttributes {
     /** Cache: EntityType -> donor type's default attributes. */
     private static final Map<EntityType, CustomMobAttributes> TEMPLATES = new ConcurrentHashMap<>();
 
-    /** The attributes a template carries, in canonical ({@code GENERIC_}-less) names. */
-    private static final Attribute[] TEMPLATE_ATTRIBUTES = {
-            Attribute.GENERIC_MAX_HEALTH, Attribute.GENERIC_MOVEMENT_SPEED, Attribute.GENERIC_ATTACK_DAMAGE,
-            Attribute.GENERIC_FOLLOW_RANGE, Attribute.GENERIC_ARMOR, Attribute.GENERIC_KNOCKBACK_RESISTANCE,
-            Attribute.GENERIC_ATTACK_KNOCKBACK, Attribute.GENERIC_SCALE, Attribute.GENERIC_JUMP_STRENGTH,
-            Attribute.GENERIC_GRAVITY,
+    /**
+     * The attributes a template carries, as canonical names — resolved at
+     * capture time through {@link MobAttributes#resolveAttribute}, so both the
+     * pre-1.21.3 ({@code GENERIC_}) and current spellings work and an attribute
+     * a future server renames away is skipped, not crashed on.
+     */
+    private static final String[] TEMPLATE_ATTRIBUTE_NAMES = {
+            "MAX_HEALTH", "MOVEMENT_SPEED", "ATTACK_DAMAGE", "FOLLOW_RANGE", "ARMOR",
+            "KNOCKBACK_RESISTANCE", "ATTACK_KNOCKBACK", "SCALE", "JUMP_STRENGTH", "GRAVITY",
     };
+
+    static {
+        for (String name : TEMPLATE_ATTRIBUTE_NAMES) {
+            if (MobAttributes.resolveAttribute(name) == null) {
+                DebugLogger.warning("[CustomMobs] attribute '" + name
+                        + "' is missing on this server; attribute templates skip it.");
+            }
+        }
+    }
 
     private final Double maxHealth;
     private final Double movementSpeed;
@@ -142,16 +154,12 @@ public final class CustomMobAttributes {
     /** Reads every templated attribute off one donor entity's base values. */
     private static CustomMobAttributes capture(LivingEntity donor) {
         Builder builder = builder();
-        put(builder, "MAX_HEALTH", attr(donor, Attribute.GENERIC_MAX_HEALTH));
-        put(builder, "MOVEMENT_SPEED", attr(donor, Attribute.GENERIC_MOVEMENT_SPEED));
-        put(builder, "ATTACK_DAMAGE", attr(donor, Attribute.GENERIC_ATTACK_DAMAGE));
-        put(builder, "FOLLOW_RANGE", attr(donor, Attribute.GENERIC_FOLLOW_RANGE));
-        put(builder, "ARMOR", attr(donor, Attribute.GENERIC_ARMOR));
-        put(builder, "KNOCKBACK_RESISTANCE", attr(donor, Attribute.GENERIC_KNOCKBACK_RESISTANCE));
-        put(builder, "ATTACK_KNOCKBACK", attr(donor, Attribute.GENERIC_ATTACK_KNOCKBACK));
-        put(builder, "SCALE", attr(donor, Attribute.GENERIC_SCALE));
-        put(builder, "JUMP_STRENGTH", attr(donor, Attribute.GENERIC_JUMP_STRENGTH));
-        put(builder, "GRAVITY", attr(donor, Attribute.GENERIC_GRAVITY));
+        for (String canonicalName : TEMPLATE_ATTRIBUTE_NAMES) {
+            Attribute attribute = MobAttributes.resolveAttribute(canonicalName);
+            if (attribute != null) {
+                put(builder, canonicalName, attr(donor, attribute));
+            }
+        }
         return builder.build();
     }
 
@@ -234,9 +242,8 @@ public final class CustomMobAttributes {
     /** How many attributes this profile sets. */
     public int overrideCount() {
         int count = 0;
-        for (Attribute attribute : TEMPLATE_ATTRIBUTES) {
-            String name = attribute.name().replace("GENERIC_", "");
-            if (valueFor(name) != null) {
+        for (String canonicalName : TEMPLATE_ATTRIBUTE_NAMES) {
+            if (valueFor(canonicalName) != null) {
                 count++;
             }
         }

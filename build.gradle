@@ -44,6 +44,8 @@ configurations {
 def testRunnerMains = [
         'com.mineplus.test.CustomMobPipelineTest',
         'com.mineplus.test.CompatVersionTest',
+        'com.mineplus.test.SchedulerCompatTest',
+        'com.mineplus.test.AttributeSeamTest',
 ]
 
 tasks.register('testRunners') {
