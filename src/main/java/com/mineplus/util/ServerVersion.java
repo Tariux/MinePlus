@@ -62,22 +62,27 @@ public final class ServerVersion {
 
     /** True when major > {@code major}, or equal with a larger-or-equal minor. */
     public static boolean atLeast(int major, int minor) {
-        int[] v = version();
-        if (v[0] != major) {
-            return v[0] > major;
-        }
-        return v[1] >= minor;
+        return atLeast(version(), major, minor, 0);
     }
 
-    private static boolean atLeast(int major, int minor, int patch) {
-        int[] v = version();
-        if (v[0] != major) {
-            return v[0] > major;
+    /** True when the running server is at least the given milestone. */
+    public static boolean atLeast(int major, int minor, int patch) {
+        return atLeast(version(), major, minor, patch);
+    }
+
+    /**
+     * Milestone comparison over a parsed triple, in pure form for tests and
+     * version tables. Calendar versions ({@code 26.x} and beyond) compare
+     * correctly against {@code 1.x} milestones: a newer year always wins.
+     */
+    public static boolean atLeast(int[] version, int major, int minor, int patch) {
+        if (version[0] != major) {
+            return version[0] > major;
         }
-        if (v[1] != minor) {
-            return v[1] > minor;
+        if (version[1] != minor) {
+            return version[1] > minor;
         }
-        return v[2] >= patch;
+        return version[2] >= patch;
     }
 
     /** Display entities ({@code ItemDisplay}/{@code BlockDisplay}, 1.19.4+). */

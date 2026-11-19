@@ -1,6 +1,7 @@
 package com.mineplus.pack;
 
 import java.util.Locale;
+import com.mineplus.util.ServerVersion;
 
 /**
  * Minecraft-version-specific pack output, isolated in one place: the
@@ -48,32 +49,37 @@ public final class PackFormat {
         if (override > 0) {
             return override;
         }
-        int[] version = parseVersion(bukkitVersion);
-        if (version == null) {
+        int[] version = ServerVersion.parseVersion(bukkitVersion);
+        if (version[0] <= 0) {
             return 46;
         }
-        int minor = version[1];
-        int patch = version[2];
-        if (minor < 20) {
-            return 15; // pre-1.20 servers: closest supported era
+        if (version[0] == 1) {
+            int minor = version[1];
+            int patch = version[2];
+            if (minor < 20) {
+                return 15; // pre-1.20 servers: closest supported era
+            }
+            return switch (minor) {
+                case 20 -> switch (patch) {
+                    case 0, 1 -> 15;
+                    case 2 -> 18;
+                    case 3, 4 -> 22;
+                    default -> 32; // 1.20.5+
+                };
+                case 21 -> switch (patch) {
+                    case 0, 1 -> 34;
+                    case 2, 3 -> 42;
+                    case 4 -> 46;
+                    case 5 -> 55;
+                    case 6 -> 63;
+                    default -> 64; // 1.21.7+ and forward-compatible fallback
+                };
+                default -> latestKnownPackFormat();
+            };
         }
-        return switch (minor) {
-            case 20 -> switch (patch) {
-                case 0, 1 -> 15;
-                case 2 -> 18;
-                case 3, 4 -> 22;
-                default -> 32; // 1.20.5+
-            };
-            case 21 -> switch (patch) {
-                case 0, 1 -> 34;
-                case 2, 3 -> 42;
-                case 4 -> 46;
-                case 5 -> 55;
-                case 6 -> 63;
-                default -> 64; // 1.21.7+ and forward-compatible fallback
-            };
-            default -> 64; // future minors: latest known format until the table catches up
-        };
+        // Calendar versions (26.x and beyond): the newest known format until
+        // the table catches up. Never the 1.x-minor branches.
+        return latestKnownPackFormat();
     }
 
     /**
@@ -88,33 +94,13 @@ public final class PackFormat {
 
     /** True when the server supports the modern {@code item_model} component (1.21.4+). */
     public static ItemRepresentation itemRepresentation(String bukkitVersion) {
-        int[] version = parseVersion(bukkitVersion);
-        if (version == null) {
+        int[] version = ServerVersion.parseVersion(bukkitVersion);
+        if (version[0] <= 0) {
             return ItemRepresentation.MODERN_ITEM_MODEL;
         }
-        boolean modern = version[1] > 21 || (version[1] == 21 && version[2] >= 4);
-        return modern ? ItemRepresentation.MODERN_ITEM_MODEL : ItemRepresentation.LEGACY_CUSTOM_MODEL_DATA;
-    }
-
-    /** Parses {@code 1.21.4-R0.1-SNAPSHOT} into {@code [21, 4]}; null when unparseable. */
-    private static int[] parseVersion(String bukkitVersion) {
-        if (bukkitVersion == null || bukkitVersion.isBlank()) {
-            return null;
-        }
-        String release = bukkitVersion.split("-", 2)[0].trim();
-        String[] parts = release.split("\\.");
-        if (parts.length < 2) {
-            return null;
-        }
-        try {
-            return new int[]{
-                    Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]),
-                    parts.length > 2 ? Integer.parseInt(parts[2]) : 0
-            };
-        } catch (NumberFormatException exception) {
-            return null;
-        }
+        return ServerVersion.atLeast(version, 1, 21, 4)
+                ? ItemRepresentation.MODERN_ITEM_MODEL
+                : ItemRepresentation.LEGACY_CUSTOM_MODEL_DATA;
     }
 
     /** Lowercased locale key of a version string, for diagnostics. */

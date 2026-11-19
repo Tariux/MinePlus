@@ -70,18 +70,32 @@ public final class VariantDatapackWriter {
 
     /** The datapack format number for the running server ({@code -1} when unknown). */
     public static int datapackFormat() {
-        int[] v = ServerVersion.version();
-        if (v[0] != 1) {
+        return datapackFormatFor(ServerVersion.rawVersion());
+    }
+
+    /**
+     * Pure form of {@link #datapackFormat()}: the datapack format for a Bukkit
+     * version string, {@code -1} when the server cannot carry variant datapacks
+     * (pre-1.21.5) or the version is unparseable. A parseable calendar version
+     * ({@code 26.x} and beyond) always takes the newest known format — never
+     * {@code -1}, which used to silently skip the variant manifest.
+     */
+    public static int datapackFormatFor(String bukkitVersion) {
+        int[] v = ServerVersion.parseVersion(bukkitVersion);
+        if (v[0] <= 0) {
             return -1;
         }
-        if (v[1] < 21 || (v[1] == 21 && v[2] < 5)) {
-            return -1;
-        }
-        if (v[2] == 5) {
-            return 71;
-        }
-        if (v[2] == 6) {
-            return 80;
+        if (v[0] == 1) {
+            if (v[1] < 21 || (v[1] == 21 && v[2] < 5)) {
+                return -1;
+            }
+            if (v[2] == 5) {
+                return 71;
+            }
+            if (v[2] == 6) {
+                return 80;
+            }
+            return 81;
         }
         return 81;
     }
