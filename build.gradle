@@ -46,6 +46,7 @@ def testRunnerMains = [
         'com.mineplus.test.CompatVersionTest',
         'com.mineplus.test.SchedulerCompatTest',
         'com.mineplus.test.AttributeSeamTest',
+        'com.mineplus.test.WanderGuardDecisionTest',
 ]
 
 tasks.register('testRunners') {

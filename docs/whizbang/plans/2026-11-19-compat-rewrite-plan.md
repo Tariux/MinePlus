@@ -179,10 +179,10 @@
 - Consumes: `BehaviorAction` contract, `MobNavigator.moveTo`, `GroundProbe` standable checks, `MobAttributes.pathRange` leg clamping, run edit/move budgets (never raw world writes — these actions only move/look).
 - Produces: `WanderAction` (builder: home anchor, radius, min/max dwell ticks) and `GuardAnchorAction` (builder: anchor supplier, threat radius) — module-consumable, engine-semantics untouched.
 
-- [ ] **Step 1: RED — decision-logic tests** (pure, with injected predicates): destination selection rejects non-standable/out-of-radius/beyond-pathRange candidates; dwell timing fires exactly once per interval per odds semantics; guard faces threat only within radius and keeps anchor when no threat. Logic extracted into package-private pure decision functions the actions call.
-- [ ] **Step 2: GREEN** — implement both actions on top of the decision functions.
-- [ ] **Step 3: `gradle testRunners -q` → PASS; `gradle build -q` green.**
-- [ ] **Step 4: Commit** — `feat: wander + guard anchor bundled actions for special mobs`.
+- [x] **Step 1: RED — decision-logic tests** (pure, with injected predicates): destination selection rejects non-standable/out-of-radius/beyond-pathRange candidates; dwell timing fires exactly once per interval per odds semantics; guard faces threat only within radius and keeps anchor when no threat. Logic extracted into package-private pure decision functions the actions call.
+- [x] **Step 2: GREEN** — implement both actions on top of the decision functions.
+- [x] **Step 3: `gradle testRunners -q` → PASS; `gradle build -q` green.**
+- [x] **Step 4: Commit** — `feat: wander + guard anchor bundled actions for special mobs`.
 
 ### Task 11: `mind(...)` authoring API + mobfun migration
 
