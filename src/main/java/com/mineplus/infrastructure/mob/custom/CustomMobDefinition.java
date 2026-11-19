@@ -352,6 +352,28 @@ public final class CustomMobDefinition {
             return this;
         }
 
+        /**
+         * The mob's whole mind in one value — who drives it and what drives it
+         * toward. {@link Mind#vanillaAi()} and {@link Mind#vanillaGoalsOf(...)}
+         * keep the vanilla engine's goals (the mob is never isolated);
+         * {@link Mind#coreProfile(...)} and {@link Mind#coreIdle()} isolate
+         * vanilla AI away and hand every move to the Core behavior engine.
+         * The per-method builders ({@link #vanillaAi()},
+         * {@link #inheritGoalsFrom(EntityType)}, {@link #behavior(Consumer)})
+         * spell the same three decisions and keep working.
+         */
+        public Builder mind(Mind value) {
+            if (value == null) {
+                return this;
+            }
+            if (value.kind() == Mind.Kind.VANILLA) {
+                return inheritGoalsFrom(value.donor() == null ? baseType : value.donor());
+            }
+            this.goalDonor = null;
+            this.behavior = value.behavior();
+            return this;
+        }
+
         /** Runs after identity, attributes and isolation; use for module-specific setup. */
         public Builder spawnConfigurator(Consumer<LivingEntity> value) {
             this.spawnConfigurator = value;

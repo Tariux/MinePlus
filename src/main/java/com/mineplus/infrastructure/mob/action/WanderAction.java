@@ -7,9 +7,9 @@ import com.mineplus.infrastructure.mob.navigation.MobNavigator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Supplier;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 
 /**
@@ -28,7 +28,9 @@ public final class WanderAction implements BehaviorAction {
     private static final int STATE_MAP_CAP = 512;
 
     /** Where the mob's home anchor is (its spawn point, a leash post, …). */
-    public interface HomeAnchor extends Supplier<Location> {
+    public interface HomeAnchor {
+        /** The mob's home, or {@code null} to skip wandering (e.g. no anchor yet). */
+        Location home(LivingEntity mob);
     }
 
     public static final class Builder {
@@ -95,7 +97,7 @@ public final class WanderAction implements BehaviorAction {
         if (home == null || !(context.entity() instanceof Mob mob)) {
             return false;
         }
-        Location anchor = home.get();
+        Location anchor = home.home(mob);
         World world = anchor == null ? null : anchor.getWorld();
         if (world == null) {
             return false;

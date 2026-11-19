@@ -174,6 +174,16 @@ public interface CustomMobApi {
     }
 
     /**
+     * One line per registered definition — its mind (who drives it) and live
+     * count. The module-facing companion to {@link #isolationLabel(LivingEntity)}:
+     * a status command prints this to show which mobs are Core-steered and
+     * which are vanilla-engine-driven.
+     */
+    default String mindSnapshot() {
+        return null;
+    }
+
+    /**
      * Applies new subsystem settings ({@code CUSTOM_MOBS}).
      */
     void updateSettings(CustomMobSettings settings);

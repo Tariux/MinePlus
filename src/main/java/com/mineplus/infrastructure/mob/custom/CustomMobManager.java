@@ -715,6 +715,26 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         return renderEngine.rigStatus(definitionId);
     }
 
+    @Override
+    public String mindSnapshot() {
+        List<CustomMobDefinition> all = definitions();
+        if (all.isEmpty()) {
+            return "no custom mob definitions registered";
+        }
+        StringBuilder lines = new StringBuilder();
+        for (CustomMobDefinition definition : all) {
+            if (lines.length() > 0) {
+                lines.append('\n');
+            }
+            lines.append(definition.id())
+                    .append(" — ").append(definition.keepsVanillaGoals()
+                            ? "vanilla engine (" + definition.goalDonor().name().toLowerCase(Locale.ROOT) + ")"
+                            : "core-steered")
+                    .append(", live ").append(liveCount(definition.id()));
+        }
+        return lines.toString();
+    }
+
     /** The live render cost of every rig, for {@code /mineplus mob cost}. */
     public String costSnapshot() {
         return renderEngine.costSnapshot();

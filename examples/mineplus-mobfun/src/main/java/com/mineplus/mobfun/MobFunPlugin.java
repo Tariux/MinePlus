@@ -11,9 +11,11 @@ import com.mineplus.infrastructure.mob.action.EatPlantsAction;
 import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
 import com.mineplus.infrastructure.mob.action.PlantSaplingAction;
+import com.mineplus.infrastructure.mob.action.WanderAction;
 import com.mineplus.infrastructure.mob.action.TorchPlaceAction;
 import com.mineplus.infrastructure.mob.custom.CustomMobAttributes;
 import com.mineplus.infrastructure.mob.custom.CustomMobDefinition;
+import com.mineplus.infrastructure.mob.custom.Mind;
 import com.mineplus.infrastructure.mob.custom.MobRenderSpec;
 import com.mineplus.infrastructure.mob.group.Formation;
 import com.mineplus.infrastructure.mob.journey.JourneyRunner;
@@ -21,11 +23,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.IronGolem;
+import org.bukkit.Location;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Snowman;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -135,6 +141,8 @@ public final class MobFunPlugin extends JavaPlugin {
     private final List<MobFunShowcaseEntry> showcases = new ArrayList<>();
     /** Embedded Evil Pig texture; also the factory's stable source on re-enable. */
     private byte[] evilPigTexture;
+    /** Spawn-point home anchors for the evil pig's wander trips. */
+    private final Map<UUID, Location> evilPigHomes = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
@@ -303,7 +311,7 @@ public final class MobFunPlugin extends JavaPlugin {
                         .followRange(24.0)
                         .knockbackResistance(0.1)
                         .build())
-                .behavior(profile -> profile
+                .mind(Mind.coreProfile(profile -> profile
                         .priority(BehaviorPriority.EVIL_PIG)
                         .action(AttackNearestAction.builder()
                                 .searchRadius(18.0)
@@ -312,7 +320,14 @@ public final class MobFunPlugin extends JavaPlugin {
                                 .damage(4.0)
                                 .cooldownTicks(20L)
                                 .knockback(0.4)
-                                .build(), 1.0))
+                                .build(), 1.0)
+                        .action(new WanderAction.Builder()
+                                .home(mob -> evilPigHomes.get(mob.getUniqueId()))
+                                .radius(6.0)
+                                .speed(0.9)
+                                .dwellSeconds(4, 10)
+                                .build(), 2.0)))
+                .spawnConfigurator(mob -> evilPigHomes.put(mob.getUniqueId(), mob.getLocation().clone()))
                 .build();
     }
 
@@ -363,7 +378,7 @@ public final class MobFunPlugin extends JavaPlugin {
         return CustomMobDefinition.builder("mobfun:villager_soldier", EntityType.IRON_GOLEM)
                 .displayName("Villager Soldier")
                 .visual(CustomMobDefinition.VisualMode.RIG)
-                .vanillaAi()
+                .mind(Mind.vanillaAi())
                 .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "soldier_villager.bbmodel")
                         .modelBytes(() -> loadResource("mobs/soldier_villager.bbmodel"))
                         .textureBytes(() -> loadResource("mobs/soldier_villager.png"))
@@ -408,7 +423,7 @@ public final class MobFunPlugin extends JavaPlugin {
         return CustomMobDefinition.builder("mobfun:woodland_trickster", EntityType.ZOMBIE)
                 .displayName("Woodland Trickster")
                 .visual(CustomMobDefinition.VisualMode.RIG)
-                .vanillaAi()
+                .mind(Mind.vanillaAi())
                 .render(MobRenderSpec.builder(MobRenderSpec.RenderType.BBMODEL, "woodland_trickster.bbmodel")
                         .modelBytes(() -> loadResource("mobs/woodland_trickster.bbmodel"))
                         .textureBytes(() -> loadResource("mobs/woodland_trickster.png"))

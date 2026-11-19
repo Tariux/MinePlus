@@ -8,7 +8,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
@@ -32,7 +31,9 @@ public final class GuardAnchorAction implements BehaviorAction {
     private static final int STATE_MAP_CAP = 512;
 
     /** Where the guard posts (a bell, a door, a village edge, …). */
-    public interface Anchor extends Supplier<Location> {
+    public interface Anchor {
+        /** The guard's post, or {@code null} to skip guarding (e.g. no anchor yet). */
+        Location anchor(LivingEntity mob);
     }
 
     public static final class Builder {
@@ -95,7 +96,7 @@ public final class GuardAnchorAction implements BehaviorAction {
         if (anchor == null || !(context.entity() instanceof Mob mob)) {
             return false;
         }
-        Location post = anchor.get();
+        Location post = anchor.anchor(mob);
         World world = post == null ? null : post.getWorld();
         if (world == null) {
             return false;
