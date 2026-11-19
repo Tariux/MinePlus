@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.input;
 import com.mineplus.infrastructure.combat.DamageTransactions;
 import com.mineplus.infrastructure.input.net.InputChannel;
 import com.mineplus.util.SchedulerCompat;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -256,7 +257,6 @@ public final class HeldItemInput implements Listener {
     private final Map<UUID, TriggerState> secondaryTriggers = new ConcurrentHashMap<>();
     private final Map<UUID, TriggerState> primaryTriggers = new ConcurrentHashMap<>();
     private final Map<UUID, long[]> fastDeliveries = new ConcurrentHashMap<>();
-    private final Listener paperStopUsing;
     private volatile InputSettings inputSettings = InputSettings.defaults();
     private volatile InputChannel fastPath;
     private boolean registered;
@@ -264,17 +264,6 @@ public final class HeldItemInput implements Listener {
 
     public HeldItemInput(Plugin plugin) {
         this.plugin = plugin;
-        this.paperStopUsing = paperStopUsingAvailable() ? new PaperStopUsingSeam() : null;
-    }
-
-    /** Probed before the seam is ever constructed, so Spigot never links the class. */
-    private static boolean paperStopUsingAvailable() {
-        try {
-            Class.forName("io.papermc.paper.event.player.PlayerStopUsingItemEvent");
-            return true;
-        } catch (Throwable unavailable) {
-            return false;
-        }
     }
 
     /** Attaches a handler; returns {@code false} when it was already attached. */
@@ -353,10 +342,6 @@ public final class HeldItemInput implements Listener {
         }
         registered = false;
         HandlerList.unregisterAll(this);
-        Listener seam = paperStopUsing;
-        if (seam != null) {
-            HandlerList.unregisterAll(seam);
-        }
         handlers.clear();
     }
 
@@ -366,10 +351,55 @@ public final class HeldItemInput implements Listener {
         }
         PluginManager manager = plugin.getServer().getPluginManager();
         manager.registerEvents(this, plugin);
-        if (paperStopUsing != null) {
-            manager.registerEvents(paperStopUsing, plugin);
-        }
+        registerPaperStopUsing(manager);
         registered = true;
+    }
+
+    /**
+     * The Paper-only stop-using signal, registered reflectively so the event
+     * type is never linked into this class. The build compiles against the
+     * Spigot stubs only: a direct import of
+     * {@code io.papermc.paper.event.player.PlayerStopUsingItemEvent} would fail
+     * the build, and a probe-gated subclass would still drag the type onto the
+     * class file. Registering a custom {@code org.bukkit.plugin.EventExecutor}
+     * against the event class by name keeps a Spigot server completely unaware
+     * of it.
+     *
+     * <p>Stop-using ends the trigger gesture; the item is still in hand, so
+     * this must not invoke the stronger item-release callback.</p>
+     */
+    private void registerPaperStopUsing(PluginManager manager) {
+        try {
+            Class<?> eventType = Class.forName("io.papermc.paper.event.player.PlayerStopUsingItemEvent");
+            if (!org.bukkit.event.Event.class.isAssignableFrom(eventType)) {
+                return;
+            }
+            @SuppressWarnings("unchecked")
+            Class<? extends org.bukkit.event.Event> typed =
+                    (Class<? extends org.bukkit.event.Event>) eventType;
+            Method getPlayer = eventType.getMethod("getPlayer");
+            manager.registerEvent(typed, this, EventPriority.MONITOR,
+                    (listener, event) -> {
+                        Player player;
+                        try {
+                            Object holder = getPlayer.invoke(event);
+                            if (!(holder instanceof Player found)) {
+                                return;
+                            }
+                            player = found;
+                        } catch (ReflectiveOperationException gone) {
+                            return;
+                        }
+                        ItemStack main = player.getInventory().getItemInMainHand();
+                        if (owner(player, main) == null) {
+                            return;
+                        }
+                        recordRelease(player);
+                    }, plugin);
+        } catch (Throwable absentOnSpigot) {
+            // The signal does not exist on this server; release is inferred
+            // from the other inputs (swap, close, death, quit, sneak).
+        }
     }
 
     /** The first handler that owns the held stack for this holder, or {@code null}. */
@@ -857,25 +887,5 @@ public final class HeldItemInput implements Listener {
     /** Lets both entity-interact events share one routing path. */
     private interface CancelSink {
         void set(boolean cancelled);
-    }
-
-    /**
-     * The Paper-only stop-using signal, in its own class so the missing event
-     * type is only ever linked on a server that has it.
-     */
-    private final class PaperStopUsingSeam implements Listener {
-
-        @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
-        public void onStopUsing(io.papermc.paper.event.player.PlayerStopUsingItemEvent event) {
-            Player player = event.getPlayer();
-            ItemStack main = player.getInventory().getItemInMainHand();
-            HeldItemHandler handler = owner(player, main);
-            if (handler == null) {
-                return;
-            }
-            // Stop-using ends the trigger gesture; the item is still in hand,
-            // so this must not invoke the stronger item-release callback.
-            recordRelease(player);
-        }
     }
 }

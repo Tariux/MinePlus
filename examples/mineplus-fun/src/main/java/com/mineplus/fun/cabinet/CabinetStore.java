@@ -1,6 +1,9 @@
 package com.mineplus.fun.cabinet;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -8,11 +11,21 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
 
 /**
  * Persistent cabinet storage: the 18 GUI slots serialized into the instance's
- * {@code stateData} as Base64-encoded {@link ItemStack#serializeAsBytes()}
- * payloads, so cabinet contents survive restarts together with the multiblock.
+ * {@code stateData} as Base64 payloads, so cabinet contents survive restarts
+ * together with the multiblock.
+ *
+ * <p>The encoding is {@link BukkitObjectOutputStream} over the item stack, not
+ * Paper's {@code ItemStack#serializeAsBytes}. The module compiles against the
+ * Spigot stubs, where that Paper-only pair does not exist, so calling it would
+ * fail the build — and, before the classpath was tightened, would have thrown
+ * {@code NoSuchMethodError} the first time a cabinet saved on a Spigot server.
+ * The Bukkit object stream is part of the shared API surface and round-trips
+ * item metadata, NBT and Mineplus identity tags unchanged.</p>
  */
 public final class CabinetStore {
 
@@ -24,12 +37,8 @@ public final class CabinetStore {
         if (encoded == null || encoded.isBlank()) {
             return null;
         }
-        try {
-            ItemStack item = ItemStack.deserializeBytes(Base64.getDecoder().decode(encoded));
-            return item.getAmount() > 0 ? item : null;
-        } catch (IllegalArgumentException corruptedEntry) {
-            return null;
-        }
+        ItemStack item = decode(encoded);
+        return item != null && item.getAmount() > 0 ? item : null;
     }
 
     public static void saveSlot(MultiBlockInstance instance, int slot, ItemStack item) {
@@ -37,10 +46,7 @@ public final class CabinetStore {
             instance.mutableStateData().remove(key(slot));
             return;
         }
-        instance.mutableStateData().put(
-                key(slot),
-                Base64.getEncoder().encodeToString(item.serializeAsBytes())
-        );
+        instance.mutableStateData().put(key(slot), encode(item));
     }
 
     /** Drops all stored items at the cabinet's anchor block and clears the state keys. */
@@ -80,6 +86,30 @@ public final class CabinetStore {
             }
         }
         return count;
+    }
+
+    /** One slot as Base64, or {@code null} when the stack cannot be encoded. */
+    private static String encode(ItemStack item) {
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                BukkitObjectOutputStream out = new BukkitObjectOutputStream(bytes)) {
+            out.writeObject(item);
+            out.flush();
+            return Base64.getEncoder().encodeToString(bytes.toByteArray());
+        } catch (IOException failure) {
+            return null;
+        }
+    }
+
+    /** The inverse of {@link #encode}; a corrupt or legacy payload reads as empty. */
+    private static ItemStack decode(String encoded) {
+        try (ByteArrayInputStream bytes =
+                        new ByteArrayInputStream(Base64.getDecoder().decode(encoded));
+                BukkitObjectInputStream in = new BukkitObjectInputStream(bytes)) {
+            Object read = in.readObject();
+            return read instanceof ItemStack item ? item : null;
+        } catch (IOException | ClassNotFoundException | IllegalArgumentException corrupted) {
+            return null;
+        }
     }
 
     private static String key(int slot) {

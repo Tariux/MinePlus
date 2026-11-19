@@ -682,7 +682,9 @@ public final class MobRenderEngine {
             // it. The delta is measured against the rig frame, not the server
             // body yaw, or the head would point off by however far the two differ.
             headYaw = BoneTransformMath.headYawModel(MobAiIsolation.headYaw(entity, heading), heading);
-            headPitch = BoneTransformMath.headPitchModel(entity.getPitch());
+            // Entity#getPitch() is Paper-only API; the Spigot-safe read is the
+            // location's pitch (the render core must link on both).
+            headPitch = BoneTransformMath.headPitchModel(location.getPitch());
         }
 
         for (int i = 0; i < model.boneCount(); i++) {
@@ -774,7 +776,10 @@ public final class MobRenderEngine {
         }
         slot.remember(x, y, z, session.scratchMatrix, session.matrixProbe);
         session.scratchLocation.setWorld(world);
-        session.scratchLocation.set(x, y, z);
+        // Location#set(x,y,z) is Paper-only; the void setters are the Spigot-safe form.
+        session.scratchLocation.setX(x);
+        session.scratchLocation.setY(y);
+        session.scratchLocation.setZ(z);
         session.scratchLocation.setYaw(0.0f);
         session.scratchLocation.setPitch(0.0f);
         session.backend.pose(slot.handle, session.scratchLocation, session.scratchMatrix,

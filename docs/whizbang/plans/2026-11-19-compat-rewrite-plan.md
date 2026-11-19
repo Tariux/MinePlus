@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Compile floor: only APIs present in `libs/paper-api-1.21.jar` / `libs/spigot-api-1.21.1.jar` may be referenced at compile time. Anything newer = reflective probe with cached `MethodHandle`/`Method`, degrade-with-log, never crash.
+- Compile floor: only APIs present in `libs/spigot-api-1.21.1.jar` may be referenced at compile time. `libs/paper-api-1.21.jar` is deliberately **not** on any compile classpath: Paper is a superset of Spigot, so a Paper-only method would compile silently and then throw `NoSuchMethodError` on a Spigot server (see `2026-11-19-spigot-linkage-hotfix-plan.md`). Anything newer = reflective probe with cached `MethodHandle`/`Method`, degrade-with-log, never crash.
 - Version range: runtime floor 1.21.0, ceiling 26.3 (calendar versioning — 26.x parses as major 26).
 - Branch: all work on branch `compat-26` (created at exec-init), conventional lowercase commits (`compat: …`, `feat: …`, `test: …`), one commit-set per task.
 - Core purity: no feature code in `src/main/java/com/mineplus`; new actions are Core-owned *bundled* behaviors, module-consumable.

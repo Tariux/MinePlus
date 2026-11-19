@@ -566,8 +566,11 @@ public final class ModelAnimationManager {
      * the normalized per-tick speed that scales the walk phase.
      */
     private static void trackStride(AnimatedInstance state, LivingEntity entity) {
-        double x = entity.getX();
-        double z = entity.getZ();
+        // Entity#getX/getZ are Paper-only API; getLocation() is the Spigot-safe
+        // read (the animation core must link on both).
+        Location at = entity.getLocation();
+        double x = at.getX();
+        double z = at.getZ();
         if (state.hasEntityPosition) {
             double dx = x - state.lastEntityX;
             double dz = z - state.lastEntityZ;

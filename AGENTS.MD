@@ -2,8 +2,13 @@ Mineplus is a Spigot/Paper plugin focused on a data-driven "vanilla-like systems
 
 **Version compatibility:** the plugin targets Minecraft 1.21.0 through 26.3
 (calendar versioning: 26.1, 26.2, 26.3) on Spigot and Paper, from one jar
-compiled against the committed 1.21 stub jars. Everything version-specific
-resolves at runtime through `util/ServerVersion` (the single version parser
+compiled against the committed **Spigot** stub jar only. `libs/paper-api-1.21.jar`
+is deliberately kept off every compile classpath: Paper is a superset of Spigot,
+so a Paper-only method compiles silently and then throws `NoSuchMethodError` on a
+Spigot server (a Paper-only `LivingEntity#getPitch()` once killed the whole mob
+render tick exactly that way - see
+`docs/whizbang/plans/2026-11-19-spigot-linkage-hotfix-plan.md`). Everything
+version-specific resolves at runtime through `util/ServerVersion` (the single version parser
 and milestone gates), `pack/PackFormat` (pack/data-pack formats and the
 `pack.mcmeta` era shapes), reflective probe chains
 (`virtual/display/nms/ReflectionNmsAdapter`, `input/net/InputChannel`,

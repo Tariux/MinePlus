@@ -21,7 +21,6 @@ dependencies {
     // Core's compile-time dependencies are also required here so the Core API
     // signatures resolve. At runtime the server provides paper/spigot.
     compileOnly files(
-            "../../libs/paper-api-1.21.jar",
             "../../libs/spigot-api-1.21.1.jar",
             "../../libs/adventure-api-4.17.0.jar",
             "../../libs/adventure-text-minimessage-4.17.0.jar",

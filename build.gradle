@@ -15,8 +15,13 @@ repositories {
 }
 
 dependencies {
+    // Spigot stubs only, deliberately: no paper-api on this classpath. A
+    // Paper-only method (Entity#getPitch, Entity#getX, Mob#getPathfinder,
+    // Bukkit#getGlobalRegionScheduler, Paper's PlayerStopUsingItemEvent) then
+    // fails the build instead of linking silently and throwing
+    // NoSuchMethodError on a Spigot server at runtime. Every Paper/Folia seam
+    // is reflective and lives behind its own probe.
     compileOnly files(
-            "libs/paper-api-1.21.jar",
             "libs/spigot-api-1.21.1.jar",
             "libs/adventure-api-4.17.0.jar",
             "libs/examination-api-1.3.0.jar",
