@@ -1,9 +1,8 @@
 package com.mineplus.infrastructure.perf;
 
 import com.mineplus.util.DebugLogger;
-import org.bukkit.Bukkit;
+import com.mineplus.util.SchedulerCompat;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -94,8 +93,7 @@ public final class PerfRegistry {
     private int overBudgetTicks;
     private int underBudgetTicks;
 
-    private BukkitTask tickTask;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
+    private SchedulerCompat.Handle tickTask;
 
     public PerfRegistry(PerfSettings settings) {
         this.settings = settings == null ? PerfSettings.defaults() : settings;
@@ -109,25 +107,16 @@ public final class PerfRegistry {
 
     /** Starts the once-per-tick row close. No task is scheduled when telemetry is off. */
     public void start(JavaPlugin plugin) {
-        if (!telemetry || plugin == null || tickTask != null || foliaTask != null) {
+        if (!telemetry || plugin == null || tickTask != null) {
             return;
         }
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> closeTick(), 1L, 1L);
-        } catch (ClassNotFoundException e) {
-            tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::closeTick, 1L, 1L);
-        }
+        tickTask = SchedulerCompat.repeat(plugin, 1L, 1L, this::closeTick);
     }
 
     public void shutdown() {
         if (tickTask != null) {
             tickTask.cancel();
             tickTask = null;
-        }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
         }
     }
 

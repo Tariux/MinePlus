@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.input.net;
 
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.SchedulerCompat;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -23,7 +24,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Optional inbound input fast path: reads swing/use/interact packets when they
@@ -89,8 +89,7 @@ public final class InputChannel implements Listener {
     private volatile boolean active;
     private boolean failed;
     private boolean registered;
-    private BukkitTask tickTask;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
+    private SchedulerCompat.Handle tickTask;
 
     public InputChannel(Plugin plugin, Sink sink) {
         this.plugin = plugin;
@@ -147,10 +146,6 @@ public final class InputChannel implements Listener {
             tickTask.cancel();
             tickTask = null;
         }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
-        }
         if (registered) {
             registered = false;
             HandlerList.unregisterAll(this);
@@ -191,12 +186,7 @@ public final class InputChannel implements Listener {
     }
 
     private void startDrain() {
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> drain(), 1L, 1L);
-        } catch (ClassNotFoundException spigot) {
-            tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::drain, 1L, 1L);
-        }
+        tickTask = SchedulerCompat.repeat(plugin, 1L, 1L, this::drain);
     }
 
     private void attach(Player player) {

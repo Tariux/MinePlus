@@ -8,6 +8,7 @@ import com.mineplus.infrastructure.virtual.rig.BoneRigAssetWriter;
 import com.mineplus.infrastructure.virtual.rig.BoneRigBlueprint;
 import com.mineplus.infrastructure.virtual.rig.BoneRigDefinition;
 import com.mineplus.infrastructure.virtual.rig.BoneRigRenderer;
+import com.mineplus.util.SchedulerCompat;
 import com.mineplus.infrastructure.virtual.rig.RigSettings;
 import com.mineplus.MineplusPlugin;
 import com.mineplus.pack.compile.PackArtifact;
@@ -743,7 +744,7 @@ public final class PackSystem {
      * respected; the push runs on the main thread (region-aware).
      */
     private void autoPushToOnlinePlayers() {
-        PackScheduling.scheduleNow(plugin, () -> {
+        SchedulerCompat.runNow(plugin, () -> {
             if (!running || currentArtifact == null || !delivery.isDeliverable()) {
                 return;
             }
@@ -879,7 +880,7 @@ public final class PackSystem {
      * thread, so a command can report it without touching Bukkit off-thread.
      */
     public void verifyDelivery(java.util.function.Consumer<DeliveryCheck> callback) {
-        verifyDeliveryAsync().thenAccept(check -> PackScheduling.scheduleNow(plugin, () -> callback.accept(check)));
+        verifyDeliveryAsync().thenAccept(check -> SchedulerCompat.runNow(plugin, () -> callback.accept(check)));
     }
 
     private static DeliveryCheck probeDelivery(String url, PackArtifact artifact) {

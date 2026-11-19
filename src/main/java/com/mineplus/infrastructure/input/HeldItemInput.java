@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.input;
 
 import com.mineplus.infrastructure.combat.DamageTransactions;
 import com.mineplus.infrastructure.input.net.InputChannel;
+import com.mineplus.util.SchedulerCompat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -33,7 +34,6 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
-import org.bukkit.scheduler.BukkitTask;
 
 /**
  * The Core's held-item input service: turns "the player is holding one of my
@@ -260,7 +260,7 @@ public final class HeldItemInput implements Listener {
     private volatile InputSettings inputSettings = InputSettings.defaults();
     private volatile InputChannel fastPath;
     private boolean registered;
-    private BukkitTask triggerTask;
+    private SchedulerCompat.Handle triggerTask;
 
     public HeldItemInput(Plugin plugin) {
         this.plugin = plugin;
@@ -340,7 +340,7 @@ public final class HeldItemInput implements Listener {
     /** Unregisters every listener this service installed. Idempotent. */
     public void shutdown() {
         stopFastPath();
-        BukkitTask current = triggerTask;
+        SchedulerCompat.Handle current = triggerTask;
         triggerTask = null;
         if (current != null) {
             current.cancel();
@@ -506,7 +506,7 @@ public final class HeldItemInput implements Listener {
         boolean anyHeld = scan(primaryTriggers, now, true);
         anyHeld |= scan(secondaryTriggers, now, false);
         if (!anyHeld) {
-            BukkitTask current = triggerTask;
+            SchedulerCompat.Handle current = triggerTask;
             triggerTask = null;
             if (current != null) {
                 current.cancel();
@@ -559,8 +559,8 @@ public final class HeldItemInput implements Listener {
         if (triggerTask != null || !plugin.isEnabled()) {
             return;
         }
-        triggerTask = plugin.getServer().getScheduler()
-                .runTaskTimer(plugin, this::scanTriggers, TRIGGER_SCAN_TICKS, TRIGGER_SCAN_TICKS);
+        triggerTask = SchedulerCompat.repeatOnMainScheduler(plugin,
+                TRIGGER_SCAN_TICKS, TRIGGER_SCAN_TICKS, this::scanTriggers);
     }
 
     private static long now() {

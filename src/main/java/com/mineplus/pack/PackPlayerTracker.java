@@ -1,6 +1,7 @@
 package com.mineplus.pack;
 
 import org.bukkit.entity.Player;
+import com.mineplus.util.SchedulerCompat;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -28,7 +29,7 @@ final class PackPlayerTracker implements Listener {
             return;
         }
         Player player = event.getPlayer();
-        PackScheduling.schedulePlayer(system.plugin(), player,
+        SchedulerCompat.runForPlayer(system.plugin(), player,
                 delivery.settings().promptDelayTicks(),
                 () -> {
                     // UNKNOWN guards against double prompts: the post-compile

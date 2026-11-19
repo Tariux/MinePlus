@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.world;
 
 import com.mineplus.infrastructure.perf.PerfRegistry;
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.SchedulerCompat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -14,7 +15,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Defers bulk world edits across ticks under a fixed budget instead of spiking
@@ -59,8 +59,7 @@ public final class DeferredEditQueue {
     private final AtomicBoolean offThreadReported = new AtomicBoolean();
 
     private volatile PerfRegistry perf;
-    private BukkitTask tickTask;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
+    private SchedulerCompat.Handle tickTask;
 
     public DeferredEditQueue(WorldEditSettings settings) {
         this.settings = settings == null ? WorldEditSettings.defaults() : settings;
@@ -85,15 +84,10 @@ public final class DeferredEditQueue {
      * otherwise.
      */
     public void start(JavaPlugin plugin) {
-        if (!settings.enabled() || plugin == null || tickTask != null || foliaTask != null) {
+        if (!settings.enabled() || plugin == null || tickTask != null) {
             return;
         }
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> drain(), 1L, 1L);
-        } catch (ClassNotFoundException e) {
-            tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::drain, 1L, 1L);
-        }
+        tickTask = SchedulerCompat.repeat(plugin, 1L, 1L, this::drain);
     }
 
     /** Cancels the drain task and flushes under a hard cap; remaining edits are dropped and logged. */
@@ -101,10 +95,6 @@ public final class DeferredEditQueue {
         if (tickTask != null) {
             tickTask.cancel();
             tickTask = null;
-        }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
         }
         if (!settings.enabled()) {
             return;

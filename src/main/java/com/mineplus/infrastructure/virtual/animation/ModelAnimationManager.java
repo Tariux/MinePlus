@@ -6,6 +6,7 @@ import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.SchedulerCompat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,7 +29,6 @@ import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -56,8 +56,7 @@ public final class ModelAnimationManager {
     private final VirtualBlockManager virtualBlockManager;
     private AnimationSettings settings = AnimationSettings.defaults();
     private AnimationInstanceBridge bridge;
-    private BukkitTask tickTask;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
+    private SchedulerCompat.Handle tickTask;
     private volatile com.mineplus.infrastructure.perf.PerfRegistry perf;
     /** Ticks between the currently scheduled pose pushes (adaptive valve may raise it). */
     private int scheduledInterval;
@@ -188,14 +187,14 @@ public final class ModelAnimationManager {
 
     public void updateSettings(AnimationSettings settings) {
         this.settings = settings == null ? AnimationSettings.defaults() : settings;
-        if (tickTask != null || foliaTask != null) {
+        if (tickTask != null) {
             stop();
             start();
         }
     }
 
     public void start() {
-        if (!settings.enabled() || tickTask != null || foliaTask != null) {
+        if (!settings.enabled() || tickTask != null) {
             return;
         }
         schedule(Math.max(1, settings.tickIntervalTicks()));
@@ -203,12 +202,7 @@ public final class ModelAnimationManager {
 
     private void schedule(int interval) {
         scheduledInterval = Math.max(1, interval);
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), scheduledInterval, scheduledInterval);
-        } catch (ClassNotFoundException e) {
-            tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, scheduledInterval, scheduledInterval);
-        }
+        tickTask = SchedulerCompat.repeat(plugin, scheduledInterval, scheduledInterval, this::tick);
         DebugLogger.info("ModelAnimationManager: animation tick scheduled (interval="
                 + scheduledInterval + " ticks).");
     }
@@ -367,10 +361,6 @@ public final class ModelAnimationManager {
         if (tickTask != null) {
             tickTask.cancel();
             tickTask = null;
-        }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
         }
     }
 

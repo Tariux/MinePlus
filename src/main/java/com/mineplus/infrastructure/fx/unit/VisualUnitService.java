@@ -4,6 +4,7 @@ import com.mineplus.infrastructure.fx.ParticleFx;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.SchedulerCompat;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -14,7 +15,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitTask;
 
 /**
  * One owner for composed visual effects: units are admitted under a per-tick
@@ -70,8 +70,7 @@ public final class VisualUnitService {
     private volatile VisualUnitSettings settings = VisualUnitSettings.defaults();
     private Location currentAnchor;
     private boolean running;
-    private BukkitTask tickTask;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask foliaTask;
+    private SchedulerCompat.Handle tickTask;
     private long spawned;
     private long completed;
     private long dropped;
@@ -229,10 +228,6 @@ public final class VisualUnitService {
             tickTask.cancel();
             tickTask = null;
         }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
-        }
         running = false;
         spawnsThisTick = 0;
         for (Active entry : active) {
@@ -311,16 +306,10 @@ public final class VisualUnitService {
             return;
         }
         running = true;
-        try {
-            try {
-                Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-                foliaTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), 1L, 1L);
-            } catch (ClassNotFoundException spigot) {
-                tickTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
-            }
-        } catch (Throwable failure) {
+        tickTask = SchedulerCompat.repeat(plugin, 1L, 1L, this::tick);
+        if (tickTask == null) {
             running = false;
-            DebugLogger.warning("[VisualUnits] could not schedule the advance task: " + failure);
+            DebugLogger.warning("[VisualUnits] could not schedule the advance task.");
         }
     }
 
@@ -328,10 +317,6 @@ public final class VisualUnitService {
         if (tickTask != null) {
             tickTask.cancel();
             tickTask = null;
-        }
-        if (foliaTask != null) {
-            foliaTask.cancel();
-            foliaTask = null;
         }
         running = false;
     }
