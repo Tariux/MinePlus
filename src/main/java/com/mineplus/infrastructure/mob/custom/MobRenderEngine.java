@@ -611,9 +611,12 @@ public final class MobRenderEngine {
         }
         session.lastHurtBurstPass = pass;
         LivingEntity entity = session.entity;
+        // Entity#getX/getY/getZ are Paper-only API; getLocation() is the
+        // Spigot-safe equivalent (the render core must link on both).
+        Location at = entity.getLocation();
         fx.burst(ParticleFx.Tier.CRITICAL,
-                new Location(entity.getWorld(), entity.getX(),
-                        entity.getY() + entity.getHeight() * 0.6, entity.getZ()),
+                new Location(entity.getWorld(), at.getX(),
+                        at.getY() + entity.getHeight() * 0.6, at.getZ()),
                 Particle.CRIT, 10, 0.25, 0.2, 0.25, 0.0);
     }
 
@@ -1354,9 +1357,12 @@ public final class MobRenderEngine {
         void scanViewers(CustomMobSettings current) {
             double rangeSq = (double) current.renderDistance() * current.renderDistance();
             World world = entity.getWorld();
-            double ex = entity.getX();
-            double ey = entity.getY();
-            double ez = entity.getZ();
+            // Entity#getX/getY/getZ are Paper-only API; getLocation() is the
+            // Spigot-safe equivalent (the render core must link on both).
+            Location entityAt = entity.getLocation();
+            double ex = entityAt.getX();
+            double ey = entityAt.getY();
+            double ez = entityAt.getZ();
             double nearest = Double.MAX_VALUE;
             boolean allHavePack = true;
             for (int i = 0; i < passViewers.size(); i++) {
@@ -1364,9 +1370,10 @@ public final class MobRenderEngine {
                 if (viewer.getWorld() != world) {
                     continue;
                 }
-                double dx = viewer.getX() - ex;
-                double dy = viewer.getY() - ey;
-                double dz = viewer.getZ() - ez;
+                Location viewerAt = viewer.getLocation();
+                double dx = viewerAt.getX() - ex;
+                double dy = viewerAt.getY() - ey;
+                double dz = viewerAt.getZ() - ez;
                 double sq = dx * dx + dy * dy + dz * dz;
                 if (sq > rangeSq) {
                     continue;
