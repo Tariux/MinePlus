@@ -94,9 +94,9 @@
 - Consumes: existing probe chains unchanged in shape.
 - Produces: failed plan resolution is **not** cached (retry next access, one `DebugLogger` warning per class); successful plans still cache for the JVM lifetime.
 
-- [ ] **Step 1: Implement** — the cache stores successes only; a failure path logs once and leaves the class unresolved. Re-verify the four shape probes (`moveTo` 4-double, `ControllerLook` 5-arg, goal-selector field discovery, `removeAllGoals(Predicate)`) against mojang names first, spigot names second (order review only unless research shows 26.x breakage).
-- [ ] **Step 2: `gradle build -q` green** (server-bound; behavior verification is the T12 checklist: pilgrim march + necromancer raid on Spigot).
-- [ ] **Step 3: Commit** — `compat: nms plan failures no longer poison the cache`.
+- [x] **Step 1: Implement** — the cache stores successes only; a failure path logs once and leaves the class unresolved. Re-verify the four shape probes (`moveTo` 4-double, `ControllerLook` 5-arg, goal-selector field discovery, `removeAllGoals(Predicate)`) against mojang names first, spigot names second (order review only unless research shows 26.x breakage).
+- [x] **Step 2: `gradle build -q` green** (server-bound; behavior verification is the T12 checklist: pilgrim march + necromancer raid on Spigot).
+- [x] **Step 3: Commit** — `compat: nms plan failures no longer poison the cache`.
 
 ### Task 5: Packet/input probe refresh for 26.x *(research-gated)*
 

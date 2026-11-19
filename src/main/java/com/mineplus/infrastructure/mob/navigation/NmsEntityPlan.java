@@ -20,8 +20,11 @@ import org.bukkit.entity.LivingEntity;
  * {@code getHandle()} bridge plus the vanilla navigation, look control, Brain
  * and goal-selector handles the reflective backends operate through.
  *
- * <p>Plans are built lazily per CraftBukkit class and cached forever;
- * {@link #EMPTY} marks an unresolvable class so the probe never re-runs.</p>
+ * <p>Plans are built lazily per CraftBukkit class and cached forever. A class
+ * whose bridge cannot be resolved is <b>not</b> cached: the next entity of that
+ * type retries, because a failed resolution may be mapping- or
+ * classloader-timing-shaped and a cached failure would poison the class for
+ * the JVM lifetime. Each unresolvable class is warned about once.</p>
  *
  * <p><b>Mapping tolerance.</b> A runtime can expose either mojang names
  * ({@code getNavigation}, {@code moveTo}, {@code stop}, {@code goalSelector},
@@ -40,10 +43,8 @@ import org.bukkit.entity.LivingEntity;
  */
 final class NmsEntityPlan {
 
-    /** Sentinel for "this CraftBukkit class cannot be bridged". */
-    static final NmsEntityPlan EMPTY = new NmsEntityPlan();
-
     private static final Map<Class<?>, NmsEntityPlan> PLANS = new ConcurrentHashMap<>();
+    private static final java.util.Set<String> WARNED_UNRESOLVED = ConcurrentHashMap.newKeySet();
     private static final MethodHandle COLLECTION_CLEAR = clearHandle();
     private static final Predicate<Object> ALWAYS_TRUE = ignored -> true;
 
@@ -135,17 +136,13 @@ final class NmsEntityPlan {
             return null;
         }
         NmsEntityPlan plan = PLANS.get(entity.getClass());
-        if (plan != null) {
-            return plan == EMPTY ? null : plan;
-        }
-        plan = resolveLive(entity);
-        return plan == null || plan == EMPTY ? null : plan;
+        return plan;
     }
 
     /**
      * Resolves (and caches) the plan for one CraftBukkit class using one live
-     * entity's real NMS handle. A genuine base-class bridge is cached as
-     * {@link #EMPTY}; a transient failure is not, so a later entity retries.
+     * entity's real NMS handle. Only successful resolutions are cached; a
+     * failure leaves the class unresolved so a later entity retries.
      */
     private static synchronized NmsEntityPlan resolveLive(org.bukkit.entity.LivingEntity entity) {
         Class<?> craftClass = entity.getClass();
@@ -155,8 +152,11 @@ final class NmsEntityPlan {
         }
         MethodHandle getHandle = findNoArg(craftClass, "getHandle");
         if (getHandle == null) {
-            PLANS.put(craftClass, EMPTY);
-            return EMPTY;
+            if (WARNED_UNRESOLVED.add(craftClass.getName())) {
+                DebugLogger.warning("[MobNavigation] no getHandle bridge on " + craftClass.getName()
+                        + "; will retry on the next entity of this type.");
+            }
+            return null;
         }
         Object handle;
         try {
