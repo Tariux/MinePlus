@@ -20,3 +20,5 @@ Task 12: complete (docs: CHANGELOG/migration-guide/custom-mobs/pack-system/confi
 Ruling: T5/T7 closed as verified-no-change (probe-first philosophy; research folded in via minecraft.wiki Pack format page + Paper 26.2 javadoc)
 Ruling: api-version 1.21 cannot be rejected by a newer server (floor declaration semantics) - risk retired
 Ruling: scripts/pack.js ceiling bumped locally but the scripts/ dir is gitignored (stays untracked by repo policy)
+Hotfix 1: MobRenderEngine scanViewers(:1357) + emitHurtFeedback(:615) called Paper-only Entity#getX/getY/getZ; on Spigot every pose tick threw NoSuchMethodError, so displays spawned but were never posed (stuck-in-ground rigs, visible base mob, purple/black boxes). Both sites now use getLocation(); rest of the display surface verified against the spigot-api-1.21.1 stub (all setters present).
+User-reported in-game failures on spigot-1.21.1 traced to this single root cause (log: 424 warnings, one signature).
