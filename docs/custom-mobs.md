@@ -714,3 +714,53 @@ target".
    entities, how many are quarter-rated or released. If it is heavy, tune
    `RENDER_NEAR_DISTANCE` / `RENDER_INTERVAL_TICKS` / `MAX_RIGGED_PER_WORLD` —
    or move the mob to `vanillaAi()`, which is both cheaper and smoother.
+
+---
+
+## The `mind(...)` authoring API (26.3 rewrite edition)
+
+A definition's "who drives the mob" decision is one value:
+
+```java
+CustomMobDefinition.builder("mymod:sentry", EntityType.IRON_GOLEM)
+    .mind(Mind.vanillaAi())                     // the server engine drives it
+    // .mind(Mind.vanillaGoalsOf(EntityType.IRON_GOLEM))  // explicit donor
+    // .mind(Mind.coreProfile(profile -> profile...))      // the Core drives it
+    // .mind(Mind.coreIdle())                              // Core owns, idle base
+    .build();
+```
+
+The older per-method builders (`vanillaAi()`, `inheritGoalsFrom(...)`,
+`behavior(...)`) spell the same decisions and keep working.
+`CustomMobApi#mindSnapshot()` prints one line per definition - mind + live
+count - next to the isolation label a status command already shows.
+
+### Rest-state animation slots
+
+Beyond `idle`/`walk`/`run`/`attack`/`hurt`/`death`, a rig may author optional
+`sit`, `eat` (aliases `graze`, `feed`) and `ambient` (alias `idle_ambient`)
+clips. `eat` plays as a one-shot overlay a module triggers through
+`CustomMobApi` timing (or the animator's `notifyEat`); `ambient` self-fires on
+a randomized 12-28 s idle cadence; `setSitting(true)` holds the base layer on
+the `sit` clip. A model without the new clips is rendered exactly as before.
+Base-layer transitions are true crossfades (the incoming clip blends by the
+transition clock instead of popping in at full weight).
+
+### Special-mob rest behavior: `WanderAction` / `GuardAnchorAction`
+
+Two Core-bundled actions give a Core-steered mob a life at rest:
+
+```java
+profile.action(new WanderAction.Builder()
+        .home(mob -> homes.get(mob.getUniqueId()))   // per-mob anchor supplier
+        .radius(6.0).speed(0.9).dwellSeconds(4, 10)
+        .build(), 2.0)
+```
+
+`WanderAction` strolls inside the home radius (leg length clamped by the mob's
+own path range, destinations must be standable) and rests between trips.
+`GuardAnchorAction` walks back to its post when displaced and faces the nearest
+qualifying threat inside the radius (default: vanilla `Monster`s; narrow it
+with `Builder.threat(...)`). Both are movement-only - no world writes - and
+continuous, so the engine evaluates them every stagger while they own the
+mob. The Evil Pig showcase walks between fights since this update.

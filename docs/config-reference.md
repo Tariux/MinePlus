@@ -650,3 +650,11 @@ Texel baking reconstructs a face's texture **pixel-by-pixel out of flat vanilla 
 ---
 
 > ➡️ **Next:** wiring behavior to these definitions — the [Developer API](developer-api.md), or pick a ready-made path in [Extension Workflows](extension-workflows.md).
+
+### `PACK.PACK_FORMAT_OVERRIDE` (0 = table)
+
+The pack format table now covers 1.21.x through 26.3 (formats are decimal from
+the 1.21.9 era, e.g. 26.3 = 97.1). The override stays an integer and still
+wins over the table. The `pack.mcmeta` key shape also follows the server:
+`pack_format` + `supported_formats` up to 1.21.8, `min_format`/`max_format`
+from 1.21.9 on. See the pack system doc's format table for the full range.

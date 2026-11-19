@@ -107,10 +107,10 @@
 **Interfaces:**
 - Produces: unchanged public surface; internal class tables extended/verified per the research brief (mojang-mapped-only runtimes, any 26.x packet-shape changes, netty channel reachability).
 
-- [ ] **Step 1: Fold in research** — Spigot 26.x mapping status; whether `org.bukkit.craftbukkit` stays unversioned; 26.x packet class/constructor changes; Paper public packet API (if a supported event API exists, note it in the ledger as a *follow-up option*, not this task's scope).
-- [ ] **Step 2: Implement** probe extensions exactly where the brief shows breakage; where the existing structural probes already cover 26.x, change nothing (probe-first philosophy — no speculative rewriting).
-- [ ] **Step 3: `gradle build -q` green; ledger note of every probe verified/extended.**
-- [ ] **Step 4: Commit** — `compat: 26.x packet/input probe refresh`.
+- [x] **Step 1: Fold in research** — Spigot 26.x mapping status; whether `org.bukkit.craftbukkit` stays unversioned; 26.x packet class/constructor changes; Paper public packet API (if a supported event API exists, note it in the ledger as a *follow-up option*, not this task's scope).
+- [x] **Step 2: Implement** probe extensions exactly where the brief shows breakage; where the existing structural probes already cover 26.x, change nothing (probe-first philosophy — no speculative rewriting).
+- [x] **Step 3: `gradle build -q` green; ledger note of every probe verified/extended.**
+- [x] **Step 4: Commit** — `compat: 26.x packet/input probe refresh`.
 
 ### Task 6: Pack format tables + mcmeta shapes *(research-gated values)*
 
@@ -123,10 +123,10 @@
 **Interfaces:**
 - Produces: `PackFormat.packFormat(v,0)` correct for every researched release 1.21.7→26.3; mcmeta JSON shape per researched client requirements (new keys if any; `supported_formats` retained where valid); `datapackFormatFor` refined with real numbers.
 
-- [ ] **Step 1: RED — extend `CompatVersionTest`** with one pack-format assertion per researched release (e.g. `packFormat("26.1.2",0)` == `<researched N>`); assert the mcmeta JSON for a 26.x version contains the required keys (and `pack_format`/`supported_formats` for a 1.21 version).
-- [ ] **Step 2: GREEN** — table + mcmeta emission + datapack table.
-- [ ] **Step 3: `gradle testRunners -q` → PASS.** Artifact hash changes automatically (format feeds the hash) — new artifact name is expected, note in ledger.
-- [ ] **Step 4: Commit** — `compat: pack format tables for 1.21.7→26.3 + mcmeta shape`.
+- [x] **Step 1: RED — extend `CompatVersionTest`** with one pack-format assertion per researched release (e.g. `packFormat("26.1.2",0)` == `<researched N>`); assert the mcmeta JSON for a 26.x version contains the required keys (and `pack_format`/`supported_formats` for a 1.21 version).
+- [x] **Step 2: GREEN** — table + mcmeta emission + datapack table.
+- [x] **Step 3: `gradle testRunners -q` → PASS.** Artifact hash changes automatically (format feeds the hash) — new artifact name is expected, note in ledger.
+- [x] **Step 4: Commit** — `compat: pack format tables for 1.21.7→26.3 + mcmeta shape`.
 
 ### Task 7: Modern resource-pack delivery probe *(research-gated)*
 
@@ -136,9 +136,9 @@
 **Interfaces:**
 - Produces: send path probes the modern Paper resource-pack API first (shape per research), falls back to the existing `(url, sha1, prompt)` → `(url, hash)` → `(url)` cascade.
 
-- [ ] **Step 1: Implement** the modern-API probe as first link of the existing cascade; cached once; log which link resolved at first send (DebugLogger-gated).
-- [ ] **Step 2: `gradle build -q` green; in-game verification folded into T12 checklist (pack push accepted on Spigot + Paper).**
-- [ ] **Step 3: Commit** — `compat: modern resource-pack send probe`.
+- [x] **Step 1: Implement** the modern-API probe as first link of the existing cascade; cached once; log which link resolved at first send (DebugLogger-gated).
+- [x] **Step 2: `gradle build -q` green; in-game verification folded into T12 checklist (pack push accepted on Spigot + Paper).**
+- [x] **Step 3: Commit** — `compat: modern resource-pack send probe`.
 
 ### Task 8: AI isolation honest-failure status
 
@@ -150,9 +150,9 @@
 **Interfaces:**
 - Produces: isolation classification failure logs once at first application (not silent); `/mineplus status` gains one line per probe seam: resolved / degraded (reason) / unavailable.
 
-- [ ] **Step 1: Implement** — `MobAiIsolation` records the last result per chain (`goals`, `brain`, `goals+brain`, structural-fallback, FAILED) and `StatusSubCommand` prints the seam table; verify `isolationLabel()` already returns the honest string (it does — keep).
-- [ ] **Step 2: `gradle build -q` green; verification is T12 in game (isolation label on a rigged mob shows `goals+brain` or an honest degradation, never blank).**
-- [ ] **Step 3: Commit** — `feat: isolation status surface + honest failure logging`.
+- [x] **Step 1: Implement** — `MobAiIsolation` records the last result per chain (`goals`, `brain`, `goals+brain`, structural-fallback, FAILED) and `StatusSubCommand` prints the seam table; verify `isolationLabel()` already returns the honest string (it does — keep).
+- [x] **Step 2: `gradle build -q` green; verification is T12 in game (isolation label on a rigged mob shows `goals+brain` or an honest degradation, never blank).**
+- [x] **Step 3: Commit** — `feat: isolation status surface + honest failure logging`.
 
 ### Task 9: MobAnimator crossfade + new clip slots
 
@@ -195,10 +195,10 @@
 - Produces: `Mind.vanillaAi()`, `Mind.coreProfile(...)` (priority + clips intent in one place); `CustomMobDefinition.Builder.mind(Mind)`; existing `.vanillaAi()`/`.behavior(...)` builders delegate to `Mind` internally (additive-first, nothing removed).
 - Consumes: W6 actions for the mobfun special mobs that opt in.
 
-- [ ] **Step 1: Implement `Mind` + builder delegation + `MobBehaviorApi` snapshot additions** (mirror the existing journey/crew/pipeline snapshot style).
-- [ ] **Step 2: Migrate mobfun** definition sites to `mind(...)`; zero deprecated-style calls remain in the module; existing behavior selection (which mobs are vanilla-AI vs core-steered) unchanged.
-- [ ] **Step 3: `gradle build -q` green for Core; module build green (`npm run build-mineplus-mobfun`).**
-- [ ] **Step 4: Commit** — `feat: mind() authoring api + mobfun migration`.
+- [x] **Step 1: Implement `Mind` + builder delegation + `MobBehaviorApi` snapshot additions** (mirror the existing journey/crew/pipeline snapshot style).
+- [x] **Step 2: Migrate mobfun** definition sites to `mind(...)`; zero deprecated-style calls remain in the module; existing behavior selection (which mobs are vanilla-AI vs core-steered) unchanged.
+- [x] **Step 3: `gradle build -q` green for Core; module build green (`npm run build-mineplus-mobfun`).**
+- [x] **Step 4: Commit** — `feat: mind() authoring api + mobfun migration`.
 
 ### Task 12: Full build, docs, in-game checklist handoff
 
@@ -209,10 +209,10 @@
 **Interfaces:**
 - Produces: the in-game verification checklist for the owner.
 
-- [ ] **Step 1: `npm run build-all` green; `gradle testRunners -q` green.**
-- [ ] **Step 2: Docs** — config reference (PACK format table, new settings if any), pack system (26.x formats), custom mobs (Mind, new actions, crossfade slots), developer API (mind authoring), migration guide (new edition: what changed, what is additive), AGENTS.md subsystem notes, CHANGELOG entry.
-- [ ] **Step 3: Write the checklist** (final message to owner): Spigot server first — plugin loads with seam-status lines; place/break a virtual+texel model; `/wine place flight`; `/cabinet place texel` and `resourcepack` twin; `/alchemy place`; pack item in hand + `/mineplus pack status`; `/mobfun spawn evilpig` (walk/attack/death clips, heading); `/mobfun fire pilgrim` night camp; grazer/pilgrim simple profiles unchanged; gun fire/scope/reload; `/mineplus model info <key>`; `/mobfun status` isolation labels; log free of stack traces.
-- [ ] **Step 4: Commit** — `docs: 26.3 compat rewrite documentation + checklist`.
+- [x] **Step 1: `npm run build-all` green; `gradle testRunners -q` green.**
+- [x] **Step 2: Docs** — config reference (PACK format table, new settings if any), pack system (26.x formats), custom mobs (Mind, new actions, crossfade slots), developer API (mind authoring), migration guide (new edition: what changed, what is additive), AGENTS.md subsystem notes, CHANGELOG entry.
+- [x] **Step 3: Write the checklist** (final message to owner): Spigot server first — plugin loads with seam-status lines; place/break a virtual+texel model; `/wine place flight`; `/cabinet place texel` and `resourcepack` twin; `/alchemy place`; pack item in hand + `/mineplus pack status`; `/mobfun spawn evilpig` (walk/attack/death clips, heading); `/mobfun fire pilgrim` night camp; grazer/pilgrim simple profiles unchanged; gun fire/scope/reload; `/mineplus model info <key>`; `/mobfun status` isolation labels; log free of stack traces.
+- [x] **Step 4: Commit** — `docs: 26.3 compat rewrite documentation + checklist`.
 
 ---
 

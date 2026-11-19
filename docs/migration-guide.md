@@ -2,6 +2,27 @@
 
 > **Navigate:** [Docs Home](README.md) • [Configuration Reference](config-reference.md) • [Developer API](developer-api.md) • [Resource Pack System](pack-system.md) • [Changelog](../CHANGELOG.md)
 
+## New edition - Minecraft 1.21 -> 26.3 compatibility rewrite (2026-11)
+
+Nothing is removed; all changes are additive or fixes. Highlights:
+
+| Area | What changed | Action needed |
+|---|---|---|
+| Version support | One jar, Spigot + Paper, 1.21.0 -> 26.3 (calendar versioning) | None |
+| Pack formats | Real table for 1.21.7 -> 26.3 (decimal formats from 1.21.9); `pack.mcmeta` uses `min_format`/`max_format` on 1.21.9+ | The compiled artifact gets a new hash/name - clients are re-prompted once |
+| Custom mob attributes | Templates resolve attribute names reflectively (works on pre- and post-1.21.3 servers) | None |
+| Mob animator | True crossfades; optional `sit`/`eat`/`ambient` clips (a model without them behaves exactly as before) | Optional: author the new clips |
+| Special-mob AI | `WanderAction` + `GuardAnchorAction` bundled actions; the Evil Pig showcase wanders at rest | Optional: opt in via a profile action |
+| Authoring API | `CustomMobDefinition.Builder#mind(Mind...)` unifies the "who drives the mob" decision; `vanillaAi()`/`behavior(...)` keep working | Optional: migrate to `mind(...)` |
+| Status | `/mineplus status` prints server/Folia, live AI isolation state, pack format, fast-path state | None |
+
+`PACK.PACK_FORMAT_OVERRIDE` still wins over the table; the override remains an
+integer (a decimal format is only needed by the table itself).
+
+---
+
+This guide covers the **Unified Rendering Engine** update.
+
 This guide covers the **Unified Rendering Engine** update. Nothing is *removed*:
 every legacy key, constructor, and API call keeps working. The changes are
 additive (new unified vocabulary and telemetry) plus a small number of

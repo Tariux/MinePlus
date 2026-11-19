@@ -416,3 +416,31 @@ zip into a client's `resourcepacks` folder or host it and point
   true texture-only entity reskins remain extension points: 1.21.1 has no
   `entity_to_model`/renderer-file mechanism to override a vanilla entity's
   texture server-side.
+
+---
+
+## Pack formats for the 1.21 -> 26.3 range (26.3 rewrite edition)
+
+The generated artifact's `pack.mcmeta` is written in the shape the running
+client era reads; `PACK.PACK_FORMAT_OVERRIDE` wins over the table in both eras.
+
+| Server | Resource format | `pack.mcmeta` shape |
+|---|---|---|
+| 1.20.x -> 1.21.3 | 15/18/22/32/34/42 | `pack_format` + `supported_formats` |
+| 1.21.4 / 1.21.5 / 1.21.6 | 46 / 55 / 63 | `pack_format` + `supported_formats` |
+| 1.21.7 / 1.21.8 | 64 | `pack_format` + `supported_formats` |
+| 1.21.9 / 1.21.10 | 69 | **`min_format` / `max_format`** |
+| 1.21.11 | 75 | `min_format` / `max_format` |
+| 26.1 / 26.2 / 26.3 | 84 / 88 / 97.1 | `min_format` / `max_format` |
+| unknown future | newest known (97.1) | per era |
+
+Formats carry a decimal tail from the 1.21.9 era on (e.g. `97.1`); the
+`min_format` floor is the integer part. The ceiling stays generous so a client
+whose format drifted above the detected value still accepts the pack. Data-pack
+formats (the custom-mob variant datapack) follow the same table
+(1.21.5=71, 1.21.6=80, 1.21.7/8=81, 1.21.9/10=88, 1.21.11=94, 26.1=101,
+26.2=107, 26.3=121). Because the format decision feeds the artifact hash, a
+server upgrade compiles a fresh artifact and clients are re-prompted once.
+
+`scripts/pack.js` (the manual fallback zip) keeps the classic shape with its
+ceiling raised to 97; prefer the Core-served LOCAL endpoint on 1.21.9+.
