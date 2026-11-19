@@ -10,7 +10,7 @@ import java.io.File;
  * @param graphHash       SHA-256 over the ordered asset-identity/content-hash graph;
  *                        same registrations -> same artifact name -> cache hit
  * @param sha1            SHA-1 of the artifact bytes (the client pack protocol's hash)
- * @param packFormat      the {@code pack.mcmeta} pack_format used
+ * @param packFormat      the {@code pack.mcmeta} format used (decimal from the 1.21.9 era)
  * @param itemRepresentation which item-model strategy produced the item files
  * @param assetCount      assets written into the zip
  * @param byteSize        artifact size in bytes
@@ -20,7 +20,7 @@ public record PackArtifact(
         File file,
         String graphHash,
         String sha1,
-        int packFormat,
+        double packFormat,
         com.mineplus.pack.PackFormat.ItemRepresentation itemRepresentation,
         int assetCount,
         long byteSize,

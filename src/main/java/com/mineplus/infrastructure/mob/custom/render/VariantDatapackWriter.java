@@ -68,17 +68,21 @@ public final class VariantDatapackWriter {
         };
     }
 
+    /** Newest data-pack format the table knows (the 26.3 era). */
+    private static final int LATEST_DATA_PACK_FORMAT = 121;
+
     /** The datapack format number for the running server ({@code -1} when unknown). */
     public static int datapackFormat() {
         return datapackFormatFor(ServerVersion.rawVersion());
     }
 
     /**
-     * Pure form of {@link #datapackFormat()}: the datapack format for a Bukkit
-     * version string, {@code -1} when the server cannot carry variant datapacks
-     * (pre-1.21.5) or the version is unparseable. A parseable calendar version
-     * ({@code 26.x} and beyond) always takes the newest known format — never
-     * {@code -1}, which used to silently skip the variant manifest.
+     * Pure form of {@link #datapackFormat()}: the data-pack format for a
+     * Bukkit version string, {@code -1} when the server cannot carry variant
+     * datapacks (pre-1.21.5) or the version is unparseable. A parseable
+     * calendar version ({@code 26.x} and beyond) always takes its drop's
+     * format — never {@code -1}, which used to silently skip the variant
+     * manifest.
      */
     public static int datapackFormatFor(String bukkitVersion) {
         int[] v = ServerVersion.parseVersion(bukkitVersion);
@@ -89,15 +93,27 @@ public final class VariantDatapackWriter {
             if (v[1] < 21 || (v[1] == 21 && v[2] < 5)) {
                 return -1;
             }
-            if (v[2] == 5) {
-                return 71;
+            if (v[1] != 21) {
+                return LATEST_DATA_PACK_FORMAT;
             }
-            if (v[2] == 6) {
-                return 80;
-            }
-            return 81;
+            return switch (v[2]) {
+                case 5 -> 71;
+                case 6 -> 80;
+                case 7, 8 -> 81;
+                case 9, 10 -> 88;
+                case 11 -> 94;
+                default -> LATEST_DATA_PACK_FORMAT;
+            };
         }
-        return 81;
+        if (v[0] == 26) {
+            return switch (v[1]) {
+                case 1 -> 101;
+                case 2 -> 107;
+                case 3 -> 121;
+                default -> LATEST_DATA_PACK_FORMAT;
+            };
+        }
+        return LATEST_DATA_PACK_FORMAT;
     }
 
     /**
@@ -116,7 +132,13 @@ public final class VariantDatapackWriter {
         boolean changed = false;
 
         int format = datapackFormat();
-        String manifest = "{\"pack\":{\"pack_format\":" + format
+        // 1.21.9+ (and calendar versions) read min_format/max_format instead
+        // of the old pack_format field; the old shape is kept for the servers
+        // that still expect it.
+        String manifest = com.mineplus.pack.PackFormat.usesFormatRange(ServerVersion.rawVersion())
+                ? "{\"pack\":{\"min_format\":" + format + ",\"max_format\":" + format
+                + ",\"description\":\"" + PACK_DESCRIPTION + "\"}}"
+                : "{\"pack\":{\"pack_format\":" + format
                 + ",\"description\":\"" + PACK_DESCRIPTION + "\"}}";
         File manifestFile = new File(packFolder, "pack.mcmeta");
         if (format > 0 && (!manifestFile.isFile() || !equalsFile(manifestFile, manifest))) {

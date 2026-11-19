@@ -39,13 +39,14 @@ public final class PackFormat {
     }
 
     /**
-     * Resolves the {@code pack.mcmeta} {@code pack_format} for the given
-     * Bukkit version string (e.g. {@code 1.21.4-R0.1-SNAPSHOT}).
+     * Resolves the {@code pack.mcmeta} pack format for the given Bukkit
+     * version string (e.g. {@code 1.21.4-R0.1-SNAPSHOT}, {@code 26.1.2-…}).
+     * Formats carry a decimal tail from the 1.21.9 era on (e.g. {@code 97.1}).
      *
      * @param bukkitVersion {@code Bukkit.getBukkitVersion()}
      * @param override      operator override from settings; 0 = use the table
      */
-    public static int packFormat(String bukkitVersion, int override) {
+    public static double packFormat(String bukkitVersion, int override) {
         if (override > 0) {
             return override;
         }
@@ -59,37 +60,60 @@ public final class PackFormat {
             if (minor < 20) {
                 return 15; // pre-1.20 servers: closest supported era
             }
-            return switch (minor) {
-                case 20 -> switch (patch) {
+            if (minor == 20) {
+                return switch (patch) {
                     case 0, 1 -> 15;
                     case 2 -> 18;
                     case 3, 4 -> 22;
                     default -> 32; // 1.20.5+
                 };
-                case 21 -> switch (patch) {
+            }
+            if (minor == 21) {
+                return switch (patch) {
                     case 0, 1 -> 34;
                     case 2, 3 -> 42;
                     case 4 -> 46;
                     case 5 -> 55;
                     case 6 -> 63;
-                    default -> 64; // 1.21.7+ and forward-compatible fallback
+                    case 7, 8 -> 64;
+                    case 9, 10 -> 69;
+                    case 11 -> 75;
+                    default -> latestKnownPackFormat();
                 };
+            }
+            return latestKnownPackFormat();
+        }
+        // Calendar versions: the drop number carries the format.
+        if (version[0] == 26) {
+            return switch (version[1]) {
+                case 1 -> 84;
+                case 2 -> 88;
+                case 3 -> 97.1;
                 default -> latestKnownPackFormat();
             };
         }
-        // Calendar versions (26.x and beyond): the newest known format until
-        // the table catches up. Never the 1.x-minor branches.
         return latestKnownPackFormat();
     }
 
     /**
-     * The newest {@code pack_format} this plugin's table knows. Used as the
-     * {@code supported_formats} ceiling in {@code pack.mcmeta} so newer
-     * clients (whose format drifted above the detected value) still accept
-     * the pack instead of rejecting it as incompatible.
+     * True when the client era replaced {@code pack_format} with the
+     * {@code min_format}/{@code max_format} pair (1.21.9+, including calendar
+     * versions). The old {@code supported_formats} object belongs to the
+     * 1.20.2 → 1.21.8 range and is ignored by the newer readers.
      */
-    public static int latestKnownPackFormat() {
-        return 64;
+    public static boolean usesFormatRange(String bukkitVersion) {
+        return ServerVersion.atLeast(ServerVersion.parseVersion(bukkitVersion), 1, 21, 9);
+    }
+
+    /**
+     * The newest pack format this plugin's table knows ({@code 97.1}, the
+     * 26.3 era). Used as the {@code max_format}/{@code supported_formats}
+     * ceiling in {@code pack.mcmeta} so newer clients (whose format drifted
+     * above the detected value) still accept the pack instead of rejecting it
+     * as incompatible.
+     */
+    public static double latestKnownPackFormat() {
+        return 97.1;
     }
 
     /** True when the server supports the modern {@code item_model} component (1.21.4+). */

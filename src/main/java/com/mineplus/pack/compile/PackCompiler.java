@@ -92,7 +92,7 @@ public final class PackCompiler {
      * identity. Version-strategy changes therefore produce new artifacts
      * instead of resurrecting stale ones.
      */
-    public static String graphHash(List<PackAsset> assets, int packFormat, PackFormat.ItemRepresentation representation) {
+    public static String graphHash(List<PackAsset> assets, double packFormat, PackFormat.ItemRepresentation representation) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (PackAsset asset : assets) {
@@ -123,7 +123,7 @@ public final class PackCompiler {
             return null;
         }
         String bukkitVersion = org.bukkit.Bukkit.getBukkitVersion();
-        int packFormat = PackFormat.packFormat(bukkitVersion, settings.packFormatOverride());
+        double packFormat = PackFormat.packFormat(bukkitVersion, settings.packFormatOverride());
         AppearanceMode.Resolved appearance = settings.appearanceMode().resolve(
                 PackFormat.itemRepresentation(bukkitVersion),
                 com.mineplus.pack.item.ItemFrameWriter.supportsStringState());
@@ -201,7 +201,7 @@ public final class PackCompiler {
             File partial = new File(cache.folder(), target.getName() + ".partial");
             try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(partial))) {
                 zip.setLevel(6);
-                writeEntry(zip, "pack.mcmeta", packMetaJson(packFormat).getBytes(StandardCharsets.UTF_8));
+                writeEntry(zip, "pack.mcmeta", packMetaJson(bukkitVersion, packFormat).getBytes(StandardCharsets.UTF_8));
                 for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
                     writeEntry(zip, entry.getKey(), entry.getValue());
                 }
@@ -240,7 +240,7 @@ public final class PackCompiler {
      */
     private static String contentHash(
             Map<String, byte[]> entries,
-            int packFormat,
+            double packFormat,
             PackFormat.ItemRepresentation representation
     ) {
         try {
@@ -375,21 +375,33 @@ public final class PackCompiler {
         return bytes;
     }
 
-    private static String packMetaJson(int packFormat) {
+    /**
+     * The pack.mcmeta body, in the shape the running client era reads.
+     * Version-branching lives in {@link PackFormat#usesFormatRange(String)};
+     * this is the pure JSON writer both eras share, exposed for the shape
+     * tests.
+     */
+    public static String packMetaJson(String bukkitVersion, double packFormat) {
         JsonObject pack = new JsonObject();
-        pack.addProperty("pack_format", packFormat);
-        // 1.20.2+ clients accept any pack whose format lies inside the
-        // declared supported range; without it, a client whose format drifted
-        // above the detected value rejects the pack after download ("failed
-        // to apply resource pack"). The generous ceiling is safe: the pack's
-        // content (models, textures, sounds, item definitions) is forward
-        // compatible in practice, and pre-1.20.2 clients simply ignore the
-        // field and use pack_format.
-        int ceiling = Math.max(packFormat, PackFormat.latestKnownPackFormat());
-        JsonObject supportedFormats = new JsonObject();
-        supportedFormats.addProperty("min_inclusive", packFormat);
-        supportedFormats.addProperty("max_inclusive", ceiling);
-        pack.add("supported_formats", supportedFormats);
+        if (PackFormat.usesFormatRange(bukkitVersion)) {
+            // 1.21.9+ (and calendar versions) replaced pack_format with the
+            // min_format/max_format pair (25w31a). The generous ceiling stays
+            // forward-compatible: the pack's content is so in practice, and a
+            // client whose format drifted above the detected value still
+            // accepts the artifact instead of rejecting it after download.
+            pack.addProperty("min_format", Math.floor(packFormat));
+            pack.addProperty("max_format", PackFormat.latestKnownPackFormat());
+        } else {
+            // 1.20.2+ clients accept any pack whose format lies inside the
+            // declared supported range; pre-1.20.2 clients ignore the field
+            // and use pack_format.
+            pack.addProperty("pack_format", (int) packFormat);
+            int ceiling = (int) Math.max(packFormat, PackFormat.latestKnownPackFormat());
+            JsonObject supportedFormats = new JsonObject();
+            supportedFormats.addProperty("min_inclusive", (int) packFormat);
+            supportedFormats.addProperty("max_inclusive", ceiling);
+            pack.add("supported_formats", supportedFormats);
+        }
         pack.addProperty("description", "Mineplus generated content pack");
         JsonObject root = new JsonObject();
         root.add("pack", pack);
