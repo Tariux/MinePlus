@@ -212,11 +212,128 @@ public final class BbClipBaker {
             return null;
         }
         root.add("elements", elements);
-        root.add("display", display(style, bones, fold, deltas));
+        JsonObject displayJson = display(style, bones, fold, deltas);
+        fitWindow(root, displayJson, model.sourceName(), issues);
+        root.add("display", displayJson);
         if (style.frontLight()) {
             root.addProperty("gui_light", "front");
         }
         return root;
+    }
+
+    // ------------------------------------------------------------------
+    // Window fitting
+    // ------------------------------------------------------------------
+
+    /** Every display context a vanilla item model carries. */
+    private static final String[] DISPLAY_CONTEXTS = {
+            "thirdperson_righthand", "thirdperson_lefthand",
+            "firstperson_righthand", "firstperson_lefthand",
+            "head", "gui", "ground", "fixed"
+    };
+
+    private static final float WINDOW_MIN = -16.0f;
+    private static final float WINDOW_MAX = 32.0f;
+
+    /**
+     * Fits the posed geometry into the client's {@code -16..32} px element
+     * window. A real-scale gun easily exceeds the 48 px window on its long
+     * axis; the client then refuses the whole model and renders the missing-
+     * model cube — the "giant purple-black box".
+     *
+     * <p>The fit is a uniform scale about the element-space centre plus a
+     * re-centre translation; the display transform compensates exactly
+     * ({@code scale × 1/f}, translation minus {@code R·S·w/f}), so the gun
+     * still presents at its authored world size. Runs after the display fold,
+     * so both authored and animated contexts are corrected.</p>
+     */
+    private static void fitWindow(JsonObject root, JsonObject display, String sourceName,
+                                  List<String> issues) {
+        JsonArray elements = root.getAsJsonArray("elements");
+        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
+        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        for (JsonElement entry : elements) {
+            JsonObject element = entry.getAsJsonObject();
+            widen(bounds(element, "from"), min, max);
+            widen(bounds(element, "to"), min, max);
+        }
+        float scale = 1.0f;
+        boolean overflow = false;
+        for (int axis = 0; axis < 3; axis++) {
+            if (min[axis] < WINDOW_MIN - 0.01f || max[axis] > WINDOW_MAX + 0.01f) {
+                overflow = true;
+            }
+            float span = max[axis] - min[axis];
+            if (span > WINDOW_MAX - WINDOW_MIN) {
+                scale = Math.min(scale, (WINDOW_MAX - WINDOW_MIN) / span);
+            }
+        }
+        if (!overflow) {
+            return;
+        }
+        float[] shift = new float[3];
+        float[] correction = new float[3];
+        for (int axis = 0; axis < 3; axis++) {
+            float centre = (min[axis] + max[axis]) / 2.0f;
+            shift[axis] = CENTRE - scale * centre;
+            // The translation term the display must absorb on top of the
+            // scale division: w = t - (1-f)·c, in element pixels.
+            correction[axis] = (shift[axis] - (1.0f - scale) * CENTRE) / scale;
+        }
+        for (JsonElement entry : elements) {
+            JsonObject element = entry.getAsJsonObject();
+            moveCorner(element, "from", scale, shift);
+            moveCorner(element, "to", scale, shift);
+        }
+        for (String context : DISPLAY_CONTEXTS) {
+            JsonObject transform = object(display, context);
+            if (transform == null) {
+                transform = new JsonObject();
+                display.add(context, transform);
+            }
+            float[] rotation = triple(transform, "rotation", new float[3]);
+            float[] translation = triple(transform, "translation", new float[3]);
+            float[] s = triple(transform, "scale", new float[]{1.0f, 1.0f, 1.0f});
+            float[] matrix = eulerXYZ(rotation[0], rotation[1], rotation[2]);
+            float[] absorbed = apply(matrix, new float[]{
+                    s[0] == 0.0f ? 0.0f : s[0] * correction[0],
+                    s[1] == 0.0f ? 0.0f : s[1] * correction[1],
+                    s[2] == 0.0f ? 0.0f : s[2] * correction[2]});
+            addPair(transform, "translation", new float[]{
+                    translation[0] - absorbed[0],
+                    translation[1] - absorbed[1],
+                    translation[2] - absorbed[2]});
+            addPair(transform, "scale", new float[]{
+                    s[0] / scale, s[1] / scale, s[2] / scale});
+        }
+        issues.add(sourceName + ": posed geometry exceeds the client's "
+                + (int) (WINDOW_MAX - WINDOW_MIN) + "px element window; it was scaled x"
+                + round(scale) + " and re-centred, with the display transform compensating"
+                + " so the presented size is unchanged.");
+    }
+
+    /** Reads one element corner, defaulting to the origin. */
+    private static float[] bounds(JsonObject element, String key) {
+        JsonArray corner = element.getAsJsonArray(key);
+        float[] out = new float[3];
+        for (int axis = 0; axis < 3; axis++) {
+            out[axis] = corner.get(axis).getAsFloat();
+        }
+        return out;
+    }
+
+    private static void widen(float[] point, float[] min, float[] max) {
+        for (int axis = 0; axis < 3; axis++) {
+            min[axis] = Math.min(min[axis], point[axis]);
+            max[axis] = Math.max(max[axis], point[axis]);
+        }
+    }
+
+    private static void moveCorner(JsonObject element, String key, float scale, float[] shift) {
+        JsonArray corner = element.getAsJsonArray(key);
+        for (int axis = 0; axis < 3; axis++) {
+            corner.set(axis, new JsonPrimitive(round(scale * corner.get(axis).getAsFloat() + shift[axis])));
+        }
     }
 
     /** Every animated bone's sampled rotation and shift, keyed by bone index. */
@@ -349,17 +466,21 @@ public final class BbClipBaker {
                 JsonObject rotation = new JsonObject();
                 addPair(rotation, "origin", origin);
                 rotation.addProperty("axis", AXIS_NAMES[axis]);
-                // The true angle is written, not a clamped one: a client that
-                // clamps element rotations still lands on its own limit, and a
-                // client that does not renders the hinge exactly as authored.
-                rotation.addProperty("angle", round(angle));
+                // Clamped into the documented ±45 window: vanilla's model
+                // deserializer REJECTS an out-of-range element angle, and one
+                // refused hinge refuses the whole model — the gun rendered as
+                // a missing-model cube. A clamp shortens the hinge visually
+                // (the hammer stops at 45° instead of 66°) but the frame
+                // always loads; the authored angle is reported as an issue.
+                float clamped = Math.max(-MAX_ELEMENT_ANGLE, Math.min(MAX_ELEMENT_ANGLE, angle));
+                rotation.addProperty("angle", round(clamped));
                 element.add("rotation", rotation);
-                if (Math.abs(angle) > MAX_ELEMENT_ANGLE
+                if (Math.abs(angle) > MAX_ELEMENT_ANGLE + 1.0e-3f
                         && warned.add("clamp:" + bone.name() + ':' + axis)) {
                     issues.add("'" + bone.rawName() + "' hinges " + round(angle) + " deg about "
                             + AXIS_NAMES[axis] + ", past the +/-" + (int) MAX_ELEMENT_ANGLE
-                            + " deg an element rotation is documented to carry; a reader that"
-                            + " enforces that limit shortens or refuses the hinge.");
+                            + " deg the format carries; the emitted hinge is clamped to "
+                            + round(clamped) + " deg so the model loads.");
                 }
             } else {
                 // No element rotation can carry this: one box, two or three axes.

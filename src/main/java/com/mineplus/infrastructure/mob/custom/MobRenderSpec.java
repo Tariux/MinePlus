@@ -86,6 +86,7 @@ public final class MobRenderSpec {
     private final Supplier<byte[]> textureBytes;
     private final float scale;
     private final float yawOffsetDegrees;
+    private final boolean yawOffsetAuthored;
     private final Map<String, String> animationMap;
     private final Map<String, HandItem> handItems;
     private final FallbackMode fallback;
@@ -96,6 +97,7 @@ public final class MobRenderSpec {
 
     private MobRenderSpec(RenderType type, String sourceName, Supplier<byte[]> modelBytes,
                           Supplier<byte[]> textureBytes, float scale, float yawOffsetDegrees,
+                          boolean yawOffsetAuthored,
                           Map<String, String> animationMap,
                           Map<String, HandItem> handItems, FallbackMode fallback,
                           HurtFeedback hurtFeedback, Float shadowRadius,
@@ -106,6 +108,7 @@ public final class MobRenderSpec {
         this.textureBytes = textureBytes;
         this.scale = scale <= 0.0f ? 1.0f : scale;
         this.yawOffsetDegrees = BoneTransformMath.wrapDegrees(yawOffsetDegrees);
+        this.yawOffsetAuthored = yawOffsetAuthored;
         this.animationMap = animationMap == null ? Map.of() : Map.copyOf(animationMap);
         this.handItems = handItems == null ? Map.of() : Map.copyOf(handItems);
         this.fallback = fallback == null ? FallbackMode.BASE_ENTITY : fallback;
@@ -151,6 +154,11 @@ public final class MobRenderSpec {
      */
     public float yawOffsetDegrees() {
         return yawOffsetDegrees;
+    }
+
+    /** True when the definition authored {@code yaw-offset} explicitly. */
+    public boolean yawOffsetAuthored() {
+        return yawOffsetAuthored;
     }
 
     /** State → clip name aliases (e.g. {@code attack → animation.smash}). */
@@ -200,6 +208,7 @@ public final class MobRenderSpec {
         private Supplier<byte[]> textureBytes;
         private float scale = 1.0f;
         private float yawOffsetDegrees;
+        private boolean yawOffsetAuthored;
         private final Map<String, String> animationMap = new LinkedHashMap<>();
         private final Map<String, HandItem> handItems = new LinkedHashMap<>();
         private FallbackMode fallback = FallbackMode.BASE_ENTITY;
@@ -235,6 +244,7 @@ public final class MobRenderSpec {
         /** Yaw added to the rig frame; for a model not authored facing {@code -z}. */
         public Builder yawOffsetDegrees(float value) {
             this.yawOffsetDegrees = value;
+            this.yawOffsetAuthored = true;
             return this;
         }
 
@@ -313,8 +323,8 @@ public final class MobRenderSpec {
                 throw new IllegalArgumentException("Render type RETEXTURE_VANILLA needs textureBytes(...)");
             }
             return new MobRenderSpec(type, sourceName, modelBytes, textureBytes, scale,
-                    yawOffsetDegrees, animationMap, handItems, fallback, hurtFeedback,
-                    shadowRadius, hitboxWidth, hitboxHeight);
+                    yawOffsetDegrees, yawOffsetAuthored, animationMap, handItems, fallback,
+                    hurtFeedback, shadowRadius, hitboxWidth, hitboxHeight);
         }
     }
 }

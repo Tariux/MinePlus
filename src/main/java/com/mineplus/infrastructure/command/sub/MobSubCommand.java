@@ -264,6 +264,13 @@ public final class MobSubCommand implements SubCommand {
                     + (pose == null ? ChatColor.GRAY + " no rig" : ChatColor.AQUA + " " + pose)
                     + (isolation == null ? "" : ChatColor.GRAY + " ai=" + isolation));
         }
+        java.util.List<String> history = context.customMobManager().rigHistory(definition.id());
+        if (!history.isEmpty()) {
+            sender.sendMessage(ChatColor.YELLOW + "Presentation history:");
+            for (String line : history) {
+                sender.sendMessage(ChatColor.GRAY + "  - " + line);
+            }
+        }
     }
 
     private String boneList(ModelData model) {

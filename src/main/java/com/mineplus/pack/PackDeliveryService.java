@@ -222,8 +222,10 @@ final class PackDeliveryService {
                 }
             }
         }
-        DebugLogger.info("[PackDelivery] Pushed " + current.artifactName() + " to "
-                + player.getName() + " at " + url);
+        // Always-on: the artifact a client was handed is the first question of
+        // every "my item does not render" report, and DebugLogger gating hid it.
+        org.bukkit.Bukkit.getLogger().info("[PackDelivery] Pushed " + current.artifactName()
+                + " to " + player.getName() + " (" + url + ")");
         return true;
     }
 

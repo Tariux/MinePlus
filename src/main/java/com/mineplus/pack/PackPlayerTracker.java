@@ -51,6 +51,11 @@ final class PackPlayerTracker implements Listener {
             case FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD -> PlayerPackState.FAILED;
             case SUCCESSFULLY_LOADED -> PlayerPackState.APPLIED;
         };
+        // The client-side pack state is invisible to every other layer: without
+        // this line, "guns do not render" is indistinguishable between a bad
+        // artifact and a client that declined or failed the download.
+        system.plugin().getLogger().info("[Pack] " + event.getPlayer().getName()
+                + " pack state: " + mapped + " (" + event.getStatus() + ")");
         delivery.state(event.getPlayer().getUniqueId(), mapped);
         system.onPlayerPackState(event.getPlayer().getUniqueId(), mapped);
     }

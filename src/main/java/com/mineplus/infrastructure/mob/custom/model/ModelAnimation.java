@@ -231,6 +231,7 @@ public final class ModelAnimation {
 
         public ModelAnimation build() {
             Map<String, BoneTrack> tracks = new LinkedHashMap<>();
+            float maxKeyTime = 0.0f;
             for (Map.Entry<String, Map<String, List<Key>>> boneEntry : keys.entrySet()) {
                 Curve rotation = curve(boneEntry.getValue().get("rotation"));
                 Curve position = curve(boneEntry.getValue().get("position"));
@@ -238,9 +239,24 @@ public final class ModelAnimation {
                 if (rotation != null || position != null || scale != null) {
                     tracks.put(boneEntry.getKey(), new BoneTrack(rotation, position, scale));
                 }
+                maxKeyTime = Math.max(maxKeyTime, maxTime(boneEntry.getValue()));
             }
             String name = rawName.toLowerCase(Locale.ROOT);
-            return new ModelAnimation(name, rawName, lengthSeconds, loopMode, tracks);
+            // Third-party exporters (Cubik, conversion scripts) omit the clip
+            // `length`; falling back to the last key keeps `wrap` meaningful —
+            // without it every sample clamps to playhead 0 and the clip freezes.
+            float effectiveLength = lengthSeconds > 0.0f ? lengthSeconds : maxKeyTime;
+            return new ModelAnimation(name, rawName, effectiveLength, loopMode, tracks);
+        }
+
+        private static float maxTime(Map<String, List<Key>> channels) {
+            float max = 0.0f;
+            for (List<Key> channelKeys : channels.values()) {
+                for (Key key : channelKeys) {
+                    max = Math.max(max, key.time);
+                }
+            }
+            return max;
         }
 
         private static Curve curve(List<Key> channelKeys) {

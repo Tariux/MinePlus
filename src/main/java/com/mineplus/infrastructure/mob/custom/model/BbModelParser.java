@@ -96,6 +96,8 @@ public final class BbModelParser {
         private final List<ModelBone> bones = new ArrayList<>();
         private final Map<String, Integer> boneIndexByUuid = new HashMap<>();
         private final Map<String, Integer> elementBoneIndex = new HashMap<>();
+        /** Element uuids under a visibility=false outliner node: geometry that must not render. */
+        private final Set<String> hiddenElementUuids = new HashSet<>();
         /** Format 5.0: group uuid -> the root {@code groups} entry holding its real data. */
         private final Map<String, JsonObject> groupsByUuid = new HashMap<>();
         private final Map<String, Boolean> molangWarned = new HashMap<>();
@@ -151,6 +153,9 @@ public final class BbModelParser {
             for (Map.Entry<String, JsonObject> entry : elementsByUuid.entrySet()) {
                 String uuid = entry.getKey();
                 JsonObject element = entry.getValue();
+                if (hiddenElementUuids.contains(uuid)) {
+                    continue;
+                }
                 String type = string(element, "type", "cube");
                 if (type.equals("locator") || type.equals("null_object")) {
                     continue; // attachment bones, created by the outliner walk
@@ -185,15 +190,15 @@ public final class BbModelParser {
                     // Bake the element rotation into a synthetic sub-bone: the
                     // client's element rotation is limited to one axis at ±45°,
                     // a bone rotation has neither limit.
-                    float[] origin = floatArrayOr(element.get("origin"), 0.0f, 3);
-                    while (origin.length < 3) {
-                        origin = new float[]{0, 0, 0};
-                    }
+                    float[] origin = new float[]{rotation[3], rotation[4], rotation[5]};
                     String subName = uniqueName(bone.name() + "_rot" + (rotationBoneCounter++));
                     int subIndex = bones.size();
                     bones.add(new ModelBone(subName, string(element, "name", uuid) + " (rotation)",
                             boneIndex, origin[0], origin[1], origin[2],
                             rotation[0], rotation[1], rotation[2], List.of(), ModelBone.Attachment.NONE));
+                    // An animator keyed by this element's uuid must drive the
+                    // sub-bone that now holds the geometry, not the parent.
+                    elementBoneIndex.put(uuid, subIndex);
                     // The cube is already relative to the parent bone's pivot; the
                     // sub-bone pivots at the absolute origin, so re-base by the
                     // origin as seen from the parent bone.
@@ -257,6 +262,13 @@ public final class BbModelParser {
                 JsonObject node = entry.getAsJsonObject();
                 String uuid = string(node, "uuid", "");
                 JsonObject authored = uuid.isEmpty() ? null : groupsByUuid.get(uuid);
+                boolean visible = firstBoolean(node.get("visibility"), authored == null ? null : authored.get("visibility"), true);
+                if (!visible) {
+                    // Hidden groups contribute nothing: collect every element
+                    // uuid under the node so the cube loop skips them too.
+                    collectHidden(node, authored, elementsByUuid);
+                    continue;
+                }
                 String rawName = firstText(string(node, "name", null), string(authored, "name", null),
                         "group_" + counter);
                 float[] pivot = floatArrayOr(firstNonNull(node.get("origin"),
@@ -283,6 +295,38 @@ public final class BbModelParser {
          * An outliner child that is an element uuid: a cube attaches to its
          * group; a locator / null object becomes its own attachment bone.
          */
+        private void collectHidden(JsonObject node, JsonObject authored, Map<String, JsonObject> elementsByUuid) {
+            JsonArray children = firstArray(node.get("children"),
+                    authored == null ? null : authored.get("children"));
+            if (children == null) {
+                return;
+            }
+            for (JsonElement child : children) {
+                if (child.isJsonPrimitive()) {
+                    String elementUuid = child.getAsString();
+                    if (elementsByUuid.containsKey(elementUuid)) {
+                        hiddenElementUuids.add(elementUuid);
+                    }
+                } else if (child.isJsonObject()) {
+                    JsonObject childNode = child.getAsJsonObject();
+                    String childUuid = string(childNode, "uuid", "");
+                    collectHidden(childNode,
+                            childUuid.isEmpty() ? null : groupsByUuid.get(childUuid), elementsByUuid);
+                }
+            }
+        }
+
+        /** First boolean across the node, its 5.0 definition, and a default. */
+        private static boolean firstBoolean(JsonElement node, JsonElement authored, boolean fallback) {
+            if (node != null && node.isJsonPrimitive()) {
+                return node.getAsBoolean();
+            }
+            if (authored != null && authored.isJsonPrimitive()) {
+                return authored.getAsBoolean();
+            }
+            return fallback;
+        }
+
         private void attachElement(String uuid, int parentIndex, Map<String, JsonObject> elementsByUuid) {
             JsonObject element = elementsByUuid.get(uuid);
             if (element == null) {
@@ -382,7 +426,17 @@ public final class BbModelParser {
                 return null;
             }
             if (to[0] <= from[0] || to[1] <= from[1] || to[2] <= from[2]) {
-                return null;
+                if (to[0] < from[0] || to[1] < from[1] || to[2] < from[2]) {
+                    return null;
+                }
+                // A zero extent is a flat plate (wings, fins, detail planes) —
+                // common in complicated models. A hair's width renders it
+                // instead of silently dropping the geometry.
+                for (int axis = 0; axis < 3; axis++) {
+                    if (to[axis] == from[axis]) {
+                        to[axis] = from[axis] + 0.01f;
+                    }
+                }
             }
             float inflate = element.has("inflate") && element.get("inflate").isJsonPrimitive()
                     ? element.get("inflate").getAsFloat() : 0.0f;
@@ -417,7 +471,10 @@ public final class BbModelParser {
                 faces.put("east", new ModelCube.Uv(u + d + w, v + d, u + d + w + d, v + d + h));
                 faces.put("south", new ModelCube.Uv(u + d + w + d, v + d, u + d + w + d + w, v + d + h));
                 faces.put("up", new ModelCube.Uv(u + d, v, u + d + w, v + d));
-                faces.put("down", new ModelCube.Uv(u + d + w, v + d, u + d + w + w, v + 2 * d));
+                // The bottom face sits in the same top row as `up`, right of
+                // it — the vanilla ModelBox layout. (A band-below placement
+                // sampled every box-UV cube's bottom one texture band low.)
+                faces.put("down", new ModelCube.Uv(u + d + w, v, u + d + w + w, v + d));
                 // Also read texture index from faces if not set at element level
                 if (textureIndex < 0 && element.has("faces") && element.get("faces").isJsonObject()) {
                     JsonObject faceObject = element.getAsJsonObject("faces");
@@ -453,6 +510,11 @@ public final class BbModelParser {
                     if (uv.length < 4 || Float.isNaN(uv[0])) {
                         continue;
                     }
+                    int faceRotation = face.has("rotation") && face.get("rotation").isJsonPrimitive()
+                            ? face.get("rotation").getAsInt() : 0;
+                    if (faceRotation % 90 != 0 || faceRotation < 0 || faceRotation > 270) {
+                        faceRotation = 0;
+                    }
                     float max = Math.max(Math.max(Math.abs(uv[0]), Math.abs(uv[1])),
                             Math.max(Math.abs(uv[2]), Math.abs(uv[3])));
                     if (max > 1.001f) {
@@ -464,11 +526,11 @@ public final class BbModelParser {
                             issues.add(sourceName + ": a face UV is pixel-space while another is"
                                     + " normalized; the pixel one is used as authored.");
                         }
-                        faces.put(direction, new ModelCube.Uv(uv[0], uv[1], uv[2], uv[3]));
+                        faces.put(direction, new ModelCube.Uv(uv[0], uv[1], uv[2], uv[3], faceRotation));
                     } else {
                         normalizedUvSeen = true;
                         faces.put(direction, new ModelCube.Uv(uv[0] * texW, uv[1] * texH,
-                                uv[2] * texW, uv[3] * texH));
+                                uv[2] * texW, uv[3] * texH, faceRotation));
                     }
                 }
             }
@@ -485,30 +547,45 @@ public final class BbModelParser {
                     cube.inflate(), cube.textureIndex(), cube.faces());
         }
 
-        /** The element rotation as {rx, ry, rz} degrees, or {@code null} when none. */
+        /**
+         * The element rotation as {rx, ry, rz, ox, oy, oz} degrees/pixels, or
+         * {@code null} when none. The Java block-model object form carries its
+         * own origin, which must be honored — the element's {@code origin}
+         * field is a different quantity.
+         */
         private float[] elementRotation(JsonObject element) {
             JsonElement rotation = element.get("rotation");
             if (rotation == null) {
                 return null;
             }
+            float[] defaultOrigin = floatArrayOr(element.get("origin"), 0.0f, 3);
+            while (defaultOrigin.length < 3) {
+                defaultOrigin = new float[]{0, 0, 0};
+            }
             if (rotation.isJsonObject()) {
                 // Java block-model style: {axis, angle, origin}.
-                String axis = string(rotation.getAsJsonObject(), "axis", "");
-                float angle = rotation.getAsJsonObject().has("angle")
-                        && rotation.getAsJsonObject().get("angle").isJsonPrimitive()
-                        ? rotation.getAsJsonObject().get("angle").getAsFloat() : 0.0f;
+                JsonObject object = rotation.getAsJsonObject();
+                String axis = string(object, "axis", "");
+                float angle = object.has("angle") && object.get("angle").isJsonPrimitive()
+                        ? object.get("angle").getAsFloat() : 0.0f;
                 if (Math.abs(angle) < 1.0e-4f) {
                     return null;
                 }
-                return switch (axis) {
-                    case "x" -> new float[]{angle, 0, 0};
-                    case "y" -> new float[]{0, angle, 0};
-                    case "z" -> new float[]{0, 0, angle};
+                float[] origin = floatArrayOr(object.get("origin"), defaultOrigin[0], 3);
+                while (origin.length < 3) {
+                    origin = defaultOrigin;
+                }
+                float[] out = new float[]{0, 0, 0, origin[0], origin[1], origin[2]};
+                switch (axis) {
+                    case "x" -> out[0] = angle;
+                    case "y" -> out[1] = angle;
+                    case "z" -> out[2] = angle;
                     default -> {
                         issues.add(sourceName + ": element rotation axis '" + axis + "' is unknown; skipped.");
-                        yield null;
+                        return null;
                     }
-                };
+                }
+                return out;
             }
             if (rotation.isJsonArray() && rotation.getAsJsonArray().size() >= 3) {
                 float rx = rotation.getAsJsonArray().get(0).getAsFloat();
@@ -520,7 +597,7 @@ public final class BbModelParser {
                 // Any axis combination is fine here: the rotation becomes a synthetic
                 // bone, and bone rotations have none of the client's one-axis ±45°
                 // element-rotation limits.
-                return new float[]{rx, ry, rz};
+                return new float[]{rx, ry, rz, defaultOrigin[0], defaultOrigin[1], defaultOrigin[2]};
             }
             return null;
         }

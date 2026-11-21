@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.mob.custom.rig;
 
 import com.mineplus.infrastructure.mob.custom.model.ModelAnimation;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -87,6 +88,14 @@ public final class MobAnimator {
     private float time;
     private float stridePhase;
     private final float[] sampleBuffer = new float[3];
+    /**
+     * Persistent per-state playheads: a state's clip keeps its own phase
+     * across transitions, so re-entering walk resumes where it left off
+     * instead of popping to wherever the shared lifetime clock happens to be.
+     */
+    private final Map<State, Float> stateClocks = new EnumMap<>(State.class);
+    /** The lifetime tick when death began; the death clip plays from frame 0. */
+    private float deathStartTime;
     private State baseState = State.IDLE;
     private State previousState = State.IDLE;
     private float crossfade = 1.0f;
@@ -205,7 +214,13 @@ public final class MobAnimator {
 
     /** Terminal: the death clip plays once and holds its last pose. */
     public void markDead() {
-        dead = true;
+        if (!dead) {
+            dead = true;
+            // The death clip must play from its first frame: without pinning
+            // the start, the playhead was the mob's whole lifetime and every
+            // ONCE/HOLD death clip landed instantly on its last pose.
+            deathStartTime = time;
+        }
     }
 
     /** True when a death clip is bound; without one the rig despawns right away. */
@@ -239,13 +254,14 @@ public final class MobAnimator {
             crossfade = 0.0f;
         }
         crossfade = Math.min(1.0f, crossfade + deltaSeconds / CROSSFADE_SECONDS);
+        stateClocks.merge(baseState, Math.max(0.0f, deltaSeconds), Float::sum);
         maybeFireAmbient(deltaSeconds);
 
         for (BonePose pose : poses.values()) {
             pose.reset();
         }
         if (dead && deathClip != null) {
-            sample(deathClip, deathClip.wrap(time), 1.0f);
+            sample(deathClip, deathClip.wrap(time - deathStartTime), 1.0f);
             return;
         }
 
@@ -253,10 +269,10 @@ public final class MobAnimator {
         ModelAnimation previous = previousState == baseState ? null : baseClip(previousState);
         float blend = dead ? 1.0f : crossfade;
         if (previous != null && blend < 1.0f) {
-            sample(previous, previous.wrap(time), 1.0f - blend);
+            sample(previous, previous.wrap(stateClock(previousState)), 1.0f - blend);
         }
         if (current != null) {
-            sample(current, current.wrap(time), blend);
+            sample(current, current.wrap(stateClock(baseState)), blend);
         } else {
             procedural(baseState, speedBlocksPerTick);
         }
@@ -314,6 +330,12 @@ public final class MobAnimator {
         };
     }
 
+    /** A state's persistent playhead; a state never sampled yet starts at 0. */
+    private float stateClock(State state) {
+        Float clock = stateClocks.get(state);
+        return clock == null ? 0.0f : clock;
+    }
+
     private static float overlayWeight(float startTime, ModelAnimation clip) {
         if (clip == null || startTime >= overlayLength(clip)) {
             return 0.0f;
@@ -332,21 +354,30 @@ public final class MobAnimator {
         for (Map.Entry<String, ModelAnimation.BoneTrack> entry : clip.trackEntries().entrySet()) {
             BonePose pose = poses.computeIfAbsent(entry.getKey(), name -> new BonePose());
             ModelAnimation.BoneTrack track = entry.getValue();
+            // sampleFromRest: a channel the playhead has not reached yet
+            // contributes nothing (rest), matching the baker and Blockbench's
+            // timeline — `sample` would hold the first key's pose instead.
             if (track.rotation() != null) {
-                track.rotation().sample(playhead, sampleBuffer);
+                track.rotation().sampleFromRest(playhead, sampleBuffer);
                 pose.rotationX = blendChannel(pose.rotationX, sampleBuffer[0], weight, true);
                 pose.rotationY = blendChannel(pose.rotationY, sampleBuffer[1], weight, true);
                 pose.rotationZ = blendChannel(pose.rotationZ, sampleBuffer[2], weight, true);
             }
             if (track.position() != null) {
-                track.position().sample(playhead, sampleBuffer);
+                track.position().sampleFromRest(playhead, sampleBuffer);
                 pose.offsetX = blendChannel(pose.offsetX, sampleBuffer[0], weight, false);
                 pose.offsetY = blendChannel(pose.offsetY, sampleBuffer[1], weight, false);
                 pose.offsetZ = blendChannel(pose.offsetZ, sampleBuffer[2], weight, false);
             }
             if (track.scale() != null) {
-                track.scale().sample(playhead, sampleBuffer);
-                float sampled = sampleBuffer[0] != 0.0f ? sampleBuffer[0] : 1.0f;
+                track.scale().sampleFromRest(playhead, sampleBuffer);
+                // Rest/unset components read as 1; a non-uniform clip
+                // contributes its axis mean (a single-scale slot is the rig's
+                // representation, so axes fold into one multiplier).
+                float x = sampleBuffer[0] != 0.0f ? sampleBuffer[0] : 1.0f;
+                float y = sampleBuffer[1] != 0.0f ? sampleBuffer[1] : 1.0f;
+                float z = sampleBuffer[2] != 0.0f ? sampleBuffer[2] : 1.0f;
+                float sampled = (x + y + z) / 3.0f;
                 pose.scale = pose.scale * (1.0f - weight) + sampled * weight;
             }
         }

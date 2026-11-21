@@ -89,6 +89,7 @@ public class BbModelImporter {
         List<RawElement> rawElements = new ArrayList<>();
         List<RawAnchor> rawAnchors = new ArrayList<>();
         List<RawGroup> rootOutliner = new ArrayList<>();
+        List<RawGroup> groupDefinitions = new ArrayList<>();
         List<String> rootElementUuids = new ArrayList<>();
         List<RawAnimation> rawAnimations = new ArrayList<>();
 
@@ -101,6 +102,7 @@ public class BbModelImporter {
                 case "textures" -> parseTextures(json, textureLookup);
                 case "elements" -> parseElements(json, rawElements, rawAnchors);
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
+                case "groups" -> parseOutliner(json, null, groupDefinitions, null);
                 case "resolution" -> resolution = parseResolution(json);
                 case "meta" -> modelFormat = parseMeta(json);
                 case "display" -> display = ModelDisplay.fromJson(json);
@@ -109,6 +111,18 @@ public class BbModelImporter {
             }
         }
         json.endObject();
+
+        // 5.0 dialect: the root `groups` array carries the full group
+        // definitions (name, origin, rotation) while the `outliner` holds
+        // bare uuid/children shells. Join the metadata by uuid before any
+        // transform is baked, or every group assembles at the model origin
+        // with identity rotation — pivots lost, animations exploding into
+        // huge arcs.
+        Map<String, RawGroup> definitions = new HashMap<>();
+        collectGroups(groupDefinitions, definitions, new HashSet<>());
+        if (!definitions.isEmpty()) {
+            joinGroupDefinitions(rootOutliner, definitions);
+        }
 
         // Bake outliner transforms exactly like the DOM importer did.
         Map<String, Matrix4f> elementTransforms = new HashMap<>();
@@ -439,7 +453,7 @@ public class BbModelImporter {
                     case "name" -> animator.name = nextStringOrNull(json);
                     case "type" -> animator.type = nextStringOrNull(json);
                     case "keyframes" -> parseKeyframes(json, animator);
-                    default -> json.skipValue(); // rotation_global, quaternion_interpolation, ...
+                    default -> parseChannelObject(json, fieldName, animator);
                 }
             }
             json.endObject();
@@ -475,6 +489,34 @@ public class BbModelImporter {
             animator.keyframes.add(keyframe);
         }
         json.endArray();
+    }
+
+    /**
+     * The classic per-channel animator dialect: {@code rotation}/{@code
+     * position}/{@code scale} each carry their own {@code keyframes} array
+     * instead of one flat list tagged per channel. Anything else
+     * ({@code rotation_global}, sound/particle effects) is skipped.
+     */
+    private static void parseChannelObject(JsonReader json, String channel,
+                                           RawAnimator animator) throws Exception {
+        if (json.peek() != JsonToken.BEGIN_OBJECT) {
+            json.skipValue();
+            return;
+        }
+        json.beginObject();
+        while (json.hasNext()) {
+            String sub = json.nextName();
+            if (sub.equals("keyframes") && json.peek() == JsonToken.BEGIN_ARRAY) {
+                int before = animator.keyframes.size();
+                parseKeyframes(json, animator);
+                for (int i = before; i < animator.keyframes.size(); i++) {
+                    animator.keyframes.get(i).channel = channel;
+                }
+            } else {
+                json.skipValue();
+            }
+        }
+        json.endObject();
     }
 
     /** Reads the first data point's x/y/z; the remaining points are skipped. */
@@ -897,6 +939,41 @@ public class BbModelImporter {
         boolean visibility = true;
         final List<String> childElementUuids = new ArrayList<>();
         final List<RawGroup> children = new ArrayList<>();
+    }
+
+    /** Flattens parsed {@code groups} definitions into a uuid lookup (cycle-safe). */
+    private static void collectGroups(List<RawGroup> groups, Map<String, RawGroup> out,
+                                      Set<RawGroup> visited) {
+        for (RawGroup group : groups) {
+            if (!visited.add(group)) {
+                continue;
+            }
+            if (group.uuid != null && !group.uuid.isBlank()) {
+                out.putIfAbsent(group.uuid, group);
+            }
+            collectGroups(group.children, out, visited);
+        }
+    }
+
+    /** Copies missing metadata from the 5.0 {@code groups} definitions into the outliner shells. */
+    private static void joinGroupDefinitions(List<RawGroup> groups, Map<String, RawGroup> definitions) {
+        for (RawGroup group : groups) {
+            if (group.uuid != null && !group.uuid.isBlank()) {
+                RawGroup definition = definitions.get(group.uuid);
+                if (definition != null) {
+                    if (group.name == null) {
+                        group.name = definition.name;
+                    }
+                    if (group.origin == null) {
+                        group.origin = definition.origin;
+                    }
+                    if (group.rotation == null) {
+                        group.rotation = definition.rotation;
+                    }
+                }
+            }
+            joinGroupDefinitions(group.children, definitions);
+        }
     }
 
     /** Streaming holder for one element. */

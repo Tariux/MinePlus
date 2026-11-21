@@ -166,6 +166,17 @@ public final class PackCompiler {
                 for (Map.Entry<String, byte[]> legacy : ItemModelWriter.legacyHostFiles(itemsOnly(snapshot)).entrySet()) {
                     putEntry(entries, legacy.getKey(), legacy.getValue(), validator);
                 }
+            } else {
+                // A modern-representation artifact still carries the legacy
+                // host files: a client older than the server's version range
+                // (a downgraded friend, a Via-style proxy) reads only the
+                // overrides, and a client the representation guessed wrong
+                // about still renders every framed item. The modern entries
+                // are ignored by legacy clients; the hosts are ignored by
+                // modern ones. One artifact covers both.
+                for (Map.Entry<String, byte[]> legacy : ItemModelWriter.legacyHostFiles(itemsOnly(snapshot)).entrySet()) {
+                    putEntry(entries, legacy.getKey(), legacy.getValue(), validator);
+                }
             }
             // Block host files are representation-independent: a BlockDisplay
             // has no per-entity model dispatch on any client version.

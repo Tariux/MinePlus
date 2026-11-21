@@ -12,8 +12,16 @@ import java.util.Map;
  */
 public final class ModelCube {
 
-    /** One face's texture window in texture pixels. */
-    public record Uv(float u1, float v1, float u2, float v2) {
+    /**
+     * One face's texture window in texture pixels, with the authored in-window
+     * UV rotation (0/90/180/270, vanilla face {@code rotation} semantics).
+     */
+    public record Uv(float u1, float v1, float u2, float v2, int rotation) {
+
+        /** Convenience form for faces authored without an in-window rotation. */
+        public Uv(float u1, float v1, float u2, float v2) {
+            this(u1, v1, u2, v2, 0);
+        }
     }
 
     private final float fromX;

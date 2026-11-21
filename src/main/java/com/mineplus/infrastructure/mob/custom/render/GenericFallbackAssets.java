@@ -29,12 +29,17 @@ public final class GenericFallbackAssets {
     private GenericFallbackAssets() {
     }
 
-    /** Registers the fallback cube (no-op when the pack subsystem is unavailable). */
-    public static void register(PackApi pack) {
+    /**
+     * Registers the fallback cube. Returns {@code true} when written; the
+     * caller retries a {@code false} once the pack is available — this asset
+     * must exist before any mob can degrade to it.
+     */
+    public static boolean register(PackApi pack) {
         if (pack == null || !pack.isAvailable()) {
-            return;
+            return false;
         }
         BoneRigAssetWriter.registerGenerated(pack, NAMESPACE, COMPONENT_PATH, cubeJson());
+        return true;
     }
 
     private static byte[] cubeJson() {

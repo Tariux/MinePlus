@@ -387,6 +387,25 @@ Profiles are dispatched by custom id through `MobIdentityResolver`:
 
 ## Rendering
 
+### Presentation lifecycle (what to check when a rig does not show)
+
+Definitions register during plugin enable, often before the pack subsystem has
+compiled its first artifact. A definition that registers too early waits — it
+does not cache a broken bundle: once the pack is available the render engine
+retries (about once a second) and rebuilds any rig that had fallen back to the
+base entity. One display piece the pack cannot present is skipped with a log
+line while the rest of the rig still builds. `/mineplus mob inspect <id>`
+prints the bounded presentation history, so a failure reads as a sequence
+(`waiting for the pack to compile` → `FULL ...`) rather than one opaque line.
+
+Model-authoring constraints the pipeline enforces: element coordinates live in
+the client's −16..32 px window per axis (inflated cubes included — the emitter
+measures bounds post-inflate); zero-thickness cubes render as hair-thin plates
+instead of being dropped; box-UV layouts follow the vanilla ModelBox cross
+(including the bottom face next to the top); per-face UV rotations 0/90/180/270
+are carried through; a clip without a `length` field uses its last keyframe as
+the length. Death clips play from frame 0.
+
 ### Texture-extended models
 
 `CustomMobModel.vanilla(baseType, png)` reuses the published vanilla model

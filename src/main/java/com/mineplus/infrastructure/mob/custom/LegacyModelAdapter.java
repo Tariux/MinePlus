@@ -85,7 +85,7 @@ public final class LegacyModelAdapter {
                     faces.put("east", new ModelCube.Uv(u + d + w, v + d, u + d + w + d, v + d + h));
                     faces.put("south", new ModelCube.Uv(u + d + w + d, v + d, u + d + w + d + w, v + d + h));
                     faces.put("up", new ModelCube.Uv(u + d, v, u + d + w, v + d));
-                    faces.put("down", new ModelCube.Uv(u + d + w, v + d, u + d + w + w, v + 2 * d));
+                    faces.put("down", new ModelCube.Uv(u + d + w, v, u + d + w + w, v + d));
                 }
                 cubes.add(new ModelCube(x1, y1, z1, x2, y2, z2, 0.0f, 0, faces));
             }

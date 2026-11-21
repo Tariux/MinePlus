@@ -577,8 +577,11 @@ public final class CustomMobPipelineTest {
                 Math.abs(animator.poses().get("body").rotationX) < 0.05f);
         animator.tick(0.1f, 0.2f);
         animator.tick(0.1f, 0.2f);
+        // Per-state playheads: the walk clip runs on its own clock (0.2 s of
+        // walk so far), not the mob's lifetime (0.4 s) — re-entering a state
+        // resumes its phase instead of popping to the shared clock.
         check("crossfade reaches the target pose",
-                Math.abs(animator.poses().get("body").rotationX - 30.0f * 0.4f) < 0.05f);
+                Math.abs(animator.poses().get("body").rotationX - 30.0f * 0.2f) < 0.05f);
     }
 
     private static void mobAnimatorSlots() {

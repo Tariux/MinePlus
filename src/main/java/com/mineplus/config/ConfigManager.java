@@ -490,10 +490,12 @@ public class ConfigManager {
                       # Mobs beyond RENDER_NEAR_DISTANCE cost a quarter of this
                       # rate, and a rig nobody is near costs nothing at all.
                       RENDER_INTERVAL_TICKS: 1
-                      # Ticks a display eases its transformation over. 1 matches
-                      # the push cadence; raise it only to soften a coarse
-                      # RENDER_INTERVAL_TICKS.
-                      RENDER_INTERPOLATION_TICKS: 1
+                      # Ticks a display eases its transformation over. 3 smooths
+                      # movement: each sample glides until the next arrives
+                      # instead of snapping per tick. (Values below 2 are
+                      # clamped up to 2 — a 1-tick window cannot span the
+                      # push gap and renders as a snap.)
+                      RENDER_INTERPOLATION_TICKS: 3
                       # Blocks beyond which a rig is released entirely: its
                       # displays despawn and the mob shows its real base model
                       # again until a viewer comes back inside it.

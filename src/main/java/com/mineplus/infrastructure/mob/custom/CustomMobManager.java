@@ -645,6 +645,11 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         return renderEngine.bundle(definitionId);
     }
 
+    /** The bounded presentation history of one definition, for the inspect command. */
+    public java.util.List<String> rigHistory(String definitionId) {
+        return renderEngine.rigHistory(definitionId);
+    }
+
     /**
      * How this mob's vanilla AI was last cleared, for a status line; {@code null}
      * for an entity the manager has never applied a definition to.

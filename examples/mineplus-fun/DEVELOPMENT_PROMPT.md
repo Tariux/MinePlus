@@ -373,11 +373,15 @@ unchanged) and the resource pack subsystem (`com.mineplus.pack`). Both run side 
 side; the pack subsystem never touches the virtual engine's internals. Full contract:
 Core's `docs/pack-system.md`.
 
-### Backends (`renderBackend` in multiblock level JSON)
+### Backends (`renderMode` in multiblock level JSON)
 
 ```json
-"levels": { "1": { "model": "models/x.bbmodel", "renderBackend": "pack" } }
+"levels": { "1": { "model": "models/x.bbmodel", "renderMode": "pack" } }
 ```
+
+The legacy `renderBackend` (+`renderKind`) pair still parses, but `renderMode`
+is the recommended spelling for new content — the shipped JSON uses it
+(`pack_block`, `pack_bones`).
 
 | Backend | Collision | Pack player sees | Packless player sees |
 |---|---|---|---|
@@ -467,7 +471,7 @@ is inherited from `RegionAccessor`, not declared on `World`.
 ## 12. Packaging, build & deploy discipline
 
 - Module `build.gradle` must include the Core jar
-  (`compileOnly files("../../build/libs/mineplus-1.0.0.jar")`) plus the same library stubs the
+  (`compileOnly files("../../build/libs/mineplus-1.3.0.jar")`) plus the same library stubs the
   Core uses. Mirror the existing `examples/mineplus-fun/build.gradle` dependency block.
 - Build the Core first, then the module. Do **not** shade the Core into a module.
 - The assistant does **not** run Gradle — the user builds and reports compiler errors and
@@ -478,7 +482,7 @@ is inherited from `RegionAccessor`, not declared on `World`.
   rebuild and redeploy the Core jar too — a stale `Mineplus.jar` silently re-runs old behavior
   while the sources look fixed. Verify with jar timestamps vs. source edit times before
   debugging "nothing happens":
-  `Get-Item build\libs\mineplus-1.0.0.jar` vs. the edited source's `LastWriteTime`.
+  `Get-Item build\libs\mineplus-1.3.0.jar` vs. the edited source's `LastWriteTime`.
 - Server-side config files in the **Core's** data folder (`multiblocks/*.json`) are never
   overwritten on module update (`overwrite=false`); after editing a shipped JSON you must
   delete/reconcile the deployed copy by hand or edits will not appear.
@@ -542,7 +546,7 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   see the texture-gradient trap in §6. The command exposes both render axes for
   A/B testing: `/cabinet place texel` places the virtual/texel `cabinet`,
   `/cabinet place resourcepack` places the pack-block twin `cabinet_pack`
-  (same models, `renderBackend: pack` + `renderKind: block`); both share the
+  (same models, `renderMode: pack_block`); both share the
   same GUI/hook and appear in `/cabinet status` tagged as `texel`/`pack`.
 - **packshowcase** (`com.mineplus.fun.packshowcase`): the Phase 2 pack-system
   reference — registers `fun:strad_wine` (backing `GLASS_BOTTLE`, model key
@@ -559,7 +563,7 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   command, no `mineplusfun.admin.gunsmith` permission. See
   [docs/migration-guide.md §5](../../docs/migration-guide.md) for the transition.
 - **alchemy** (`com.mineplus.fun.alchemy`): the pack **block** axis. An
-  `alchemy_table` multiblock whose level declares `renderBackend: pack` +
+  `alchemy_table` multiblock whose level declares `renderMode: pack_block` (
   `renderKind: block`, rendered as one `BlockDisplay` carrying an allocated
   `PackBlockCarrier.NOTE_BLOCK` state. Note blocks share one uniform model and
   use the client's `MODEL` render type (required — `INVISIBLE`-render-type

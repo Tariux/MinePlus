@@ -28,6 +28,7 @@ import com.mineplus.util.DebugLogger;
 import com.mineplus.util.ServerVersion;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,6 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Deque;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -105,6 +107,8 @@ public final class MobRenderEngine {
     /** A pose push is skipped when neither position nor matrix moved by this. */
     private static final double POSE_POSITION_EPSILON = 0.0015;
     private static final float POSE_MATRIX_EPSILON = 0.0008f;
+    /** Maximum feed-forward lead a pose push may carry (blocks). */
+    private static final double POSE_LEAD_MAX_BLOCKS = 0.5;
     /** Ticks the base model stays revealed for a vanilla hurt flash. */
     private static final int HURT_REVEAL_TICKS = 8;
     /** Pose passes between two hurt particle bursts of the same mob. */
@@ -135,6 +139,8 @@ public final class MobRenderEngine {
     private long passCounter;
     private volatile static MobRenderEngine active;
     private volatile boolean boneDebug;
+    /** True once the bundled shadow/fallback assets actually reached the pack. */
+    private volatile boolean bundledAssetsRegistered;
     /** Paper's {@code Entity#setSize}, probed once; absent on plain Spigot. */
     private static MethodHandle setSizeHandle;
     private static boolean setSizeProbed;
@@ -192,8 +198,11 @@ public final class MobRenderEngine {
     /** Starts the tick loop, the listeners and the ghost sweep. */
     public void start() {
         Bukkit.getPluginManager().registerEvents(new Listeners(), plugin);
-        GenericFallbackAssets.register(pack);
-        MobShadowAssets.register(pack);
+        bundledAssetsRegistered = GenericFallbackAssets.register(pack) & MobShadowAssets.register(pack);
+        if (!bundledAssetsRegistered) {
+            DebugLogger.warning("[CustomMobs] Bundled rig assets (shadow, fallback cube) are"
+                    + " waiting for the pack to compile; they register automatically.");
+        }
         poseIntervalTicks = settings.renderIntervalTicks();
         tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick,
                 poseIntervalTicks, poseIntervalTicks);
@@ -280,28 +289,43 @@ public final class MobRenderEngine {
         String id = definition.id();
         if (spec == null && definition.model() == null) {
             entry.bundle = null;
-            entry.status = "vanilla look (no model)";
+            entry.note("vanilla look (no model)");
             return;
         }
         MobRenderSpec.RenderType type = spec != null ? spec.type() : MobRenderSpec.RenderType.BBMODEL;
         switch (type) {
             case NONE -> {
                 entry.bundle = null;
-                entry.status = "vanilla look";
+                entry.note("vanilla look");
             }
             case RETEXTURE_VANILLA -> {
                 entry.bundle = null;
                 shipRetexture(entry);
             }
             default -> {
+                // Assets can only be emitted once the pack subsystem is
+                // available. Registration runs during onEnable, before the
+                // first pack compile, so an unavailable pack is a wait state,
+                // not a broken model: keep the previous bundle (if any) and
+                // retry from the tick pass.
+                if (pack == null || !pack.isAvailable()) {
+                    entry.needsCompile = true;
+                    if (entry.bundle == null || !entry.bundle.presentable()) {
+                        entry.note("waiting for the pack to compile; "
+                                + "the base entity stands in for now");
+                    }
+                    return;
+                }
+                entry.needsCompile = false;
                 ModelData model = parseModel(entry, spec);
                 entry.bundle = ModelBundleCompiler.compile(pack, definition.namespace(),
                         definition.path(), model);
-                entry.status = entry.bundle.statusLine();
+                entry.note(entry.bundle.statusLine());
                 logOnce(id, "compile", entry.bundle.report().usable(),
                         "[CustomMobs] '" + id + "': " + entry.status);
             }
         }
+        entry.record();
     }
 
     private ModelData parseModel(Entry entry, MobRenderSpec spec) {
@@ -513,7 +537,12 @@ public final class MobRenderEngine {
 
     private void destroySession(Session session) {
         session.despawnDisplays();
-        session.revealBase();
+        // A dead mob's session ends after its death hold; the entity is a
+        // corpse for a few more ticks and must not flash back to the vanilla
+        // model on the way out.
+        if (!session.dead) {
+            session.revealBase();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -521,12 +550,18 @@ public final class MobRenderEngine {
     // ------------------------------------------------------------------
 
     private void tick() {
+        long pass = ++passCounter;
+        // Definitions that registered before the pack could compile get one
+        // cheap retry per second — this is what turns "mob spawned during
+        // startup renders as its base entity forever" into a self-heal.
+        if (pass % 20 == 0) {
+            rebuildPendingAssets();
+        }
         if (sessions.isEmpty()) {
             return;
         }
         CustomMobSettings current = settings;
         float passSeconds = TICK_SECONDS * poseIntervalTicks;
-        long pass = ++passCounter;
         snapshotViewers();
         Iterator<Session> iterator = sessions.values().iterator();
         while (iterator.hasNext()) {
@@ -594,6 +629,55 @@ public final class MobRenderEngine {
     }
 
     /**
+     * Retries definitions whose assets were emitted too early (pack not yet
+     * compiled) and rebuilds their sessions that fell back to the base entity.
+     * Runs at most once a second from the tick pass.
+     */
+    private void rebuildPendingAssets() {
+        PackApi packApi = pack;
+        if (packApi == null || !packApi.isAvailable()) {
+            return;
+        }
+        if (!bundledAssetsRegistered) {
+            // One identical-content registration is a registry no-op after
+            // the first success; until then it is what keeps the shadow
+            // plate and the fallback cube from rendering missing-model.
+            bundledAssetsRegistered = GenericFallbackAssets.register(pack)
+                    & MobShadowAssets.register(pack);
+        }
+        boolean any = false;
+        for (Entry entry : entries.values()) {
+            if (entry.needsCompile) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) {
+            return;
+        }
+        for (Entry entry : entries.values()) {
+            if (!entry.needsCompile) {
+                continue;
+            }
+            entry.needsCompile = false;
+            rebuildAssets(entry);
+            DebugLogger.info("[CustomMobs] '" + entry.definition.id() + "' assets compiled"
+                    + " (pack became available): " + entry.status);
+            for (Session session : List.copyOf(sessions.values())) {
+                if (session.entry != entry || session.dead || !session.entity.isValid()) {
+                    continue;
+                }
+                if (!session.hasRig || session.generic) {
+                    session.despawnDisplays();
+                    if (session.build()) {
+                        applySessionViewers(session);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * The damage confirmation a rigged mob cannot get from the game on its own:
      * the model that would flash red is the base entity, and the base entity is
      * invisible while the rig covers it. So a hit is answered with a spark burst
@@ -622,8 +706,9 @@ public final class MobRenderEngine {
 
     /**
      * One mob just died. With an authored death clip the rig plays it; without
-     * one the rig steps aside and the vanilla death animation plays, so a mob
-     * never vanishes mid-collapse.
+     * one the rig freezes on its last pose and stays — a rigged mob never
+     * collapses into its vanilla base model mid-death, which read as the
+     * disguise falling off.
      */
     private void beginDeath(Session session) {
         session.dead = true;
@@ -631,7 +716,6 @@ public final class MobRenderEngine {
         if (session.animator.hasDeathClip()) {
             session.deathTimer = session.animator.deathClipLength() + DEATH_GRACE_SECONDS;
         } else {
-            session.releaseDisplays();
             session.deathTimer = DEATH_HOLD_SECONDS;
         }
         syncBasePresentation(session);
@@ -649,12 +733,37 @@ public final class MobRenderEngine {
         int elapsedTicks = poseIntervalTicks * divisor;
         float speed = (float) Math.sqrt(dx * dx + dy * dy + dz * dz) / elapsedTicks;
         int interpolation = interpolationWindow(current) * divisor;
+        // Feed-forward lead: the client eases each teleport over the whole
+        // interpolation window, so a pose pushed at the mob's *current*
+        // position is already half a window behind by the time it finishes
+        // easing — the rig visibly trails a walking mob and snaps back when
+        // it stops. Targeting where the mob will be when the easing lands
+        // (velocity extrapolated over half the window, clamped) makes the
+        // rig track the mob instead of chasing it.
+        double leadTicks = Math.min(3.0, interpolation * 0.5);
+        double velX = dx / elapsedTicks * leadTicks;
+        double velY = dy / elapsedTicks * leadTicks;
+        double velZ = dz / elapsedTicks * leadTicks;
+        // A long pathfinding snap must not fling the rig ahead of the mob.
+        double leadSq = velX * velX + velY * velY + velZ * velZ;
+        if (leadSq > POSE_LEAD_MAX_BLOCKS * POSE_LEAD_MAX_BLOCKS) {
+            double scale = POSE_LEAD_MAX_BLOCKS / Math.sqrt(leadSq);
+            velX *= scale;
+            velY *= scale;
+            velZ *= scale;
+        }
+        session.leadX = velX;
+        session.leadY = velY;
+        session.leadZ = velZ;
 
         session.animator.tick(TICK_SECONDS * elapsedTicks, speed);
         if (!session.hasRig) {
             return;
         }
-        poseShadow(session, location, interpolation);
+        double leadX = location.getX() + session.leadX;
+        double leadY = location.getY() + session.leadY;
+        double leadZ = location.getZ() + session.leadZ;
+        poseShadow(session, leadX, leadY, leadZ, interpolation);
         if (session.generic) {
             poseGenericCube(session, location, interpolation);
             return;
@@ -718,9 +827,9 @@ public final class MobRenderEngine {
             for (int p = 0; p < display.slots.size(); p++) {
                 PoseSlot slot = display.slots.get(p);
                 Vector3f offset = slot.offset;
-                double px = location.getX() + session.scratchVector.x;
-                double py = location.getY() + session.scratchVector.y;
-                double pz = location.getZ() + session.scratchVector.z;
+                double px = leadX + session.scratchVector.x;
+                double py = leadY + session.scratchVector.y;
+                double pz = leadZ + session.scratchVector.z;
                 if (offset.lengthSquared() > 0.0f) {
                     // Rotational part only: R·S·d = transformPosition(d) −
                     // transformPosition(0), since the stub-free joml surface
@@ -747,11 +856,11 @@ public final class MobRenderEngine {
             session.scratchMatrix.set(absolute);
             session.scratchMatrix.setTranslation(0.0f, 0.0f, 0.0f);
             poseSlot(session, item.slot, world,
-                    location.getX() + session.scratchVector.x,
-                    location.getY() + session.scratchVector.y,
-                    location.getZ() + session.scratchVector.z, interpolation);
+                    leadX + session.scratchVector.x,
+                    leadY + session.scratchVector.y,
+                    leadZ + session.scratchVector.z, interpolation);
         }
-        poseBoneMarkers(session, model, location, interpolation);
+        poseBoneMarkers(session, model, leadX, leadY, leadZ, interpolation);
         if (session.usesTransport()) {
             DisplayTransport currentTransport = transport;
             if (currentTransport != null) {
@@ -787,24 +896,24 @@ public final class MobRenderEngine {
     }
 
     /** The soft ground plate under the rig: the mob's own shadow is not drawn. */
-    private void poseShadow(Session session, Location location, int interpolation) {
+    private void poseShadow(Session session, double x, double y, double z, int interpolation) {
         if (session.shadow == null) {
             return;
         }
         session.scratchMatrix.identity();
         session.scratchMatrix.scale(session.shadowDiameter);
-        poseSlot(session, session.shadow, location.getWorld(), location.getX(),
-                location.getY() + 0.03, location.getZ(), interpolation);
+        poseSlot(session, session.shadow, session.entity.getWorld(), x,
+                y + 0.03, z, interpolation);
     }
 
     /** Positions the debug markers at the bone pivots (reuses the tick's matrices). */
-    private void poseBoneMarkers(Session session, ModelData model, Location location,
-                                 int interpolation) {
+    private void poseBoneMarkers(Session session, ModelData model,
+                                 double x, double y, double z, int interpolation) {
         session.syncBoneMarkers(model);
         if (session.boneMarkers.isEmpty()) {
             return;
         }
-        World world = location.getWorld();
+        World world = session.entity.getWorld();
         for (int i = 0; i < session.boneMarkers.size() && i < model.boneCount(); i++) {
             PoseSlot marker = session.boneMarkers.get(i);
             Matrix4f absolute = session.absolute[i];
@@ -814,9 +923,9 @@ public final class MobRenderEngine {
             session.scratchMatrix.setTranslation(0.0f, 0.0f, 0.0f);
             session.scratchMatrix.scale(BONE_MARKER_SCALE);
             poseSlot(session, marker, world,
-                    location.getX() + session.scratchVector.x,
-                    location.getY() + session.scratchVector.y,
-                    location.getZ() + session.scratchVector.z, interpolation);
+                    x + session.scratchVector.x,
+                    y + session.scratchVector.y,
+                    z + session.scratchVector.z, interpolation);
         }
     }
 
@@ -942,6 +1051,12 @@ public final class MobRenderEngine {
             session.hideBase(false);
             return;
         }
+        if (session.dead && session.hasRig && !session.released) {
+            // Death keeps the rig: a dying mob must never flip back to its
+            // vanilla base model — that read as the disguise falling off.
+            session.hideBase(true);
+            return;
+        }
         if (session.released || !session.hasRig) {
             // No rig on screen (nobody near, or none could be built): a visible
             // vanilla mob beats an invisible hitbox. A death with no authored
@@ -1022,6 +1137,17 @@ public final class MobRenderEngine {
             return entry.status;
         }
         return entry.bundle != null ? entry.bundle.statusLine() : "no presentation attempted";
+    }
+
+    /** The bounded presentation history of one definition, for the inspect command. */
+    public List<String> rigHistory(String definitionId) {
+        Entry entry = entries.get(definitionId);
+        if (entry == null) {
+            return List.of();
+        }
+        synchronized (entry.history) {
+            return new ArrayList<>(entry.history);
+        }
     }
 
     /** Why this definition last could not present its rig, or {@code null}. */
@@ -1181,10 +1307,34 @@ public final class MobRenderEngine {
         volatile String status = "";
         /** Non-null while a runtime probe overrides the definition's yaw offset. */
         volatile Float yawOffsetOverride;
+        /**
+         * True while this definition's assets must wait for the pack subsystem
+         * to become available (registration happens during {@code onEnable},
+         * the first pack compile later). Retried by the tick pass; without it
+         * an empty bundle compiled too early is cached forever.
+         */
+        volatile boolean needsCompile;
+        /** Bounded presentation history: every status transition, oldest first. */
+        final Deque<String> history = new ArrayDeque<>();
 
         Entry(CustomMobDefinition definition, MobRenderSpec spec) {
             this.definition = definition;
             this.spec = spec;
+        }
+
+        void note(String line) {
+            status = line;
+            record();
+        }
+
+        /** Pushes the current status into the bounded presentation history. */
+        void record() {
+            synchronized (history) {
+                while (history.size() >= 8) {
+                    history.pollFirst();
+                }
+                history.addLast(status);
+            }
         }
 
         float yawOffset() {
@@ -1192,7 +1342,22 @@ public final class MobRenderEngine {
             if (override != null) {
                 return override.floatValue();
             }
-            return spec == null ? 0.0f : spec.yawOffsetDegrees();
+            if (spec == null) {
+                return 0.0f;
+            }
+            if (spec.yawOffsetAuthored()) {
+                return spec.yawOffsetDegrees();
+            }
+            // Imported models (Blockbench / Java JSON) are overwhelmingly
+            // authored front-toward-the-viewer (+z), the opposite of the rig
+            // frame's -z convention — every such rig faced away from its own
+            // movement. They default to +180; the vanilla part-table path
+            // (which already matches the frame) and explicitly authored
+            // offsets are untouched. `/mobfun rig <id> yaw-offset` still wins.
+            return switch (spec.type()) {
+                case BBMODEL, JAVA_JSON -> 180.0f;
+                default -> 0.0f;
+            };
         }
     }
 
@@ -1316,6 +1481,10 @@ public final class MobRenderEngine {
         double lastX;
         double lastY;
         double lastZ;
+        /** Feed-forward lead added to every pose push this pass (blocks). */
+        double leadX;
+        double leadY;
+        double leadZ;
         float heading;
         final Location scratchLocation = new Location(null, 0, 0, 0);
         final Vector3f scratchVector = new Vector3f();
@@ -1535,11 +1704,15 @@ public final class MobRenderEngine {
             List<String> arms = new ArrayList<>();
             if (bundle != null && bundle.model() != null) {
                 for (ModelBone bone : bundle.model().bones()) {
-                    String name = bone.name();
+                    // The raw authored name decides the role: sanitizing
+                    // replaces non-Latin characters with underscores and would
+                    // hide "leg"/"arm" from every non-English rig.
+                    String name = bone.rawName() != null && !bone.rawName().isBlank()
+                            ? bone.rawName().toLowerCase(Locale.ROOT) : bone.name();
                     if (name.contains("leg")) {
-                        legs.add(name);
+                        legs.add(bone.name());
                     } else if (name.contains("arm")) {
-                        arms.add(name);
+                        arms.add(bone.name());
                     }
                 }
             }
@@ -1560,8 +1733,8 @@ public final class MobRenderEngine {
             }
             if (inWorld >= current.maxRiggedPerWorld()) {
                 hasRig = false;
-                entry.status = "rig skipped: the per-world rig cap (" + current.maxRiggedPerWorld()
-                        + ") is reached";
+                entry.note("rig skipped: the per-world rig cap (" + current.maxRiggedPerWorld()
+                        + ") is reached");
                 DebugLogger.warning("[CustomMobs] " + entry.status + " — '" + entry.definition.id()
                         + "' renders as its base entity.");
                 return false;
@@ -1578,6 +1751,7 @@ public final class MobRenderEngine {
 
             int interpolation = interpolationWindow(current);
             int teleport = interpolationWindow(current);
+            int skippedPieces = 0;
             for (int boneIndex = 0; boneIndex < bundle.model().boneCount(); boneIndex++) {
                 List<PackModelEmitter.Piece> pieces = bundle.pieces(boneIndex);
                 if (pieces.isEmpty()) {
@@ -1588,23 +1762,29 @@ public final class MobRenderEngine {
                     ItemStack stack = packApi.createModelDisplay(Material.PAPER,
                             bundle.namespace(), piece.componentPath());
                     if (stack == null) {
-                        entry.status = "rig skipped: the pack cannot present '" + piece.componentPath()
-                                + "' (recompile the pack)";
-                        DebugLogger.warning("[CustomMobs] " + entry.status);
-                        rollback();
-                        return buildGenericFallback(bundle);
+                        // One unresolvable piece is a hole in one bone, not a
+                        // reason to tear down the whole rig — a legacy server
+                        // that missed one predicate still shows 95% of the mob.
+                        skippedPieces++;
+                        logOnce(bundle.namespace() + ":" + piece.componentPath(), "piece", false,
+                                "[CustomMobs] '" + entry.definition.id() + "': the pack cannot present '"
+                                        + piece.componentPath() + "' (recompile the pack); piece skipped");
+                        continue;
                     }
                     MobDisplayHandle handle = backend.spawn(id, entity.getLocation(), stack,
                             ItemDisplay.ItemDisplayTransform.NONE, interpolation, teleport);
                     if (handle == null) {
-                        entry.status = "rig skipped: the display could not spawn";
-                        DebugLogger.warning("[CustomMobs] " + entry.status);
-                        rollback();
-                        return buildGenericFallback(bundle);
+                        skippedPieces++;
+                        continue;
                     }
                     display.slots.add(new PoseSlot(handle, new Vector3f(piece.offsetPx())));
                 }
-                bones.add(display);
+                if (!display.slots.isEmpty()) {
+                    bones.add(display);
+                }
+            }
+            if (skippedPieces > 0) {
+                entry.note("rig built with " + skippedPieces + " skipped piece(s) the pack cannot present");
             }
             spawnHandItems(bundle, interpolation, teleport);
             if (bones.isEmpty() && items.isEmpty()) {
@@ -1615,6 +1795,7 @@ public final class MobRenderEngine {
             generic = false;
             spawnShadow(current);
             backend.finishSession(id, entity.getLocation());
+            entry.record();
             return true;
         }
 
@@ -1663,18 +1844,18 @@ public final class MobRenderEngine {
 
         private boolean buildGenericFallback(ModelBundle bundle) {
             if (entry.spec != null && entry.spec.fallback() != MobRenderSpec.FallbackMode.GENERIC_CUBE) {
-                entry.status = bundle == null ? "no bundle; base entity stays visible"
-                        : "base entity stays visible: " + bundle.report().summary();
+                entry.note(bundle == null ? "no bundle; base entity stays visible"
+                        : "base entity stays visible: " + bundle.report().summary());
                 return false;
             }
             if (pack == null || !pack.isAvailable() || !pack.supportsGeneratedModelDisplay()) {
-                entry.status = "generic fallback needs a working pack; base entity stays visible";
+                entry.note("generic fallback needs a working pack; base entity stays visible");
                 return false;
             }
             ItemStack stack = pack.createModelDisplay(Material.PAPER,
                     GenericFallbackAssets.NAMESPACE, GenericFallbackAssets.COMPONENT_PATH);
             if (stack == null) {
-                entry.status = "the generic fallback cube is not registered; base entity stays visible";
+                entry.note("the generic fallback cube is not registered; base entity stays visible");
                 return false;
             }
             CustomMobSettings current = settings();
@@ -1682,12 +1863,12 @@ public final class MobRenderEngine {
             MobDisplayHandle cube = backend.spawn(id, entity.getLocation(), stack,
                     ItemDisplay.ItemDisplayTransform.NONE, interpolation, interpolation);
             if (cube == null) {
-                entry.status = "the generic fallback cube could not spawn; base entity stays visible";
+                entry.note("the generic fallback cube could not spawn; base entity stays visible");
                 return false;
             }
             genericCube = new PoseSlot(cube, null);
-            entry.status = "rendering the neutral fallback cube: "
-                    + (bundle == null ? "no bundle" : bundle.report().summary());
+            entry.note("rendering the neutral fallback cube: "
+                    + (bundle == null ? "no bundle" : bundle.report().summary()));
             generic = true;
             hasRig = true;
             spawnShadow(current);
@@ -1726,19 +1907,6 @@ public final class MobRenderEngine {
                     : Math.max(MobShadowAssets.BASE_DIAMETER_BLOCKS * 0.4f,
                     (float) entity.getWidth() * 0.6f);
             shadowDiameter = Math.max(MobShadowAssets.BASE_DIAMETER_BLOCKS * 0.25f, radius * 2.0f);
-        }
-
-        private void rollback() {
-            for (MobDisplayHandle handle : allHandles()) {
-                backend.despawn(handle);
-            }
-            bones.clear();
-            items.clear();
-            boneMarkers.clear();
-            genericCube = null;
-            shadow = null;
-            generic = false;
-            backend.destroySession(id);
         }
 
         /** Keeps the debug bone markers in step with the engine's debug flag. */

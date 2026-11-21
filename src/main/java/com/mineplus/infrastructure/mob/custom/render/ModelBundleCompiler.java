@@ -134,12 +134,18 @@ public final class ModelBundleCompiler {
                 float pivotX = model.bone(smallest).pivotX() - model.bone(parent).pivotX();
                 float pivotY = model.bone(smallest).pivotY() - model.bone(parent).pivotY();
                 float pivotZ = model.bone(smallest).pivotZ() - model.bone(parent).pivotZ();
+                float mergedVolume = 0.0f;
                 for (ModelCube cube : cubes.get(smallest)) {
                     cubes.get(parent).add(new ModelCube(
                             cube.fromX() + pivotX, cube.fromY() + pivotY, cube.fromZ() + pivotZ,
                             cube.toX() + pivotX, cube.toY() + pivotY, cube.toZ() + pivotZ,
                             cube.inflate(), cube.textureIndex(), cube.faces()));
+                    mergedVolume += cube.width() * cube.height() * cube.depth();
                 }
+                // The parent's volume must include what it just absorbed, or
+                // later "smallest bone" picks read a stale value and merge the
+                // wrong bones first.
+                volumes[parent] += mergedVolume;
                 cubes.get(smallest).clear();
             }
             count--;

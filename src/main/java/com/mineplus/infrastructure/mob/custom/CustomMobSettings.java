@@ -53,14 +53,22 @@ public record CustomMobSettings(
 
     public CustomMobSettings {
         renderIntervalTicks = clamp(renderIntervalTicks, 1, 40);
-        renderInterpolationTicks = clamp(renderInterpolationTicks, 1, 40);
+        // A 1-tick client easing window ends before the next pose sample
+        // arrives, so every push renders as a snap — the "laggy movement".
+        // Two is the floor where easing spans the push gap; configs saved by
+        // older versions (which shipped 1) upgrade silently.
+        renderInterpolationTicks = clamp(renderInterpolationTicks, 2, 40);
         renderDistance = clamp(renderDistance, 8, 256);
         renderNearDistance = clamp(renderNearDistance, 4, renderDistance);
         maxRiggedPerWorld = clamp(maxRiggedPerWorld, 1, 4096);
     }
 
     public static CustomMobSettings defaults() {
-        return new CustomMobSettings(true, true, 1, 1, 48, 20, 48, true, true);
+        // The interpolation window is three times the push cadence: a 1-tick
+        // window ends the client's easing before the next sample arrives, so
+        // every pose push renders as a tiny snap instead of a glide — the
+        // "laggy movement" of a crowd of rigs.
+        return new CustomMobSettings(true, true, 1, 3, 48, 20, 48, true, true);
     }
 
     public static CustomMobSettings parse(FileConfiguration yaml, CustomMobSettings fallback) {

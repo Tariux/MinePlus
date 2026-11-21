@@ -172,7 +172,11 @@ public final class AnimationEvaluator {
             Keyframe current = keyframes.get(i);
             Keyframe next = keyframes.get(i + 1);
             if (time >= current.time() && time <= next.time()) {
-                if (!next.interpolation().smooth()) {
+                // Blockbench semantics: the interpolation of a keyframe
+                // governs the segment leaving that key, so `current` — not
+                // `next` — decides. The old next-based read applied STEP one
+                // keyframe late.
+                if (!current.interpolation().smooth()) {
                     valueOf(current, out);
                     return;
                 }

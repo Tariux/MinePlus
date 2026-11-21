@@ -72,7 +72,17 @@ public final class WeaponAssets {
                 installed++;
             }
         }
-        plugin.getLogger().info("[MineplusGun] Installed " + installed + " asset file(s).");
+        if (installed == 0) {
+            // A zero-asset install previously failed the enable silently: every
+            // gun then renders as the client's missing-model cube with nothing
+            // in the log naming the cause. Say exactly what happened instead.
+            plugin.getLogger().severe("[MineplusGun] Installed ZERO asset files — every gun"
+                    + " will render as a missing model. Cause: the module jar could not be"
+                    + " read as a jar (class source = " + origin(plugin)
+                    + "); reinstall the module jar and restart.");
+        } else {
+            plugin.getLogger().info("[MineplusGun] Installed " + installed + " asset file(s).");
+        }
         // A folder that ships only a Blockbench project gets its frames from it,
         // before anything reads the folder: the densifier, the classifier and the
         // pack all consume what is on disk.

@@ -244,18 +244,22 @@ public final class PackModelEmitter {
         split(high, depth + 1, out, problems);
     }
 
-    /** Emitted-space bounds: {@code {minX, maxX, minY, maxY, minZ, maxZ}} (y up). */
+    /** Emitted-space bounds including inflate: {@code {minX, maxX, minY, maxY, minZ, maxZ}} (y up). */
     private static float[] bounds(List<ModelCube> boxes) {
         float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
         float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
         float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
         for (ModelCube box : boxes) {
-            minX = Math.min(minX, box.fromX());
-            maxX = Math.max(maxX, box.toX());
-            minY = Math.min(minY, box.fromY());
-            maxY = Math.max(maxY, box.toY());
-            minZ = Math.min(minZ, box.fromZ());
-            maxZ = Math.max(maxZ, box.toZ());
+            // The inflate the emitter adds in element() must be part of the
+            // window decision, or a cube sitting exactly at the edge overflows
+            // the window by inflate and gets clipped by the client.
+            float inflate = box.inflate();
+            minX = Math.min(minX, box.fromX() - inflate);
+            maxX = Math.max(maxX, box.toX() + inflate);
+            minY = Math.min(minY, box.fromY() - inflate);
+            maxY = Math.max(maxY, box.toY() + inflate);
+            minZ = Math.min(minZ, box.fromZ() - inflate);
+            maxZ = Math.max(maxZ, box.toZ() + inflate);
         }
         return new float[]{minX, maxX, minY, maxY, minZ, maxZ};
     }
@@ -356,7 +360,7 @@ public final class PackModelEmitter {
                 continue;
             }
             faces.add(direction, face(uv.u1() * uScale, uv.v1() * vScale,
-                    uv.u2() * uScale, uv.v2() * vScale, textureSlot));
+                    uv.u2() * uScale, uv.v2() * vScale, textureSlot, uv.rotation()));
         }
         element.add("faces", faces);
         return element;
@@ -376,7 +380,8 @@ public final class PackModelEmitter {
         return textures.get(index);
     }
 
-    private static JsonObject face(float u1, float v1, float u2, float v2, int textureSlot) {
+    private static JsonObject face(float u1, float v1, float u2, float v2, int textureSlot,
+                                   int rotation) {
         JsonArray uv = new JsonArray();
         uv.add(round(u1));
         uv.add(round(v1));
@@ -384,6 +389,9 @@ public final class PackModelEmitter {
         uv.add(round(v2));
         JsonObject face = new JsonObject();
         face.add("uv", uv);
+        if (rotation != 0) {
+            face.addProperty("rotation", rotation);
+        }
         face.addProperty("texture", "#" + textureSlot);
         return face;
     }

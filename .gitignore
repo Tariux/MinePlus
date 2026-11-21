@@ -35,4 +35,9 @@ package-lock.json
 **.png
 **.class
 
+# Module-shipped assets must build into every jar (R9: a fresh clone without
+# these ships modules whose textures/models never load).
+!examples/**/src/main/resources/**
+!src/main/resources/**
+
 /graphify-out/
