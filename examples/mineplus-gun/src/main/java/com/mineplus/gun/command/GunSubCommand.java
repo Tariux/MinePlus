@@ -84,7 +84,7 @@ public final class GunSubCommand implements SubCommand {
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " ammo [player] [amount]");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " reload");
             sender.sendMessage(ChatColor.YELLOW + "/" + label + " stats");
-            sender.sendMessage(ChatColor.YELLOW + "/" + label + " debug <hitbox|trace|anim|fx>");
+            sender.sendMessage(ChatColor.YELLOW + "/" + label + " debug <hitbox|trace|anim [log]|fx>");
         }
         sender.sendMessage(ChatColor.YELLOW + "/" + label + " hud" + ChatColor.GRAY + " - toggle the ammo HUD");
     }
@@ -231,6 +231,15 @@ public final class GunSubCommand implements SubCommand {
         }
         String mode = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "trace";
         if (mode.equals("anim") || mode.equals("animation")) {
+            if (args.length >= 3 && args[2].equalsIgnoreCase("log")) {
+                boolean on = services.runtime().toggleTrace();
+                if (on) {
+                    services.runtime().logPlans();
+                }
+                player.sendMessage(ChatColor.YELLOW + "Animation console trace: "
+                        + ChatColor.WHITE + (on ? "on" : "off"));
+                return;
+            }
             animation(sender, player);
             return;
         }

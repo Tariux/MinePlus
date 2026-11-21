@@ -29,9 +29,11 @@ public interface PackApi {
     /**
      * True when this server presents items through modern item-model
      * definitions (1.21.4+) rather than legacy {@code custom_model_data}
-     * predicates. Only the modern representation can serialize a client-clock
-     * animation, so a module checks this before deciding how to drive frame
-     * states. False when the subsystem is disabled or the server is older.
+     * predicates. Both representations serialize a client-clock animation
+     * (the legacy one through {@code cooldown} overrides), so this is a
+     * diagnostic, not a capability check: a module that wants to know whether
+     * the client can play a clip asks {@link #isAvailable()}. False when the
+     * subsystem is disabled or the server is older.
      */
     default boolean usesModernItemModels() {
         return false;

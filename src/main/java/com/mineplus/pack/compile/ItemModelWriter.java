@@ -272,22 +272,32 @@ public final class ItemModelWriter {
                 root.add("textures", textures);
             }
 
-            JsonArray overrideList = new JsonArray();
+            List<LegacyOverride> overrides = new ArrayList<>();
             for (ItemModelAsset item : sorted) {
                 if (item.isFramed()) {
-                    // Plain state entries first: idle at the item base, then one
-                    // predicate per frame state. (Vanilla picks the LAST override
-                    // whose predicates are all satisfied.)
-                    addOverride(overrideList, item.customModelData(), item.fallbackModelReference());
-                    for (ItemModelAsset.Frame frame : item.frames()) {
-                        addOverride(overrideList, item.frameStackValue(Math.round(frame.threshold())),
-                                frame.modelReference());
-                    }
+                    addFramedOverrides(overrides, item);
                 } else if (item.isRawModel()) {
-                    addOverride(overrideList, item.customModelData(), item.fallbackModelReference());
+                    addOverride(overrides, item.customModelData(), NO_COOLDOWN, item.fallbackModelReference());
                 } else {
-                    addOverride(overrideList, item.customModelData(), item.modelReference());
+                    addOverride(overrides, item.customModelData(), NO_COOLDOWN, item.modelReference());
                 }
+            }
+            // A predicate matches every stack value at or above it and vanilla
+            // picks the LAST matching override, so the list has to ascend over
+            // the whole host, not just within one item.
+            overrides.sort(Comparator.comparingInt(LegacyOverride::customModelData)
+                    .thenComparingDouble(LegacyOverride::cooldown));
+            JsonArray overrideList = new JsonArray();
+            for (LegacyOverride override : overrides) {
+                JsonObject predicate = new JsonObject();
+                predicate.addProperty("custom_model_data", override.customModelData());
+                if (override.cooldown() >= 0.0f) {
+                    predicate.addProperty("cooldown", override.cooldown());
+                }
+                JsonObject json = new JsonObject();
+                json.add("predicate", predicate);
+                json.addProperty("model", override.model());
+                overrideList.add(json);
             }
             root.add("overrides", overrideList);
 
@@ -301,29 +311,78 @@ public final class ItemModelWriter {
      * One sorted predicate override; a colliding predicate keeps its first
      * owner (a genuine cross-module CMD collision — reported, never fatal).
      */
-    private static void addOverride(JsonArray overrides, int customModelData, String modelReference) {
+    private static void addOverride(List<LegacyOverride> overrides, int customModelData, float cooldown,
+                                    String modelReference) {
         if (modelReference == null || modelReference.isBlank()) {
             return;
         }
-        for (int index = 0; index < overrides.size(); index++) {
-            JsonObject existing = overrides.get(index).getAsJsonObject();
-            if (existing.getAsJsonObject("predicate").has("custom_model_data")
-                    && existing.getAsJsonObject("predicate").get("custom_model_data").getAsInt() == customModelData
-                    && existing.getAsJsonObject("predicate").size() == 1) {
-                String existingModel = existing.get("model").getAsString();
-                if (!existingModel.equals(modelReference)) {
+        for (LegacyOverride existing : overrides) {
+            if (existing.customModelData() == customModelData
+                    && Float.compare(existing.cooldown(), cooldown) == 0) {
+                if (!existing.model().equals(modelReference)) {
                     DebugLogger.warning("[Pack] Legacy override collision on custom_model_data="
-                            + customModelData + ": '" + existingModel + "' wins over '" + modelReference + "'.");
+                            + customModelData + ": '" + existing.model() + "' wins over '" + modelReference + "'.");
                 }
                 return;
             }
         }
-        JsonObject predicate = new JsonObject();
-        predicate.addProperty("custom_model_data", customModelData);
-        JsonObject override = new JsonObject();
-        override.add("predicate", predicate);
-        override.addProperty("model", modelReference);
-        overrides.add(override);
+        overrides.add(new LegacyOverride(customModelData, cooldown, modelReference));
+    }
+
+    /** Marks a legacy override that does not test the cooldown. */
+    private static final float NO_COOLDOWN = -1.0f;
+
+    /**
+     * One legacy host override: the stack value it matches from, the remaining
+     * cooldown fraction it matches from ({@link #NO_COOLDOWN} for none), and
+     * the model it selects.
+     */
+    private record LegacyOverride(int customModelData, float cooldown, String model) {
+    }
+
+    /**
+     * The legacy overrides of one framed item: one per state, and for every
+     * state that gates a client-clock sequence one more per sequence frame on
+     * the {@code cooldown} predicate. That is the predicate form of the modern
+     * nested {@code range_dispatch} (same thresholds, same fallback), so one
+     * state write plus one item cooldown plays the clip on the client's own
+     * clock on a legacy pack as well.
+     */
+    private static void addFramedOverrides(List<LegacyOverride> overrides, ItemModelAsset item) {
+        String resting = item.fallbackModelReference() != null
+                ? item.fallbackModelReference()
+                : item.modelReference();
+        Map<Integer, com.mineplus.pack.item.ItemFrames.Sequence> gated = new LinkedHashMap<>();
+        for (com.mineplus.pack.item.ItemFrames.Sequence sequence : item.clipPlan().sequences()) {
+            if (sequence.animates()) {
+                gated.putIfAbsent(sequence.gateState(), sequence);
+            }
+        }
+        addStateOverrides(overrides, item.customModelData(), item.fallbackModelReference(), gated.get(0), resting);
+        for (ItemModelAsset.Frame frame : item.frames()) {
+            int state = Math.round(frame.threshold());
+            addStateOverrides(overrides, item.frameStackValue(state), frame.modelReference(), gated.get(state),
+                    resting);
+        }
+    }
+
+    private static void addStateOverrides(List<LegacyOverride> overrides, int stackValue, String stateReference,
+                                          com.mineplus.pack.item.ItemFrames.Sequence sequence, String resting) {
+        if (sequence == null) {
+            addOverride(overrides, stackValue, NO_COOLDOWN, stateReference);
+            return;
+        }
+        addOverride(overrides, stackValue, NO_COOLDOWN,
+                sequence.fallbackReference() != null ? sequence.fallbackReference() : resting);
+        List<String> frames = sequence.frames();
+        int count = frames.size();
+        if (count == 1) {
+            addOverride(overrides, stackValue, 0.001f, frames.get(0));
+            return;
+        }
+        for (int index = count - 1; index >= 0; index--) {
+            addOverride(overrides, stackValue, (float) (1.0 - (index + 1) / (double) count), frames.get(index));
+        }
     }
 
     /**

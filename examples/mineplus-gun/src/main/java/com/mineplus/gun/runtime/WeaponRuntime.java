@@ -18,6 +18,7 @@ import com.mineplus.infrastructure.registry.ItemMagazine;
 import com.mineplus.pack.item.ItemFrames;
 import com.mineplus.pack.item.ItemFrameAnimator;
 import com.mineplus.pack.item.ItemFrameWriter;
+import com.mineplus.util.DebugLogger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -71,21 +72,69 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     private final Map<UUID, Long> hitmarkAt = new HashMap<>();
     private final ProjectileHandler projectileHandler = new WeaponHitHandler();
     /**
-     * True when the pack presents this item through a modern item-model
-     * definition, which is the only representation that can serialize a
-     * client-clock sequence (nested {@code range_dispatch} on the item's
-     * cooldown). Legacy predicate packs keep the server animator.
+     * True when the Core pack is running, so a clip can play on the client's
+     * own clock. Both representations serialize it: modern item-model
+     * definitions as a nested {@code range_dispatch} on the item's cooldown,
+     * legacy predicate packs as {@code cooldown} overrides. Without a pack the
+     * server animator is the fallback.
      */
     private boolean clientClock;
+    /** Console trace of every sequence and frame write ({@code /mpgun debug anim log}). */
+    private boolean trace;
 
     private BukkitTask task;
 
     public WeaponRuntime(MineplusGunPlugin plugin, GunServices services) {
         this.plugin = plugin;
         this.services = services;
-        this.clientClock = services.context().packApi().usesModernItemModels();
-    }    public void start() {
+        this.clientClock = services.context().packApi().isAvailable();
+    }
+
+    public void start() {
         // Nothing to schedule; the first trigger arms the tick task.
+    }
+
+    /** Flips the console animation trace and returns the new setting. */
+    public boolean toggleTrace() {
+        trace = !trace;
+        return trace;
+    }
+
+    /**
+     * Prints every weapon's animation plan to the console: the carrier, the
+     * number of frame states and each client-clock sequence with its gate
+     * state. A gun that lists no sequence has nothing the client can play.
+     */
+    public void logPlans() {
+        for (WeaponDefinition weapon : services.registry().all()) {
+            ItemFrames frames = weapon.frames();
+            if (frames == null) {
+                plugin.getLogger().info("[MineplusGun][anim] " + weapon.id()
+                        + ": no model, renders as " + weapon.backingMaterial());
+                continue;
+            }
+            StringBuilder line = new StringBuilder("[MineplusGun][anim] ").append(weapon.id())
+                    .append(": carrier=").append(weapon.backingMaterial())
+                    .append(" states=").append(frames.references().size())
+                    .append(" idle=").append(frames.idleState())
+                    .append("(value ").append(weapon.frameStackValue(frames.idleState())).append(')')
+                    .append(" loaded=").append(frames.loadedState())
+                    .append(" sequences=");
+            boolean any = false;
+            for (ItemFrames.Sequence sequence : frames.plan().sequences()) {
+                if (!sequence.animates()) {
+                    continue;
+                }
+                line.append(any ? ", " : "").append(sequence.name())
+                        .append('[').append(sequence.frames().size()).append(" frames, gate ")
+                        .append(sequence.gateState()).append(']');
+                any = true;
+            }
+            if (!any) {
+                line.append("none");
+            }
+            plugin.getLogger().info(line.toString());
+        }
     }
 
     /** Flushes every live magazine and stops the task. */
@@ -118,10 +167,9 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     }
 
     /**
-     * True when this server's pack representation lets a clip play on the
-     * client's own clock (one state write plus one item cooldown, then the
-     * client walks the frames). Legacy predicate packs fall back to the server
-     * frame animator.
+     * True when a clip plays on the client's own clock (one state write plus
+     * one item cooldown, then the client walks the frames). That needs the
+     * Core pack; without it the server frame animator is the fallback.
      */
     public boolean clientClock() {
         return clientClock;
@@ -142,8 +190,10 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
             return lines;
         }
         lines.add("clock: " + (clientClock
-                ? "client (cooldown range_dispatch, no per-frame packets)"
-                : "server (legacy custom_model_data predicates)"));
+                ? "client (item cooldown walks the frames, no per-frame packets; "
+                        + (services.context().packApi().usesModernItemModels()
+                                ? "item_model range_dispatch" : "legacy cooldown predicates") + ")"
+                : "server (no Core pack, one frame write per tick)"));
         lines.add("states: " + frames.references().size()
                 + " (idle=" + frames.idleState() + ", loaded=" + frames.loadedState() + ")");
         for (ItemFrames.Sequence sequence : frames.plan().sequences()) {
@@ -387,7 +437,7 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
     public void refreshAll() {
         // The representation is fixed by the server version, but recomputing it
         // here keeps a reload honest if the pack subsystem itself restarted.
-        clientClock = services.context().packApi().usesModernItemModels();
+        clientClock = services.context().packApi().isAvailable();
         closeAll();
         for (Player player : Bukkit.getOnlinePlayers()) {
             refresh(player);
@@ -843,12 +893,23 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
                                   String name, int ticks, Pose pose) {
         ItemFrames.Sequence sequence = sequence(weapon, name);
         if (sequence == null) {
+            if (tracing()) {
+                trace(player, weapon.id() + " " + pose + " clip '" + name
+                        + "' has no client sequence (clock=" + (clientClock ? "client" : "server") + ")");
+            }
             return false;
         }
         if (session.animator != null && session.animator.active()) {
             session.animator.stop();
         }
         session.pose = pose;
+        if (tracing()) {
+            trace(player, weapon.id() + " start " + pose + " sequence '" + sequence.name() + "': "
+                    + sequence.frames().size() + " frames over " + Math.max(1, ticks)
+                    + " ticks, gate state " + sequence.gateState() + " (value "
+                    + weapon.frameStackValue(sequence.gateState()) + "), cooldown on "
+                    + weapon.backingMaterial());
+        }
         writeFrame(player, session, weapon, sequence.gateState());
         player.setCooldown(weapon.backingMaterial(), Math.max(1, ticks));
         session.sequenceTicks = Math.max(1, ticks);
@@ -1097,6 +1158,10 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
 
     /** What a finished pose hands off to: the next clip, the scope hold, or rest. */
     private void finishPose(Player player, Session session, WeaponDefinition weapon, Pose finished) {
+        if (tracing()) {
+            trace(player, weapon.id() + " finished " + finished + " (cooldown left "
+                    + player.getCooldown(weapon.backingMaterial()) + " ticks)");
+        }
         session.pose = Pose.NONE;
         switch (finished) {
             case FIRE -> {
@@ -1152,18 +1217,62 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         writeFrame(player, session, weapon, state);
     }
 
+    /**
+     * Renders one frame state on the held weapon. The stack is the source of
+     * truth, not the session: a state only counts as shown once the stack
+     * really carries its value, so a write that could not land (another item
+     * in hand, a swapped stack) is retried on the next call instead of being
+     * remembered as done.
+     */
     private void writeFrame(Player player, Session session, WeaponDefinition weapon, int state) {
         if (state < 0 || state == session.frameState || !weapon.hasFrames()) {
             return;
         }
         ItemStack stack = player.getInventory().getItemInMainHand();
         if (resolve(stack) != weapon) {
+            session.frameState = Integer.MIN_VALUE;
+            if (tracing()) {
+                trace(player, weapon.id() + " frame " + state + " skipped: main hand holds "
+                        + (stack == null ? "nothing" : stack.getType()));
+            }
             return;
         }
-        if (ItemFrameWriter.apply(stack, weapon.frameStackValue(state))) {
+        int value = weapon.frameStackValue(state);
+        int before = ItemFrameWriter.read(stack);
+        if (before == value) {
+            session.frameState = state;
+            return;
+        }
+        boolean changed = ItemFrameWriter.apply(stack, value);
+        if (changed) {
             player.getInventory().setItemInMainHand(stack);
         }
-        session.frameState = state;
+        int after = ItemFrameWriter.read(player.getInventory().getItemInMainHand());
+        if (tracing()) {
+            trace(player, weapon.id() + " frame " + session.frameState + " -> " + state
+                    + " (stack value " + before + " -> " + after + ", wanted " + value
+                    + ", pose " + session.pose + ")");
+        }
+        if (after == value) {
+            session.frameState = state;
+            return;
+        }
+        session.frameState = Integer.MIN_VALUE;
+        if (!session.frameWriteWarned) {
+            session.frameWriteWarned = true;
+            plugin.getLogger().warning("[MineplusGun] " + weapon.id() + ": frame state " + state
+                    + " did not reach " + player.getName() + "'s item (stack value " + after
+                    + ", wanted " + value + ", meta changed=" + changed
+                    + "). The gun will not animate until this write lands.");
+        }
+    }
+
+    private boolean tracing() {
+        return trace || DebugLogger.isEnabled();
+    }
+
+    private void trace(Player player, String message) {
+        plugin.getLogger().info("[MineplusGun][anim] " + player.getName() + ": " + message);
     }
 
     private void pushHud(Player player, Session session, WeaponDefinition weapon) {
@@ -1254,6 +1363,8 @@ public final class WeaponRuntime implements HeldItemInput.HeldItemHandler {
         private ScopeGui scopeView;
         private String hudSignature;
         private int frameState = Integer.MIN_VALUE;
+        /** One console warning per session when a frame write does not land. */
+        private boolean frameWriteWarned;
         /** Ticks left in the client-clock sequence being played, 0 when idle. */
         private int sequenceTicks;
 

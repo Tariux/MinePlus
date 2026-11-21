@@ -56,14 +56,20 @@ public final class ModelGeometryGuard {
      * @param clamped   elements whose span exceeded the window and were squashed
      * @param findings  per-model notes, truncated at {@value #MAX_FINDINGS}
      */
-    public record Report(int scanned, int moved, int elements, int clamped, List<String> findings) {
+    public record Report(int scanned, int moved, int elements, int clamped, int snappedModels,
+                         int snappedAngles, List<String> findings) {
 
-        public static final Report EMPTY = new Report(0, 0, 0, 0, List.of());
+        public static final Report EMPTY = new Report(0, 0, 0, 0, 0, 0, List.of());
 
         public boolean clean() {
             return moved == 0 && clamped == 0;
         }
     }
+
+    /** Element rotation step of clients older than 1.21.6. */
+    public static final float LEGACY_ANGLE_STEP = 22.5f;
+    /** Largest element rotation every client version accepts. */
+    public static final float MAX_ANGLE = 45.0f;
 
     /**
      * Rebases every out-of-window element of every model entry in place.
@@ -73,6 +79,19 @@ public final class ModelGeometryGuard {
      * @return what had to change
      */
     public static Report enforce(Map<String, byte[]> entries) {
+        return enforce(entries, false);
+    }
+
+    /**
+     * As {@link #enforce(Map)}, and with {@code steppedAngles} also snaps every
+     * element rotation to the {@value #LEGACY_ANGLE_STEP} degree steps a client
+     * older than 1.21.6 requires. Such a client rejects the whole model for a
+     * single free angle and renders the missing-model cube instead, so a
+     * slightly coarser hinge is the only way that model can render at all.
+     *
+     * @param steppedAngles true when the artifact targets a client older than 1.21.6
+     */
+    public static Report enforce(Map<String, byte[]> entries, boolean steppedAngles) {
         if (entries == null || entries.isEmpty()) {
             return Report.EMPTY;
         }
@@ -80,6 +99,9 @@ public final class ModelGeometryGuard {
         int movedModels = 0;
         int movedElements = 0;
         int clampedElements = 0;
+        int snappedModels = 0;
+        int snappedAngles = 0;
+        List<String> snappedSamples = new ArrayList<>();
         List<String> findings = new ArrayList<>();
         List<String> paths = new ArrayList<>(entries.keySet());
         for (String path : paths) {
@@ -117,6 +139,7 @@ public final class ModelGeometryGuard {
             }
             int moved = 0;
             int squashed = 0;
+            int snapped = 0;
             for (JsonElement element : elements) {
                 if (!element.isJsonObject()) {
                     continue;
@@ -128,8 +151,21 @@ public final class ModelGeometryGuard {
                 } else if (result == 1) {
                     squashed++;
                 }
+                if (steppedAngles && snapAngle(box)) {
+                    snapped++;
+                }
+            }
+            if (snapped > 0) {
+                snappedModels++;
+                snappedAngles += snapped;
+                if (snappedSamples.size() < 8) {
+                    snappedSamples.add(path.substring(path.lastIndexOf('/') + 1) + " x" + snapped);
+                }
             }
             if (moved == 0 && squashed == 0) {
+                if (snapped > 0) {
+                    entries.put(path, GSON.toJson(root).getBytes(StandardCharsets.UTF_8));
+                }
                 continue;
             }
             movedModels++;
@@ -154,7 +190,42 @@ public final class ModelGeometryGuard {
                     + (int) WINDOW_MIN + ".." + (int) WINDOW_MAX + "px element window and were re-based;"
                     + " check the authoring scale of those models.");
         }
-        return new Report(scanned, movedModels, movedElements, clampedElements, List.copyOf(findings));
+        if (snappedModels > 0 && findings.size() < MAX_FINDINGS) {
+            findings.add(snappedAngles + " element rotation(s) in " + snappedModels + " model(s) were snapped to "
+                    + LEGACY_ANGLE_STEP + " degree steps, because clients older than 1.21.6 reject a model with any"
+                    + " other angle and draw the missing-model cube (e.g. " + String.join(", ", snappedSamples) + ")");
+        }
+        return new Report(scanned, movedModels, movedElements, clampedElements, snappedModels, snappedAngles,
+                List.copyOf(findings));
+    }
+
+    /**
+     * Snaps one element's rotation to the nearest {@value #LEGACY_ANGLE_STEP}
+     * degree step within +/-{@value #MAX_ANGLE}.
+     *
+     * @return true when the angle had to change
+     */
+    private static boolean snapAngle(JsonObject element) {
+        if (!element.has("rotation") || !element.get("rotation").isJsonObject()) {
+            return false;
+        }
+        JsonObject rotation = element.getAsJsonObject("rotation");
+        if (!rotation.has("angle") || !rotation.get("angle").isJsonPrimitive()) {
+            return false;
+        }
+        float angle;
+        try {
+            angle = rotation.get("angle").getAsFloat();
+        } catch (RuntimeException notANumber) {
+            return false;
+        }
+        float snapped = Math.round(angle / LEGACY_ANGLE_STEP) * LEGACY_ANGLE_STEP;
+        snapped = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, snapped));
+        if (Math.abs(snapped - angle) < 1.0e-4f) {
+            return false;
+        }
+        rotation.addProperty("angle", snapped);
+        return true;
     }
 
     /**

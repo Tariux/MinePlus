@@ -64,13 +64,17 @@ public final class CombatFeature extends ModuleFeature implements Listener {
             if (runtime == null) {
                 return;
             }
+            runtime.logPlans();
             for (Player player : Bukkit.getOnlinePlayers()) {
                 runtime.refresh(player);
             }
         });
 
         plugin.getLogger().info("[MineplusGun] Combat runtime started (input=core held-item routing, handlers="
-                + context.heldItemInput().handlerCount() + ").");
+                + context.heldItemInput().handlerCount()
+                + ", animation=" + (runtime.clientClock() ? "client-clock" : "server-frames")
+                + ", item models=" + (context.packApi().usesModernItemModels() ? "item_model" : "legacy predicates")
+                + ", server=" + com.mineplus.util.ServerVersion.rawVersion() + ").");
     }
 
     /**

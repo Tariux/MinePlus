@@ -61,6 +61,8 @@ public final class PackCompiler {
     private volatile com.mineplus.infrastructure.perf.PerfRegistry perf;
     /** Non-fatal content diagnostics of the last compile ({} when validation is off). */
     private volatile ModelAssetValidator.Report lastReport = ModelAssetValidator.Report.EMPTY;
+    /** What the last compile targeted and had to correct, for the console. */
+    private volatile String lastSummary = "not compiled yet";
 
     public PackCompiler(VirtualBlockManager virtualBlockManager, PackCache cache, PackSettings settings) {
         this.virtualBlockManager = virtualBlockManager;
@@ -187,7 +189,18 @@ public final class PackCompiler {
             // The client-window gate runs on the artifact's own bytes, after
             // every writer, before hashing: the corrected geometry is what the
             // artifact hash, the filename and the client download all describe.
-            ModelGeometryGuard.Report guard = ModelGeometryGuard.enforce(entries);
+            // Clients older than 1.21.6 reject a model carrying any element
+            // rotation off the 22.5 degree steps and draw the missing-model
+            // cube, so those artifacts get their angles snapped here.
+            boolean steppedAngles = !com.mineplus.util.ServerVersion.atLeast(
+                    com.mineplus.util.ServerVersion.parseVersion(bukkitVersion), 1, 21, 6);
+            ModelGeometryGuard.Report guard = ModelGeometryGuard.enforce(entries, steppedAngles);
+            lastSummary = "target " + bukkitVersion + ", pack_format " + packFormat + ", items "
+                    + representation + "/" + dispatch + ", element angles "
+                    + (steppedAngles ? "snapped to 22.5 degree steps (client older than 1.21.6)" : "free")
+                    + "; " + guard.scanned() + " model(s) scanned, " + guard.snappedAngles()
+                    + " angle(s) snapped in " + guard.snappedModels() + " model(s), " + guard.moved()
+                    + " model(s) re-based";
             validator.checkAssets(snapshot);
             validator.checkArtifactEntries(entries, guard);
             lastReport = validator.report(snapshot.size(), failed.size());
@@ -308,6 +321,11 @@ public final class PackCompiler {
     /** Content diagnostics of the last compile. */
     public ModelAssetValidator.Report lastReport() {
         return lastReport;
+    }
+
+    /** One line on what the last compile targeted and corrected. */
+    public String lastSummary() {
+        return lastSummary;
     }
 
     /** Serialized bytes with per-content-hash memoization; null when the asset fails. */

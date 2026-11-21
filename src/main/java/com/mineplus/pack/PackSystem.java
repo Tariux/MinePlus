@@ -240,10 +240,10 @@ public final class PackSystem {
     /**
      * True when this server presents items through modern item-model
      * definitions ({@code assets/<ns>/items/<id>.json}, 1.21.4+) instead of
-     * legacy {@code custom_model_data} predicates. The modern path is the only
-     * one that can serialize a client-clock animation (nested
-     * {@code range_dispatch} on {@code minecraft:cooldown}), so modules ask
-     * this before choosing how to drive their frame states.
+     * legacy {@code custom_model_data} predicates. Both serialize a
+     * client-clock animation: the modern path as a nested
+     * {@code range_dispatch} on {@code minecraft:cooldown}, the legacy path as
+     * {@code cooldown} overrides on the host model.
      */
     public boolean usesModernItemModels() {
         return appearance.modern();
@@ -765,6 +765,7 @@ public final class PackSystem {
                     plugin.getLogger().info("[Pack] Artifact " + artifact.artifactName() + " ("
                             + artifact.assetCount() + " assets, " + artifact.byteSize() + " bytes) is current"
                             + describeDeliverySuffix() + ".");
+                    plugin.getLogger().info("[Pack] " + artifact.artifactName() + ": " + compiler.lastSummary() + ".");
                     // Players online before this compile finished (or holding a
                     // previous artifact) get the new pack without a rejoin.
                     // Unchanged recompiles never re-prompt anyone.
