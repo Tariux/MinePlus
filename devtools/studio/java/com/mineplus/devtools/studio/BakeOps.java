@@ -979,7 +979,9 @@ final class BakeOps {
                 overrideInt(overrides, "maxTexelPlatesPerInstance", base.maxTexelPlatesPerInstance()),
                 overrideInt(overrides, "texelBrightness", base.texelBrightness()),
                 base.display(),
-                str(overrides, "itemParent", base.itemParent()));
+                str(overrides, "itemParent", base.itemParent()),
+                base.animationFile(),
+                base.triggers());
     }
 
     /**

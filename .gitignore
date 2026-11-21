@@ -46,3 +46,5 @@ skills-lock.json
 /.agents
 /.whizbang
 /.curly
+
+javacc_args_**.txt
