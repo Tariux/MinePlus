@@ -1,7 +1,7 @@
 package com.mineplus.fun.juicer;
 
+import com.mineplus.infrastructure.mob.navigation.MobAttributes;
 import com.mineplus.infrastructure.registry.ItemRegistry;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -37,9 +37,7 @@ public final class JuiceConsumeListener implements Listener {
     }
 
     private void applyJuiceEffects(Player player, double healthPoints, int speedTicks) {
-        double maxHealth = player.getAttribute(Attribute.GENERIC_MAX_HEALTH) == null
-                ? 20.0
-                : player.getAttribute(Attribute.GENERIC_MAX_HEALTH).getValue();
+        double maxHealth = MobAttributes.get(player, "MAX_HEALTH", 20.0);
         player.setHealth(Math.min(maxHealth, player.getHealth() + healthPoints));
         player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, speedTicks, 0, true, true, true));
     }

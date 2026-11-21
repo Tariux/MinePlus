@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.mob.action;
 
 import com.mineplus.infrastructure.mob.BehaviorAction;
 import com.mineplus.infrastructure.mob.BehaviorContext;
+import com.mineplus.infrastructure.mob.navigation.MobAttributes;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.Tag;
@@ -49,8 +50,7 @@ public final class EatPlantsAction implements BehaviorAction {
     }
 
     private static void hurtHeal(LivingEntity eater) {
-        var attribute = eater.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
-        double max = attribute == null ? eater.getHealth() : attribute.getValue();
+        double max = MobAttributes.get(eater, "MAX_HEALTH", eater.getHealth());
         if (eater.getHealth() < max) {
             eater.setHealth(Math.min(max, eater.getHealth() + 1.0));
         }

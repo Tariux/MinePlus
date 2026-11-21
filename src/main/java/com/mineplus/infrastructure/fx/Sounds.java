@@ -1,6 +1,10 @@
 package com.mineplus.infrastructure.fx;
 
+import java.lang.reflect.Field;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Location;
 import org.bukkit.Sound;
 import org.bukkit.World;
@@ -28,6 +32,9 @@ import org.bukkit.entity.Player;
  */
 public final class Sounds {
 
+    /** Constant name -> resolved sound (empty when the server has no such constant). */
+    private static final Map<String, Optional<Sound>> CONSTANTS = new ConcurrentHashMap<>();
+
     private Sounds() {
     }
 
@@ -54,6 +61,20 @@ public final class Sounds {
             return;
         }
         emit(() -> world.playSound(location, fallback, volume, pitch));
+    }
+
+    /**
+     * Location sound from a typed vanilla constant. Modules pass the constant
+     * itself rather than {@code constant.name()}: {@code Sound} is an interface
+     * from 1.21.3 on, and a method called on it from a jar compiled against the
+     * 1.21.1 enum does not link there. Never throws.
+     */
+    public static void play(Location location, Sound sound, float volume, float pitch) {
+        World world = location == null ? null : location.getWorld();
+        if (world == null || sound == null) {
+            return;
+        }
+        emit(() -> world.playSound(location, sound, volume, pitch));
     }
 
     /** Self-only sound (feedback the shooter alone should hear). Never throws. */
@@ -101,16 +122,27 @@ public final class Sounds {
         }
     }
 
-    /** Enum constants are accepted as sound names too; they route to the typed overload. */
-    private static Sound enumSound(String name) {
+    /**
+     * Constant names are accepted as sound names too; they route to the typed
+     * overload. {@code Sound} was an enum until 1.21.2 and is an interface from
+     * 1.21.3 on, so the constant is read as a static field (present in both
+     * shapes) instead of through {@code Sound.valueOf}, whose call site only
+     * links against one of them.
+     */
+    public static Sound enumSound(String name) {
         String trimmed = name.trim();
         if (trimmed.indexOf(':') >= 0 || !trimmed.equals(trimmed.toUpperCase(Locale.ROOT))) {
             return null;
         }
+        return CONSTANTS.computeIfAbsent(trimmed, Sounds::readConstant).orElse(null);
+    }
+
+    private static Optional<Sound> readConstant(String constantName) {
         try {
-            return Sound.valueOf(trimmed);
-        } catch (IllegalArgumentException notAnEnum) {
-            return null;
+            Field field = Sound.class.getField(constantName);
+            return field.get(null) instanceof Sound sound ? Optional.of(sound) : Optional.empty();
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException unknownConstant) {
+            return Optional.empty();
         }
     }
 }

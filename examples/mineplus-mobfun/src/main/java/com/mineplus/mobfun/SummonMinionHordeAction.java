@@ -187,7 +187,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             retaliate(witch, raid.threat());
             kite(witch, raid.threat());
         } else if (summoned > 0) {
-            Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE.name(), 1.0f, 1.2f);
+            Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE, 1.0f, 1.2f);
             startRetreat(witch, focus.getLocation());
         }
         return true;
@@ -254,7 +254,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
     private void retaliate(Mob witch, LivingEntity threat) {
         witch.setTarget(threat);
         Location center = witch.getLocation().add(0, 1, 0);
-        Sounds.play(center, Sound.ENTITY_WITCH_THROW.name(), 1.0f, 1.0f);
+        Sounds.play(center, Sound.ENTITY_WITCH_THROW, 1.0f, 1.0f);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.WITCH, 8, 0.3, 0.4, 0.3, 0.02);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.SMOKE, 5, 0.2, 0.3, 0.2, 0.01);
     }
@@ -347,7 +347,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
         }
         minion.setTarget(victim);
         Location center = at.clone().add(0, 0.6, 0);
-        Sounds.play(center, Sound.ENTITY_ZOMBIE_AMBIENT.name(), 0.8f, 0.7f);
+        Sounds.play(center, Sound.ENTITY_ZOMBIE_AMBIENT, 0.8f, 0.7f);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.WITCH, 10, 0.3, 0.5, 0.3, 0.02);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.SMOKE, 6, 0.2, 0.4, 0.2, 0.01);
         return minion;
@@ -378,7 +378,7 @@ public final class SummonMinionHordeAction implements BehaviorAction {
             mount.addPassenger(rider);
         }
         Location center = at.clone().add(0, 1, 0);
-        Sounds.play(center, Sound.ENTITY_SKELETON_HORSE_AMBIENT.name(), 1.0f, 1.0f);
+        Sounds.play(center, Sound.ENTITY_SKELETON_HORSE_AMBIENT, 1.0f, 1.0f);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.WITCH, 10, 0.3, 0.5, 0.3, 0.02);
         return mount;
     }
@@ -511,7 +511,8 @@ public final class SummonMinionHordeAction implements BehaviorAction {
      * engine's spawn budget is typed, and this is the mapping it wants.
      */
     private static List<Class<? extends Mob>> poolFor(org.bukkit.block.Biome biome) {
-        String name = biome == null ? "" : biome.name();
+        String name = biome == null ? ""
+                : ((org.bukkit.Keyed) biome).getKey().getKey().toUpperCase(java.util.Locale.ROOT);
         Class<? extends Mob> melee = Zombie.class;
         Class<? extends Mob> flanker = Spider.class;
         Class<? extends Mob> ranged = Skeleton.class;

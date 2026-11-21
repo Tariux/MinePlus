@@ -68,7 +68,7 @@ public final class PlantFlowerAction implements BehaviorAction {
         }
         Location center = foot.getLocation().add(0.5, 0.7, 0.5);
         fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.HAPPY_VILLAGER, 5, 0.2, 0.2, 0.2, 0.0);
-        Sounds.play(center, Sound.BLOCK_GRASS_PLACE.name(), 0.6f, 1.6f);
+        Sounds.play(center, Sound.BLOCK_GRASS_PLACE, 0.6f, 1.6f);
         return true;
     }
 
@@ -80,7 +80,7 @@ public final class PlantFlowerAction implements BehaviorAction {
         if (biome == null) {
             return null;
         }
-        String name = biome.name();
+        String name = ((org.bukkit.Keyed) biome).getKey().getKey().toUpperCase(java.util.Locale.ROOT);
         if (name.contains("SWAMP") || name.contains("MANGROVE")) {
             return Material.BLUE_ORCHID;
         }

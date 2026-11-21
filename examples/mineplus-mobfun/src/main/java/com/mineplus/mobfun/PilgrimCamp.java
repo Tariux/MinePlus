@@ -142,7 +142,7 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
         Location at = context.entity().getLocation().add(0, 1.2, 0);
         fx.ring(at, Particle.HAPPY_VILLAGER, 2.5, 6);
         fx.burst(ParticleFx.Tier.AMBIENT, at, Particle.HAPPY_VILLAGER, 16, 0.8, 0.5, 0.8, 0.0);
-        Sounds.play(at, Sound.ENTITY_VILLAGER_CELEBRATE.name(), 1.0f, 1.1f);
+        Sounds.play(at, Sound.ENTITY_VILLAGER_CELEBRATE, 1.0f, 1.1f);
         DebugLogger.debug("[MobFun] pilgrim crew arrived at %d %d %d",
                 destination.getBlockX(), destination.getBlockY(), destination.getBlockZ());
     }
@@ -244,7 +244,7 @@ public final class PilgrimCamp implements JourneyToStructureAction.Callbacks {
         if (lit) {
             tagCrewCampBlock(fireSpot, crewTag);
             rememberCampBlock(crewTag, fireSpot);
-            Sounds.play(at, Sound.BLOCK_CAMPFIRE_CRACKLE.name(), 0.9f, 1.0f);
+            Sounds.play(at, Sound.BLOCK_CAMPFIRE_CRACKLE, 0.9f, 1.0f);
             fx.burst(ParticleFx.Tier.AMBIENT, at, Particle.CAMPFIRE_SIGNAL_SMOKE, 8, 0.3, 0.4, 0.3, 0.0);
         }
         return lit;

@@ -93,7 +93,7 @@ public final class NecromancerRaidStage implements PipelineStage {
             return;
         }
         ringBell(context, witch);
-        Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE.name(), 1.0f, 0.8f);
+        Sounds.play(witch.getLocation().add(0, 1, 0), Sound.ENTITY_WITCH_CELEBRATE, 1.0f, 0.8f);
     }
 
     @Override
@@ -186,7 +186,7 @@ public final class NecromancerRaidStage implements PipelineStage {
             minion.setTarget(focus);
             summoned++;
             Location center = spot.clone().add(0, 0.6, 0);
-            Sounds.play(center, Sound.ENTITY_ZOMBIE_AMBIENT.name(), 0.8f, 0.7f);
+            Sounds.play(center, Sound.ENTITY_ZOMBIE_AMBIENT, 0.8f, 0.7f);
             fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.WITCH, 10, 0.3, 0.5, 0.3, 0.02);
             fx.burst(ParticleFx.Tier.AMBIENT, center, Particle.SMOKE, 6, 0.2, 0.4, 0.2, 0.01);
         }
@@ -288,7 +288,8 @@ public final class NecromancerRaidStage implements PipelineStage {
 
     /** Biome-matched raiding party: melee, flanker, ranged. */
     private static List<Class<? extends Mob>> poolFor(org.bukkit.block.Biome biome) {
-        String name = biome == null ? "" : biome.name();
+        String name = biome == null ? ""
+                : ((org.bukkit.Keyed) biome).getKey().getKey().toUpperCase(java.util.Locale.ROOT);
         Class<? extends Mob> melee = Zombie.class;
         Class<? extends Mob> flanker = org.bukkit.entity.Spider.class;
         Class<? extends Mob> ranged = Skeleton.class;

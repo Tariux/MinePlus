@@ -51,6 +51,7 @@ def testRunnerMains = [
         'com.mineplus.test.CompatVersionTest',
         'com.mineplus.test.SchedulerCompatTest',
         'com.mineplus.test.AttributeSeamTest',
+        'com.mineplus.test.ApiShapeGuardTest',
         'com.mineplus.test.WanderGuardDecisionTest',
 ]
 

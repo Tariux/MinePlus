@@ -797,9 +797,8 @@ public final class BehaviorContext {
                 if (self.isDead() || !self.isValid()) {
                     return false;
                 }
-                org.bukkit.attribute.AttributeInstance maximum =
-                        self.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
-                double ceiling = maximum == null ? 20.0 : maximum.getValue();
+                double ceiling = com.mineplus.infrastructure.mob.navigation.MobAttributes
+                        .get(self, "MAX_HEALTH", 20.0);
                 return self.getHealth() <= ceiling * clamped;
             };
         }
@@ -852,12 +851,17 @@ public final class BehaviorContext {
          * Biome-appropriate sapling for a location, or {@code null}. Mirrors
          * the reference mod's approach (name matching over biome families) at
          * Bukkit API level: {@code Tag.SAPLINGS} members only.
+         *
+         * <p>The name is read through {@link org.bukkit.Keyed}: {@code Biome}
+         * was an enum until 1.21.2 and is an interface from 1.21.3 on, so a
+         * call made on the {@code Biome} type itself links against only one
+         * of the two shapes.
          */
         public static Material saplingFor(org.bukkit.block.Biome biome) {
             if (biome == null) {
                 return null;
             }
-            String name = biome.name();
+            String name = ((org.bukkit.Keyed) biome).getKey().getKey().toUpperCase(java.util.Locale.ROOT);
             if (name.contains("BIRCH")) {
                 return Material.BIRCH_SAPLING;
             }

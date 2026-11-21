@@ -226,7 +226,7 @@ public final class GolemSummonAction implements BehaviorAction {
                 return false; // the grant is spent: the column stays as built
             }
             Location at = target.getLocation().add(0.5, 0.5, 0.5);
-            Sounds.play(at, blockSound.name(), 0.9f, 1.0f);
+            Sounds.play(at, blockSound, 0.9f, 1.0f);
             fx.burst(ParticleFx.Tier.AMBIENT, at, Particle.CLOUD, 3, 0.15, 0.15, 0.15, 0.01);
             return true;
         }
@@ -256,7 +256,7 @@ public final class GolemSummonAction implements BehaviorAction {
                 return;
             }
             Location center = spawnLocation.add(0, 1, 0);
-            Sounds.play(center, spawnSound.name(), 1.0f, 1.0f);
+            Sounds.play(center, spawnSound, 1.0f, 1.0f);
             fx.burst(ParticleFx.Tier.CRITICAL, center.clone().add(0, 0.5, 0), Particle.WHITE_SMOKE,
                     10, 0.3, 0.4, 0.3, 0.02);
             if (golem instanceof Mob mob) {
