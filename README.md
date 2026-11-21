@@ -164,6 +164,7 @@ ADDITIONAL_DEBUG_LOGS: false
 | [**Examples**](examples/README.md) | Ready-to-copy JSON machines, Java snippets, and hybrid patterns |
 | [**MineplusFun Module**](examples/mineplus-fun/README.md) | Complete reference plugin: Juicer + Cannon, built fully outside the core |
 | [**Module Development Prompt**](examples/mineplus-fun/DEVELOPMENT_PROMPT.md) | The context guide for building new modules on the core |
+| [**Mineplus Studio**](devtools/studio/README.md) | The dev tool: render/parse/validate models, mobs, items, blocks, texel baking and the pack in a browser — plus an agent CLI to verify assets from the terminal without launching a server |
 
 ---
 

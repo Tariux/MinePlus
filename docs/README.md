@@ -65,3 +65,9 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 
 For building your own module, follow the canonical recipe in
 [`mineplus-fun/DEVELOPMENT_PROMPT.md`](../examples/mineplus-fun/DEVELOPMENT_PROMPT.md).
+
+---
+
+## 🛠️ Mineplus Studio
+
+The bundled dev tool at [`devtools/studio/`](../devtools/studio/README.md): one browser app over the real pipeline classes — models, mobs, items, blocks, textures, **texel baking** and the compiled pack — plus `agent.mjs`, a terminal CLI with exit codes and `--json` output so **AI agents verify assets while coding** without launching a server. Load any extra model directory with `--models <dir>`.

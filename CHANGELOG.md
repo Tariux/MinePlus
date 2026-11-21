@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Mineplus Studio — one merged devtool (asset-lab + texel)
+
+- `devtools/asset-lab` and `devtools/texel` are merged into **`devtools/studio`**:
+  one server (port 5167), one daemon (`StudioDaemon`, package
+  `com.mineplus.devtools.studio`), one app. The texel tool's separate port 5166
+  is gone — its bake op had already been ported into the daemon.
+- **Unified asset browser** — a new first tab listing every asset across all
+  watched roots (shipped defaults, live server folder, and any extra
+  `--models <dir>` roots): block models, mob rigs/definitions, gun folders +
+  frames, textures, pack artifacts. Filter box, `j`/`k` keyboard walk, and
+  `?open=<kind>:<id>` deep links (bookmarks / agent hand-off).
+- **Agent CLI** — `devtools/studio/agent.mjs`: the terminal twin of the web
+  app for AI agents and CI. Commands `status`, `list`, `audit`, `verify`,
+  `block`, `item`, `mob`, `poses`, `bake`, `pack`, `wait` — same daemon ops as
+  the UI, verdicts `OK / REPAIRED / BROKEN`, exit codes (0 ok, 1 broken, 2
+  unavailable, 3 usage) and `--json` for the raw response. Documented in
+  `AGENTS.MD` as the agent-facing verification bridge.
+- Build output moves to `build/studio`; the old `build/asset-lab` and
+  `build/devtool` are obsolete.
+
 ### Embedded-texture handling (free-format Blockbench projects)
 
 - **Embedded textures materialize on load.** A `free`-format bbmodel embeds

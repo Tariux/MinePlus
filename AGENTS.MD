@@ -71,4 +71,9 @@ Module layer (features live outside the Core): `examples/mineplus-fun` is the ca
 
 User documentation lives in `docs/` (`README.md` hub, `config-reference.md`, `developer-api.md`, `extension-workflows.md`) with assets in `docs/assets/`; the root `README.md` is the GitHub presentation. Keep these in sync when behavior changes.
 
+**Mineplus Studio (`devtools/studio/`) — the agent-facing verification bridge.** One dev tool over every asset axis (the former `devtools/asset-lab` + `devtools/texel`, merged; texel owns the `bake` op). The daemon runs the real compiled pipeline classes with zero production-code modifications, so a Studio verdict IS the server behavior. Use it to verify work without launching a server or opening a browser:
+- `node devtools/studio/server/server.mjs [--models <dir>]...` — the web app (port 5167); `--models` loads any extra model/texture directory.
+- `node devtools/studio/agent.mjs <cmd>` — terminal twin for agents/CI: `status` (daemon/compile health), `list [kind]` (inventory), `audit` (whole-repo pass, exit 1 on any BROKEN), `verify <key>` (one asset, right op auto-picked — run after editing an asset or pipeline code), `block <key>`, `item <gun>`, `mob <name>`, `poses <model> [--duration s --speed b/t --attack|--hurt|--death]`, `bake <key>`, `pack`, `wait`. Exit codes 0 ok/repaired, 1 broken, 2 unavailable, 3 usage; `--json` for the raw op response.
+- Ops vocabulary everywhere: `status: OK | REPAIRED | BROKEN` + `findings: [{code, message}]`; the audit pass tallies rows. Hot reload: editing pipeline Java recompiles and restarts the daemon; editing assets refreshes the inventory.
+
 Publishing identity: author `Tariux` (tariux@protonmail.com), repo `github.com/Tariux/MinePlus`, Modrinth project `modrinth.com/plugin/minepluscore` (slug `minepluscore`), Hangar project `hangar.papermc.io/Tariux/MinePlusCore`, bStats plugin id 33702. The Core jar ships as the primary download; MineplusFun is the separate reference module.
