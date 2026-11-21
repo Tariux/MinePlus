@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Advanced model correctness: items, pack blocks, animations
+
+#### Fixed
+
+- **Complicated item models rendered black/purple** (`BbClipBaker`). Face UVs
+  were written in texture pixels while vanilla reads the `0..16` window - a
+  64x64 bbmodel gun sampled outside its sprite. UVs now scale by
+  `16/resolution` (project-UV authoring auto-detected), the full parsed
+  texture table is emitted (`#0..#N` + `particle`, fixing multi-texture
+  models whose faces referenced undefined variables), only the eight vanilla
+  display contexts are emitted (a Blockbench-only `on_shelf` made the client
+  reject the whole model), and the `texture_size`/`format_version` fields
+  vanilla ignores are gone.
+- **Oversized pack blocks (alchemy table) rendered scrambled/oversized.**
+  The client-window guard re-based/squashed each element independently,
+  scrambling the layout of a 4-block-wide model. The block serializer now
+  applies one uniform centering + shared fit scale to the whole model and the
+  `BlockDisplay` compensates with `1/k` about the anchor block center, so
+  any-size models render exactly authored; the guard is verification-only on
+  the block axis.
+- **Pack textures lost to filename casing.** Texture PNGs resolve
+  case-insensitively against the model folder and models root
+  (`Alchemy_Texture.png` satisfies the identifier `alchemy_texture` on
+  case-sensitive filesystems).
+
+#### Added
+
+- **Inherited items** - `PackItemDefinition.builder(...).parent(model).texture(png)`
+  compiles a one-line `parent` + `layer0` model, so a re-skin of a vanilla
+  item (emerald sword from the diamond sword) costs a single PNG and nothing
+  else.
+- **Animations beside the model** - a sibling `<model>.anim.bbmodel` /
+  `<model>.animations.bbmodel`, or a meta-declared `"animationFile"`, merges
+  into the model by bone name (`VirtualModel.withAnimations`; a clip that
+  animates no bone of the target is reported at load).
+- **Declarative triggers** - `"triggers": {"event": "clip"}` in
+  `<key>.meta.json` plus `AnimationApi.triggerEvent(instanceId, event)`:
+  modules fire authored event names, authors re-map them per model without a
+  recompile.
+- **Alchemy example** - `/alchemy trigger <event>` demonstrates the trigger
+  API; `alchemy-table.meta.json` pins the anchor convention.
+- **Mob animation smoothing** - pose-skip epsilon tightened so slow
+  micro-motion (breathing, walk cycles) never visibly steps; catmull-rom
+  keyframe curves already sample smoothly.
+
 ### Minecraft 26.3 compatibility rewrite (runtime 1.21.0 -> 26.3)
 
 #### Fixed
@@ -985,7 +1030,7 @@ content (five texel-baked vinery bottles with `/wine flight`).
 
 ## [1.2.0]
 
-**Blockbench animations now play on vanilla clients.** Clips, bones, and keyframes ride inside the `.bbmodel` — the core samples them server-side and the vanilla client interpolates to its own frame rate. No mods, no resource packs.
+**Blockbench animations now play on vanilla clients.** Clips, bones, and keyframes ride inside the `.bbmodel` — the core samples them server-side and the vanilla client interpolates to its own frame rate. No mods, no resource pack (the virtual axis).
 
 ### Animation engine
 
@@ -1125,7 +1170,8 @@ First public release.
   negative-coordinate geometry, outliner pivot-conjugation transforms, per-cube
   `light_emission`, per-face UV analysis, and per-face material plates for
   mixed-material cubes. Models render as vanilla `BlockDisplay` entities —
-  **no client mods, no resource packs**.
+  no client mods (the virtual axis; the resource-pack axis arrived later as a
+  peer rendering mode).
 - **Geometry-aware collision** — per-cube SAT voxelization with `GEOMETRY`
   (default), `SURFACE` (interior hollowing), and `AABB` (legacy) modes; barrier
   occupancy uses the exact same transform as the visuals, so collision and

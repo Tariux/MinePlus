@@ -218,6 +218,11 @@ anim.triggerAnimation(instance.id(), AnimationSelector.animation("recoil"));
 // Granular: trigger only the named bone's tracks inside every clip animating it
 anim.triggerAnimation(instance.id(), AnimationSelector.bone("turret"));
 
+// Declarative event trigger: the event resolves through the model's meta
+// trigger map, so the module fires authored event names and the author
+// re-maps events to clips by editing <key>.meta.json only
+anim.triggerEvent(instance.id(), "brew");
+
 // Enable/disable whatever a selector addresses (pause/resume controllers,
 // or gate a bone's contribution inside all matching clips)
 anim.setAnimationEnabled(instance.id(), AnimationSelector.bone("wheel_front_left"), false);
@@ -228,6 +233,26 @@ anim.getAnimations(instance.id());          // clip names in the model
 anim.getBones(instance.id());               // bone (outliner group) names
 anim.getAnimationState(instance.id(), "recoil");  // playback snapshot or null
 ```
+
+**Declarative triggers.** `triggers` in `<key>.meta.json` maps event names to
+clips (`"triggers": {"brew": "brew_clip", "break": "break_clip"}`); the map is
+case-insensitive, plays the clip as a forced one-shot above autoplay but below
+explicit priorities, and a missing mapping is a harmless `false` — a module
+can fire events unconditionally and an author wires them per model.
+
+**Animation files beside the model.** Clips do not have to live inside the
+model's own file. Either convention merges the extra clips into the model by
+bone name (a same-name clip in the extra file replaces the model's own):
+
+- A sibling `<model>.anim.bbmodel` / `<model>.animations.bbmodel` in the same
+  folder loads automatically with the model;
+- `"animationFile": "<name>.bbmodel"` in `<key>.meta.json` names any file in
+  the models folder.
+
+The animation file keeps the same outliner group names as the model (save the
+animation project from the same Blockbench file), because animators are
+addressed by bone name. A clip whose animators match none of the model's
+bones is reported at load instead of silently playing nothing.
 
 **Selector kinds** (`AnimationSelector`):
 
@@ -256,7 +281,7 @@ anim.getAnimationState(instance.id(), "recoil");  // playback snapshot or null
 
 ## Texel Surface Baking
 
-Pixel-accurate vanilla texturing, zero resource pack: when a texture PNG sits next to the model file (`plugins/Mineplus/models/<textureName>.png`), a transformer decomposes each face's UV-mapped texture into per-pixel **texels**, quantizes each texel to the nearest visually-flat vanilla block (66-entry palette: concretes, concrete powders, terracottas, snow, and flat stones/minerals — polished granite excluded; Oklab matching with directional-shade compensation; only pure-flat concretes and snow merge into stretched rectangles, everything else stays 1×1), and emits one thin plate (1/1024 block, inset in-plane at every face edge so perpendicular plates at shared cube edges are geometrically disjoint — they touch exactly instead of interpenetrating) per merged run of same-color texels (greedy rectangle merging). Texels whose plate would land inside another cube's solid are occlusion-culled, so nested box-modeled geometry never spawns overlapping surface entities; texel plates sit flush at the cube surface so plate planes never z-fight the base display at grazing angles. Baking runs off the main thread (results land asynchronously; a reload or settings change discards in-flight bakes, and spawns wait — bounded — for a model's bake in flight), so model registration and `/mineplus reload models` never stall on PNG decoding.
+Pixel-accurate vanilla texturing with no resource pack needed (virtual axis): when a texture PNG sits next to the model file (`plugins/Mineplus/models/<textureName>.png`), a transformer decomposes each face's UV-mapped texture into per-pixel **texels**, quantizes each texel to the nearest visually-flat vanilla block (66-entry palette: concretes, concrete powders, terracottas, snow, and flat stones/minerals — polished granite excluded; Oklab matching with directional-shade compensation; only pure-flat concretes and snow merge into stretched rectangles, everything else stays 1×1), and emits one thin plate (1/1024 block, inset in-plane at every face edge so perpendicular plates at shared cube edges are geometrically disjoint — they touch exactly instead of interpenetrating) per merged run of same-color texels (greedy rectangle merging). Texels whose plate would land inside another cube's solid are occlusion-culled, so nested box-modeled geometry never spawns overlapping surface entities; texel plates sit flush at the cube surface so plate planes never z-fight the base display at grazing angles. Baking runs off the main thread (results land asynchronously; a reload or settings change discards in-flight bakes, and spawns wait — bounded — for a model's bake in flight), so model registration and `/mineplus reload models` never stall on PNG decoding. When a model needs more than this axis can express, the [resource-pack axis](pack-system.md) renders it at full fidelity through a pack the core compiles and delivers itself.
 
 - **Zero regression by default:** `MODE: AUTO` only upgrades faces that would otherwise render with the FULL strategy and have a resolvable PNG — models without adjacent PNGs render byte-identically. `TEXEL_BAKING.ENABLED: false` restores the pre-texel pipeline entirely.
 - **Entity count scales with geometry, not texture resolution:** the effective grid is the face's own pixel grid (16px face → 16×16 texels); a 4×4 texture upscales, a 32×32 downsamples.

@@ -4,6 +4,7 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
 import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
+import com.mineplus.infrastructure.virtual.animation.AnimationClip;
 import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
@@ -354,9 +355,44 @@ public class VirtualBlockManager implements Listener {
 
         for (ModelImportCoordinator.ModelEntry entry : result.entries()) {
             VirtualModel model = entry.model();
-            registerModel(entry.key(), model, ModelMeta.load(entry.file()), entry.file());
+            ModelMeta meta = ModelMeta.load(entry.file());
+            model = mergeDeclaredAnimations(entry, model, meta, modelsFolder);
+            registerModel(entry.key(), model, meta, entry.file());
             textureReports.put(entry.key(), resolveTextureReport(model));
         }
+    }
+
+    /**
+     * Merges a meta-declared animation file ({@code "animationFile": "..."} in
+     * {@code <key>.meta.json}) into the model: the file is parsed with the same
+     * streaming importer and its clips join the model's own by bone name, later
+     * file wins per clip name. Lets an author keep all animation work in one
+     * dedicated bbmodel beside the model file.
+     */
+    private VirtualModel mergeDeclaredAnimations(ModelImportCoordinator.ModelEntry entry,
+                                                 VirtualModel model, ModelMeta meta, File modelsFolder) {
+        if (meta == null || meta.animationFile() == null || meta.animationFile().isBlank()) {
+            return model;
+        }
+        String declared = meta.animationFile().trim();
+        if (!declared.toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
+            declared = declared + ".bbmodel";
+        }
+        File animationFile = new File(modelsFolder, declared);
+        if (!animationFile.isFile()) {
+            DebugLogger.warning("[ModelImport] Model '" + entry.key()
+                    + "' declares animationFile '" + meta.animationFile()
+                    + "' but no such file exists in the models folder.");
+            return model;
+        }
+        VirtualModel parsed = BbModelImporter.parse(entry.key() + "#declared-anim", animationFile, plugin.getLogger());
+        if (parsed == null || parsed.animations().isEmpty()) {
+            return model;
+        }
+        List<AnimationClip> clips = parsed.animations();
+        DebugLogger.info("[ModelImport] Merged " + clips.size() + " clip(s) from '"
+                + declared + "' into model '" + entry.key() + "'.");
+        return model.withAnimations(clips);
     }
 
     /**
@@ -848,6 +884,15 @@ public class VirtualBlockManager implements Listener {
      */
     public File resolveTextureFile(String modelKey, String textureName) {
         return imageStore().resolveTextureFile(textureName, getModelSourceFile(modelKey));
+    }
+
+    /**
+     * Resolves a PNG by name against the models root only (no model context),
+     * for content that has no bbmodel of its own — an inherited pack item's
+     * {@code layer0} texture, for example.
+     */
+    public File resolveStandaloneTextureFile(String textureName) {
+        return imageStore().resolveTextureFile(textureName, null);
     }
 
     private String stripExtension(String fileName) {

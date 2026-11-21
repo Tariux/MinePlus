@@ -41,7 +41,7 @@ public final class AlchemySubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/alchemy <place|remove|clear|status>";
+        return "/alchemy <place|remove|clear|status|trigger <event>>";
     }
 
     @Override
@@ -63,8 +63,33 @@ public final class AlchemySubCommand implements SubCommand {
             case "remove" -> removeLooked(player);
             case "clear" -> clearNearby(player);
             case "status" -> printStatus(player);
+            case "trigger" -> fireTrigger(player, args);
             default -> false;
         };
+    }
+
+    /**
+     * Declarative-trigger demo: fires an event on the looked-at table through
+     * {@link com.mineplus.infrastructure.core.api.AnimationApi#triggerEvent}.
+     * The event resolves through the model's {@code triggers} meta map —
+     * the module never names a clip, so an author re-maps events by editing
+     * {@code alchemy-table.meta.json} only.
+     */
+    private boolean fireTrigger(Player player, String[] args) {
+        if (args.length < 2 || args[1].isBlank()) {
+            return false;
+        }
+        MultiBlockInstance looked = context.moduleSupport().resolveLooked(player, 6, AlchemyKeys.MACHINE_ID);
+        if (looked == null) {
+            player.sendMessage(ChatColor.RED + "Look at an Alchemy Table to trigger it.");
+            return true;
+        }
+        boolean fired = context.animationApi().triggerEvent(looked.id(), args[1]);
+        player.sendMessage(fired
+                ? ChatColor.GREEN + "Trigger '" + args[1] + "' fired."
+                : ChatColor.YELLOW + "No clip mapped for trigger '" + args[1]
+                + "' in alchemy-table.meta.json.");
+        return true;
     }
 
     private boolean placeSingle(Player player) {
@@ -164,7 +189,7 @@ public final class AlchemySubCommand implements SubCommand {
         if (args.length == 1) {
             List<String> completions = new ArrayList<>();
             StringUtil.copyPartialMatches(args[0],
-                    List.of("place", "remove", "clear", "status"), completions);
+                    List.of("place", "remove", "clear", "status", "trigger"), completions);
             Collections.sort(completions);
             return completions;
         }

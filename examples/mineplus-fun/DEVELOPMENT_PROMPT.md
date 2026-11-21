@@ -522,7 +522,7 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   re-evaluation. The canonical `AnimationApi` consumer (§10a).
 - **wine** (`com.mineplus.fun.wine`): pure showcase of the Core's texel surface baking —
   five vinery bottles (Strad/Stal/Red/Chenet/Solaris) whose 16x16 sprites are reconstructed
-  pixel-by-pixel out of vanilla palette blocks with zero resource pack. Ships converted
+  pixel-by-pixel out of vanilla palette blocks — no resource pack needed (the virtual/texel axis). Ships converted
   `java_block`-format bbmodels (GRID anchor via AUTO detection, pruned to visible cubes),
   one PNG per model, per-model `.meta.json` opt-ins (`texelMode: AUTO`, raised plate
   budgets), and one multiblock type per variant. `/wine flight` lays all five out side by
@@ -578,8 +578,15 @@ All live in `examples/mineplus-fun` (see also `examples/STEP_BY_STEP_FUN_GUIDE.m
   to at reload; the derived key only exists after the first render). Geometry
   serializes in block space (`ModelJsonWriter.writeBlock`) and
   `BlockStateWriter` regenerates the carrier's complete vanilla blockstate
-  table. Placement, collision, breaking and persistence are the ordinary
+  table. Oversized geometry is window-fitted by one uniform transform the
+  renderer inverts, so models wider than one block stay exactly authored.
+  Placement, collision, breaking and persistence are the ordinary
   multiblock lifecycle — the pack subsystem only declares the visual, so it
-  never touches texel/virtual internals. `/alchemy place|remove|clear|status`.
+  never touches texel/virtual internals. `/alchemy
+  place|remove|clear|status|trigger <event>` — `trigger` fires a declarative
+  animation event through `AnimationApi.triggerEvent`, resolved by the
+  `triggers` map in `alchemy-table.meta.json` (the demo of the event->clip
+  pattern: your module fires authored event names, authors re-map them per
+  model without recompiling).
 
 Copy the reference whose interaction model matches your feature.

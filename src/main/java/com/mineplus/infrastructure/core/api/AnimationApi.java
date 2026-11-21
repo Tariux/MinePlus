@@ -79,6 +79,20 @@ public interface AnimationApi {
     boolean triggerAnimation(UUID instanceId, AnimationSelector selector);
 
     /**
+     * Declarative event trigger: resolves the event name through the model's
+     * meta trigger map ({@code "triggers": {"fire": "fire_clip", ...}} in
+     * {@code <key>.meta.json}) and plays the mapped clip once, returning to
+     * the base pose afterwards. Lets a module fire authored event names
+     * without hard-coding clip names.
+     *
+     * @param event the trigger event name (case-insensitive)
+     * @return {@code true} when the event maps to a clip on this instance
+     */
+    default boolean triggerEvent(UUID instanceId, String event) {
+        return false;
+    }
+
+    /**
      * Enables or disables whatever the selector addresses: animation selectors
      * pause/resume controllers, bone selectors gate the matched bones inside
      * every controller animating them, {@code all()} addresses everything.

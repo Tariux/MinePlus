@@ -1143,6 +1143,32 @@ public final class ModelAnimationManager {
         return true;
     }
 
+    /**
+     * Declarative trigger playback: resolves the event through the model's
+     * meta trigger map ({@code triggers: {event -> clip}} in
+     * {@code <key>.meta.json}) and plays the mapped clip as a forced one-shot
+     * that returns to base afterwards. Sits above autoplay but below explicit
+     * {@link #play} priorities — the same layer as {@link #trigger}.
+     *
+     * @return {@code true} when the event maps to a clip on this instance
+     */
+    public boolean fireTrigger(UUID renderedModelId, String event) {
+        if (!settings.enabled() || event == null || event.isBlank()) {
+            return false;
+        }
+        AnimatedInstance state = instance(renderedModelId);
+        if (state == null) {
+            return false;
+        }
+        com.mineplus.infrastructure.virtual.ModelMeta meta =
+                virtualBlockManager.getModelMeta(state.modelKey);
+        String clip = meta == null ? null : meta.triggerClip(event);
+        if (clip == null) {
+            return false;
+        }
+        return trigger(renderedModelId, AnimationSelector.animation(clip));
+    }
+
     public boolean stop(UUID renderedModelId, String animation) {
         AnimatedInstance state = instance(renderedModelId);
         if (state == null) {

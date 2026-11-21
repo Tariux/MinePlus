@@ -2,7 +2,9 @@ package com.mineplus.infrastructure.virtual;
 
 import com.mineplus.infrastructure.virtual.animation.AnimationClip;
 import com.mineplus.infrastructure.virtual.animation.VirtualBone;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -151,6 +153,41 @@ public final class VirtualModel {
         }
         return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
                 display, resolved);
+    }
+
+    /**
+     * The same model with additional clips merged in, keyed by normalized clip
+     * name (a later clip of the same name replaces the earlier one — the
+     * animation-file merge convention). Used by the animation-file loader: a
+     * sibling {@code .anim.bbmodel} or a meta-declared animation file carries
+     * clips whose animators are keyed by bone name, which is exactly what this
+     * model's bone graph addresses, so a merge is safe without any uuid
+     * reconciliation.
+     *
+     * @param extra the clips to merge in; clips already present under the same
+     *              name are replaced by the incoming ones, order preserved
+     */
+    public VirtualModel withAnimations(List<AnimationClip> extra) {
+        if (extra == null || extra.isEmpty()) {
+            return this;
+        }
+        Map<String, AnimationClip> merged = new LinkedHashMap<>();
+        for (AnimationClip clip : animations) {
+            merged.put(AnimationClip.normalize(clip.name()), clip);
+        }
+        for (AnimationClip clip : extra) {
+            if (clip != null) {
+                merged.put(AnimationClip.normalize(clip.name()), clip);
+            }
+        }
+        if (merged.size() == animations.size()) {
+            List<AnimationClip> values = new ArrayList<>(merged.values());
+            if (values.equals(animations)) {
+                return this;
+            }
+        }
+        return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones,
+                new ArrayList<>(merged.values()), display, itemParent);
     }
 
     public String name() {

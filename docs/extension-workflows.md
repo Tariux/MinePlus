@@ -128,6 +128,20 @@ Behavior profiles, not listeners. One `MobProfile` per entity type, registered o
 
 ---
 
+## F) Animation-Heavy Models
+
+Models whose interaction is animation — machines that cycle, items with authored clips, mobs with gait work — share three conventions:
+
+1. **Keep animations beside the model when it helps** — ship `<model>.anim.bbmodel` next to `<model>.bbmodel` (merged automatically, same outliner group names required), or name any file with `"animationFile"` in `<key>.meta.json`. Clips merge by bone name; a same-name clip in the extra file replaces the model's own.
+2. **Fire events, not clip names** — call `context.animationApi().triggerEvent(instanceId, "brew")` and wire the event to a clip in the model's meta `"triggers"` map. Your code never recompiles when an author re-maps an event; a missing mapping is a harmless `false`.
+3. **Complicated items compile themselves** — any-resolution, multi-texture bbmodel items bake through `BbClipBaker` with correct vanilla-window UVs and full texture tables; a re-skin of a vanilla item needs only `.parent(model).texture(png)` on the `PackItemDefinition`.
+
+> 📁 **Working demo:** `/alchemy trigger <event>` in [`examples/mineplus-fun`](../examples/mineplus-fun/README.md) fires a declarative trigger on the pack-block alchemy table.
+
+> 📖 **API detail:** [Animation Engine](developer-api.md#animation-engine) · [Resource Pack System](pack-system.md)
+
+---
+
 ## Runtime Administration
 
 Use the Mineplus admin CLI instead of debug tricks — it keeps production operations clean and predictable:

@@ -97,8 +97,7 @@ public final class WeaponBbModels {
              "firstperson_lefthand":{"rotation":[-12,6,0],"translation":[1,2.5,-6],"scale":[0.62,0.62,0.62]},
              "ground":{"rotation":[0,90,0],"translation":[0,2,2],"scale":[0.5,0.5,0.5]},
              "gui":{"rotation":[90,-58,90],"translation":[0,6,0],"scale":[0.55,0.55,0.55]},
-             "fixed":{"rotation":[90,45,-90],"translation":[3,5,0],"scale":[0.6,0.6,0.6]},
-             "on_shelf":{"rotation":[90,45,-90],"translation":[2,2,-1],"scale":[0.5,0.5,0.5]}}
+             "fixed":{"rotation":[90,45,-90],"translation":[3,5,0],"scale":[0.6,0.6,0.6]}}
             """;
 
     private WeaponBbModels() {

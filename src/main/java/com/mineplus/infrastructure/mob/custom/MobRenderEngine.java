@@ -104,9 +104,16 @@ public final class MobRenderEngine {
     private static final double RELEASE_HYSTERESIS_BLOCKS = 8.0;
     /** Pose passes a mid-detail rig waits between pushes. */
     private static final int MID_LOD_DIVISOR = 4;
-    /** A pose push is skipped when neither position nor matrix moved by this. */
-    private static final double POSE_POSITION_EPSILON = 0.0015;
-    private static final float POSE_MATRIX_EPSILON = 0.0008f;
+    /**
+     * A pose push is skipped when neither position nor matrix moved by this.
+     * Deliberately tiny: a skipped push freezes the client interpolation at
+     * the last pushed frame, so anything above a hair of drift (breathing,
+     * slow walk cycles at LOD cadence) must keep pushing or motion visibly
+     * steps. Deltas below the threshold accumulate across passes, so a slow
+     * drift still pushes once it adds up.
+     */
+    private static final double POSE_POSITION_EPSILON = 0.0008;
+    private static final float POSE_MATRIX_EPSILON = 0.0003f;
     /** Maximum feed-forward lead a pose push may carry (blocks). */
     private static final double POSE_LEAD_MAX_BLOCKS = 0.5;
     /** Ticks the base model stays revealed for a vanilla hurt flash. */

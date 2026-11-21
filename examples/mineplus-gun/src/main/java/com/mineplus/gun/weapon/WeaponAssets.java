@@ -98,12 +98,13 @@ public final class WeaponAssets {
     /**
      * Drops faces that reference a texture variable the model never defines.
      *
-     * <p>A single unresolved face makes the client refuse the whole model and
-     * render the missing-model checkerboard, which is what "some frames are
-     * purple and black" looks like in hand. The usual cause is an author
-     * hiding a face as {@code #missing} instead of removing it; the face was
-     * invisible anyway, so removing it restores the intended look and keeps
-     * the rest of the model faithful.</p>
+     * <p>A face referencing a texture variable the model does not define makes
+     * the client refuse the whole model and render the missing-model
+     * checkerboard, which is what "some frames are purple and black" looks
+     * like in hand. Such a face is remapped to the model's primary sprite
+     * ({@code #0}) instead of being deleted, so geometry always keeps its
+     * shape; the baker now emits the full texture table, so this pass only
+     * repairs hand-authored files.</p>
      *
      * @return how many model files were repaired
      */
@@ -119,7 +120,7 @@ public final class WeaponAssets {
                 if (!parsed.isJsonObject()) {
                     continue;
                 }
-                if (dropUnresolvedFaces(parsed.getAsJsonObject()) > 0) {
+                if (remapUnresolvedFaces(parsed.getAsJsonObject()) > 0) {
                     Files.writeString(file.toPath(), GSON.toJson(parsed.getAsJsonObject()),
                             StandardCharsets.UTF_8);
                     repaired++;
@@ -136,7 +137,7 @@ public final class WeaponAssets {
         return repaired;
     }
 
-    private static int dropUnresolvedFaces(JsonObject model) {
+    private static int remapUnresolvedFaces(JsonObject model) {
         JsonObject textures = objectOf(model, "textures");
         if (textures == null || textures.isEmpty()) {
             return 0;
@@ -145,7 +146,11 @@ public final class WeaponAssets {
         if (elements == null) {
             return 0;
         }
-        int dropped = 0;
+        // The primary sprite ("0", guaranteed by the baker) is the safest
+        // remap target: geometry keeps its shape and draws with the model's
+        // own texture instead of vanishing face by face.
+        String fallback = textures.has("0") ? "0" : textures.entrySet().iterator().next().getKey();
+        int remapped = 0;
         for (JsonElement element : elements) {
             if (!element.isJsonObject()) {
                 continue;
@@ -154,7 +159,6 @@ public final class WeaponAssets {
             if (faces == null) {
                 continue;
             }
-            List<String> unresolved = new ArrayList<>();
             for (Map.Entry<String, JsonElement> face : faces.entrySet()) {
                 if (!face.getValue().isJsonObject()) {
                     continue;
@@ -165,15 +169,12 @@ public final class WeaponAssets {
                     continue;
                 }
                 if (!textures.has(texture.getAsString().substring(1))) {
-                    unresolved.add(face.getKey());
+                    face.getValue().getAsJsonObject().addProperty("texture", "#" + fallback);
+                    remapped++;
                 }
             }
-            for (String key : unresolved) {
-                faces.remove(key);
-                dropped++;
-            }
         }
-        return dropped;
+        return remapped;
     }
 
     private static JsonObject objectOf(JsonObject parent, String key) {

@@ -14,7 +14,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | Author models in **Blockbench** | [Configuration Reference → Blockbench Guide](config-reference.md#blockbench-designer-guidelines) |
 | Build a **small add-on plugin** | [Developer API](developer-api.md#tier-2-basic-infrastructure-api) → [Basic Add-on Workflow](extension-workflows.md#b-basic-add-on-developers) |
 | Build a **full machine framework** | [Developer API](developer-api.md) → [Advanced Workflow](extension-workflows.md#c-advanced-framework-developers) |
-| See a **complete working module** | [MineplusFun (Juicer + Cannon)](../examples/mineplus-fun/README.md) |
+| See a **complete working module** | [MineplusFun (Juicer, Cannon, Wine, Cabinet, Alchemy)](../examples/mineplus-fun/README.md) · [MineplusGun (firearms)](../examples/mineplus-gun/README.md) |
 | Tune the **rendering engine** | [Configuration Reference → settings.mp.yml](config-reference.md#settingsmpyml-engine--runtime-services) |
 | Add **pack-based custom content** | [Resource Pack System](pack-system.md) |
 | Give weapons **real ballistics** | [Developer API → Combat Services](developer-api.md#combat-services) |
@@ -40,7 +40,7 @@ Adding new mobs without touching vanilla ones: the definition/model/attributes c
 The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced framework) plus runtime administration and model-debugging tips.
 
 ### [Resource Pack System](pack-system.md)
-Phase 2's second rendering axis: custom items, models and textures through a generated resource pack — architecture, render-mode selection (`virtual` / `pack_item` / `pack_block` / `hybrid_item` / `hybrid_block`), lighting, the `PackApi`, compilation/delivery model, configuration, and the current limitations.
+Phase 2's second rendering axis: custom items, models and textures through a generated resource pack — architecture, render-mode selection (`virtual` / `pack_item` / `pack_block` / `hybrid_item` / `hybrid_block`), lighting, the `PackApi`, compilation/delivery model, configuration, inherited items (vanilla-parent re-skins from a single PNG), uniform fitting of any-size pack blocks, and the current limitations.
 
 ### [Migration Guide](migration-guide.md)
 Upgrading across a major release: renamed/added configuration keys, the unified `renderMode` vocabulary (and the legacy `renderBackend`/`renderKind` mapping), and how to update custom modules. The change list lives in the [changelog](../CHANGELOG.md).

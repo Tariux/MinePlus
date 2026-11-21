@@ -56,6 +56,8 @@ public final class PackItemDefinition implements ItemDefinition {
     private final String linkedBlockKey;
     private final org.bukkit.inventory.EquipmentSlot equipmentSlot;
     private final List<String> descriptionLines;
+    private final String parentModel;
+    private final String textureOverride;
 
     /** Assigned by {@code PackApi} during registration; internal wiring. */
     private volatile PackItemFactory factory;
@@ -74,7 +76,8 @@ public final class PackItemDefinition implements ItemDefinition {
             List<String> descriptionLines
     ) {
         this(namespace, id, backingMaterial, modelKey, fallbackModelReference, frames,
-                ItemFrames.ClipPlan.NONE, displayName, category, linkedBlockKey, equipmentSlot, descriptionLines);
+                ItemFrames.ClipPlan.NONE, displayName, category, linkedBlockKey, equipmentSlot,
+                descriptionLines, null, null);
     }
 
     public PackItemDefinition(
@@ -90,6 +93,26 @@ public final class PackItemDefinition implements ItemDefinition {
             String linkedBlockKey,
             org.bukkit.inventory.EquipmentSlot equipmentSlot,
             List<String> descriptionLines
+    ) {
+        this(namespace, id, backingMaterial, modelKey, fallbackModelReference, frames, plan,
+                displayName, category, linkedBlockKey, equipmentSlot, descriptionLines, null, null);
+    }
+
+    public PackItemDefinition(
+            String namespace,
+            String id,
+            Material backingMaterial,
+            String modelKey,
+            String fallbackModelReference,
+            List<Frame> frames,
+            ItemFrames.ClipPlan plan,
+            String displayName,
+            ItemCategory category,
+            String linkedBlockKey,
+            org.bukkit.inventory.EquipmentSlot equipmentSlot,
+            List<String> descriptionLines,
+            String parentModel,
+            String textureOverride
     ) {
         this.namespace = normalizeToken(namespace);
         this.id = normalizeToken(id);
@@ -107,9 +130,17 @@ public final class PackItemDefinition implements ItemDefinition {
         this.linkedBlockKey = linkedBlockKey == null ? "" : linkedBlockKey;
         this.equipmentSlot = equipmentSlot;
         this.descriptionLines = descriptionLines == null ? List.of() : List.copyOf(descriptionLines);
-        if (this.modelKey == null && this.fallbackModelReference == null) {
+        this.parentModel = parentModel == null || parentModel.isBlank()
+                ? null
+                : parentModel.trim().toLowerCase(Locale.ROOT);
+        this.textureOverride = textureOverride == null || textureOverride.isBlank()
+                ? null
+                : textureOverride.trim().toLowerCase(Locale.ROOT);
+        if (this.modelKey == null && this.fallbackModelReference == null
+                && (this.parentModel == null || this.textureOverride == null)) {
             throw new IllegalArgumentException(
-                    "Pack item '" + this.id + "' needs a modelKey or a fallbackModelReference");
+                    "Pack item '" + this.id + "' needs a modelKey, a fallbackModelReference,"
+                    + " or a parentModel + textureOverride pair");
         }
     }
 
@@ -145,10 +176,35 @@ public final class PackItemDefinition implements ItemDefinition {
 
     /**
      * Key of the registered virtual model this item renders, or {@code null}
-     * when the item is assembled from module-registered raw model JSONs.
+     * when the item is assembled from module-registered raw model JSONs or
+     * inherits a vanilla parent model.
      */
     public String modelKey() {
         return modelKey;
+    }
+
+    /**
+     * The vanilla model this item extends ({@code minecraft:item/handheld},
+     * {@code minecraft:item/diamond_sword}...), or {@code null}. An inherited
+     * item compiles to a one-line model — {@code parent} plus one
+     * {@code layer0} texture — so a re-skin costs a single PNG and inherits
+     * every display transform, element and property of the parent.
+     */
+    public String parentModel() {
+        return parentModel;
+    }
+
+    /**
+     * The texture PNG (last-segment name, resolved like every model texture)
+     * an inherited item draws with, or {@code null}.
+     */
+    public String textureOverride() {
+        return textureOverride;
+    }
+
+    /** True when this item extends a vanilla parent model with a single texture. */
+    public boolean isInherited() {
+        return parentModel != null && textureOverride != null;
     }
 
     /** The resting-state model of a framed item; {@code null} on plain items. */
@@ -253,6 +309,8 @@ public final class PackItemDefinition implements ItemDefinition {
         private String linkedBlockKey = "";
         private org.bukkit.inventory.EquipmentSlot equipmentSlot;
         private List<String> descriptionLines = List.of();
+        private String parentModel;
+        private String textureOverride;
 
         private Builder(String namespace, String id, Material backingMaterial, String modelKey) {
             this.namespace = namespace;
@@ -313,14 +371,38 @@ public final class PackItemDefinition implements ItemDefinition {
             return this;
         }
 
+        /**
+         * Extends a vanilla model ({@code minecraft:item/handheld},
+         * {@code minecraft:item/diamond_sword}...): the compiled model is
+         * {@code parent} plus one {@code layer0} texture, so a re-skin of an
+         * existing item costs a single PNG and inherits everything else.
+         * Requires {@link #texture(String)}.
+         */
+        public Builder parent(String value) {
+            this.parentModel = value == null || value.isBlank() ? null : value.trim();
+            return this;
+        }
+
+        /**
+         * The texture PNG (file name, resolved like every model texture) an
+         * inherited item draws with. Requires {@link #parent(String)}.
+         */
+        public Builder texture(String value) {
+            this.textureOverride = value == null || value.isBlank() ? null : value.trim();
+            return this;
+        }
+
         public PackItemDefinition build() {
-            if (modelKey == null && fallbackModelReference == null) {
+            if (modelKey == null && fallbackModelReference == null
+                    && (parentModel == null || textureOverride == null)) {
                 throw new IllegalArgumentException(
-                        "Pack item '" + id + "' needs a modelKey or a frames() fallback reference");
+                        "Pack item '" + id + "' needs a modelKey, a frames() fallback reference,"
+                        + " or parent()+texture()");
             }
             return new PackItemDefinition(namespace, id, backingMaterial, modelKey,
                     fallbackModelReference, frames, plan,
-                    displayName, category, linkedBlockKey, equipmentSlot, descriptionLines);
+                    displayName, category, linkedBlockKey, equipmentSlot, descriptionLines,
+                    parentModel, textureOverride);
         }
     }
 }

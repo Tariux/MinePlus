@@ -3,8 +3,10 @@ package com.mineplus.infrastructure.virtual;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Per-model override file {@code models/<key>.meta.json}:
@@ -17,7 +19,9 @@ import java.util.Locale;
  *   "texelDetail": "FACE",
  *   "maxTexelPlatesPerFace": 96,
  *   "maxTexelPlatesPerInstance": 150,
- *   "texelBrightness": 15
+ *   "texelBrightness": 15,
+ *   "animationFile": "alchemy-animations.bbmodel",
+ *   "triggers": { "reload": "reload_clip", "fire": "fire_clip" }
  * }
  * }</pre>
  * Any omitted field falls back to the global settings default.
@@ -32,7 +36,9 @@ public record ModelMeta(
         Integer maxTexelPlatesPerInstance,
         Integer texelBrightness,
         ModelDisplay display,
-        String itemParent
+        String itemParent,
+        String animationFile,
+        Map<String, String> triggers
 ) {
 
     public ModelMeta {
@@ -44,6 +50,16 @@ public record ModelMeta(
                 ? null : Math.max(0, Math.min(15, texelBrightness));
         display = display == null ? ModelDisplay.EMPTY : display;
         itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
+        animationFile = animationFile == null || animationFile.isBlank() ? null : animationFile.trim();
+        triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
+    }
+
+    /** The clip a trigger event maps to (case-insensitive), or {@code null}. */
+    public String triggerClip(String event) {
+        if (event == null || triggers.isEmpty()) {
+            return null;
+        }
+        return triggers.get(event.trim().toLowerCase(Locale.ROOT));
     }
 
     public enum OriginMode {
@@ -216,7 +232,7 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
@@ -252,6 +268,8 @@ public record ModelMeta(
             Integer texelBrightness = null;
             ModelDisplay display = ModelDisplay.EMPTY;
             String itemParent = null;
+            String animationFile = null;
+            Map<String, String> triggers = new LinkedHashMap<>();
 
             json.beginObject();
             while (json.hasNext()) {
@@ -267,13 +285,16 @@ public record ModelMeta(
                     case "texelBrightness" -> texelBrightness = readBrightness(json);
                     case "display" -> display = ModelDisplay.fromJson(json);
                     case "itemParent" -> itemParent = readString(json);
+                    case "animationFile" -> animationFile = readString(json);
+                    case "triggers" -> readTriggerMap(json, triggers);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
 
             return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
-                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent);
+                    maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
+                    animationFile, triggers);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
@@ -331,5 +352,22 @@ public record ModelMeta(
             }
         }
         json.endArray();
+    }
+
+    /** The declarative trigger map: event name (kept lowercase) -> clip name. */
+    private static void readTriggerMap(com.google.gson.stream.JsonReader json, Map<String, String> output) throws Exception {
+        if (json.peek() != com.google.gson.stream.JsonToken.BEGIN_OBJECT) {
+            json.skipValue();
+            return;
+        }
+        json.beginObject();
+        while (json.hasNext()) {
+            String event = json.nextName();
+            String clip = readString(json);
+            if (event != null && !event.isBlank() && clip != null && !clip.isBlank()) {
+                output.put(event.trim().toLowerCase(Locale.ROOT), clip.trim());
+            }
+        }
+        json.endObject();
     }
 }

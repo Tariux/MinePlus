@@ -82,7 +82,8 @@ public final class PackBlockRenderer implements Listener {
      * @param placement  the placement (anchor + rotation)
      * @return {@code true} when a display was spawned
      */
-    public boolean attach(UUID instanceId, VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
+    public boolean attach(UUID instanceId, VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement,
+                          com.mineplus.infrastructure.virtual.ModelMeta.OriginMode originMode) {
         if (instanceId == null || model == null || placement == null) {
             return false;
         }
@@ -108,7 +109,8 @@ public final class PackBlockRenderer implements Listener {
         // The entity origin is the anchor block corner; the block model is
         // block-local, so the display occupies the anchor exactly.
         Location entityLocation = anchor.clone();
-        Transformation transformation = transformationFor(placement);
+        Transformation transformation = transformationFor(placement,
+                com.mineplus.pack.compile.ModelJsonWriter.blockFit(model, originMode));
 
         // Lighting policy: display entities inherit world light. AUTO applies an
         // override only to emissive models (block light = model max emission), so
@@ -136,16 +138,26 @@ public final class PackBlockRenderer implements Listener {
     }
 
     /**
-     * Rotation about the anchor block center: the virtual lattice uses the same
-     * pivot, so both backends rotate identically.
+     * Rotation about the anchor block center — the pivot the virtual lattice
+     * uses — plus the exact inverse of the serializer's uniform fit
+     * {@code p' = k·(p - c) + 8}: the display scales by {@code 1/k} about the
+     * block center and re-applies the baked center {@code c/16}, so the
+     * presented world size and position are exactly the authored geometry,
+     * whatever the client's element window forced the file to carry.
      */
-    private Transformation transformationFor(VirtualBlockPlacementHelper.PlacementData placement) {
+    private Transformation transformationFor(VirtualBlockPlacementHelper.PlacementData placement,
+                                            com.mineplus.pack.compile.ModelJsonWriter.BlockFit fit) {
         Quaternionf rotation = new Quaternionf(placement.globalRotation());
         Vector3f pivot = new Vector3f(0.5f, 0.5f, 0.5f);
+        float k = Math.max(1.0e-4f, fit.scale());
         Matrix4f matrix = new Matrix4f()
                 .translate(pivot)
                 .rotate(rotation)
-                .translate(pivot.negate());
+                .translate(pivot.negate())
+                .scale(1.0f / k)
+                .translate(-0.5f + k * fit.centerX() / 16.0f,
+                        -0.5f + k * fit.centerY() / 16.0f,
+                        -0.5f + k * fit.centerZ() / 16.0f);
         return new Transformation(
                 matrix.getTranslation(new Vector3f()),
                 matrix.getUnnormalizedRotation(new Quaternionf()),

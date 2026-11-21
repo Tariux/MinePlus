@@ -37,7 +37,8 @@ Copy these into your server's `plugins/Mineplus/` data folders and run `/mineplu
 
 | Folder | Shows |
 |---|---|
-| [`mineplus-fun/`](mineplus-fun/README.md) | A **complete, buildable plugin** — the Juicer (recipes, GUI, custom items, upgrades) and the Cannon (conditional interaction, torch firing, TNT ballistics, persistent ammo) — built entirely outside the core |
+| [`mineplus-fun/`](mineplus-fun/README.md) | A **complete, buildable plugin** — the Juicer (recipes, GUI, custom items, upgrades), the Cannon (conditional interaction, torch firing, TNT ballistics, persistent ammo), the Wine flight (texel baking), the Cabinet (both render axes A/B) and the Alchemy Table (pack blocks + declarative animation triggers via `/alchemy trigger <event>`) — built entirely outside the core |
+| [`mineplus-gun/`](mineplus-gun/README.md) | A **complete, buildable plugin** on the combat axes — 12 firearms whose bbmodel clips bake into frame files at install (any-resolution, multi-texture Blockbench projects supported), server-clock animation, scope GUI, Vault shop |
 
 ### 🐄 The mob behavior showcase
 

@@ -8,6 +8,8 @@ import com.mineplus.infrastructure.mob.custom.model.ModelAnimation;
 import com.mineplus.infrastructure.mob.custom.model.ModelBone;
 import com.mineplus.infrastructure.mob.custom.model.ModelCube;
 import com.mineplus.infrastructure.mob.custom.model.ModelData;
+import com.mineplus.infrastructure.mob.custom.model.ModelTexture;
+import com.mineplus.pack.asset.TextureAsset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -60,9 +62,6 @@ import java.util.Set;
  * vocabulary belongs to the gameplay runtime that reads it.</p>
  */
 public final class BbClipBaker {
-
-    /** The item-model format the pack layer already ships for framed items. */
-    private static final String FORMAT_VERSION = "1.21.6";
 
     /** The contexts a held item's own motion is allowed to change. */
     private static final String[] HELD_CONTEXTS = {
@@ -179,14 +178,11 @@ public final class BbClipBaker {
         List<ModelBone> bones = model.bones();
         Map<Integer, BoneDelta> deltas = sample(bones, animation, time, issues, warned);
         int fold = foldBone(bones, animation, deltas);
+        float[] uvScale = uvScale(model);
+        JsonObject textureMap = textures(style, model);
 
         JsonObject root = new JsonObject();
-        root.addProperty("format_version", FORMAT_VERSION);
-        JsonArray size = new JsonArray();
-        size.add(new JsonPrimitive(Math.max(1, model.textureWidth())));
-        size.add(new JsonPrimitive(Math.max(1, model.textureHeight())));
-        root.add("texture_size", size);
-        root.add("textures", textures(style));
+        root.add("textures", textureMap);
 
         JsonArray elements = new JsonArray();
         for (int bone = 0; bone < bones.size(); bone++) {
@@ -204,7 +200,7 @@ public final class BbClipBaker {
                 float[] to = {cube.toX() + pivot[0], cube.toY() + pivot[1], cube.toZ() + pivot[2]};
                 Transform posed = chainTransform(bones, chain, deltas, fold);
                 elements.add(element(cube, name(holder, cubeIndex), from, to, posed, style,
-                        holder, issues, warned));
+                        holder, uvScale, issues, warned));
             }
         }
         if (elements.size() == 0) {
@@ -212,7 +208,7 @@ public final class BbClipBaker {
             return null;
         }
         root.add("elements", elements);
-        JsonObject displayJson = display(style, bones, fold, deltas);
+        JsonObject displayJson = display(style, bones, fold, deltas, model.sourceName(), issues, warned);
         fitWindow(root, displayJson, model.sourceName(), issues);
         root.add("display", displayJson);
         if (style.frontLight()) {
@@ -231,6 +227,15 @@ public final class BbClipBaker {
             "firstperson_righthand", "firstperson_lefthand",
             "head", "gui", "ground", "fixed"
     };
+
+    private static boolean isKnownDisplayContext(String key) {
+        for (String context : DISPLAY_CONTEXTS) {
+            if (context.equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static final float WINDOW_MIN = -16.0f;
     private static final float WINDOW_MAX = 32.0f;
@@ -438,7 +443,7 @@ public final class BbClipBaker {
     }
 
     private static JsonObject element(ModelCube cube, String name, float[] from, float[] to,
-                                      Transform posed, Style style, ModelBone bone,
+                                      Transform posed, Style style, ModelBone bone, float[] uvScale,
                                       List<String> issues, Set<String> warned) {
         JsonObject element = new JsonObject();
         element.addProperty("name", name);
@@ -504,11 +509,22 @@ public final class BbClipBaker {
             }
             JsonObject window = new JsonObject();
             JsonArray corners = new JsonArray();
-            corners.add(new JsonPrimitive(round(uv.u1())));
-            corners.add(new JsonPrimitive(round(uv.v1())));
-            corners.add(new JsonPrimitive(round(uv.u2())));
-            corners.add(new JsonPrimitive(round(uv.v2())));
+            // Blockbench stores face UVs in texture pixels; vanilla reads them
+            // in the 0..16 window, so they are scaled exactly like the block
+            // writer does (ModelJsonWriter). A model authored in project UV
+            // space (all windows inside 0..16 on a larger texture) needs no
+            // scaling — see {@link #uvScale}.
+            corners.add(new JsonPrimitive(round(uv.u1() * uvScale[0])));
+            corners.add(new JsonPrimitive(round(uv.v1() * uvScale[1])));
+            corners.add(new JsonPrimitive(round(uv.u2() * uvScale[0])));
+            corners.add(new JsonPrimitive(round(uv.v2() * uvScale[1])));
             window.add("uv", corners);
+            if (uv.rotation() != 0) {
+                int normalized = ((uv.rotation() % 360) + 360) % 360;
+                if (normalized == 90 || normalized == 180 || normalized == 270) {
+                    window.addProperty("rotation", normalized);
+                }
+            }
             window.addProperty("texture", "#" + Math.max(0, cube.textureIndex()));
             faces.add(face, window);
         }
@@ -524,10 +540,23 @@ public final class BbClipBaker {
 
     /** The whole-model pose, folded onto the authored display block. */
     private static JsonObject display(Style style, List<ModelBone> bones, int fold,
-                                      Map<Integer, BoneDelta> deltas) {
+                                      Map<Integer, BoneDelta> deltas, String sourceName,
+                                      List<String> issues, Set<String> warned) {
         JsonObject authored = style.display();
         JsonObject out = new JsonObject();
         for (Map.Entry<String, JsonElement> entry : authored.entrySet()) {
+            // Only the eight vanilla contexts may be emitted; an unknown key
+            // (e.g. a Blockbench-only "on_shelf") makes the client's model
+            // deserializer reject the WHOLE model — the missing-model cube.
+            if (!isKnownDisplayContext(entry.getKey())) {
+                if (warned.add("display:" + entry.getKey())) {
+                    issues.add(sourceName + ": display context '" + entry.getKey()
+                            + "' is not a vanilla context and was dropped so the"
+                            + " model loads (a vanilla key it may reuse was read"
+                            + " only from supported contexts).");
+                }
+                continue;
+            }
             out.add(entry.getKey(), entry.getValue().isJsonObject()
                     ? entry.getValue().getAsJsonObject().deepCopy()
                     : entry.getValue());
@@ -808,11 +837,69 @@ public final class BbClipBaker {
         return raw.isEmpty() || Character.isDigit(raw.charAt(0)) ? "bone_" + raw + "_" + cubeIndex : raw + "_" + cubeIndex;
     }
 
-    private static JsonObject textures(Style style) {
+    /**
+     * The model's texture table as vanilla references. Every parsed texture is
+     * emitted under its own {@code #index} so a multi-texture model (body,
+     * grip, scope...) binds each cube to the sprite it was authored with; the
+     * pack path of each reference is derived from the module's texture
+     * reference (same namespace/folder, per-texture last segment).
+     */
+    private static JsonObject textures(Style style, ModelData model) {
         JsonObject textures = new JsonObject();
-        textures.addProperty("0", style.textureReference());
-        textures.addProperty("particle", style.textureReference());
+        String prefix = prefixOf(style.textureReference());
+        List<ModelTexture> parsed = model.textures();
+        for (int index = 0; index < parsed.size(); index++) {
+            ModelTexture texture = parsed.get(index);
+            String name = texture == null ? null : TextureAsset.normalizePath(texture.name());
+            if (name == null || name.isBlank()) {
+                name = "texture_" + index;
+            }
+            textures.addProperty(String.valueOf(index), prefix.isEmpty()
+                    ? name : prefix + "/" + name);
+        }
+        if (parsed.isEmpty() || !textures.has("0")) {
+            textures.addProperty("0", style.textureReference());
+        }
+        textures.addProperty("particle", textures.get("0").getAsString());
         return textures;
+    }
+
+    /** Everything before the last {@code /} of a pack reference ({@code ns:item/x} -> {@code ns:item}). */
+    private static String prefixOf(String reference) {
+        int cut = reference.lastIndexOf('/');
+        return cut <= 0 ? "" : reference.substring(0, cut);
+    }
+
+    /**
+     * The {@code 0..16} window scale for face UVs. Blockbench stores face UVs
+     * in texture pixels, so a 64x64 texture needs {@code 16/64} scaling — but
+     * a project authored in Blockbench's 0..16 UV space (every window already
+     * inside the vanilla window on a larger texture) must not be scaled again.
+     */
+    private static float[] uvScale(ModelData model) {
+        float width = Math.max(1, model.textureWidth());
+        float height = Math.max(1, model.textureHeight());
+        float[] scale = {16.0f / width, 16.0f / height};
+        if (width == 16 && height == 16) {
+            return scale;
+        }
+        boolean projectSpace = true;
+        for (ModelBone bone : model.bones()) {
+            for (ModelCube cube : bone.cubes()) {
+                for (String face : FACE_NAMES) {
+                    ModelCube.Uv uv = cube.face(face);
+                    if (uv != null && (uv.u1() > 16.001f || uv.u2() > 16.001f
+                            || uv.v1() > 16.001f || uv.v2() > 16.001f)) {
+                        projectSpace = false;
+                        break;
+                    }
+                }
+                if (!projectSpace) {
+                    return scale;
+                }
+            }
+        }
+        return projectSpace ? new float[]{1.0f, 1.0f} : scale;
     }
 
     private static JsonObject object(JsonObject parent, String key) {

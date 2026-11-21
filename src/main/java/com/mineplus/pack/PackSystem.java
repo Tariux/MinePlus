@@ -11,6 +11,7 @@ import com.mineplus.infrastructure.virtual.rig.BoneRigRenderer;
 import com.mineplus.util.SchedulerCompat;
 import com.mineplus.infrastructure.virtual.rig.RigSettings;
 import com.mineplus.MineplusPlugin;
+import com.google.gson.JsonObject;
 import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.compile.PackCache;
 import com.mineplus.pack.compile.PackCompiler;
@@ -277,7 +278,10 @@ public final class PackSystem {
                     ? new ItemModelAsset(
                             definition.namespace(), definition.id(), definition.namespace(),
                             definition.backingMaterial(), definition.displayName(),
-                            definition.fallbackModelReference(), toFrameAssets(definition.frames()),
+                            definition.isInherited()
+                                    ? definition.namespace() + ":item/" + definition.id()
+                                    : definition.fallbackModelReference(),
+                            toFrameAssets(definition.frames()),
                             definition.plan())
                     : new ItemModelAsset(
                             definition.namespace(), definition.id(), definition.namespace(),
@@ -531,6 +535,12 @@ public final class PackSystem {
      * {@code TextureAsset.normalizePath}).
      */
     private void ensureModelAssets(PackItemDefinition definition) {
+        // An inherited item compiles to a one-line parent/layer0 model — no
+        // bbmodel, one texture, everything else inherited from the parent.
+        if (definition.isInherited()) {
+            registerInheritedItemAssets(definition);
+            return;
+        }
         // Framed items carry no virtual geometry: their models are registered
         // raw by the owning module and referenced directly by the definition.
         if (definition.modelKey() == null) {
@@ -549,6 +559,48 @@ public final class PackSystem {
             return;
         }
         registerModelTextures(namespace, definition.modelKey(), model, "item");
+    }
+
+    /**
+     * Compiles and registers the assets of an inherited item: the one-line
+     * {@code parent} + {@code layer0} model JSON and its single texture.
+     * The parent reference is emitted verbatim, so every element, display
+     * transform and property of the vanilla parent carries over unchanged —
+     * the vanilla item's own behavior is never touched.
+     */
+    private void registerInheritedItemAssets(PackItemDefinition definition) {
+        String namespace = definition.namespace();
+        String normalized = TextureAsset.normalizePath(definition.textureOverride());
+        if (normalized.isEmpty()) {
+            plugin.getLogger().warning("[Pack] Inherited item '" + definition.contentId()
+                    + "' has no resolvable texture override; item not compiled.");
+            return;
+        }
+        JsonObject model = new JsonObject();
+        model.addProperty("parent", definition.parentModel());
+        JsonObject textures = new JsonObject();
+        textures.addProperty("layer0", namespace + ":item/" + normalized);
+        model.add("textures", textures);
+        try {
+            registerGeneratedAsset(namespace, "item/" + definition.id(),
+                    model.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+            return;
+        }
+        File textureFile = virtualBlockManager.resolveStandaloneTextureFile(definition.textureOverride());
+        if (textureFile == null) {
+            plugin.getLogger().warning("[Pack] Inherited item '" + definition.contentId()
+                    + "': texture '" + definition.textureOverride()
+                    + "' not found in the models folder; the item will render untextured.");
+            return;
+        }
+        try {
+            assetRegistry.register(new TextureAsset(namespace, "item/" + normalized,
+                    namespace, textureFile));
+        } catch (IllegalArgumentException conflict) {
+            plugin.getLogger().warning("[Pack] " + conflict.getMessage());
+        }
     }
 
     /**

@@ -139,6 +139,11 @@ Seed data in `examples/mineplus-fun` has been migrated to `renderMode`.
 | `PluginContext.renderRouter()` | Access to the router from modules (never null) |
 | `MultiBlockLevel.renderMode()` / `renderPlan(source)` | A level's mode and plan |
 | `/mineplus render stats` / `render reset` | Routing telemetry |
+| `AnimationApi.triggerEvent(instanceId, event)` | Declarative trigger: fires an event resolved by the model's meta `triggers` map (`event → clip`) |
+| `PackItemDefinition.builder(...).parent(model).texture(png)` | Inherited items: a vanilla-parent re-skin compiles to a one-line `parent` + `layer0` model |
+| `PackItemDefinition.isInherited()` | True when the item extends a vanilla parent with a single texture |
+| `.meta.json` `animationFile` / `triggers` | Load clips from a separate bbmodel; map events to clips declaratively |
+| `<model>.anim.bbmodel` / `.animations.bbmodel` | Sibling animation files merged automatically at model load |
 
 `ModelRenderingManager` now routes through the `RenderRouter` instead of
 resolving the backend inline; observable behavior is unchanged under the default
@@ -164,6 +169,20 @@ policy. Modules that only used `InfrastructureApi`, `BasicInfrastructureApi`,
 
 ## 4) Behavior notes
 
+- **Pack item frames from bbmodels bake correctly now**: face UVs scale to the
+  vanilla `0..16` window at the model's resolution (the historical raw-pixel
+  emission made any non-16×16 project sample outside its sprite), the full
+  texture table is emitted, and non-vanilla display contexts (`on_shelf`,
+  single-letter leftovers) are dropped at bake instead of refusing the whole
+  model client-side. If you keep hand-authored frame JSONs, strip non-vanilla
+  `display` keys from them once.
+- **Pack blocks wider than one block render exactly authored**: one uniform
+  window fit at compile + renderer compensation, replacing the old per-element
+  re-base/squash. No module change — recompile the pack (`/mineplus pack
+  recompile`) so the artifact regenerates.
+- **Texture file lookup is case-insensitive** across model folders and the
+  models root; a previously-missing sprite from a casing mismatch (e.g.
+  `Alchemy_Texture.png`) resolves without renaming anything.
 - **Plate counts** for texel-baked models drop in most scenes (uniform
   coalescing, adaptive budgets, face reuse). `/mineplus model info <key>` now
   reports `simplifiedFallbacks` and `reusedFaceBakes` next to the budget verdict.

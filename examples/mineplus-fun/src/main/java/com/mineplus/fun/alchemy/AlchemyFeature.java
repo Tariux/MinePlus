@@ -46,6 +46,8 @@ public final class AlchemyFeature extends ModuleFeature {
         support.installDefault(plugin,
                 "defaults/models/Alchemy_Texture.png", "models/Alchemy_Texture.png", true);
         support.installDefault(plugin,
+                "defaults/models/alchemy-table.meta.json", "models/alchemy-table.meta.json", true);
+        support.installDefault(plugin,
                 "defaults/multiblocks/alchemy_table.json", "multiblocks/alchemy_table.json", false);
 
         // Registration is order-insensitive: the model is not loaded yet, so

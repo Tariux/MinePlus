@@ -71,6 +71,12 @@ public final class MineplusAnimationApi implements AnimationApi {
     }
 
     @Override
+    public boolean triggerEvent(UUID instanceId, String event) {
+        UUID renderedModelId = resolve(instanceId);
+        return renderedModelId != null && animationManager.fireTrigger(renderedModelId, event);
+    }
+
+    @Override
     public boolean setAnimationEnabled(UUID instanceId, AnimationSelector selector, boolean enabled) {
         UUID renderedModelId = resolve(instanceId);
         return renderedModelId != null && animationManager.setEnabled(renderedModelId, selector, enabled);

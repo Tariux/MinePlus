@@ -181,14 +181,45 @@ public final class TextureImageStore {
             if (adjacent.isFile()) {
                 return adjacent;
             }
+            // Model folders are authored on case-sensitive filesystems with
+            // names that rarely match the bbmodel's own lowercase texture
+            // identifiers ("Alchemy_Texture.png" vs "alchemy_texture"); a
+            // case-insensitive index of the folder makes the pack and the
+            // texel baker agree with what the author meant.
+            File indexed = indexedLookup(modelFile.getParentFile(), name + ".png");
+            if (indexed != null) {
+                return indexed;
+            }
         }
         if (rootFolder != null) {
             File rooted = new File(rootFolder, name + ".png");
             if (rooted.isFile()) {
                 return rooted;
             }
+            File indexed = indexedLookup(rootFolder, name + ".png");
+            if (indexed != null) {
+                return indexed;
+            }
         }
         return null;
+    }
+
+    /** Lowercase filename -> actual filename per directory, built once and cached. */
+    private final Map<File, Map<String, String>> directoryIndex = new ConcurrentHashMap<>();
+
+    private File indexedLookup(File folder, String fileName) {
+        Map<String, String> index = directoryIndex.computeIfAbsent(folder.getAbsoluteFile(), dir -> {
+            File[] entries = dir.listFiles(File::isFile);
+            Map<String, String> built = new java.util.HashMap<>();
+            if (entries != null) {
+                for (File entry : entries) {
+                    built.putIfAbsent(entry.getName().toLowerCase(Locale.ROOT), entry.getName());
+                }
+            }
+            return built;
+        });
+        String actual = index.get(fileName.toLowerCase(Locale.ROOT));
+        return actual == null ? null : new File(folder, actual);
     }
 
     private static String normalize(String name) {

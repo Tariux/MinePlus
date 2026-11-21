@@ -108,6 +108,13 @@ public final class ModelGeometryGuard {
             }
             scanned++;
             JsonArray elements = root.getAsJsonArray("elements");
+            if (path.contains("/models/block/")) {
+                // Block-axis models are uniformly fitted by the serializer
+                // (one shared scale + translation, renderer-compensated); a
+                // per-element rewrite here would scramble layout and stretch
+                // UVs, so this axis is verification-only.
+                continue;
+            }
             int moved = 0;
             int squashed = 0;
             for (JsonElement element : elements) {

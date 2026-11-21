@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.virtual;
 
+import com.mineplus.infrastructure.virtual.animation.AnimationClip;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
 import java.util.ArrayList;
@@ -47,7 +48,8 @@ public final class ModelImportCoordinator {
         }
 
         List<File> files = new ArrayList<>();
-        collect(modelsFolder, files);
+        List<File> animationFiles = new ArrayList<>();
+        collect(modelsFolder, files, animationFiles);
         files.sort(Comparator.comparing(File::getPath)); // deterministic order
 
         // Phase 1: preflight collision detection (FMM preflightNormalizedModelIds).
@@ -86,6 +88,50 @@ public final class ModelImportCoordinator {
             }
         }
 
+        // Phase 3: merge sibling animation files (`<stem>.anim.bbmodel` /
+        // `<stem>.animations.bbmodel`) into their target model. Animators are
+        // keyed by bone name, so the merge addresses the target's bone graph
+        // directly; clips whose animators resolve to nothing are reported.
+        if (!animationFiles.isEmpty()) {
+            animationFiles.sort(Comparator.comparing(File::getPath));
+            for (File animationFile : animationFiles) {
+                ModelEntry target = siblingTarget(animationFile, loaded);
+                if (target == null) {
+                    DebugLogger.warning("[ModelImport] Animation file '"
+                            + animationFile.getName() + "' has no sibling model '"
+                            + stemOf(animationFile) + ".bbmodel'; skipped.");
+                    continue;
+                }
+                VirtualModel parsed = BbModelImporter.parse(
+                        target.key() + "#anim", animationFile, logger);
+                if (parsed == null || parsed.animations().isEmpty()) {
+                    continue;
+                }
+                List<AnimationClip> usable = new ArrayList<>();
+                List<AnimationClip> unresolved = new ArrayList<>();
+                for (AnimationClip clip : parsed.animations()) {
+                    if (resolvesAgainst(clip, target.model())) {
+                        usable.add(clip);
+                    } else {
+                        unresolved.add(clip);
+                    }
+                }
+                for (AnimationClip clip : unresolved) {
+                    DebugLogger.warning("[ModelImport] Animation file '"
+                            + animationFile.getName() + "': clip '" + clip.name()
+                            + "' animates no bone of model '" + target.key()
+                            + "'; check the outliner group names.");
+                }
+                if (!usable.isEmpty()) {
+                    loaded.put(target.key(), new ModelEntry(target.key(),
+                            target.model().withAnimations(usable), target.file()));
+                    DebugLogger.info("[ModelImport] Merged " + usable.size()
+                            + " clip(s) from '" + animationFile.getName()
+                            + "' into model '" + target.key() + "'.");
+                }
+            }
+        }
+
         if (!loaded.isEmpty()) {
             DebugLogger.info("[ModelImport] Loaded " + loaded.size()
                     + " model(s) from " + modelsFolder.getPath());
@@ -93,16 +139,61 @@ public final class ModelImportCoordinator {
         return new LoadResult(List.copyOf(loaded.values()), Set.copyOf(rejected));
     }
 
-    private static void collect(File folder, List<File> output) {
+    /** True when at least one of the clip's animators addresses the model's bones by name. */
+    private static boolean resolvesAgainst(AnimationClip clip, VirtualModel target) {
+        for (String bone : clip.animators().keySet()) {
+            if (target.boneIndex(bone) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The loaded model a sibling animation file belongs to (same directory, same stem). */
+    private static ModelEntry siblingTarget(File animationFile, Map<String, ModelEntry> loaded) {
+        String stem = stemOf(animationFile);
+        File parent = animationFile.getParentFile();
+        for (ModelEntry entry : loaded.values()) {
+            if (entry.file() != null
+                    && entry.file().getParentFile() != null
+                    && entry.file().getParentFile().equals(parent)
+                    && stemOf(entry.file()).equalsIgnoreCase(stem)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /** The bbmodel stem with any {@code .anim} / {@code .animations} suffix removed. */
+    private static String stemOf(File file) {
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".bbmodel")) {
+            name = name.substring(0, name.length() - ".bbmodel".length());
+        }
+        if (name.endsWith(".animations")) {
+            name = name.substring(0, name.length() - ".animations".length());
+        }
+        if (name.endsWith(".anim")) {
+            name = name.substring(0, name.length() - ".anim".length());
+        }
+        return name;
+    }
+
+    private static void collect(File folder, List<File> output, List<File> animationOutput) {
         File[] children = folder.listFiles();
         if (children == null) {
             return;
         }
         for (File child : children) {
             if (child.isDirectory()) {
-                collect(child, output);
-            } else if (child.getName().toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
-                output.add(child);
+                collect(child, output, animationOutput);
+            } else {
+                String name = child.getName().toLowerCase(Locale.ROOT);
+                if (name.endsWith(".anim.bbmodel") || name.endsWith(".animations.bbmodel")) {
+                    animationOutput.add(child);
+                } else if (name.endsWith(".bbmodel")) {
+                    output.add(child);
+                }
             }
         }
     }

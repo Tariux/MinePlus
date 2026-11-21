@@ -106,7 +106,7 @@ A fruit-pressing machine with a recipe-driven GUI and custom juice items.
 
 ## 💥 The Cannon
 
-A 3×1×1 muzzle-loading cannon modeled in Blockbench ([level 1](src/main/resources/defaults/models/cannon-3-1-1.bbmodel), [level 2](src/main/resources/defaults/models/cannon-3-1-1-bigger.bbmodel)) — rendered, collidable, and aimable, on completely vanilla clients.
+A 3×1×1 muzzle-loading cannon modeled in Blockbench ([level 1](src/main/resources/defaults/models/cannon-3-1-1.bbmodel), [level 2](src/main/resources/defaults/models/cannon-3-1-1-bigger.bbmodel)) — rendered, collidable, and aimable on the virtual axis, so no resource pack is involved.
 
 **Command:** `/cannon <place|remove|upgrade>`
 
@@ -174,7 +174,7 @@ A single-block gear modeled in Blockbench ([model](src/main/resources/defaults/m
 
 ## 🍷 The Wine Tasting Flight
 
-Five vinery wine bottles — **Strad, Stal, Red, Chenet, Solaris** — each reconstructed from its own hand-drawn 16x16 sprite by the Core's **texel surface baker**: every face is decomposed into texels, each texel is quantized to the nearest visually-flat vanilla block, and merged same-color runs become thin plates. The result reads as pixel art built from concretes and terracottas — **zero resource pack, completely vanilla clients**.
+Five vinery wine bottles — **Strad, Stal, Red, Chenet, Solaris** — each reconstructed from its own hand-drawn 16x16 sprite by the Core's **texel surface baker**: every face is decomposed into texels, each texel is quantized to the nearest visually-flat vanilla block, and merged same-color runs become thin plates. The result reads as pixel art built from concretes and terracottas — **no resource pack needed**: 100% vanilla clients see it (this is the virtual/texel axis; the pack-block twin pattern lives in the Cabinet and Alchemy Table features).
 
 **Command:** `/wine <place [variant]|flight|remove|clear|status>`
 
@@ -201,7 +201,7 @@ Five vinery wine bottles — **Strad, Stal, Red, Chenet, Solaris** — each reco
 
 The **pack block axis**: a multiblock that is placed, collision-owned and persisted by the ordinary lifecycle, but rendered through the generated resource pack as **one `BlockDisplay`** carrying an allocated carrier state — the exact model in one entity, not a vanilla-block mosaic.
 
-**Command:** `/alchemy <place|remove|clear|status>`
+**Command:** `/alchemy <place|remove|clear|status|trigger <event>>`
 
 | Action | Effect |
 |---|---|
@@ -209,6 +209,7 @@ The **pack block axis**: a multiblock that is placed, collision-owned and persis
 | `remove` | Remove the looked-at Alchemy Table |
 | `clear` | Remove every alchemy table within 24 blocks |
 | `status` | List placed tables and report the pack subsystem state |
+| `trigger <event>` | Fire a declarative animation trigger on the looked-at table (`AnimationApi.triggerEvent`) — the event resolves through `alchemy-table.meta.json`'s `triggers` map, so re-mapping events to clips is a meta-file edit, never a code change |
 
 **How the rendering differs from the virtual axis:**
 
@@ -218,7 +219,7 @@ The **pack block axis**: a multiblock that is placed, collision-owned and persis
 - No texel baking, no per-cube display meshing: the block axis and the texel/virtual axis are separate pipelines that share the same model/texture assets and the same collision lattice.
 - With the pack disabled, the level degrades to the virtual render in one place — the table still appears.
 
-**Implementation highlights:** model + PNG installed from `defaults/models/` (a converted Hytale-format prop), multiblock JSON from `defaults/multiblocks/alchemy_table.json`, and a `ModuleFeature` that does nothing but install resources and call `registerBlock` — the minimal pack-block shape to copy.
+**Implementation highlights:** model + PNG + `alchemy-table.meta.json` installed from `defaults/models/` (a converted Hytale-format prop; the meta pins the `CENTER` anchor and can carry a `triggers` event map), multiblock JSON from `defaults/multiblocks/alchemy_table.json`, and a `ModuleFeature` that does nothing but install resources and call `registerBlock` — the minimal pack-block shape to copy. Models wider than one block compile correctly: the pack block serializer applies one uniform window fit and the renderer inverts it at display time, so the 4-block tabletop renders exactly as authored (see [pack-system.md](../../docs/pack-system.md), "Uniform fit").
 
 ---
 

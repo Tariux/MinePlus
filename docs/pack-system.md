@@ -139,9 +139,17 @@ Blockbench and the pack still gets plain static item models:
   (an item model has no scale), a hinge past ±45° (the limit an element
   rotation is documented to carry), and a bone turning about more than one
   axis, which falls back to its posed axis-aligned envelope.
-- Everything outside the authored display is deterministic: `format_version`
-  `1.21.6`, the six held contexts + `gui`/`ground`/`fixed`/`on_shelf`, and the
-  texture reference the caller's `Style` names.
+- Everything outside the authored display is deterministic: only the eight
+  vanilla display contexts are emitted (a Blockbench-only context such as
+  `on_shelf` would make the client's model deserializer reject the whole
+  model, so it is dropped and reported), no `texture_size`/`format_version`
+  fields vanilla ignores, and the texture table the parsed model carries.
+- **Face UVs are scaled to the vanilla `0..16` window** exactly like the
+  block writer: Blockbench stores face UVs in texture pixels, so a 64×64
+  project needs `16/64` scaling (a project authored in Blockbench's `0..16`
+  UV space on a larger texture is detected and left untouched). The full
+  texture table (`#0..#N` + `particle`) is emitted from the parsed model, so
+  multi-texture models bind every cube to the sprite it was authored with.
 
 > 📁 The MineplusGun module bakes its gun folders this way
 > (`com.mineplus.gun.weapon.WeaponBbModels`): a gun folder that ships one
@@ -205,6 +213,46 @@ machine. The pack subsystem only declares the rendering; it does not touch
 texel baking, the virtual display transport, or the multiblock engine's
 internals. If a pack block can't attach its display, the collision-only owner
 is released and the level falls back to a full virtual render.
+
+**Uniform fit (any-size models).** The client constrains every element to a
+`-16..32` px window, so a model wider than one block (the alchemy table's
+4-block tabletop) cannot be stored 1:1 in a single block model. The block
+serializer applies **one uniform transform to the whole model** — a shared
+centering plus, only when a span exceeds the 48 px window, a shared scale
+factor `k` baked into every element (rotation origins included; UVs stay
+authored, so textures stretch proportionally with their geometry). At render
+time `PackBlockRenderer` multiplies the `BlockDisplay` transform by `1/k`
+about the anchor block center, so the presented world size and position are
+exactly the authored geometry — the alchemy table renders 1:1 with its
+virtual-axis twin and its collision lattice. The old per-element
+re-base/squash (which scrambled oversized models) is gone; the compile guard
+is verification-only on the block axis.
+
+**Texture resolution.** Texture PNGs resolve case-insensitively against the
+model folder and the models root (`Alchemy_Texture.png` satisfies the
+bbmodel identifier `alchemy_texture`), so a pack block's sprites can never go
+missing over filename casing on a Linux filesystem.
+
+## Inherited items (vanilla-parent extension)
+
+A derived item that only re-skins an existing vanilla item — an emerald sword
+from the diamond sword, a recolored tool — does not need a bbmodel at all:
+
+```java
+packApi().registerItem(PackItemDefinition.builder(
+                "fun", "emerald_sword", Material.DIAMOND_SWORD, null)
+        .parent("minecraft:item/diamond_sword")
+        .texture("emerald_sword")      // PNG name in the models folder
+        .displayName("Emerald Sword")
+        .build());
+```
+
+The compiled model is one line — `{"parent": "minecraft:item/diamond_sword",
+"textures": {"layer0": "fun:item/emerald_sword"}}` — so every element,
+display transform and property of the vanilla parent carries over, and the
+item costs a single PNG. The parent reference is emitted verbatim and the
+item keeps its Mineplus PDC identity like every other pack item; vanilla
+items without that identity are never touched (the hard rule above).
 
 ## Configuration (`settings.mp.yml`)
 

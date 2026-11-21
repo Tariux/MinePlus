@@ -167,13 +167,13 @@ Blockbench animations live in the same `.bbmodel` file and are imported in the s
 | Molang keyframe values (e.g. `math.sin(q.anim_time * 90)`) | ⚠️ fall back to `0` and are reported at import |
 | Effect animators (sounds, particles, timelines) | ❌ skipped — no client mod to play them |
 
-Autoplay is declared per multiblock level (`animations` key) or per raw model (`autoplay` in `.meta.json`); programmatic control goes through the `AnimationApi` (selectors for clips, bones, or the whole model). Full behavior: [Developer API → Animation Engine](developer-api.md#animation-engine).
+Autoplay is declared per multiblock level (`animations` key) or per raw model (`autoplay` in `.meta.json`); programmatic control goes through the `AnimationApi` (selectors for clips, bones, or the whole model), and declarative event triggers go through `AnimationApi.triggerEvent(instanceId, event)`, resolved by the model's `triggers` meta map. Clips can also live in a separate bbmodel beside the model (sibling `<model>.anim.bbmodel` or the meta `animationFile` key — merged by bone name at load). Full behavior: [Developer API → Animation Engine](developer-api.md#animation-engine).
 
 ---
 
 ### Texture Engine Architecture
 
-Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes one `BlockDisplay`, which can only show a single Minecraft block material — this is the fundamental constraint of the "completely vanilla, no resource pack" approach, and everything below follows from it.
+Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes one `BlockDisplay`, which can only show a single Minecraft block material — this is the fundamental constraint of the virtual axis (the default: completely vanilla clients, no pack needed), and everything below follows from it. Content that needs full-fidelity textures and geometry beyond this constraint opts into the [resource-pack axis](pack-system.md) per level/item — the plugin compiles and delivers that pack itself.
 
 **How a cube gets its material:**
 
@@ -183,7 +183,7 @@ Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes
 4. The primary texture name is mapped to a Minecraft `Material` via `TextureMaterialResolver` (curated map → direct match → suffix-strip → aliases → fuzzy → fallback).
 5. Unmatched names fall back to `WHITE_CONCRETE` and are reported per model via `/mineplus model info`.
 
-**Beyond one material per face:** the UV alignment layer renders wrapping windows as native-density tile grids and half windows as slab-type crops, and — when a texture PNG sits next to the model file — **texel surface baking** reconstructs the actual texture pixel-by-pixel out of flat vanilla palette blocks (see [Texel Surface Baking](#texel-surface-baking)). Arbitrary sub-pixel UV cropping without a resource pack remains out of scope.
+**Beyond one material per face:** the UV alignment layer renders wrapping windows as native-density tile grids and half windows as slab-type crops, and — when a texture PNG sits next to the model file — **texel surface baking** reconstructs the actual texture pixel-by-pixel out of flat vanilla palette blocks (see [Texel Surface Baking](#texel-surface-baking)). Arbitrary sub-pixel UV cropping without a resource pack remains out of scope on this axis — the [resource-pack axis](pack-system.md) is the full-fidelity escape hatch when a model needs it.
 
 ---
 
@@ -298,11 +298,14 @@ Any global rendering setting can be overridden per model. Place a `models/<key>.
    "texelDetail": "FACE",
    "maxTexelPlatesPerFace": 96,
    "maxTexelPlatesPerInstance": 150,
-   "texelBrightness": 15
+   "texelBrightness": 15,
+   "itemParent": "minecraft:item/handheld",
+   "animationFile": "alchemy-animations.bbmodel",
+   "triggers": { "brew": "brew_clip", "break": "break_clip" }
 }
 ```
 
-Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default; `texelBrightness` (0-15) sets a minimum display light level for texel-baked models so dark palette art stays readable in shade and at night.
+Omitted fields fall back to the global `settings.mp.yml` values. `autoplay` lists clip names to auto-start when a raw (non-multiblock) model spawns — multiblock levels use their own `animations` key instead, which takes precedence. `texelMode`/`texelDetail` override the global `TEXEL_BAKING` settings for this model (see [Texel Surface Baking](#texel-surface-baking)); `maxTexelPlatesPerFace`/`maxTexelPlatesPerInstance` raise (or lower) the plate budgets per model — decorative pixel-art models legitimately want more plates than the conservative global default; `texelBrightness` (0-15) sets a minimum display light level for texel-baked models so dark palette art stays readable in shade and at night. `itemParent` sets the vanilla item-model parent the pack item axis serializes with. `animationFile` names a bbmodel in the models folder whose clips merge into this model by bone name (a sibling `<model>.anim.bbmodel` merges automatically without the meta key). `triggers` maps event names to clips for `AnimationApi.triggerEvent(instanceId, event)` — the event plays the mapped clip once, above autoplay and below explicit priorities, and the mapping is case-insensitive.
 
 ---
 

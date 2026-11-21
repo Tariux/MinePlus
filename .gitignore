@@ -41,3 +41,6 @@ package-lock.json
 !src/main/resources/**
 
 /graphify-out/
+
+skills-lock.json
+/.agents

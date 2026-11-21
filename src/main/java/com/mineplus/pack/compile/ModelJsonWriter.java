@@ -121,6 +121,16 @@ public final class ModelJsonWriter {
         root.addProperty("ambientocclusion", false);
         root.add("textures", textures);
         root.add("elements", elements);
+        if (block && !elements.isEmpty()) {
+            // Pack blocks must render exactly as authored: ONE uniform
+            // centering + fit scale over the whole model (never per-element
+            // re-basing, which scrambles layout and stretches UVs). The client
+            // constrains elements to a 48px window, so a model wider than that
+            // is baked at scale k and the renderer compensates with 1/k about
+            // the anchor block center — the presented world size stays exact.
+            BlockFit fit = blockFit(model, originMode);
+            applyFit(elements, fit);
+        }
         if (!block) {
             // Item models: optional parent for natural held/GUI transforms.
             String itemParent = model.itemParent();
@@ -243,6 +253,127 @@ public final class ModelJsonWriter {
         if (Math.abs(rotation.x) > 1.0e-4f) return 'x';
         if (Math.abs(rotation.y) > 1.0e-4f) return 'y';
         return 'z';
+    }
+
+    // ------------------------------------------------------------------
+    // Block-axis uniform fit
+    // ------------------------------------------------------------------
+
+    /**
+     * The uniform block-axis fit shared by the serializer and the renderer:
+     * the scale the compiled pixel coordinates carry ({@code 1} when the
+     * model fits the client's 48px element window) and the post-fit block
+     * center the renderer scales back about. Both sides compute it through
+     * this one method, so they can never disagree.
+     */
+    public record BlockFit(float scale, float centerX, float centerY, float centerZ) {
+    }
+
+    /** The fit a block-axis compile bakes for {@code model} under {@code originMode}. */
+    public static BlockFit blockFit(VirtualModel model, ModelMeta.OriginMode originMode) {
+        if (model == null || model.cubes().isEmpty()) {
+            return new BlockFit(1.0f, 8.0f, 8.0f, 8.0f);
+        }
+        float[] min = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
+        float[] max = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+        float centerShift = originMode == ModelMeta.OriginMode.CENTER ? 8.0f : 0.0f;
+        for (BakedCube cube : model.cubes()) {
+            ElementGeometry geom = cube.geometry();
+            float fromX, fromY, fromZ, toX, toY, toZ;
+            if (geom != null) {
+                fromX = geom.from().x + centerShift;
+                fromY = geom.from().y;
+                fromZ = geom.from().z + centerShift;
+                toX = geom.to().x + centerShift;
+                toY = geom.to().y;
+                toZ = geom.to().z + centerShift;
+            } else {
+                fromX = cube.translation().x * 16.0f + centerShift;
+                fromY = cube.translation().y * 16.0f;
+                fromZ = cube.translation().z * 16.0f + centerShift;
+                toX = fromX + cube.scale().x * 16.0f;
+                toY = fromY + cube.scale().y * 16.0f;
+                toZ = fromZ + cube.scale().z * 16.0f;
+            }
+            widen(fromX, fromY, fromZ, min, max);
+            widen(toX, toY, toZ, min, max);
+        }
+        if (min[0] == Float.MAX_VALUE) {
+            return new BlockFit(1.0f, 8.0f, 8.0f, 8.0f);
+        }
+        float scale = fitScale(min, max);
+        return new BlockFit(scale,
+                (min[0] + max[0]) / 2.0f,
+                (min[1] + max[1]) / 2.0f,
+                (min[2] + max[2]) / 2.0f);
+    }
+
+    /**
+     * Applies the shared fit to a built elements array: one shared scale and
+     * one shared translation (identical for every element, rotation origins
+     * included). {@code p' = k·(p - c) + 8} — the block-local center
+     * {@code (8,8,8)} is the anchor the renderer scales back about, so the
+     * round trip is exact.
+     */
+    private static void applyFit(JsonArray elements, BlockFit fit) {
+        float[] center = {fit.centerX(), fit.centerY(), fit.centerZ()};
+        float[] anchor = {8.0f, 8.0f, 8.0f};
+        for (JsonElement entry : elements) {
+            if (!entry.isJsonObject()) {
+                continue;
+            }
+            JsonObject element = entry.getAsJsonObject();
+            remap(element, "from", fit.scale(), center, anchor);
+            remap(element, "to", fit.scale(), center, anchor);
+            if (element.has("rotation") && element.get("rotation").isJsonObject()) {
+                remap(element.getAsJsonObject("rotation"), "origin", fit.scale(), center, anchor);
+            }
+        }
+    }
+
+    /** The window scale for a bbox: 1 when it fits, else 48 / max span. */
+    private static float fitScale(float[] min, float[] max) {
+        float scale = 1.0f;
+        for (int axis = 0; axis < 3; axis++) {
+            float span = max[axis] - min[axis];
+            if (span > ModelGeometryGuard.WINDOW_SPAN + 1.0e-3f) {
+                scale = Math.min(scale, ModelGeometryGuard.WINDOW_SPAN / span);
+            }
+        }
+        return scale;
+    }
+
+    private static void remap(JsonObject element, String key, float scale, float[] center, float[] anchor) {
+        float[] point = corner(element, key);
+        if (point == null) {
+            return;
+        }
+        for (int axis = 0; axis < 3; axis++) {
+            point[axis] = scale * (point[axis] - center[axis]) + anchor[axis];
+        }
+        element.add(key, vec3(point));
+    }
+
+    private static float[] corner(JsonObject element, String key) {
+        JsonArray array = element.has(key) && element.get(key).isJsonArray()
+                ? element.getAsJsonArray(key) : null;
+        if (array == null || array.size() < 3) {
+            return null;
+        }
+        float[] out = new float[3];
+        for (int axis = 0; axis < 3; axis++) {
+            out[axis] = array.get(axis).getAsFloat();
+        }
+        return out;
+    }
+
+    private static void widen(float x, float y, float z, float[] min, float[] max) {
+        min[0] = Math.min(min[0], x);
+        max[0] = Math.max(max[0], x);
+        min[1] = Math.min(min[1], y);
+        max[1] = Math.max(max[1], y);
+        min[2] = Math.min(min[2], z);
+        max[2] = Math.max(max[2], z);
     }
 
     private static JsonObject face(

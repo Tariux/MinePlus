@@ -227,7 +227,8 @@ public final class ModelRenderingManager {
             if (renderer == null) {
                 return false;
             }
-            if (renderer.attach(instanceId, resolved.model(), resolved.placement())) {
+            if (renderer.attach(instanceId, resolved.model(), resolved.placement(),
+                    originModeFor(resolved.model()))) {
                 return true;
             }
             renderRouter.recordAttachFailure();

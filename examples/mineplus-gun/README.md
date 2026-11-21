@@ -3,6 +3,10 @@
 A standalone [Mineplus](../../README.md) module that owns the firearms
 ecosystem — guns, magazines, scopes and a Vault shop — as **fully additive**
 content. It never overrides a vanilla item, block, texture, model or sound.
+The gun frames are **pack-rendered**: the Core compiles them into its
+resource pack and delivers that pack to players automatically (one
+server-sent accept prompt; a declined client falls back to the bare
+materials — the guns stay functional, just unstyled).
 
 - **[DEVELOPMENT_PROMPT.md](DEVELOPMENT_PROMPT.md)** — the build contract:
   verified Core APIs, exact layout and acceptance criteria.
@@ -116,7 +120,13 @@ swing open, shells go in) is the **reload**, and `close` (the snap shut) is the
 item's `display` transform and each part hinge onto an element rotation, which is
 what the format can express; a scale channel, a hinge past ±45° or a bone turning
 on two axes is logged as an issue and degraded rather than dropped, and the
-`.bbmodel` itself never enters the pack (only `.json` registers). An `idle` clip
+`.bbmodel` itself never enters the pack (only `.json` registers). Baked frames
+are correct for any Blockbench project: face UVs are scaled to the vanilla
+`0..16` window at the model's resolution (64×64 projects bake correctly —
+this is the fix for the black/purple frames the raw-pixel emission used to
+produce), the full texture table is emitted so multi-texture models bind
+every cube to its own sprite, and non-vanilla display contexts are dropped
+at bake instead of making the client reject the whole model. An `idle` clip
 is deliberately not baked — a held item cannot be rewritten every frame, so the
 resting pose is authored once and the client's own clock does the rest. Five guns
 ship this way: `longmark` (36 baked states from its 4 clips), `longshot` (73 from
