@@ -1,4 +1,4 @@
-Mineplus is a Spigot/Paper plugin focused on a data-driven "vanilla-like systems" framework: custom items, managed blocks, multiblocks/machines, recipes, GUIs, and virtual rendered models, all server-side (no client mod required).
+Mineplus is a Spigot/Paper plugin focused on a data-driven "vanilla-like systems" framework: custom items, managed blocks, multiblocks/machines, recipes, GUIs, and rendered models, all server-side (no client mod required). Models render through two server-side axes, chosen per level/item: the **resource-pack axis is the primary, full-fidelity path** (custom geometry + textures through a pack the plugin compiles, hosts and delivers itself), and the **virtual/texel axis is the built-in option** (vanilla `BlockDisplay` mosaics + texel baking; no pack, and the automatic fallback whenever a pack render is unavailable or declined).
 
 **Version compatibility:** the plugin targets Minecraft 1.21.0 through 26.3
 (calendar versioning: 26.1, 26.2, 26.3) on Spigot and Paper, from one jar
@@ -6,8 +6,8 @@ compiled against the committed **Spigot** stub jar only. `libs/paper-api-1.21.ja
 is deliberately kept off every compile classpath: Paper is a superset of Spigot,
 so a Paper-only method compiles silently and then throws `NoSuchMethodError` on a
 Spigot server (a Paper-only `LivingEntity#getPitch()` once killed the whole mob
-render tick exactly that way - see
-`docs/whizbang/plans/2026-11-19-spigot-linkage-hotfix-plan.md`). Everything
+render tick exactly that way; the fix landed in the November 2026 render-core
+rewrite). Everything
 version-specific resolves at runtime through `util/ServerVersion` (the single version parser
 and milestone gates), `pack/PackFormat` (pack/data-pack formats and the
 `pack.mcmeta` era shapes), reflective probe chains

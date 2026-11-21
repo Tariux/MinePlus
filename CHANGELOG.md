@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation repositioning + cleanup
+
+- **The resource-pack axis is documented as the primary rendering path**: full
+  authored fidelity (textures, UVs, baked item animations) through packs the
+  plugin compiles, hosts and delivers itself; the virtual/texel engine is the
+  built-in option and the automatic fallback when a pack render is unavailable
+  or declined. Corrected across `README.md`, `docs/README.md`,
+  `docs/config-reference.md`, `docs/developer-api.md`, `docs/pack-system.md`,
+  `AGENTS.MD` and `examples/mineplus-fun/DEVELOPMENT_PROMPT.md` (the old
+  "second rendering axis / no resource packs / no downloads" framing is gone).
+- **Stale working documents removed**: `docs/whizbang/` (completed design and
+  execution plans), `examples/mineplus-gun/PLAN.md` (superseded v1 design) and
+  the tracked `.whizbang/` execution logs (now git-ignored along with
+  `/.curly`). `AGENTS.MD` and `CHANGELOG.md` references updated.
+- **Guard tightened**: `PackItemDefinition` `parent()`/`texture()` inheritance
+  only takes the inherited path when no explicit `modelKey` is set — the
+  explicit model wins on a misconfigured registration.
+
 ### Advanced model correctness: items, pack blocks, animations
 
 #### Fixed
@@ -105,8 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Evil Pig showcase now wanders between fights. `MobAnimator` gained
   optional `sit`/`eat`/`ambient` clip slots - `ambient` self-fires on a
   randomized idle cadence - plus `setSitting`/`notifyEat`.
-- `docs/whizbang/` holds the approved design and execution plan for this
-  rewrite; `CustomMobPipelineTest`, `CompatVersionTest`, `SchedulerCompatTest`,
+- `CustomMobPipelineTest`, `CompatVersionTest`, `SchedulerCompatTest`,
   `AttributeSeamTest` and `WanderGuardDecisionTest` run under
   `gradle testRunners`.
 

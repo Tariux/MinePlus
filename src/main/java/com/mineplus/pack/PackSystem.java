@@ -537,7 +537,9 @@ public final class PackSystem {
     private void ensureModelAssets(PackItemDefinition definition) {
         // An inherited item compiles to a one-line parent/layer0 model — no
         // bbmodel, one texture, everything else inherited from the parent.
-        if (definition.isInherited()) {
+        // (parent()/texture() combined with a modelKey is a misconfiguration:
+        // the explicit model wins.)
+        if (definition.isInherited() && definition.modelKey() == null) {
             registerInheritedItemAssets(definition);
             return;
         }

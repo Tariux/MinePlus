@@ -173,7 +173,7 @@ Autoplay is declared per multiblock level (`animations` key) or per raw model (`
 
 ### Texture Engine Architecture
 
-Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes one `BlockDisplay`, which can only show a single Minecraft block material — this is the fundamental constraint of the virtual axis (the default: completely vanilla clients, no pack needed), and everything below follows from it. Content that needs full-fidelity textures and geometry beyond this constraint opts into the [resource-pack axis](pack-system.md) per level/item — the plugin compiles and delivers that pack itself.
+Mineplus renders models through two server-side axes. The **resource-pack axis is the primary path** — full-fidelity geometry and textures compiled into a pack the plugin hosts and delivers itself (see [Resource Pack System](pack-system.md)). Alongside it, the **virtual axis** is the built-in option: the model is mosaic'd out of vanilla `BlockDisplay` entities, and each cube becomes one `BlockDisplay`, which can only show a single Minecraft block material — that is the fundamental constraint of this no-pack rendering, and everything in this section follows from it. Pack rendering is also the quality upgrade path: content authored once renders on either axis, and a declined or unavailable pack degrades to the virtual render in one place.
 
 **How a cube gets its material:**
 
@@ -183,7 +183,7 @@ Mineplus renders models using vanilla `BlockDisplay` entities. Each cube becomes
 4. The primary texture name is mapped to a Minecraft `Material` via `TextureMaterialResolver` (curated map → direct match → suffix-strip → aliases → fuzzy → fallback).
 5. Unmatched names fall back to `WHITE_CONCRETE` and are reported per model via `/mineplus model info`.
 
-**Beyond one material per face:** the UV alignment layer renders wrapping windows as native-density tile grids and half windows as slab-type crops, and — when a texture PNG sits next to the model file — **texel surface baking** reconstructs the actual texture pixel-by-pixel out of flat vanilla palette blocks (see [Texel Surface Baking](#texel-surface-baking)). Arbitrary sub-pixel UV cropping without a resource pack remains out of scope on this axis — the [resource-pack axis](pack-system.md) is the full-fidelity escape hatch when a model needs it.
+**Beyond one material per face:** the UV alignment layer renders wrapping windows as native-density tile grids and half windows as slab-type crops, and — when a texture PNG sits next to the model file — **texel surface baking** reconstructs the actual texture pixel-by-pixel out of flat vanilla palette blocks (see [Texel Surface Baking](#texel-surface-baking)). Arbitrary sub-pixel UV cropping is beyond this axis — that is exactly what the [resource-pack axis](pack-system.md) renders natively.
 
 ---
 

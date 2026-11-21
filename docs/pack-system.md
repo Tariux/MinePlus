@@ -1,10 +1,17 @@
-# Resource Pack System (Phase 2)
+# Resource Pack System
 
-Mineplus' second rendering axis: rich custom content — custom items, custom
-block/item models, textures — through a **generated resource pack**, with **no
-client mod required** and **zero impact on vanilla content**. It is a peer of
-the packless [virtual rendering engine](config-reference.md#settingsmpyml-engine--runtime-services);
-both run side by side, and neither touches the other's internals.
+Mineplus' **primary rendering axis**: rich custom content — custom items,
+custom block/item models, textures, baked item animations — through a
+**generated resource pack**, with **no client mod required** and **zero
+impact on vanilla content**. The plugin compiles the pack itself
+(deterministic hash-named artifacts), hosts it (built-in LOCAL endpoint or
+your static URL), delivers it automatically to online players, and tracks
+each player's accept/decline state. The [virtual/texel
+engine](config-reference.md#settingsmpyml-engine--runtime-services) is the
+built-in option beside it — no pack, vanilla `BlockDisplay` mosaics with
+texel baking — and doubles as the automatic fallback whenever a pack render
+is unavailable or a player declines. Both run side by side, and neither
+touches the other's internals.
 
 ```
 Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom content

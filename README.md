@@ -2,7 +2,7 @@
 
 # ⚙️ Mineplus
 
-### Data-driven machines, items & mobs for Minecraft — **no client mods**, two server-side rendering axes.
+### Data-driven machines, items & mobs for Minecraft — **no client mods**, rendered through a self-delivered resource pack.
 
 [![](https://img.shields.io/badge/Minecraft-1.21%2B-green)](https://www.minecraft.net/)
 [![](https://img.shields.io/badge/Server-Paper%20%7C%20Spigot-orange)](https://papermc.io/)
@@ -12,7 +12,7 @@
 [![](https://img.shields.io/badge/Modrinth-minepluscore-1bd96a)](https://modrinth.com/plugin/minepluscore)
 [![](https://img.shields.io/badge/Hangar-MinePlusCore-blue)](https://hangar.papermc.io/Tariux/MinePlusCore)
 
-**Design it in Blockbench → drop it in → it exists in-game. No client mods, ever.** The default virtual/texel axis needs no resource pack at all — and when a model wants full-fidelity pack rendering, Mineplus **compiles, hosts and delivers that pack automatically**: players accept one server-sent prompt, nobody downloads anything manually, and pack-dependent content degrades gracefully for anyone who declines.
+**Design it in Blockbench → drop it in → it exists in-game. No client mods, ever.** Full-fidelity models, textures, animations and custom items ride through a **resource pack the plugin compiles, hosts and delivers itself**: hash-named artifacts, a built-in HTTP endpoint, per-player URL resolution, automatic push to online players, one accept prompt — never a manual download. And for content that prefers it (or a player who declines the pack), the built-in **virtual/texel axis** renders models out of vanilla `BlockDisplay` entities with per-pixel texel baking — 100% vanilla clients, zero pack, automatic fallback in one place.
 
 **📥 Download:** [Modrinth](https://modrinth.com/plugin/minepluscore) · [Hangar](https://hangar.papermc.io/Tariux/MinePlusCore) · [GitHub Releases](https://github.com/Tariux/MinePlus/releases)
 
@@ -24,16 +24,16 @@
 
 Mineplus is a **server-side infrastructure core** for Paper/Spigot 1.21+ that turns Blockbench models (`.bbmodel`) into living, collidable, interactive machines, custom items, animated mobs and more. It renders through **two axes you choose per model**, and neither requires a client mod:
 
-- 🧊 **Virtual / texel axis (default)** — the model is mosaic'd out of vanilla `BlockDisplay` entities, with per-pixel texel baking reconstructing real textures from a 66-entry vanilla palette. 100% vanilla clients, zero pack.
-- 📦 **Resource-pack axis (opt-in per level/item)** — full-fidelity geometry and textures through a pack the plugin compiles and serves itself: hash-named artifacts, a built-in local HTTP endpoint, per-player URL resolution, automatic push to online players and per-player accept/decline tracking.
+- 📦 **Resource-pack axis (primary)** — the model compiles into the pack at its authored fidelity: real textures, real UVs, animations baked into item frames, oversized blocks window-fitted exactly. The pack is generated, hosted and auto-delivered by the plugin; players accept once.
+- 🧊 **Virtual / texel axis (built-in option)** — the model is mosaic'd out of vanilla `BlockDisplay` entities, with per-pixel texel baking reconstructing real textures from a 66-entry vanilla palette. No pack involved — and it is also the automatic fallback whenever pack rendering is unavailable or declined, so content never breaks, only degrades.
 
 What does that mean for your server?
 
 | | Mineplus | Traditional custom-content plugins |
 |---|---|---|
 | **Player client** | ✅ No mods; vanilla clients work everywhere | ❌ Often needs mods |
-| **Resource pack** | ✅ Optional, generated & auto-delivered by the plugin — one accept prompt, never a manual download | ❌ Manual texture-pack download and install |
-| **Degradation** | ✅ Pack declined → content falls back to the vanilla/texel render in one place | ❌ Broken or invisible content |
+| **Resource pack** | ✅ Generated & auto-delivered by the plugin — one accept prompt, never a manual download | ❌ Manual texture-pack download and install |
+| **Degradation** | ✅ Pack declined → the built-in texel/virtual render takes over in one place | ❌ Broken or invisible content |
 | **Model authoring** | ✅ Blockbench (free, visual) | ❌ Java code or flat item models |
 | **Collision** | ✅ Per-cube cell-rasterized barriers | ⚠️ Usually one flat bounding box |
 | **Content policy** | ✅ Zero-content core — you decide everything | ⚠️ Opinionated defaults |

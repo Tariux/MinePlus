@@ -366,11 +366,15 @@ Verified facts / traps:
   pushes are one `setTransformationMatrix` per bound display per tick with
   client-side interpolation (`ANIMATION.TICK_INTERVAL_TICKS: 1` default).
 
-## 10b. Resource pack system (Phase 2 — the second rendering axis)
+## 10b. Resource pack system (the primary rendering axis)
 
-The Core now has **two peer rendering axes**: the packless virtual engine (default,
-unchanged) and the resource pack subsystem (`com.mineplus.pack`). Both run side by
-side; the pack subsystem never touches the virtual engine's internals. Full contract:
+The Core has **two rendering axes**: the resource pack subsystem
+(`com.mineplus.pack`) is the **primary, full-fidelity path** — real textures,
+exact UVs, baked item animations — compiled, hosted and auto-delivered by the
+plugin; the virtual/texel engine is the **built-in option** beside it (no pack,
+vanilla `BlockDisplay` mosaics) and doubles as the automatic fallback whenever
+a pack render is unavailable or a player declines. Both run side by side; the
+pack subsystem never touches the virtual engine's internals. Full contract:
 Core's `docs/pack-system.md`.
 
 ### Backends (`renderMode` in multiblock level JSON)

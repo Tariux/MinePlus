@@ -1,8 +1,9 @@
 # MineplusGun — Implementation Prompt
 
-> **Read [`PLAN.md`](PLAN.md) first.** This file is the build contract: the
-> exact layout, the Core surfaces the module is allowed to use, and the
-> acceptance criteria. Where the plan and this file disagree, this file wins.
+> This file is the build contract: the exact layout, the Core surfaces the
+> module is allowed to use, and the acceptance criteria. The historical v1
+> design plan has been removed — where any older document and this file
+> disagree, this file wins.
 >
 > The contract below describes the module **as it is today**: the runtime that
 > used to live here moved into the Core, and what stayed here is content.
@@ -293,4 +294,4 @@ checks its own permission.
 
 ---
 
-*Companion design document: [`PLAN.md`](PLAN.md).*
+*Shipped behavior: [`README.md`](README.md). Core contract: `docs/pack-system.md` + `docs/developer-api.md`.*

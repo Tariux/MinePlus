@@ -40,7 +40,7 @@ Adding new mobs without touching vanilla ones: the definition/model/attributes c
 The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced framework) plus runtime administration and model-debugging tips.
 
 ### [Resource Pack System](pack-system.md)
-Phase 2's second rendering axis: custom items, models and textures through a generated resource pack — architecture, render-mode selection (`virtual` / `pack_item` / `pack_block` / `hybrid_item` / `hybrid_block`), lighting, the `PackApi`, compilation/delivery model, configuration, inherited items (vanilla-parent re-skins from a single PNG), uniform fitting of any-size pack blocks, and the current limitations.
+The **primary rendering axis**: custom items, models, textures and baked item animations through a resource pack the plugin compiles, hosts and delivers itself — architecture, render-mode selection (`virtual` / `pack_item` / `pack_block` / `hybrid_item` / `hybrid_block`), lighting, the `PackApi`, compilation/delivery model, configuration, inherited items (vanilla-parent re-skins from a single PNG), uniform fitting of any-size pack blocks, and the current limitations. The virtual/texel engine (below) is the built-in option and the automatic fallback.
 
 ### [Migration Guide](migration-guide.md)
 Upgrading across a major release: renamed/added configuration keys, the unified `renderMode` vocabulary (and the legacy `renderBackend`/`renderKind` mapping), and how to update custom modules. The change list lives in the [changelog](../CHANGELOG.md).

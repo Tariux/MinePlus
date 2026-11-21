@@ -44,3 +44,5 @@ package-lock.json
 
 skills-lock.json
 /.agents
+/.whizbang
+/.curly
