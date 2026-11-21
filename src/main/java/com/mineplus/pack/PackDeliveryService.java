@@ -32,15 +32,21 @@ final class PackDeliveryService {
     private final PackSettings settings;
     private final PackCache cache;
     private final LocalPackEndpoint localEndpoint;
+    /** Supplies the artifact's item representation without coupling to the compiler. */
+    private final java.util.function.Supplier<PackFormat.ItemRepresentation> representation;
+    private final ViaCompatProbe via = new ViaCompatProbe();
     private final Map<UUID, PlayerPackState> playerStates = new ConcurrentHashMap<>();
     private volatile PackArtifact current;
 
-    PackDeliveryService(PackSettings settings, PackCache cache) {
+    PackDeliveryService(PackSettings settings, PackCache cache,
+                        java.util.function.Supplier<PackFormat.ItemRepresentation> representation) {
         this.settings = settings;
         this.cache = cache;
+        this.representation = representation;
         this.localEndpoint = settings.deliveryMode() == PackDeliveryMode.LOCAL
                 ? new LocalPackEndpoint(cache, settings.localHost(), settings.localPort())
                 : null;
+        via.rescan();
     }
 
     boolean start() {
@@ -202,6 +208,19 @@ final class PackDeliveryService {
             return false;
         }
         state(player.getUniqueId(), PlayerPackState.REQUESTED);
+        // ViaVersion/ViaBackwards do not translate resource packs: a client on
+        // an older protocol than the server gets the same bytes and its own
+        // (older) item-model reader evaluates them. Surface that mismatch at
+        // the exact moment it matters instead of as a silent broken render.
+        int clientProtocol = via.clientProtocol(player);
+        if (clientProtocol > 0
+                && representation.get() == PackFormat.ItemRepresentation.MODERN_ITEM_MODEL
+                && !via.supportsModernItemModels(player)) {
+            DebugLogger.warning("[PackDelivery] " + player.getName() + " joined via ViaBackwards as "
+                    + ViaCompatProbe.describeProtocol(clientProtocol)
+                    + " but the pack uses the 1.21.4+ item_model representation; "
+                    + "custom items will not render on this client.");
+        }
         byte[] hash = HexFormat.of().parseHex(current.sha1());
         String prompt = settings.promptMessage().isBlank() ? null : settings.promptMessage();
         try {
@@ -249,6 +268,11 @@ final class PackDeliveryService {
     /** True when the local endpoint is serving on a port above the configured one. */
     boolean localPortDrifted() {
         return localEndpoint != null && localEndpoint.portDrifted();
+    }
+
+    /** Best-effort real client protocol probe (ViaVersion-aware). */
+    ViaCompatProbe viaProbe() {
+        return via;
     }
 
     PackSettings settings() {

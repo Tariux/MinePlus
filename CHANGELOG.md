@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Default item hold pose fixed (generic models held like tools)
+
+- Pack item models without a parent and without authored `display` transforms
+  now get the **vanilla `minecraft:item/handheld` pose** as their default
+  (`ModelJsonWriter.vanillaDisplayTransforms`). Previously they inherited the
+  flat-texture "generated" pose: guns and tools rendered backward and too high
+  in the hand. A model that authors its own `display` contexts keeps every
+  context it wrote; only contexts the author never touched fall back to the
+  handheld defaults (`ModelJsonWriter.withDefaults`).
+
+### ViaVersion/ViaBackwards client probe at pack delivery
+
+- New `ViaCompatProbe` (reflective, no ViaVersion dependency): reads each
+  player's real client protocol at pack delivery and logs a targeted warning
+  when a ViaBackwards client's era cannot render the pack's compiled
+  representation (`item_model` needs 1.21.4+; free-angle rotations 1.21.6+).
+  Diagnostics/gating only — the pack is still compiled once, for the server.
+- Design doc: `docs/design/blockbench-item-animation-design.md` (baking,
+  cooldown-frame playback, both pack generations, the ViaVersion trap).
+
 ### Mineplus Studio — one merged devtool (asset-lab + texel)
 
 - `devtools/asset-lab` and `devtools/texel` are merged into **`devtools/studio`**:

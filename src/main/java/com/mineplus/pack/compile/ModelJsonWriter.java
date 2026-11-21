@@ -143,7 +143,12 @@ public final class ModelJsonWriter {
             // to vanilla generated defaults for compatibility.
             ModelDisplay display = model.display();
             if (display != null && !display.isEmpty()) {
-                root.add("display", displayTransforms(display));
+                // Authored contexts always win; without a parent, contexts the
+                // author never touched fall back to the handheld pose so a gun
+                // or tool does not render backward/up in the hand.
+                root.add("display", itemParent == null
+                        ? withDefaults(displayTransforms(display))
+                        : displayTransforms(display));
             } else if (itemParent == null) {
                 root.add("display", vanillaDisplayTransforms());
             }
@@ -457,17 +462,46 @@ public final class ModelJsonWriter {
         return json;
     }
 
+    /**
+     * The vanilla {@code minecraft:item/handheld} display pose (verified
+     * against the 1.21.4 asset). Tools and guns authored without their own
+     * display transforms must hold like a sword: blade forward along the arm,
+     * not the "generated" backward/up pose.
+     */
     private static JsonObject vanillaDisplayTransforms() {
         JsonObject display = new JsonObject();
         display.add("gui", displayEntry(new float[]{30, 225, 0}, new float[]{0, 0, 0}, new float[]{0.625f, 0.625f, 0.625f}));
         display.add("ground", displayEntry(new float[]{0, 0, 0}, new float[]{0, 3, 0}, new float[]{0.25f, 0.25f, 0.25f}));
         display.add("head", displayEntry(new float[]{0, 180, 0}, new float[3], new float[]{1, 1, 1}));
         display.add("fixed", displayEntry(new float[3], new float[3], new float[]{1, 1, 1}));
-        display.add("thirdperson_righthand", displayEntry(new float[]{75, 45, 0}, new float[]{0, 2.5f, 0}, new float[]{0.375f, 0.375f, 0.375f}));
-        display.add("thirdperson_lefthand", displayEntry(new float[]{75, 225, 0}, new float[]{0, 2.5f, 0}, new float[]{0.375f, 0.375f, 0.375f}));
-        display.add("firstperson_righthand", displayEntry(new float[]{0, 45, 0}, new float[3], new float[]{0.40f, 0.40f, 0.40f}));
-        display.add("firstperson_lefthand", displayEntry(new float[]{0, 225, 0}, new float[3], new float[]{0.40f, 0.40f, 0.40f}));
+        display.add("thirdperson_righthand", displayEntry(new float[]{0, -90, 55}, new float[]{0, 4.0f, 0.5f}, new float[]{0.85f, 0.85f, 0.85f}));
+        display.add("thirdperson_lefthand", displayEntry(new float[]{0, 90, -55}, new float[]{0, 4.0f, 0.5f}, new float[]{0.85f, 0.85f, 0.85f}));
+        display.add("firstperson_righthand", displayEntry(new float[]{0, -90, 25}, new float[]{1.13f, 3.2f, 1.13f}, new float[]{0.68f, 0.68f, 0.68f}));
+        display.add("firstperson_lefthand", displayEntry(new float[]{0, 90, -25}, new float[]{1.13f, 3.2f, 1.13f}, new float[]{0.68f, 0.68f, 0.68f}));
         return display;
+    }
+
+    /**
+     * Fills the contexts the author never authored with the handheld defaults
+     * (contexts they did author are already present and win).
+     */
+    private static JsonObject withDefaults(JsonObject authored) {
+        JsonObject defaults = vanillaDisplayTransforms();
+        JsonObject merged = new JsonObject();
+        for (String context : new String[]{
+                "thirdperson_righthand", "thirdperson_lefthand",
+                "firstperson_righthand", "firstperson_lefthand",
+                "head", "gui", "ground", "fixed"}) {
+            JsonElement authoredEntry = authored.get(context);
+            merged.add(context, authoredEntry != null ? authoredEntry : defaults.get(context));
+        }
+        // Keep any additional authored contexts (none today; contexts are a fixed set).
+        for (java.util.Map.Entry<String, com.google.gson.JsonElement> entry : authored.entrySet()) {
+            if (!merged.has(entry.getKey())) {
+                merged.add(entry.getKey(), entry.getValue());
+            }
+        }
+        return merged;
     }
 
     private static JsonObject displayEntry(float[] rotation, float[] translation, float[] scale) {

@@ -400,6 +400,13 @@ accepted and maps to `pack_block`; new content should use `renderMode`.
   → APPLIED`) drive the fallback contract. Failed pushes keep every overload
   that still carries the SHA-1 integrity hash; `/mineplus pack status` prints
   the resolved URL and SHA-1 for client-side verification.
+- **ViaVersion clients**: ViaBackwards translates protocol, not resource packs.
+  A client on an older protocol receives the pack compiled for the server and
+  evaluates it with its own (older) reader — `item_model` requires a 1.21.4+
+  client, free-angle element rotations a 1.21.6+ client. `ViaCompatProbe`
+  (reflective, no ViaVersion dependency) checks each player's real protocol at
+  delivery and logs a targeted warning on a mismatch; it never changes what is
+  compiled. See `docs/design/blockbench-item-animation-design.md`.
 - **Scheduling**: pack work runs on its own bounded executors, never the main
   thread, the texel bake pool, or virtual rendering workers. Player-scoped
   pushes are Folia-aware (`PackScheduling`).

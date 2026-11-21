@@ -15,7 +15,14 @@ and milestone gates), `pack/PackFormat` (pack/data-pack formats and the
 `mob/navigation/NmsEntityPlan` - mojang names first, structural shapes as
 fallback) and `util/SchedulerCompat` (the single Folia probe). Never reference
 an API newer than the 1.21 stubs at compile time and never add a second copy
-of a version probe; extend the owning seam instead.
+of a version probe; extend the owning seam instead. ViaVersion/ViaBackwards
+clients are the exception the server version cannot describe: the pack is
+compiled once for the server, and `pack/ViaCompatProbe` (reflective, no
+ViaVersion dependency) reads each player's real protocol at delivery to warn
+when their client era cannot render the compiled representation (`item_model`
+needs 1.21.4+, free-angle rotations 1.21.6+). Pack item models without a parent
+default to the vanilla `handheld` display pose; authored `display` contexts
+always win and only untouched contexts fall back (`ModelJsonWriter`).
 
 Runtime starts in `MineplusPlugin`: it loads `settings.mp.yml` via `ConfigManager`, applies `VirtualRenderingSettings` to `VirtualBlockManager`, loads model assets from the plugin data folder, then bootstraps `PluginContext`. `PluginContext` wires `ItemRegistry` and the infrastructure engine + `InfrastructureApi`.
 

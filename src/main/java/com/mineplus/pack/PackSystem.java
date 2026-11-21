@@ -126,7 +126,8 @@ public final class PackSystem {
         this.rigSettings = limits;
         this.boneRenderer = new BoneRigRenderer(plugin, new MineplusPackApi(this),
                 virtualBlockManager.displayTransport(), limits, BONE_RIG_TAG_PREFIX);
-        this.delivery = new PackDeliveryService(settings, cache);
+        this.delivery = new PackDeliveryService(settings, cache,
+                appearance::representation);
         this.compileExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mineplus-pack-compile");
             thread.setDaemon(true);
