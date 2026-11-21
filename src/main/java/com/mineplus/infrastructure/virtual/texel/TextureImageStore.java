@@ -190,6 +190,25 @@ public final class TextureImageStore {
             if (indexed != null) {
                 return indexed;
             }
+            // Authors conventionally ship one texture PNG named after the
+            // model itself ("hawk_eye.png" beside "hawk_eye.bbmodel") even
+            // when the project's internal texture name drifted. When nothing
+            // matched the texture name, try the model's own stem.
+            String stem = modelFile.getName();
+            int dot = stem.lastIndexOf('.');
+            if (dot > 0) {
+                stem = stem.substring(0, dot);
+            }
+            if (!stem.isBlank()) {
+                File stemNamed = new File(modelFile.getParentFile(), stem + ".png");
+                if (stemNamed.isFile()) {
+                    return stemNamed;
+                }
+                stemNamed = indexedLookup(modelFile.getParentFile(), stem + ".png");
+                if (stemNamed != null) {
+                    return stemNamed;
+                }
+            }
         }
         if (rootFolder != null) {
             File rooted = new File(rootFolder, name + ".png");

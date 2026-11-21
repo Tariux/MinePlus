@@ -154,8 +154,14 @@ public final class WeaponBbModels {
         String id = folder.getName().toLowerCase(Locale.ROOT);
         File source = firstSource(folder);
         ModelData model = BbModelParser.parse(id, Files.readAllBytes(source.toPath()), reference -> null);
+        // The module registers every folder's sprite under the folder id
+        // (flat registration: mineplusgun:item/<id>), while a bbmodel's own
+        // texture name can drift from it ("boom_stick" inside hawk_eye).
+        // Resolve every parsed texture name to the registered path so baked
+        // frames always reference a sprite that ships.
         BbClipBaker.Style style = new BbClipBaker.Style(displayOf(folder, id),
-                WeaponFrames.NAMESPACE + ":item/" + id, true);
+                WeaponFrames.NAMESPACE + ":item/" + id, true,
+                name -> WeaponFrames.NAMESPACE + ":item/" + id);
 
         List<String> issues = new ArrayList<>();
         Set<String> written = new LinkedHashSet<>();

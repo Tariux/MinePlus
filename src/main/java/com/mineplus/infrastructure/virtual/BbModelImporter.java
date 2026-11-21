@@ -52,8 +52,9 @@ public class BbModelImporter {
             return null;
         }
 
+        VirtualModel model;
         try (Reader fileReader = new BufferedReader(new FileReader(file))) {
-            return parse(name, fileReader, logger);
+            model = parse(name, fileReader, logger);
         } catch (Exception exception) {
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "' from " + file.getAbsolutePath()
@@ -63,12 +64,73 @@ public class BbModelImporter {
             }
             return null;
         }
+        Map<String, byte[]> embedded = EMBEDDED_TEXTURES.get();
+        EMBEDDED_TEXTURES.remove();
+        if (model != null && embedded != null && !embedded.isEmpty()) {
+            materializeEmbeddedTextures(file, embedded, logger);
+        }
+        return model;
+    }
+
+    /**
+     * Base64 sources captured by the streaming parse on this thread, texture
+     * name -> decoded PNG bytes. File-parse plumbing: materialized beside the
+     * model so every file-based consumer (texel baker, pack registration,
+     * reports) resolves them with no new seams.
+     */
+    private static final ThreadLocal<Map<String, byte[]>> EMBEDDED_TEXTURES = new ThreadLocal<>();
+
+    /**
+     * Decodes each embedded texture source and writes it as
+     * {@code <textureName>.png} beside the model — the authored pixels ARE the
+     * texture, and every free-format Blockbench project embeds them. An
+     * existing file is never overwritten (an author's hand-placed PNG wins).
+     */
+    private static void materializeEmbeddedTextures(File modelFile, Map<String, byte[]> embedded, Logger logger) {
+        File folder = modelFile.getParentFile();
+        if (folder == null || !folder.isDirectory() && !folder.mkdirs()) {
+            return;
+        }
+        for (Map.Entry<String, byte[]> entry : embedded.entrySet()) {
+            String name = entry.getKey();
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            int cut = name.lastIndexOf('/');
+            if (cut >= 0) {
+                name = name.substring(cut + 1);
+            }
+            name = name.toLowerCase(java.util.Locale.ROOT);
+            if (name.endsWith(".png")) {
+                name = name.substring(0, name.length() - 4);
+            }
+            if (name.isBlank()) {
+                continue;
+            }
+            File out = new File(folder, name + ".png");
+            if (out.isFile()) {
+                continue; // the author's own file is authoritative
+            }
+            try {
+                java.nio.file.Files.write(out.toPath(), entry.getValue());
+                if (logger != null) {
+                    logger.info("Materialized embedded texture '" + out.getName() + "' ("
+                            + entry.getValue().length + " bytes) beside '" + modelFile.getName() + "'.");
+                }
+            } catch (Exception exception) {
+                DebugLogger.warning("Failed to materialize embedded texture '" + name + "' beside '"
+                        + modelFile.getName() + "': " + exception.getMessage());
+            }
+        }
     }
 
     public static VirtualModel parse(String name, Reader reader, Logger logger) {
         try {
-            return parseStreamed(name, reader);
+            VirtualModel model = parseStreamed(name, reader);
+            EMBEDDED_TEXTURES.remove(); // file-less parse: nothing to materialize
+            return model;
         } catch (Exception exception) {
+            EMBEDDED_TEXTURES.remove();
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
             } else {
@@ -92,6 +154,7 @@ public class BbModelImporter {
         List<RawGroup> groupDefinitions = new ArrayList<>();
         List<String> rootElementUuids = new ArrayList<>();
         List<RawAnimation> rawAnimations = new ArrayList<>();
+        Map<String, byte[]> embeddedTextures = new LinkedHashMap<>();
 
         JsonReader json = new JsonReader(reader);
         json.setLenient(false);
@@ -99,7 +162,7 @@ public class BbModelImporter {
         while (json.hasNext()) {
             String fieldName = json.nextName();
             switch (fieldName) {
-                case "textures" -> parseTextures(json, textureLookup);
+                case "textures" -> parseTextures(json, textureLookup, embeddedTextures);
                 case "elements" -> parseElements(json, rawElements, rawAnchors);
                 case "outliner" -> parseOutliner(json, null, rootOutliner, rootElementUuids);
                 case "groups" -> parseOutliner(json, null, groupDefinitions, null);
@@ -111,6 +174,7 @@ public class BbModelImporter {
             }
         }
         json.endObject();
+        EMBEDDED_TEXTURES.set(embeddedTextures);
 
         // 5.0 dialect: the root `groups` array carries the full group
         // definitions (name, origin, rotation) while the `outliner` holds
@@ -266,7 +330,10 @@ public class BbModelImporter {
         );
     }
 
-    private static void parseTextures(JsonReader json, TextureLookup lookup) throws Exception {
+    /** Decoded-byte ceiling for one embedded texture (a 4096x4096 PNG fits comfortably). */
+    private static final int MAX_EMBEDDED_TEXTURE_BYTES = 8 * 1024 * 1024;
+
+    private static void parseTextures(JsonReader json, TextureLookup lookup, Map<String, byte[]> embedded) throws Exception {
         lookup.beginParse();
         json.beginArray();
         int arrayIndex = 0;
@@ -281,6 +348,7 @@ public class BbModelImporter {
             String path = null;
             String relativePath = null;
             String name = null;
+            String source = null;
             while (json.hasNext()) {
                 String fieldName = json.nextName();
                 switch (fieldName) {
@@ -288,7 +356,8 @@ public class BbModelImporter {
                     case "path" -> path = nextStringOrNull(json);
                     case "relative_path" -> relativePath = nextStringOrNull(json);
                     case "name" -> name = nextStringOrNull(json);
-                    default -> json.skipValue(); // "source" (Base64 PNG), "uuid", "particle", ...
+                    case "source" -> source = nextStringOrNull(json);
+                    default -> json.skipValue(); // "uuid", "particle", "mode", ...
                 }
             }
             json.endObject();
@@ -302,6 +371,26 @@ public class BbModelImporter {
                 extracted = extractTextureIdentifier(name);
             }
             lookup.addTexture(arrayIndex, id, extracted);
+
+            // The embedded source is the texture the author painted — free-format
+            // projects always embed it and often leave the internal name stale.
+            // Decode it (bounded) so the file-based parse can materialize it as
+            // <name>.png beside the model; every file-based consumer then
+            // resolves the real pixels with no new seams.
+            if (source != null && source.startsWith("data:image/")) {
+                int comma = source.indexOf(',');
+                if (comma > 0 && source.length() - comma <= MAX_EMBEDDED_TEXTURE_BYTES) {
+                    try {
+                        byte[] decoded = java.util.Base64.getDecoder()
+                                .decode(source.substring(comma + 1).trim());
+                        String key = extracted != null && !extracted.isBlank() ? extracted
+                                : (name != null ? name : "texture_" + arrayIndex);
+                        embedded.putIfAbsent(key.toLowerCase(java.util.Locale.ROOT), decoded);
+                    } catch (IllegalArgumentException malformed) {
+                        // A bad base64 payload is skipped; file-side PNGs still apply.
+                    }
+                }
+            }
             arrayIndex++;
         }
         json.endArray();

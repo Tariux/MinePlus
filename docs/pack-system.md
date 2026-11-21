@@ -238,7 +238,18 @@ is verification-only on the block axis.
 **Texture resolution.** Texture PNGs resolve case-insensitively against the
 model folder and the models root (`Alchemy_Texture.png` satisfies the
 bbmodel identifier `alchemy_texture`), so a pack block's sprites can never go
-missing over filename casing on a Linux filesystem.
+missing over filename casing on a Linux filesystem. Two more layers close the
+gap for free-format Blockbench projects:
+
+- **Embedded textures materialize on load.** A `free`-format project embeds
+  its painted texture as base64 (`source`), usually under a stale internal
+  name. The importer decodes it (bounded) and writes `<textureName>.png`
+  beside the bbmodel — once; an author's own file is never overwritten — so
+  the texel baker, pack registration and every report resolve the real
+  pixels with no author-side renaming.
+- **Folder-stem fallback.** When a texture name matches nothing, the model's
+  own stem is tried (`hawk_eye.png` beside `hawk_eye.bbmodel`), the
+  convention authors actually follow when they export one PNG per model.
 
 ## Inherited items (vanilla-parent extension)
 

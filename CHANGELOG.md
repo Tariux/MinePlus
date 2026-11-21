@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Embedded-texture handling (free-format Blockbench projects)
+
+- **Embedded textures materialize on load.** A `free`-format bbmodel embeds
+  its painted texture as base64, usually under a stale internal name, and the
+  file-based texture resolution could never satisfy it (purple models, texel
+  degradation). The importer now decodes the embedded source (bounded) and
+  writes `<textureName>.png` beside the bbmodel once — an author's own file
+  is never overwritten — so texel baking, pack registration and reports
+  resolve the real pixels with no renaming.
+- **Folder-stem texture fallback.** When a texture name matches nothing, the
+  model file's own stem is tried (`hawk_eye.png` beside `hawk_eye.bbmodel`).
+- **Bake-path texture resolver.** `BbClipBaker.Style` gains an optional
+  name→reference resolver; the gun module maps every parsed texture to the
+  folder's registered sprite, so a drifted internal name (`boom_stick` inside
+  `hawk_eye`) no longer bakes unresolvable references.
+- R&D verified against `hawk_eye.bbmodel` (Blockbench 5.0 free format): the
+  5.0 outliner/`groups` join (names + pivots), flat `keyframes` dialect,
+  `animation.`-prefixed clip names, element-rotation cubes and texture-pixel
+  UVs all already parse correctly on both axes; design record in
+  `docs/design/`.
+
 ### Documentation repositioning + cleanup
 
 - **The resource-pack axis is documented as the primary rendering path**: full

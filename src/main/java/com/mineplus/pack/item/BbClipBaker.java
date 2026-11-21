@@ -84,12 +84,25 @@ public final class BbClipBaker {
      *                         {@code mineplusgun:item/frontier_eye}
      * @param frontLight       true to emit {@code gui_light: front}, which keeps a
      *                         boxy prop evenly lit in an inventory GUI
+     * @param textureResolver  maps a parsed texture name to the pack reference its
+     *                         sprite is registered under, or {@code null} to derive
+     *                         every reference from {@code textureReference}'s prefix
+     *                         plus the texture's own name. Modules whose flat texture
+     *                         registration keys sprites by a folder id pass
+     *                         {@code name -> prefix + "/" + folderId} so baked frames
+     *                         reference exactly the registered path
      */
-    public record Style(JsonObject display, String textureReference, boolean frontLight) {
+    public record Style(JsonObject display, String textureReference, boolean frontLight,
+                        java.util.function.UnaryOperator<String> textureResolver) {
 
         public Style {
             display = display == null ? new JsonObject() : display.deepCopy();
             textureReference = textureReference == null ? "" : textureReference.trim().toLowerCase(Locale.ROOT);
+        }
+
+        /** Convenience constructor for the prefix-derivation default. */
+        public Style(JsonObject display, String textureReference, boolean frontLight) {
+            this(display, textureReference, frontLight, null);
         }
     }
 
@@ -851,11 +864,21 @@ public final class BbClipBaker {
         for (int index = 0; index < parsed.size(); index++) {
             ModelTexture texture = parsed.get(index);
             String name = texture == null ? null : TextureAsset.normalizePath(texture.name());
-            if (name == null || name.isBlank()) {
-                name = "texture_" + index;
+            String reference;
+            if (style.textureResolver() != null) {
+                reference = style.textureResolver().apply(texture == null || texture.name() == null
+                        ? "" : texture.name());
+                if (reference == null || reference.isBlank()) {
+                    reference = prefix.isEmpty() ? String.valueOf(index)
+                            : prefix + "/" + (name == null || name.isBlank()
+                                    ? "texture_" + index : name);
+                }
+            } else if (name == null || name.isBlank()) {
+                reference = prefix.isEmpty() ? "texture_" + index : prefix + "/texture_" + index;
+            } else {
+                reference = prefix.isEmpty() ? name : prefix + "/" + name;
             }
-            textures.addProperty(String.valueOf(index), prefix.isEmpty()
-                    ? name : prefix + "/" + name);
+            textures.addProperty(String.valueOf(index), reference.toLowerCase(Locale.ROOT));
         }
         if (parsed.isEmpty() || !textures.has("0")) {
             textures.addProperty("0", style.textureReference());

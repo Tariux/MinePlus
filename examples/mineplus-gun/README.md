@@ -126,7 +126,13 @@ are correct for any Blockbench project: face UVs are scaled to the vanilla
 this is the fix for the black/purple frames the raw-pixel emission used to
 produce), the full texture table is emitted so multi-texture models bind
 every cube to its own sprite, and non-vanilla display contexts are dropped
-at bake instead of making the client reject the whole model. An `idle` clip
+at bake instead of making the client reject the whole model. Every parsed
+texture resolves to the folder's registered sprite (`mineplusgun:item/<id>`,
+the flat-registration convention) — a project whose internal texture name
+drifted (`boom_stick` inside `hawk_eye`) still bakes correctly. Free-format
+5.0 projects work end to end: outliner groups joined from the root `groups`
+array (bone names **and pivots**), flat `keyframes` dialects read, and
+`animation.`-prefixed clip names classified by their suffix. An `idle` clip
 is deliberately not baked — a held item cannot be rewritten every frame, so the
 resting pose is authored once and the client's own clock does the rest. Five guns
 ship this way: `longmark` (36 baked states from its 4 clips), `longshot` (73 from
