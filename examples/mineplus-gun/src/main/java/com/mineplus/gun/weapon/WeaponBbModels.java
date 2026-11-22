@@ -88,9 +88,16 @@ public final class WeaponBbModels {
      * pose from an earlier release can never survive an upgrade — no manual
      * "delete the staged folder" step. Version 2: displays are no longer
      * inherited from previously baked frames and the held-pose correction is
-     * always applied fresh from config.
+     * always applied fresh from config. Version 4: the held-pose correction
+     * defaults to none — facing comes from the source's grip-to-muzzle ray and
+     * the validated display table, so the old 180° base yaw that pointed
+     * -Z-authored guns backward is gone. Version 5: a source that carries an
+     * authored display (a hand-authored frame JSON, or a {@code .bbmodel}
+     * with its own {@code display} block) is treated as the author's final
+     * word — no facing flip, base yaw or lift is composed onto it; the
+     * geometry-facing pass runs only for sources with no display at all.
      */
-    static final int BAKE_VERSION = 3;
+    static final int BAKE_VERSION = 5;
     private static final String VERSION_KEY = "mineplus_bake_version";
 
     /** Element-name fragments that mark the hand end of a weapon source. */
@@ -115,8 +122,8 @@ public final class WeaponBbModels {
      * origin is the cube's corner), not in a hand, so the poses need a display
      * block to fold onto. These are the values already validated in game for the
      * module's rifles. The held-pose correction from {@code PACK.HELD_YAW} and
-     * {@code PACK.HELD_Y_LIFT} composes on top of this table (and on top of an
-     * authored or baked display) at bake time.
+     * {@code PACK.HELD_Y_LIFT} composes on top of this table only — a source
+     * with an authored display is kept exactly as the author posed it.
      */
     private static final String DEFAULT_DISPLAY = """
             {"thirdperson_righthand":{"rotation":[-4,0,0],"translation":[0,5,-1],"scale":[0.6,0.6,0.6]},
@@ -138,15 +145,18 @@ public final class WeaponBbModels {
      */
     public static int bakeAll(JavaPlugin plugin, PluginContext context) {
         // The held-pose fix reads the plugin config so a server can tune the
-        // correction without re-authoring the Blockbench source: pack.held-yaw
-        // rotates the four hand contexts (default 180 — the shipped sources are
-        // authored on the model table, so a barrel along +Z points back at the
-        // player until flipped), pack.held-y-lift lowers a model that rides
-        // high, and pack.held-yaw-overrides (<gun-id>: degrees) tunes one
+        // correction without re-authoring the Blockbench source. Facing is NOT
+        // assumed here: facingFlipZ reads each source's grip-to-muzzle ray and
+        // flips only the sources authored barrel-backward, and the default
+        // display table is the pose already validated in game — so both
+        // defaults are 0 and the correction exists purely for tuning.
+        // pack.held-yaw rotates the four hand contexts,
+        // pack.held-y-lift lowers a model that rides high, and
+        // pack.held-yaw-overrides (<gun-id>: degrees) tunes one
         // gun — e.g. a mirrored source — without touching the rest.
         var config = plugin.getConfig();
-        float baseYaw = (float) config.getDouble("pack.held-yaw", 180.0);
-        float lift = (float) config.getDouble("pack.held-y-lift", 2.0);
+        float baseYaw = (float) config.getDouble("pack.held-yaw", 0.0);
+        float lift = (float) config.getDouble("pack.held-y-lift", 0.0);
         Map<String, Double> overrides = new LinkedHashMap<>();
         if (config.isConfigurationSection("pack.held-yaw-overrides")) {
             for (String key : config.getConfigurationSection("pack.held-yaw-overrides").getKeys(false)) {
@@ -229,29 +239,50 @@ public final class WeaponBbModels {
         File source = firstSource(folder);
         byte[] sourceBytes = Files.readAllBytes(source.toPath());
         ModelData model = BbModelParser.parse(id, sourceBytes, reference -> null);
-        // Facing is read from the source, not assumed: a grip-to-muzzle ray
-        // pointing along -Z means the model is authored the other way round and
-        // needs a 180° flip on top of the base yaw. This is what keeps every
-        // gun correct without per-gun hand tuning.
-        int facingFlip = facingFlipZ(sourceBytes);
-        float effectiveYaw = yawIsAbsolute ? yaw : normalizeYaw(yaw + facingFlip);
+        // Two model types, two rules:
+        //
+        // 1. A source with an authored display (a hand-authored frame JSON the
+        //    author posed in Blockbench's display settings, or a .bbmodel that
+        //    carries its own display block) is the author's final word. The
+        //    bake applies nothing automatic on top of it — no facing flip, no
+        //    base yaw, no lift — because the author already oriented the gun
+        //    for the hand. Only an explicit pack.held-yaw-overrides entry may
+        //    tune such a gun (e.g. a mirrored source).
+        // 2. A source with no display at all has no hand pose, so facing is
+        //    read from the geometry: a grip-to-muzzle ray pointing along -Z
+        //    means the model is authored the other way round and needs a 180°
+        //    flip on top of the base yaw and the validated default table.
+        AuthoredDisplay display = displayOf(folder, id, sourceBytes);
+        BbClipBaker.Style.HeldCorrection correction;
+        float effectiveYaw;
+        if (yawIsAbsolute) {
+            // A per-gun override is explicit: it composes on any display.
+            effectiveYaw = yaw;
+            correction = new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
+        } else if (display.authored()) {
+            effectiveYaw = 0.0f;
+            correction = BbClipBaker.Style.HeldCorrection.NONE;
+        } else {
+            int facingFlip = facingFlipZ(sourceBytes);
+            effectiveYaw = normalizeYaw(yaw + facingFlip);
+            correction = new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
+        }
         // The module registers every folder's sprite under the folder id
         // (flat registration: mineplusgun:item/<id>), while a bbmodel's own
         // texture name can drift from it ("boom_stick" inside hawk_eye).
         // Resolve every parsed texture name to the registered path so baked
         // frames always reference a sprite that ships.
-        BbClipBaker.Style.HeldCorrection correction =
-                new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
-        JsonObject display = displayOf(folder, id);
-        BbClipBaker.Style style = new BbClipBaker.Style(display,
+        BbClipBaker.Style style = new BbClipBaker.Style(display.display(),
                 WeaponFrames.NAMESPACE + ":item/" + id, true,
                 name -> WeaponFrames.NAMESPACE + ":item/" + id, correction);
 
         log.info("[MineplusGun] '" + id + "': baking from '" + source.getName()
-                + "' with long axis " + longAxis(model) + ", muzzle "
-                + (facingFlip == 0 ? "+Z as authored" : "-Z (source flipped, +180\u00b0)")
-                + ", held yaw " + effectiveYaw + "\u00b0, lift " + lift + ".");
-
+                + "' with long axis " + longAxis(model) + ", display "
+                + (display.authored()
+                        ? "authored (kept as-is, no auto correction)"
+                        : "default table + geometry facing (held yaw "
+                                + effectiveYaw + "\u00b0, lift " + lift + ")")
+                + ".");
         List<String> issues = new ArrayList<>();
         Set<String> written = new LinkedHashSet<>();
         JsonObject rest = firstOrNull(BbClipBaker.rest(model, style));
@@ -524,18 +555,29 @@ public final class WeaponBbModels {
     // Style and reporting
     // ------------------------------------------------------------------
 
+    /** A display block plus where it came from. */
+    private record AuthoredDisplay(JsonObject display, boolean authored) {
+
+        static final AuthoredDisplay DEFAULT = new AuthoredDisplay(
+                JsonParser.parseString(DEFAULT_DISPLAY).getAsJsonObject(), false);
+    }
+
     /**
-     * The display block the poses fold onto: the folder's own hand-authored
-     * resting model when one exists, otherwise the module's rifle table.
+     * The display block the poses fold onto, in priority order: the folder's
+     * own hand-authored resting model, the {@code .bbmodel} source's own
+     * {@code display} block, then the module's rifle table.
      *
      * <p>Only files without the {@code mineplus_baked} marker are trusted: a
      * frame a previous bake pass wrote already carries that pass's held-pose
      * correction folded into its display, and inheriting it would bake the old
      * correction into every future pose no matter what the config now says.
      * Baked frames are always rebuilt fresh from the source and the current
-     * {@code pack.held-yaw}.</p>
+     * config. Whether the result is <em>authored</em> matters as much as its
+     * values: an authored display is the author's final word on how the gun
+     * sits in a hand, so the bake composes no automatic correction onto it —
+     * only the default table is ever corrected from geometry.</p>
      */
-    private static JsonObject displayOf(File folder, String id) {
+    private static AuthoredDisplay displayOf(File folder, String id, byte[] sourceBytes) {
         for (String stem : new String[]{id + "_primed", id + "_loaded", id + "_idle", id + "_rest"}) {
             File candidate = new File(folder, stem + ".json");
             if (!candidate.isFile()) {
@@ -550,14 +592,28 @@ public final class WeaponBbModels {
                 }
                 JsonElement display = root.get("display");
                 if (display != null && display.isJsonObject()) {
-                    return display.getAsJsonObject();
+                    return new AuthoredDisplay(display.getAsJsonObject(), true);
                 }
             } catch (Exception malformed) {
-                // Fall through to the default table: a display block the parser
-                // cannot read is worse than the one already proven in game.
+                // Fall through: a display block the parser cannot read is
+                // worse than the one already proven in game.
             }
         }
-        return JsonParser.parseString(DEFAULT_DISPLAY).getAsJsonObject();
+        // A .bbmodel can carry the author's display adjustments itself
+        // (Blockbench's display settings panel writes them on the project
+        // root) — same rule: authored, kept as-is.
+        try {
+            JsonObject root = JsonParser.parseString(
+                    new String(sourceBytes, StandardCharsets.UTF_8)).getAsJsonObject();
+            JsonElement display = root.get("display");
+            if (display != null && display.isJsonObject()
+                    && display.getAsJsonObject().size() > 0) {
+                return new AuthoredDisplay(display.getAsJsonObject().deepCopy(), true);
+            }
+        } catch (Exception malformed) {
+            // Fall through to the default table.
+        }
+        return AuthoredDisplay.DEFAULT;
     }
 
     private static JsonObject firstOrNull(BbClipBaker.Result result) {

@@ -88,19 +88,20 @@ settings:
   disabled-worlds: []          # gameplay (firing/shop use) disabled in these worlds
   pvp-only: false              # only damage players, never other living entities
 
-# Held-pose correction for the baked gun models. Blockbench "generic" geometry
-# is authored on the model table, not in hand space, so the default rotates the
-# four hand contexts 180 degrees at bake time to point barrels forward. The
-# correction composes fresh on every bake (displays are only inherited from
-# hand-authored files), so changing these takes effect on the next restart.
+# Held-pose correction for the baked gun models. Both default to 0: facing is
+# auto-detected per gun from its source geometry (muzzle vs grip along Z — a
+# source authored barrel-backward is flipped automatically), and the default
+# display table is the pose already validated in game, so no correction is
+# applied unless a specific gun needs it. The correction composes fresh on
+# every bake (displays are only inherited from hand-authored files), so
+# changing these takes effect on the next restart.
 # held-yaw rotates the four hand contexts; held-y-lift lowers the model in
-# display pixels. Facing is auto-detected per gun from its source geometry
-# (muzzle vs grip), so overrides are only needed for a gun whose names give
-# no hint (the bake logs "unclear facing" for those). held-yaw-overrides
-# wins per gun: value is the absolute extra yaw, 0 keeps the authored pose.
+# display pixels. The bake logs each gun's detected muzzle direction, so a
+# source with unclear facing shows in the log. held-yaw-overrides wins per
+# gun: value is the absolute extra yaw, 0 keeps the auto-detected pose.
 pack:
-  held-yaw: 180
-  held-y-lift: 2
+  held-yaw: 0
+  held-y-lift: 0
   held-yaw-overrides: {}
 
 ammo:

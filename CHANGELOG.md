@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Authored displays are the author's final word (bake v5)
+
+- Two model types need two rules, and the bake now knows them apart:
+  1. **Authored display** — a hand-authored frame JSON the author posed in
+     Blockbench's display settings (`rifle`, `shotgun`, `boom_stick`,
+     `rust_shot`, `battle_rifle`, …) or a `.bbmodel` carrying its own
+     `display` block. These are kept exactly as authored: no facing flip, no
+     base yaw, no lift is composed on top. This is what un-flips the old
+     rifle and shotgun, whose hand-tuned first-person poses were being
+     double-corrected into pointing backward again.
+  2. **No display at all** (e.g. `hawk_eye`, `double_boom`) — facing is read
+     from the grip-to-muzzle geometry (`facingFlipZ`) and composed onto the
+     validated default table, as before.
+- `displayOf` also picks up a `.bbmodel`'s own `display` block (Blockbench
+  writes author display adjustments on the project root), so a source with
+  display adjustments baked into the project file now prefers them over the
+  default table.
+- The hand-authored frame folders (`rifle`, `shotgun`, `boom_stick`,
+  `rust_shot`, `battle_rifle`, …) were restored from the pre-`c3cec3a`
+  authored displays that the last rewrite had clobbered with +180°.
+- `mineplus_bake_version` bumped 4 → 5 so frames baked under the old rule are
+  swept on next enable. An explicit `pack.held-yaw-overrides` entry still
+  composes on any display, authored or not.
+
+### Held pose defaults to no correction (first-person guns face forward again)
+
+- Root cause of the backwards guns in game: `bakeAll` folded a base
+  `pack.held-yaw` of 180° into every gun *on top of* the display table that was
+  already validated in game, and `facingFlipZ` added another 180° for
+  +Z-authored sources — so −Z-authored guns got flipped twice (net 180° =
+  backwards) and +Z guns rode the shifted default. Facing is geometry-driven
+  (`facingFlipZ`) and the default display is proven, so the correction's
+  defaults are now `pack.held-yaw: 0` and `pack.held-y-lift: 0` in both the
+  code fallback and the shipped gun-module `config.yml`. The knobs remain for
+  tuning one stubborn model.
+- Bump `mineplus_bake_version` to 4 so frames baked with the old 180° base yaw
+  are swept on the next enable.
+- Docs: `docs/config-reference.md` and the gun module `config.yml` comments
+  describe the auto-detected facing and the tuning-only knobs.
+
 ### Gun facing is auto-detected from source geometry
 
 - Third and final root cause: the remaining backwards guns were sources authored

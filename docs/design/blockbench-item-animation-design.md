@@ -81,6 +81,15 @@ only — the pack itself is always compiled once, for the server.
    back to the vanilla `handheld` pose (`ModelJsonWriter.withDefaults`). A
    model without any display gets the handheld defaults so tools/guns hold
    like a sword, not like a flat texture.
+   The bake honours the same rule at the pack level (`WeaponBbModels`,
+   bake version 5): a source with an authored display — a hand-authored
+   frame JSON, or a `.bbmodel` carrying its own `display` block — receives
+   **no automatic held-pose correction** (no geometry facing flip, no
+   `pack.held-yaw`, no lift); the geometry-facing pass runs only for
+   display-less sources such as `hawk_eye`. An explicit
+   `pack.held-yaw-overrides` entry is the only way to tune an authored gun
+   (for a mirrored source). Author the pose in Blockbench's display settings
+   and it reaches the hand untouched.
 3. **Never unsort overrides.** Any new writer touching `overrides` must merge
    into the existing ascending (custom_model_data, cooldown) order.
 4. **One compile, many clients.** Version differences are handled at the
