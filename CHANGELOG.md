@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Held-pose correction for generic Blockbench guns (`PACK.HELD_YAW` / `PACK.HELD_Y_LIFT`)
+
+- New `BbClipBaker.Style.HeldCorrection`: a module-supplied yaw rotation and
+  lift applied **on top of** the item's display block (authored, baked or the
+  module's default table) to the four held contexts at bake time. Generic
+  Blockbench geometry runs its barrel along model +Z, which points back at the
+  player in the vanilla hand contexts — a 180° yaw points it forward, and the
+  lift drops a model that rides high on the hand.
+- The gun example module reads `PACK.HELD_YAW` (default `180`) and
+  `PACK.HELD_Y_LIFT` (default `2`) from its plugin config; set `0` to keep the
+  authored pose untouched. A baked display is stamped
+  (`mineplus_held_pose_fixed`) so re-bakes never stack the fix, and the idle
+  pose a previous pass wrote is no longer swept as stale on re-bake.
+- All 63 shipped default gun models in `examples/mineplus-gun` re-issued with
+  the corrected held pose. Documented in `docs/config-reference.md`.
+
 ### Default item hold pose fixed (generic models held like tools)
 
 - Pack item models without a parent and without authored `display` transforms

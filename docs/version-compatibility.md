@@ -63,6 +63,19 @@ purple and black cube, if any element angle is off the 22.5 degree steps.
 there. Open point: angles beyond 45 degrees became legal only in 1.21.11, and
 how the guard treats them on 1.21.6 to 1.21.10 was not re-checked for this page.
 
+**ViaVersion / ViaBackwards clients.** Via translates *protocol*, not
+resource packs: a client that joins through Via receives, byte for byte, the
+pack the server compiled for the *server's* version. So a pre-1.21.4 client
+on a 1.21.4+ server cannot read `item_model` pack items (it shows the vanilla
+skin), and a pre-1.21.6 client rejects models with off-grid element angles
+(the purple and black cube) even though the server version allows them. The
+pack is still compiled exactly once for the server — no per-client packs.
+`ViaCompatProbe` (reflective, no ViaVersion dependency) reads the real client
+protocol at delivery time and logs a targeted warning when that client's era
+cannot render the pack's representation; modules should gate animation
+gameplay on `PackApi.isAvailable()`, which reports whether the pack
+subsystem can present items at all.
+
 **pack.mcmeta.** `PackFormat.usesFormatRange` switches the manifest shape at
 1.21.9. A server newer than the table gets the newest known format.
 

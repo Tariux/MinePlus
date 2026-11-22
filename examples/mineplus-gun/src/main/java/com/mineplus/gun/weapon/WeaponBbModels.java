@@ -74,6 +74,9 @@ public final class WeaponBbModels {
 
     private static final String MODEL_ROOT = "pack/mineplusgun/models/item/";
     private static final String MARKER = "mineplus_baked";
+
+    /** Stamps a display whose held contexts already carry the pose fix. */
+    private static final String POSE_FIXED = "mineplus_held_pose_fixed";
     private static final String BBMODEL = ".bbmodel";
 
     /** Poses sampled per authored second of a clip. */
@@ -88,7 +91,9 @@ public final class WeaponBbModels {
      * gun is authored on the model-space table (a full block is 16 pixels and the
      * origin is the cube's corner), not in a hand, so the poses need a display
      * block to fold onto. These are the values already validated in game for the
-     * module's rifles.
+     * module's rifles. The held-pose correction from {@code PACK.HELD_YAW} and
+     * {@code PACK.HELD_Y_LIFT} composes on top of this table (and on top of an
+     * authored or baked display) at bake time.
      */
     private static final String DEFAULT_DISPLAY = """
             {"thirdperson_righthand":{"rotation":[-4,0,0],"translation":[0,5,-1],"scale":[0.6,0.6,0.6]},
@@ -109,14 +114,28 @@ public final class WeaponBbModels {
      * @return how many frame files the sources define
      */
     public static int bakeAll(JavaPlugin plugin, PluginContext context) {
-        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT));
+        // The held-pose fix reads the plugin config so a server can tune the
+        // correction without re-authoring the Blockbench source: PACK.HELD_YAW
+        // rotates the held contexts (180 points a +Z barrel forward), and
+        // PACK.HELD_Y_LIFT lowers a model that rides high on the hand.
+        var config = plugin.getConfig();
+        BbClipBaker.Style.HeldCorrection correction = new BbClipBaker.Style.HeldCorrection(
+                (float) config.getDouble("PACK.HELD_YAW", 180.0),
+                (float) config.getDouble("PACK.HELD_Y_LIFT", 2.0));
+        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT), correction);
     }
 
     /**
      * The same pass over an explicit {@code models/item} root, so the bake is
      * checkable without a server: {@link #bakeAll} only resolves the path.
+     * Uses the default held-pose correction ({@code 180°} yaw, no lift).
      */
     public static int bakeTree(Logger log, File root) {
+        return bakeTree(log, root, BbClipBaker.Style.HeldCorrection.NONE);
+    }
+
+    /** The pass with an explicit held-pose correction. */
+    public static int bakeTree(Logger log, File root, BbClipBaker.Style.HeldCorrection correction) {
         File[] folders = root.listFiles(File::isDirectory);
         if (folders == null || folders.length == 0) {
             return 0;
@@ -129,7 +148,7 @@ public final class WeaponBbModels {
                 continue;
             }
             try {
-                int baked = bake(log, folder);
+                int baked = bake(log, folder, correction);
                 if (baked > 0) {
                     sources++;
                 }
@@ -151,6 +170,11 @@ public final class WeaponBbModels {
     // ------------------------------------------------------------------
 
     private static int bake(Logger log, File folder) throws IOException {
+        return bake(log, folder, BbClipBaker.Style.HeldCorrection.NONE);
+    }
+
+    private static int bake(Logger log, File folder,
+                            BbClipBaker.Style.HeldCorrection correction) throws IOException {
         String id = folder.getName().toLowerCase(Locale.ROOT);
         File source = firstSource(folder);
         ModelData model = BbModelParser.parse(id, Files.readAllBytes(source.toPath()), reference -> null);
@@ -159,9 +183,15 @@ public final class WeaponBbModels {
         // texture name can drift from it ("boom_stick" inside hawk_eye).
         // Resolve every parsed texture name to the registered path so baked
         // frames always reference a sprite that ships.
-        BbClipBaker.Style style = new BbClipBaker.Style(displayOf(folder, id),
+        JsonObject display = displayOf(folder, id);
+        // A display a previous pass already corrected carries the stamp and
+        // must not take the fix a second time.
+        BbClipBaker.Style.HeldCorrection pose =
+                display.has(POSE_FIXED) ? BbClipBaker.Style.HeldCorrection.NONE : correction;
+        boolean stamped = !pose.isNone();
+        BbClipBaker.Style style = new BbClipBaker.Style(display,
                 WeaponFrames.NAMESPACE + ":item/" + id, true,
-                name -> WeaponFrames.NAMESPACE + ":item/" + id);
+                name -> WeaponFrames.NAMESPACE + ":item/" + id, pose);
 
         List<String> issues = new ArrayList<>();
         Set<String> written = new LinkedHashSet<>();
@@ -171,7 +201,11 @@ public final class WeaponBbModels {
             return 0;
         }
         if (!new File(folder, id + "_idle.json").isFile()) {
-            write(folder, id + "_idle", rest, source.getName(), written);
+            write(folder, id + "_idle", rest, source.getName(), written, stamped);
+        } else {
+            // The idle already exists (a previous pass wrote it, or the user
+            // hand-tuned it): keep it, and tell the sweep it is not stale.
+            written.add(id + "_idle");
         }
 
         for (String clip : BbClipBaker.clips(model)) {
@@ -191,7 +225,7 @@ public final class WeaponBbModels {
             if (frames.isEmpty()) {
                 continue;
             }
-            writeRole(folder, id, role, frames, source.getName(), written);
+            writeRole(folder, id, role, frames, source.getName(), written, stamped);
         }
 
         int removed = sweep(log, folder, id, written);
@@ -214,19 +248,19 @@ public final class WeaponBbModels {
     }
 
     private static void writeRole(File folder, String id, Role role, List<JsonObject> frames,
-                                  String source, Set<String> written) throws IOException {
+                                  String source, Set<String> written, boolean poseFixed) throws IOException {
         switch (role) {
-            case FIRE -> writeSequence(folder, id + "_fire_", frames, source, written);
-            case CYCLE -> writeSequence(folder, id + "_cycle_", frames, source, written);
-            case EQUIP -> writeSequence(folder, id + "_equip_", frames, source, written);
+            case FIRE -> writeSequence(folder, id + "_fire_", frames, source, written, poseFixed);
+            case CYCLE -> writeSequence(folder, id + "_cycle_", frames, source, written, poseFixed);
+            case EQUIP -> writeSequence(folder, id + "_equip_", frames, source, written, poseFixed);
             case RELOAD -> {
                 // A single reload pose is not a sequence: leaving it unwritten
                 // lets WeaponAnimations synthesize its three-pose fallback.
                 if (frames.size() >= 2) {
-                    writeSequence(folder, id + "_loading_", frames, source, written);
+                    writeSequence(folder, id + "_loading_", frames, source, written, poseFixed);
                 }
             }
-            case SCOPE -> writeScope(folder, id, frames, source, written);
+            case SCOPE -> writeScope(folder, id, frames, source, written, poseFixed);
             default -> {
             }
         }
@@ -240,20 +274,20 @@ public final class WeaponBbModels {
      * the gun to its lowest aim frame before bringing it back down.
      */
     private static void writeScope(File folder, String id, List<JsonObject> frames,
-                                   String source, Set<String> written) throws IOException {
+                                   String source, Set<String> written, boolean poseFixed) throws IOException {
         JsonObject hold = frames.get(frames.size() - 1);
         List<JsonObject> inward = frames.subList(0, frames.size() - 1);
-        writeSequence(folder, id + "_scope_in_", inward, source, written);
-        write(folder, id + "_scope_hold", hold, source, written);
+        writeSequence(folder, id + "_scope_in_", inward, source, written, poseFixed);
+        write(folder, id + "_scope_hold", hold, source, written, poseFixed);
         List<JsonObject> outward = new ArrayList<>(inward);
         Collections.reverse(outward);
-        writeSequence(folder, id + "_scope_out_", outward, source, written);
+        writeSequence(folder, id + "_scope_out_", outward, source, written, poseFixed);
     }
 
     private static void writeSequence(File folder, String prefix, List<JsonObject> frames,
-                                      String source, Set<String> written) throws IOException {
+                                      String source, Set<String> written, boolean poseFixed) throws IOException {
         for (int index = 0; index < frames.size(); index++) {
-            write(folder, prefix + index, frames.get(index), source, written);
+            write(folder, prefix + index, frames.get(index), source, written, poseFixed);
         }
     }
 
@@ -277,9 +311,12 @@ public final class WeaponBbModels {
     }
 
     private static void write(File folder, String stem, JsonObject model, String source,
-                              Set<String> written) throws IOException {
+                              Set<String> written, boolean poseFixed) throws IOException {
         JsonObject posed = model.deepCopy();
         posed.addProperty(MARKER, source);
+        if (poseFixed) {
+            posed.addProperty(POSE_FIXED, source);
+        }
         File file = new File(folder, stem + ".json");
         byte[] bytes = GSON.toJson(posed).getBytes(StandardCharsets.UTF_8);
         written.add(stem);
@@ -342,10 +379,18 @@ public final class WeaponBbModels {
             try {
                 JsonElement parsed = JsonParser.parseString(
                         Files.readString(candidate.toPath(), StandardCharsets.UTF_8));
-                JsonElement display = parsed.isJsonObject()
-                        ? parsed.getAsJsonObject().get("display") : null;
+                JsonObject root = parsed.isJsonObject() ? parsed.getAsJsonObject() : null;
+                JsonElement display = root != null ? root.get("display") : null;
                 if (display != null && display.isJsonObject()) {
-                    return display.getAsJsonObject();
+                    JsonObject pose = display.getAsJsonObject();
+                    // The pose fix may only land once: a display baked by a
+                    // previous pass already carries the correction, and
+                    // re-applying the yaw would flip it back (and the lift
+                    // would accumulate on every rebake).
+                    if (root.has(POSE_FIXED)) {
+                        pose.add(POSE_FIXED, root.get(POSE_FIXED));
+                    }
+                    return pose;
                 }
             } catch (Exception malformed) {
                 // Fall through to the default table: a display block the parser
