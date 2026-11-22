@@ -90,8 +90,16 @@ public final class WeaponBbModels {
      * inherited from previously baked frames and the held-pose correction is
      * always applied fresh from config.
      */
-    static final int BAKE_VERSION = 2;
+    static final int BAKE_VERSION = 3;
     private static final String VERSION_KEY = "mineplus_bake_version";
+
+    /** Element-name fragments that mark the hand end of a weapon source. */
+    private static final String[] GRIP_KEYS = {
+        "grip", "handle", "stock", "butt", "comb", "wrist"};
+
+    /** Element-name fragments that mark the muzzle end of a weapon source. */
+    private static final String[] MUZZLE_KEYS = {
+        "muzzle", "crown", "front_bead", "front_sight", "ejector", "barrel", "underlug"};
     private static final String BBMODEL = ".bbmodel";
 
     /** Poses sampled per authored second of a clip. */
@@ -219,22 +227,30 @@ public final class WeaponBbModels {
                             boolean yawIsAbsolute) throws IOException {
         String id = folder.getName().toLowerCase(Locale.ROOT);
         File source = firstSource(folder);
-        ModelData model = BbModelParser.parse(id, Files.readAllBytes(source.toPath()), reference -> null);
+        byte[] sourceBytes = Files.readAllBytes(source.toPath());
+        ModelData model = BbModelParser.parse(id, sourceBytes, reference -> null);
+        // Facing is read from the source, not assumed: a grip-to-muzzle ray
+        // pointing along -Z means the model is authored the other way round and
+        // needs a 180° flip on top of the base yaw. This is what keeps every
+        // gun correct without per-gun hand tuning.
+        int facingFlip = facingFlipZ(sourceBytes);
+        float effectiveYaw = yawIsAbsolute ? yaw : normalizeYaw(yaw + facingFlip);
         // The module registers every folder's sprite under the folder id
         // (flat registration: mineplusgun:item/<id>), while a bbmodel's own
         // texture name can drift from it ("boom_stick" inside hawk_eye).
         // Resolve every parsed texture name to the registered path so baked
         // frames always reference a sprite that ships.
         BbClipBaker.Style.HeldCorrection correction =
-                new BbClipBaker.Style.HeldCorrection(yaw, lift);
+                new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
         JsonObject display = displayOf(folder, id);
         BbClipBaker.Style style = new BbClipBaker.Style(display,
                 WeaponFrames.NAMESPACE + ":item/" + id, true,
                 name -> WeaponFrames.NAMESPACE + ":item/" + id, correction);
 
         log.info("[MineplusGun] '" + id + "': baking from '" + source.getName()
-                + "' with long axis " + longAxis(model) + ", held yaw " + yaw
-                + "\u00b0, lift " + lift + ".");
+                + "' with long axis " + longAxis(model) + ", muzzle "
+                + (facingFlip == 0 ? "+Z as authored" : "-Z (source flipped, +180\u00b0)")
+                + ", held yaw " + effectiveYaw + "\u00b0, lift " + lift + ".");
 
         List<String> issues = new ArrayList<>();
         Set<String> written = new LinkedHashSet<>();
@@ -444,6 +460,51 @@ public final class WeaponBbModels {
      * authored the wrong way round is visible in the log instead of a mystery
      * in game. Model front is -z, so a Z-long gun is barrel-forward as authored.
      */
+    /** Extra yaw (0 or 180) that points the source's muzzle forward. */
+    static int facingFlipZ(byte[] sourceBytes) {
+        JsonObject json = JsonParser.parseString(new String(sourceBytes, StandardCharsets.UTF_8))
+                .getAsJsonObject();
+        JsonArray elements = json.getAsJsonArray("elements");
+        if (elements == null || elements.isEmpty()) {
+            return 0;
+        }
+        Float gripZ = null;
+        Float muzzleZ = null;
+        for (JsonElement element : elements) {
+            JsonObject el = element.getAsJsonObject();
+            String name = el.has("name") ? el.get("name").getAsString().toLowerCase(Locale.ROOT) : "";
+            if (!el.has("from") || !el.has("to")) {
+                continue;
+            }
+            float fromZ = el.getAsJsonArray("from").get(2).getAsFloat();
+            float toZ = el.getAsJsonArray("to").get(2).getAsFloat();
+            float z = (fromZ + toZ) / 2f;
+            if (matches(name, GRIP_KEYS)) {
+                gripZ = gripZ == null ? z : (gripZ + z) / 2f;
+            } else if (matches(name, MUZZLE_KEYS)) {
+                muzzleZ = muzzleZ == null ? z : (muzzleZ + z) / 2f;
+            }
+        }
+        if (gripZ == null || muzzleZ == null || Math.abs(muzzleZ - gripZ) < 4f) {
+            return 0; // unclear facing: keep the authored pose rather than guess
+        }
+        return muzzleZ < gripZ ? 180 : 0;
+    }
+
+    private static boolean matches(String name, String[] keys) {
+        for (String key : keys) {
+            if (name.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static float normalizeYaw(float yaw) {
+        float normalized = yaw % 360f;
+        return normalized < 0 ? normalized + 360f : normalized;
+    }
+
     private static String longAxis(ModelData model) {
         float x = 0;
         float z = 0;

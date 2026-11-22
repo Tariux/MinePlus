@@ -94,15 +94,14 @@ settings:
 # correction composes fresh on every bake (displays are only inherited from
 # hand-authored files), so changing these takes effect on the next restart.
 # held-yaw rotates the four hand contexts; held-y-lift lowers the model in
-# display pixels. held-yaw-overrides wins per gun: peacemaker is authored
-# mirrored to the others, so it keeps the authored pose. The bake logs each
-# gun's detected long axis so a future source authored the odd way is visible
-# in the log.
+# display pixels. Facing is auto-detected per gun from its source geometry
+# (muzzle vs grip), so overrides are only needed for a gun whose names give
+# no hint (the bake logs "unclear facing" for those). held-yaw-overrides
+# wins per gun: value is the absolute extra yaw, 0 keeps the authored pose.
 pack:
   held-yaw: 180
   held-y-lift: 2
-  held-yaw-overrides:
-    peacemaker: 0
+  held-yaw-overrides: {}
 
 ammo:
   material: GOLD_NUGGET

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Gun facing is auto-detected from source geometry
+
+- Third and final root cause: the remaining backwards guns were sources authored
+  muzzle-toward-−Z (`longshot`) or carried a wrong per-gun override
+  (`peacemaker`). The bake now reads facing from the source itself: it locates
+  grip/stock and muzzle/front-sight elements along Z and adds 180° when the
+  muzzle points backward. All guns face forward with `pack.held-yaw: 180` and an
+  empty override map — no per-gun hand tuning.
+- Bump `mineplus_bake_version` to 3 so any frames baked by the old pass are
+  swept on the next enable.
+- The bake log now states each gun's detected muzzle direction ("+Z as authored"
+  / "-Z (source flipped, +180°)") next to the long axis.
+- `docs/config-reference.md` and the shipped `config.yml` updated; the
+  `peacemaker: 0` override is gone.
+
 ### Baked guns facing backwards: stale-display inheritance fixed
 
 - Second root cause found in game: `displayOf` inherited the display block from
