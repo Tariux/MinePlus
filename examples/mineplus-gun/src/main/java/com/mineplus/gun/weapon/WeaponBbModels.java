@@ -96,8 +96,12 @@ public final class WeaponBbModels {
      * with its own {@code display} block) is treated as the author's final
      * word — no facing flip, base yaw or lift is composed onto it; the
      * geometry-facing pass runs only for sources with no display at all.
+     * Version 6: the geometry-facing comparison was inverted — it flipped
+     * -Z-muzzle sources and left +Z-muzzle sources (every shipped no-display
+     * gun) unflipped, pointing them backward. The flip now applies to
+     * muzzle-ahead-of-grip (+Z) sources.
      */
-    static final int BAKE_VERSION = 5;
+    static final int BAKE_VERSION = 6;
     private static final String VERSION_KEY = "mineplus_bake_version";
 
     /** Element-name fragments that mark the hand end of a weapon source. */
@@ -249,9 +253,10 @@ public final class WeaponBbModels {
         //    for the hand. Only an explicit pack.held-yaw-overrides entry may
         //    tune such a gun (e.g. a mirrored source).
         // 2. A source with no display at all has no hand pose, so facing is
-        //    read from the geometry: a grip-to-muzzle ray pointing along -Z
-        //    means the model is authored the other way round and needs a 180°
-        //    flip on top of the base yaw and the validated default table.
+        //    read from the geometry: a grip-to-muzzle ray pointing along +Z
+        //    means the model's muzzle is toward the viewer's back of the
+        //    default pose and needs a 180° flip on top of the base yaw and
+        //    the validated default table; a -Z ray is left as authored.
         AuthoredDisplay display = displayOf(folder, id, sourceBytes);
         BbClipBaker.Style.HeldCorrection correction;
         float effectiveYaw;
@@ -489,7 +494,8 @@ public final class WeaponBbModels {
      * Where the gun's barrel points, from the rest geometry: the model-space
      * axis carrying the largest cube extent. One log line per bake, so a source
      * authored the wrong way round is visible in the log instead of a mystery
-     * in game. Model front is -z, so a Z-long gun is barrel-forward as authored.
+     * in game. See the return's comment for the +Z-muzzle convention and why
+     * it needs the flip.
      */
     /** Extra yaw (0 or 180) that points the source's muzzle forward. */
     static int facingFlipZ(byte[] sourceBytes) {
@@ -519,7 +525,15 @@ public final class WeaponBbModels {
         if (gripZ == null || muzzleZ == null || Math.abs(muzzleZ - gripZ) < 4f) {
             return 0; // unclear facing: keep the authored pose rather than guess
         }
-        return muzzleZ < gripZ ? 180 : 0;
+        // The default display table (and the vanilla handheld pose it mirrors)
+        // presents a model whose muzzle points along +Z. Every shipped source is
+        // authored that way (Blockbench's front view looks down -Z, so the
+        // barrel extends toward +Z), so a muzzle behind the grip (-Z) needs no
+        // correction and a muzzle ahead of the grip (+Z) needs the 180° flip.
+        // Verified in game: hawk_eye and double_boom (muzzleZ > gripZ) aim
+        // correctly only with the flip; the previous inverted comparison was
+        // what pointed them backward.
+        return muzzleZ > gripZ ? 180 : 0;
     }
 
     private static boolean matches(String name, String[] keys) {

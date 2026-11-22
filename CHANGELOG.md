@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Geometry-facing comparison was inverted (bake v6)
+
+- In-game result of bake v5: every no-display single-model gun
+  (`hawk_eye`, `double_boom`, `longmark`, `peacemaker`) aimed backward, while
+  the frame-by-frame guns with authored Blockbench displays were correct.
+- Root cause: `facingFlipZ`'s comparison was inverted. Every shipped no-display
+  source is authored muzzle toward **+Z** (Blockbench's front view looks down
+  −Z, so the barrel extends toward +Z), and the default display table presents
+  exactly that orientation — so a +Z-muzzle source is the one that needs the
+  180° flip. The old code flipped −Z-muzzle sources instead and left the +Z
+  ones untouched, pointing them all backward; under the earlier base-yaw-180
+  bake the same guns had been correct, which was the polarity clue.
+- `facingFlipZ` now adds 180° when the muzzle is **ahead of** the grip (+Z) and
+  leaves −Z-muzzle sources as authored. Authored-display sources are still the
+  author's final word — nothing composes onto them.
+- `mineplus_bake_version` bumped 5 → 6 so frames baked under the inverted rule
+  are swept on next enable.
+
 ### Authored displays are the author's final word (bake v5)
 
 - Two model types need two rules, and the bake now knows them apart:
