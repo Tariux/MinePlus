@@ -162,6 +162,11 @@ public final class MobAnimator {
         return attackClip != null;
     }
 
+    /** Whether an authored hurt clip exists for this rig. */
+    public boolean hasHurtClip() {
+        return hurtClip != null;
+    }
+
     private static float overlayLength(ModelAnimation clip) {
         return clip == null || clip.lengthSeconds() <= 0.0f ? 0.5f : clip.lengthSeconds();
     }

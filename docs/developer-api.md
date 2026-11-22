@@ -981,6 +981,32 @@ What runs underneath your feature code:
 
 ---
 
+## Developer API 2.0 (`dev()`)
+
+`MineplusPlugin#context()#dev()` is the module-facing facade for the vanilla-trick primitives. Everything on it works on a plain Spigot server — no NMS.
+
+| Method | What it gives you |
+| --- | --- |
+| `dev().hitTest()` | Unified ray testing across world blocks, virtual-model cells and custom mobs |
+| `dev().spawnVirtualModel(model, placement)` | Places a virtual model; collision cells come from the model's `collisionMaterial` meta (barrier, slime, honey, cobweb, powder snow, soul sand, bubble column) |
+| `dev().placementFor(player, maxDistance, options)` | Placement resolution with options: yaw lattice of 90/45/22.5°, an extra face-normal offset, and an optional air-target check for solid furniture |
+| `dev().virtualModelAt(location)` / `activeVirtualModels()` | Instance lookup and listing |
+| `dev().spawnCustomMob(...)` / `playMobAttack` / `playMobHurt` / `customMobs()` | Custom-mob lifecycle and clips |
+| `dev().renderSnapshot()` | Rendering 2.0 census: live rigs, virtual-block instances, display entities, loaded worlds — watch budgets instead of guessing |
+| `dev().multiblock()` | Multiblock 2.0 facade: `instanceAt`, `instances`, `type`/`types`, `startProcess`/`cancelProcess`/`processOf`, and `advanceProcesses(interval)` returning the ids of machines whose state changed (for event-driven displays instead of polling) |
+
+### `PlacementOptions`
+
+```java
+PlacementOptions opts = PlacementOptions.DEFAULT
+        .withYawSnap(22.5f)      // finer rotation lattice (must divide 360)
+        .withFaceOffset(0.5)     // push further out along the hit-face normal
+        .withAirTargetCheck(true); // refuse placing into grass/water
+var placement = context.dev().placementFor(player, 5.0, opts);
+```
+
+---
+
 ## Zero-Content Policy
 
 Mineplus registers no gameplay content by default:

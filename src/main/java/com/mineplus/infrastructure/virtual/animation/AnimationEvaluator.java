@@ -1,5 +1,6 @@
 package com.mineplus.infrastructure.virtual.animation;
 
+import com.mineplus.infrastructure.mob.custom.model.MolangExpression;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import java.util.List;
 import org.joml.Matrix4f;
@@ -42,6 +43,7 @@ public final class AnimationEvaluator {
     }
 
     private static final ThreadLocal<float[]> SCRATCH_VALUES = ThreadLocal.withInitial(() -> new float[3]);
+    private static final ThreadLocal<float[]> SCRATCH_END = ThreadLocal.withInitial(() -> new float[3]);
     private static final ThreadLocal<Matrix4f> SCRATCH_LOCAL = ThreadLocal.withInitial(Matrix4f::new);
     private static final ThreadLocal<Quaternionf> SCRATCH_QUATERNION = ThreadLocal.withInitial(Quaternionf::new);
 
@@ -157,15 +159,20 @@ public final class AnimationEvaluator {
      * Samples a sorted keyframe track into {@code out[0..2]}: clamp outside the
      * range, lerp or step inside. No allocation.
      */
+    /** Test bridge: samples one track without building a model. */
+    public static void sampleForTest(List<Keyframe> keyframes, float time, float[] out) {
+        sample(keyframes, time, out);
+    }
+
     private static void sample(List<Keyframe> keyframes, float time, float[] out) {
         Keyframe first = keyframes.get(0);
         if (time <= first.time()) {
-            valueOf(first, out);
+            valueOf(first, time, out);
             return;
         }
         Keyframe last = keyframes.get(keyframes.size() - 1);
         if (time >= last.time()) {
-            valueOf(last, out);
+            valueOf(last, time, out);
             return;
         }
         for (int i = 0; i < keyframes.size() - 1; i++) {
@@ -177,24 +184,52 @@ public final class AnimationEvaluator {
                 // `next` — decides. The old next-based read applied STEP one
                 // keyframe late.
                 if (!current.interpolation().smooth()) {
-                    valueOf(current, out);
+                    valueOf(current, time, out);
                     return;
                 }
                 float span = next.time() - current.time();
                 float alpha = span <= 1.0e-6f ? 0.0f : (time - current.time()) / span;
-                out[0] = lerp(current.x(), next.x(), alpha);
-                out[1] = lerp(current.y(), next.y(), alpha);
-                out[2] = lerp(current.z(), next.z(), alpha);
+                valueOf(current, time, out);
+                // Molang keys evaluate at the queried time, so both segment
+                // endpoints are evaluated at `time` before lerping — a plain
+                // numeric segment evaluates to its stored constants there.
+                float[] end = SCRATCH_END.get();
+                valueOf(next, time, end);
+                out[0] = lerp(out[0], end[0], alpha);
+                out[1] = lerp(out[1], end[1], alpha);
+                out[2] = lerp(out[2], end[2], alpha);
                 return;
             }
         }
-        valueOf(last, out);
+        valueOf(last, time, out);
     }
 
-    private static void valueOf(Keyframe keyframe, float[] out) {
-        out[0] = keyframe.x();
-        out[1] = keyframe.y();
-        out[2] = keyframe.z();
+    /**
+     * Writes the keyframe's channel values. A component backed by a Molang
+     * expression evaluates at the queried time ({@code q.anim_time}); the
+     * clip time stands in for {@code q.life_time}, which the instance
+     * lifecycle does not track yet. Purely numeric keys ignore {@code time}.
+     */
+    private static void valueOf(Keyframe keyframe, float time, float[] out) {
+        MolangExpression[] expressions = keyframe.expressions();
+        if (expressions == null) {
+            out[0] = keyframe.x();
+            out[1] = keyframe.y();
+            out[2] = keyframe.z();
+            return;
+        }
+        for (int i = 0; i < 3; i++) {
+            MolangExpression expression = expressions[i];
+            out[i] = expression != null ? expression.eval(time, time) : component(keyframe, i);
+        }
+    }
+
+    private static float component(Keyframe keyframe, int index) {
+        return switch (index) {
+            case 0 -> keyframe.x();
+            case 1 -> keyframe.y();
+            default -> keyframe.z();
+        };
     }
 
     private static float lerp(float a, float b, float alpha) {

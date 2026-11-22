@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.virtual;
 
 import com.mineplus.util.DebugLogger;
+import org.bukkit.Material;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -14,6 +15,8 @@ import java.util.Map;
  * {
  *   "originMode": "GRID",
  *   "collisionMode": "SURFACE",
+ *   "collisionMaterial": "SLIME",
+ *   "light": "normal",
  *   "autoplay": ["rotate_gear"],
  *   "texelMode": "AUTO",
  *   "texelDetail": "FACE",
@@ -29,6 +32,8 @@ import java.util.Map;
 public record ModelMeta(
         OriginMode originMode,
         CollisionMode collisionMode,
+        CollisionMaterial collisionMaterial,
+        LightTier light,
         List<String> autoplay,
         TexelMode texelMode,
         TexelDetail texelDetail,
@@ -52,6 +57,39 @@ public record ModelMeta(
         itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
         animationFile = animationFile == null || animationFile.isBlank() ? null : animationFile.trim();
         triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
+    }
+
+    /**
+     * Vanilla block the collision lattice is built from. Every value keeps the
+     * same occupied-cell computation — only the placed block constant changes, so
+     * vanilla physics (bounce, climb, drag, slow, bubble) applies on custom
+     * geometry with zero physics code of ours. {@code BARRIER} is the default.
+     */
+    public enum CollisionMaterial {
+        BARRIER(Material.BARRIER),
+        SLIME(Material.SLIME_BLOCK),
+        HONEY(Material.HONEY_BLOCK),
+        COBWEB(Material.COBWEB),
+        POWDER_SNOW(Material.POWDER_SNOW),
+        SOUL_SAND(Material.SOUL_SAND),
+        BUBBLE_COLUMN(Material.BUBBLE_COLUMN);
+
+        public final Material block;
+
+        CollisionMaterial(Material block) {
+            this.block = block;
+        }
+
+        public static CollisionMaterial fromKey(String key, CollisionMaterial fallback) {
+            if (key == null || key.isBlank()) {
+                return fallback;
+            }
+            try {
+                return CollisionMaterial.valueOf(key.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                return fallback;
+            }
+        }
     }
 
     /** The clip a trigger event maps to (case-insensitive), or {@code null}. */
@@ -232,11 +270,12 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
-        return originMode == null && collisionMode == null && autoplay.isEmpty()
+        return originMode == null && collisionMode == null && collisionMaterial == null
+                && light == LightTier.OFF && autoplay.isEmpty()
                 && texelMode == null && texelDetail == null
                 && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
                 && texelBrightness == null && display.isEmpty() && itemParent == null;
@@ -260,6 +299,8 @@ public record ModelMeta(
                      new com.google.gson.stream.JsonReader(new java.io.BufferedReader(new java.io.FileReader(metaFile)))) {
             OriginMode originMode = null;
             CollisionMode collisionMode = null;
+            CollisionMaterial collisionMaterial = null;
+            LightTier light = LightTier.OFF;
             List<String> autoplay = new ArrayList<>();
             TexelMode texelMode = null;
             TexelDetail texelDetail = null;
@@ -277,6 +318,8 @@ public record ModelMeta(
                 switch (field) {
                     case "originMode" -> originMode = OriginMode.fromKey(readString(json), null);
                     case "collisionMode" -> collisionMode = CollisionMode.fromKey(readString(json), null);
+                    case "collisionMaterial" -> collisionMaterial = CollisionMaterial.fromKey(readString(json), null);
+                    case "light" -> light = LightTier.fromKey(readString(json));
                     case "autoplay" -> readStringArray(json, autoplay);
                     case "texelMode" -> texelMode = TexelMode.fromKey(readString(json), null);
                     case "texelDetail" -> texelDetail = TexelDetail.fromKey(readString(json), null);
@@ -292,7 +335,7 @@ public record ModelMeta(
             }
             json.endObject();
 
-            return new ModelMeta(originMode, collisionMode, autoplay, texelMode, texelDetail,
+            return new ModelMeta(originMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
                     maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
                     animationFile, triggers);
         } catch (Exception exception) {

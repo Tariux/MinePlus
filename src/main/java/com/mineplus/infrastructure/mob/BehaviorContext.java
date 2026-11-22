@@ -83,6 +83,11 @@ public final class BehaviorContext {
         this.profilePriority = profile == null ? 0 : profile.priority();
     }
 
+    /** The entity's short-term AI memory (senses, grudges); never null. */
+    public MobMemory memory() {
+        return engine.memory(entity.getUniqueId());
+    }
+
     /** The priority of the profile being evaluated. */
     public int profilePriority() {
         return profilePriority;

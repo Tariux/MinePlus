@@ -2,6 +2,7 @@ package com.mineplus.infrastructure.virtual;
 
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
+import com.mineplus.infrastructure.mob.custom.model.MolangExpression;
 import com.mineplus.infrastructure.virtual.animation.AnimationClip;
 import com.mineplus.infrastructure.virtual.animation.Keyframe;
 import com.mineplus.infrastructure.virtual.animation.KeyframeInterpolation;
@@ -610,6 +611,7 @@ public class BbModelImporter {
 
     /** Reads the first data point's x/y/z; the remaining points are skipped. */
     private static void parseDataPoints(JsonReader json, RawKeyframe keyframe) throws Exception {
+        MolangExpression[] expressions = new MolangExpression[3];
         json.beginArray();
         boolean first = true;
         while (json.hasNext()) {
@@ -622,24 +624,30 @@ public class BbModelImporter {
             while (json.hasNext()) {
                 String fieldName = json.nextName();
                 switch (fieldName) {
-                    case "x" -> keyframe.x = nextMolangFloat(json, 0.0f);
-                    case "y" -> keyframe.y = nextMolangFloat(json, 0.0f);
-                    case "z" -> keyframe.z = nextMolangFloat(json, 0.0f);
+                    case "x" -> keyframe.x = nextMolangFloat(json, 0.0f, expressions, 0);
+                    case "y" -> keyframe.y = nextMolangFloat(json, 0.0f, expressions, 1);
+                    case "z" -> keyframe.z = nextMolangFloat(json, 0.0f, expressions, 2);
                     default -> json.skipValue();
                 }
             }
             json.endObject();
         }
         json.endArray();
+        boolean any = false;
+        for (MolangExpression expression : expressions) {
+            any |= expression != null;
+        }
+        keyframe.expressions = any ? expressions : null;
     }
 
     /**
      * Molang-tolerant numeric read: numbers and numeric strings parse; molang
-     * expressions (e.g. {@code math.sin(q.anim_time * 90)}) fall back to the
-     * given default — evaluating them needs an animation context the importer
-     * does not have.
+     * expressions (e.g. {@code math.sin(q.anim_time * 90)}) compile into
+     * {@code out[axis]} for per-frame evaluation and fall back to the given
+     * default as the keyframe's numeric value.
      */
-    private static float nextMolangFloat(JsonReader json, float fallback) throws Exception {
+    private static float nextMolangFloat(JsonReader json, float fallback,
+                                         MolangExpression[] out, int axis) throws Exception {
         JsonToken peek = json.peek();
         if (peek == JsonToken.NUMBER) {
             return (float) json.nextDouble();
@@ -649,6 +657,10 @@ public class BbModelImporter {
             try {
                 return Float.parseFloat(value.trim());
             } catch (NumberFormatException ignored) {
+                MolangExpression compiled = MolangExpression.compile(value);
+                if (compiled != null) {
+                    out[axis] = compiled;
+                }
                 return fallback;
             }
         }
@@ -719,7 +731,8 @@ public class BbModelImporter {
                 for (RawKeyframe kf : animator.keyframes) {
                     Keyframe converted = new Keyframe(
                             kf.time, kf.x, kf.y, kf.z,
-                            KeyframeInterpolation.fromKey(kf.interpolation, KeyframeInterpolation.LINEAR)
+                            KeyframeInterpolation.fromKey(kf.interpolation, KeyframeInterpolation.LINEAR),
+                            kf.expressions
                     );
                     String channel = kf.channel == null ? "" : kf.channel.trim().toLowerCase(Locale.ROOT);
                     switch (channel) {
@@ -1120,6 +1133,8 @@ public class BbModelImporter {
         float x;
         float y;
         float z;
+        /** One compiled Molang expression per component, or null when purely numeric. */
+        MolangExpression[] expressions;
     }
 
     /**

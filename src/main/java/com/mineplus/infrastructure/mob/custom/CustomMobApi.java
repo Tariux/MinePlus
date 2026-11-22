@@ -138,6 +138,14 @@ public interface CustomMobApi {
     }
 
     /**
+     * Plays a rigged mob's authored hurt clip now; the same overlay contract as
+     * {@link #playAttack}. A mob with no hurt clip ignores it.
+     */
+    default boolean playHurt(LivingEntity mob) {
+        return false;
+    }
+
+    /**
      * Plays any authored clip of one rigged mob as a one-shot overlay (the
      * {@code /mineplus mob anim} command). {@code clipName} is matched
      * case-insensitively against the model's clip names.

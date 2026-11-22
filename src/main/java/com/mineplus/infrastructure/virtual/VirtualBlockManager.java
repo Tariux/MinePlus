@@ -314,7 +314,7 @@ public class VirtualBlockManager implements Listener {
     @EventHandler
     public void onBarrierBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (block.getType() != BARRIER_MATERIAL) return;
+        if (!isLatticeBlock(block.getType())) return;
 
         UUID instanceId = blockToModelMap.get(BlockCoordinate.from(block.getLocation()));
         if (instanceId != null) {
@@ -538,15 +538,21 @@ public class VirtualBlockManager implements Listener {
         int[] cells = context.cells();
 
         Location displayOrigin = originMode == ModelMeta.OriginMode.GRID ? origin.clone() : origin.clone().add(0.5, 0.0, 0.5);
+        ModelMeta spawnMeta = getModelMeta(model.name());
+        ModelMeta.CollisionMaterial latticeMaterial = spawnMeta != null && spawnMeta.collisionMaterial() != null
+                ? spawnMeta.collisionMaterial() : ModelMeta.CollisionMaterial.BARRIER;
 
         List<UUID> spawnedEntities = new ArrayList<>();
         Set<Location> barrierBlocks = new HashSet<>();
+        LightTier lightTier = spawnMeta == null ? LightTier.OFF
+                : spawnMeta.light() == null ? LightTier.OFF : spawnMeta.light();
+        int lightBudget = lightTier.maxCells();
 
         for (int i = 0; i + 2 < cells.length; i += 3) {
             Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
             Block block = location.getBlock();
             if (block.getType().isAir()) {
-                block.setType(BARRIER_MATERIAL);
+                block.setType(latticeMaterial.block);
                 barrierBlocks.add(location);
                 blockToModelMap.put(BlockCoordinate.from(location), instanceId);
             } else if (settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
@@ -554,6 +560,24 @@ public class VirtualBlockManager implements Listener {
                 DebugLogger.warning("spawnModel: collision cell " + location + " is not air; STRICT policy aborted spawn of '" + model.name() + "'.");
                 return null;
             }
+        }
+
+        // Light engine: the same occupancy cells, re-read as emitters. Placing the
+        // light blocks after the lattice means light cells also block movement —
+        // a lit lamp is solid, which is what players expect from a machine.
+        if (lightTier != LightTier.OFF) {
+            java.util.List<Block> lightCells = new java.util.ArrayList<>();
+            for (Location placed : barrierBlocks) {
+                if (lightBudget <= 0) {
+                    break;
+                }
+                Block b = placed.getBlock();
+                if (b.getType() == latticeMaterial.block) {
+                    lightCells.add(b);
+                    lightBudget--;
+                }
+            }
+            lightTier.placeBlocks(lightCells);
         }
 
         boolean animated = false;
@@ -572,9 +596,7 @@ public class VirtualBlockManager implements Listener {
             animationBindings = animated ? new ArrayList<>() : null;
             TexelBakeResult texelBake = getTexelBake(model.name());
             List<Map<CubeFace, TexelSurfacePlan>> texelCubePlans = texelBake != null && texelBake.enabled() ? texelBake.cubePlans() : null;
-            ModelMeta spawnMeta = getModelMeta(model.name());
             int brightnessFloor = spawnMeta.texelBrightness() != null && texelCubePlans != null ? spawnMeta.texelBrightness() : 0;
-
             int cubeIndex = 0;
             for (BakedCube cube : model.cubes()) {
                 Map<CubeFace, TexelSurfacePlan> facePlans = texelCubePlans != null && cubeIndex < texelCubePlans.size()
@@ -694,13 +716,23 @@ public class VirtualBlockManager implements Listener {
         return originMode;
     }
 
+    /** {@code true} when a world block could be one of our lattice cells. */
+    private static boolean isLatticeBlock(Material type) {
+        for (ModelMeta.CollisionMaterial material : ModelMeta.CollisionMaterial.values()) {
+            if (material.block == type) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
-     * Reverts barriers placed by an aborted spawn. Displays never spawn before
-     * the barrier lattice passes its checks, so there is nothing else to undo.
+     * Reverts lattice cells placed by an aborted spawn. Displays never spawn before
+     * the lattice passes its checks, so there is nothing else to undo.
      */
     private void rollbackSpawn(Set<Location> barrierBlocks) {
         for (Location loc : barrierBlocks) {
-            if (loc.getBlock().getType() == BARRIER_MATERIAL) {
+            if (isLatticeBlock(loc.getBlock().getType())) {
                 loc.getBlock().setType(Material.AIR);
             }
             blockToModelMap.remove(BlockCoordinate.from(loc));
@@ -787,7 +819,7 @@ public class VirtualBlockManager implements Listener {
         anchorToInstance.remove(BlockCoordinate.from(activeBlock.origin()), instanceId);
 
         for (Location loc : activeBlock.barrierBlocks()) {
-            if (loc.getBlock().getType() == BARRIER_MATERIAL) {
+            if (isLatticeBlock(loc.getBlock().getType())) {
                 loc.getBlock().setType(Material.AIR);
             }
             blockToModelMap.remove(BlockCoordinate.from(loc));

@@ -53,6 +53,7 @@ def testRunnerMains = [
         'com.mineplus.test.AttributeSeamTest',
         'com.mineplus.test.ApiShapeGuardTest',
         'com.mineplus.test.WanderGuardDecisionTest',
+        'com.mineplus.test.MolangEvaluatorTest',
 ]
 
 tasks.register('testRunners') {

@@ -120,6 +120,11 @@ public final class MobRenderEngine {
     private static final int HURT_REVEAL_TICKS = 8;
     /** Pose passes between two hurt particle bursts of the same mob. */
     private static final int HURT_BURST_COOLDOWN = 4;
+    /** Ticks between ambient-sound opportunities; a random 1-in-N of those actually plays. */
+    private static final int AMBIENT_CADENCE_TICKS = 100;
+    /** One ambient opportunity in this many actually vocalizes. */
+    private static final int AMBIENT_SKIP_DIVISOR = 3;
+    private static final java.util.Random RANDOM = new java.util.Random();
 
     private final Plugin plugin;
     private final PackApi pack;
@@ -594,6 +599,7 @@ public final class MobRenderEngine {
                     continue;
                 }
             }
+            maybePlayAmbient(session, pass);
             session.scanViewers(current);
             if (!session.dead) {
                 // A rig nobody is near releases its displays entirely and lets the
@@ -712,6 +718,44 @@ public final class MobRenderEngine {
     }
 
     /**
+     * Plays an authored lifecycle sound (vanilla sound name) at the mob, once —
+     * an absent name is silent, so an unconfigured mob behaves exactly as before.
+     * The sound comes from the spec's {@code sounds} block and follows the base
+     * entity's pitch variation, so a crowd never plays in perfect unison.
+     */
+    private void playLifecycleSound(Session session, String soundName) {
+        if (soundName == null || soundName.isBlank() || session.dead) {
+            return;
+        }
+        LivingEntity entity = session.entity;
+        Location at = entity.getLocation();
+        entity.getWorld().playSound(at, soundName, 1.0f,
+                0.9f + RANDOM.nextFloat() * 0.2f);
+    }
+
+    /**
+     * Idles an authored ambient sound on a randomized cadence, only while the
+     * rig is posed for a nearby viewer. The per-session phase offset keeps a
+     * crowd of the same mob from vocalizing on the same tick.
+     */
+    private void maybePlayAmbient(Session session, long pass) {
+        if (session.dead || session.released) {
+            return;
+        }
+        MobRenderSpec spec = session.entry.spec;
+        String ambient = spec == null ? null : spec.sounds().ambient();
+        if (ambient == null || ambient.isBlank()) {
+            return;
+        }
+        int phase = Math.floorMod(session.id.hashCode(), AMBIENT_CADENCE_TICKS);
+        if ((pass + phase) % AMBIENT_CADENCE_TICKS != 0
+                || RANDOM.nextInt(AMBIENT_SKIP_DIVISOR) != 0) {
+            return;
+        }
+        playLifecycleSound(session, ambient);
+    }
+
+    /**
      * One mob just died. With an authored death clip the rig plays it; without
      * one the rig freezes on its last pose and stays — a rigged mob never
      * collapses into its vanilla base model mid-death, which read as the
@@ -720,6 +764,8 @@ public final class MobRenderEngine {
     private void beginDeath(Session session) {
         session.dead = true;
         session.animator.markDead();
+        MobRenderSpec spec = session.entry.spec;
+        playLifecycleSound(session, spec == null ? null : spec.sounds().death());
         if (session.animator.hasDeathClip()) {
             session.deathTimer = session.animator.deathClipLength() + DEATH_GRACE_SECONDS;
         } else {
@@ -1182,6 +1228,22 @@ public final class MobRenderEngine {
             return false;
         }
         session.animator.notifyAttack();
+        return true;
+    }
+
+    /** Whether one rigged mob has an authored hurt clip wired to damage. */
+    public boolean hasHurtClip(LivingEntity entity) {
+        Session session = entity == null ? null : sessions.get(entity.getUniqueId());
+        return session != null && session.animator.hasHurtClip();
+    }
+
+    /** Plays the mob's hurt clip now; {@code false} when impossible. */
+    public boolean playHurt(LivingEntity entity) {
+        Session session = entity == null ? null : sessions.get(entity.getUniqueId());
+        if (session == null || !session.animator.hasHurtClip()) {
+            return false;
+        }
+        session.animator.notifyHurt();
         return true;
     }
 
@@ -1673,9 +1735,10 @@ public final class MobRenderEngine {
             return spec != null && spec.hurtFeedback() == MobRenderSpec.HurtFeedback.FLASH;
         }
 
-        /** The mob was hurt: the clip plays and the feedback pass gets armed. */
+        /** The mob was hurt: the clip plays, the sound sounds, feedback arms. */
         void onHurt() {
             animator.notifyHurt();
+            playLifecycleSound(this, entry.spec == null ? null : entry.spec.sounds().hurt());
             hurtTicks = HURT_REVEAL_TICKS;
         }
 

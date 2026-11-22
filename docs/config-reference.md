@@ -164,7 +164,7 @@ Blockbench animations live in the same `.bbmodel` file and are imported in the s
 | `linear` / `step` keyframe interpolation | ✅ |
 | `catmullrom` / `bezier` / `ease` | ⚠️ sampled as linear (spline handles are not exported in keyframes) |
 | Loop modes `once` / `loop` / `hold` | ✅ |
-| Molang keyframe values (e.g. `math.sin(q.anim_time * 90)`) | ⚠️ fall back to `0` and are reported at import |
+| Molang keyframe values (e.g. `math.sin(q.anim_time * 90)`) | ✅ evaluated by the sandboxed Molang evaluator (`q.anim_time`, `q.life_time`, `math.sin/cos/abs/min/max/pow/sqrt/floor/ceil`, constants and operators). Unsupported queries still fall back to `0` and are reported at import |
 | Effect animators (sounds, particles, timelines) | ❌ skipped — no client mod to play them |
 
 Autoplay is declared per multiblock level (`animations` key) or per raw model (`autoplay` in `.meta.json`); programmatic control goes through the `AnimationApi` (selectors for clips, bones, or the whole model), and declarative event triggers go through `AnimationApi.triggerEvent(instanceId, event)`, resolved by the model's `triggers` meta map. Clips can also live in a separate bbmodel beside the model (sibling `<model>.anim.bbmodel` or the meta `animationFile` key — merged by bone name at load). Full behavior: [Developer API → Animation Engine](developer-api.md#animation-engine).

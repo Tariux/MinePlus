@@ -23,6 +23,15 @@ public class VirtualBlockPlacementHelper {
      * @return PlacementData containing the target location and required rotation, or null if no valid surface is found.
      */
     public static PlacementData getPlacementData(Player player, double maxDistance) {
+        return getPlacementData(player, maxDistance, PlacementOptions.DEFAULT);
+    }
+
+    /**
+     * Options-aware variant; see {@link PlacementOptions}. Returns null when no valid
+     * surface is found or the air-target check rejected the placement point.
+     */
+    public static PlacementData getPlacementData(Player player, double maxDistance, PlacementOptions options) {
+        PlacementOptions opts = options == null ? PlacementOptions.DEFAULT : options;
         RayTraceResult rayTrace = player.getWorld().rayTraceBlocks(
                 player.getEyeLocation(),
                 player.getEyeLocation().getDirection(),
@@ -39,8 +48,14 @@ public class VirtualBlockPlacementHelper {
         
         // Offset the placement location by the face normal to ensure surface-level placement
         Location placeLoc = rayTrace.getHitBlock().getLocation().add(hitFace.getDirection());
+        if (opts.faceOffset() != 0.0) {
+            placeLoc.add(hitFace.getDirection().multiply(opts.faceOffset()));
+        }
+        if (opts.requireAirTarget() && !placeLoc.getBlock().getType().isAir()) {
+            return null;
+        }
 
-        Quaternionf rotation = calculateVanillaRotation(player, hitFace);
+        Quaternionf rotation = calculateVanillaRotation(player, hitFace, opts.yawSnapDegrees());
 
         return new PlacementData(placeLoc, hitFace, rotation);
     }
@@ -49,12 +64,12 @@ public class VirtualBlockPlacementHelper {
      * Calculates a quaternion representing vanilla-like block rotation.
      * The rotation mimics items like stairs or observers, snapping to 90-degree increments.
      */
-    private static Quaternionf calculateVanillaRotation(Player player, BlockFace hitFace) {
+    private static Quaternionf calculateVanillaRotation(Player player, BlockFace hitFace, float snapDegrees) {
         Quaternionf rotation = new Quaternionf();
 
-        // Snap yaw to nearest 90 degrees to lock onto the grid.
+        // Snap yaw to the configured grid to lock onto the rotation lattice.
         float yaw = player.getLocation().getYaw();
-        float snappedYaw = Math.round(yaw / 90.0f) * 90.0f;
+        float snappedYaw = Math.round(yaw / snapDegrees) * snapDegrees;
         
         // Rotate 180 degrees so the front of the model faces the player.
         float yawRad = (float) Math.toRadians(180 - snappedYaw);

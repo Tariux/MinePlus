@@ -439,6 +439,11 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         return customMobId(entity) != null;
     }
 
+    /** Plays the mob's {@code hurt} clip; {@code false} when none is authored. */
+    public boolean playHurt(LivingEntity entity) {
+        return renderEngine.playHurt(entity);
+    }
+
     @Override
     public String customMobId(LivingEntity entity) {
         return customMobId((Entity) entity);

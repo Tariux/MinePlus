@@ -56,6 +56,8 @@ public final class PluginContext {
     private final StanceService stances;
     private final PerfRegistry perf;
     private final DeferredEditQueue deferredEdits;
+    private final com.mineplus.infrastructure.world.HitTestApi hitTest;
+    private final DeveloperApi2 dev;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -80,7 +82,8 @@ public final class PluginContext {
             HudService hud,
             StanceService stances,
             PerfRegistry perf,
-            DeferredEditQueue deferredEdits
+            DeferredEditQueue deferredEdits,
+            com.mineplus.infrastructure.world.HitTestApi hitTest
     ) {
         this.plugin = plugin;
         this.itemRegistry = itemRegistry;
@@ -103,6 +106,8 @@ public final class PluginContext {
         this.stances = stances;
         this.perf = perf;
         this.deferredEdits = deferredEdits;
+        this.hitTest = hitTest;
+        this.dev = new DeveloperApi2(this);
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -275,6 +280,11 @@ public final class PluginContext {
         DeferredEditQueue deferredEdits = new DeferredEditQueue(worldEditSettings);
         deferredEdits.setPerfRegistry(performance);
 
+        // Unified hit testing: one classified ray against world blocks, virtual
+        // lattice cells and custom mobs (developer API surface).
+        com.mineplus.infrastructure.world.HitTestApi hitTest =
+                new com.mineplus.infrastructure.world.HitTestApi(virtualBlockManager, customMobs);
+
         // Composed visual units: inert until VISUAL_UNITS.ENABLED; the
         // ballistics engine routes block impacts through it when enabled.
         VisualUnitService visualUnits = new VisualUnitService(plugin, particleFx, virtualBlockManager);
@@ -301,7 +311,8 @@ public final class PluginContext {
                 hud,
                 stances,
                 performance,
-                deferredEdits
+                deferredEdits,
+                hitTest
         );
     }
 
@@ -485,6 +496,24 @@ public final class PluginContext {
         String cacheKey = owner.getName() + ":" + slotName.toLowerCase(java.util.Locale.ROOT);
         return magazines.computeIfAbsent(cacheKey,
                 key -> new ItemMagazine(owner, slotName));
+    }
+
+    /**
+     * Unified ray testing against world blocks, virtual-model lattice cells and
+     * custom mobs in one pass. Never null; results are classified by
+     * {@link com.mineplus.infrastructure.world.HitTestApi.Hit#kind()}.
+     */
+    public com.mineplus.infrastructure.world.HitTestApi hitTest() {
+        return hitTest;
+    }
+
+    /**
+     * Developer API 2.0: the module-facing facade over the vanilla-trick
+     * primitives (hit testing, virtual models with material/light meta, custom
+     * mob clips). Never null.
+     */
+    public DeveloperApi2 dev() {
+        return dev;
     }
 
     /** Applies the combat settings slice (called on enable and reload). */

@@ -25,6 +25,7 @@ Copy these into your server's `plugins/Mineplus/` data folders and run `/mineplu
 | File | Shows |
 |---|---|
 | [`code-based/BasicPlacementExample.java`](code-based/BasicPlacementExample.java) | Create / place / query / remove machines via `BasicInfrastructureApi` |
+| [`code-based/DeveloperApi2Example.java`](code-based/DeveloperApi2Example.java) | The Developer API 2.0 primitives via `context().dev()`: placement options (22.5° yaw lattice, air-target check), virtual-model spawn/removal/lookup with collision materials, custom-mob clips, the Rendering 2.0 census, and Multiblock 2.0 event-driven process ticking |
 
 ### Tier 3 — Advanced framework developers
 

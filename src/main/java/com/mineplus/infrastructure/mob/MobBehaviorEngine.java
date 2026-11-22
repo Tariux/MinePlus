@@ -70,6 +70,8 @@ public final class MobBehaviorEngine {
      */
     private volatile MobIdentityResolver identityResolver;
     private final Map<UUID, ActiveActivity> activities = new ConcurrentHashMap<>();
+    /** Per-mob short-term memory (senses, grudges); entries self-expire. */
+    private final Map<UUID, MobMemory> memories = new ConcurrentHashMap<>();
     private final BehaviorTelemetry telemetry = new BehaviorTelemetry();
     private final BehaviorContext evaluationContext = new BehaviorContext(this);
     /** Long-distance walking state, owned by the engine so one runner serves every module. */
@@ -671,6 +673,32 @@ public final class MobBehaviorEngine {
         }
     }
 
+    /**
+     * Mob AI 2.0 senses: while evaluating one mob, remember the nearby players
+     * on its {@link MobMemory} so actions can react to being watched, hunted or
+     * followed without any per-module scan. Radius and cadence follow the same
+     * settings every other world query here respects.
+     */
+    private void sensePlayers(LivingEntity entity) {
+        MobMemory memory = memory(entity.getUniqueId());
+        long tick = entity.getWorld().getGameTime();
+        for (org.bukkit.entity.Entity nearby : entity.getNearbyEntities(16.0, 8.0, 16.0)) {
+            if (nearby instanceof org.bukkit.entity.Player p) {
+                memory.sense(p, tick);
+            }
+        }
+    }
+
+    /** The behavior memory of one entity; created lazily, never null. */
+    public MobMemory memory(UUID entityId) {
+        return memories.computeIfAbsent(entityId, id -> new MobMemory());
+    }
+
+    /** Forgets one entity's memory (on death or removal). */
+    public void forgetMemory(UUID entityId) {
+        memories.remove(entityId);
+    }
+
     private void evaluate(LivingEntity entity, EntityType type, List<MobProfile> candidates,
                           MobBehaviorSettings snapshot, RunGuard guard, long deadline) {
         telemetry.candidateSeen();
@@ -680,6 +708,7 @@ public final class MobBehaviorEngine {
             return;
         }
         evaluationContext.refresh(entity, ThreadLocalRandom.current(), guard);
+        sensePlayers(entity);
         double checksPerSecond = snapshot.checksPerSecond();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 

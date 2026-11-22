@@ -91,6 +91,7 @@ public final class MobRenderSpec {
     private final Map<String, HandItem> handItems;
     private final FallbackMode fallback;
     private final HurtFeedback hurtFeedback;
+    private final MobSoundSpec sounds;
     private final Float shadowRadius;
     private final Double hitboxWidth;
     private final Double hitboxHeight;
@@ -100,7 +101,7 @@ public final class MobRenderSpec {
                           boolean yawOffsetAuthored,
                           Map<String, String> animationMap,
                           Map<String, HandItem> handItems, FallbackMode fallback,
-                          HurtFeedback hurtFeedback, Float shadowRadius,
+                          HurtFeedback hurtFeedback, MobSoundSpec sounds, Float shadowRadius,
                           Double hitboxWidth, Double hitboxHeight) {
         this.type = type == null ? RenderType.NONE : type;
         this.sourceName = sourceName == null || sourceName.isBlank() ? "model" : sourceName;
@@ -113,6 +114,7 @@ public final class MobRenderSpec {
         this.handItems = handItems == null ? Map.of() : Map.copyOf(handItems);
         this.fallback = fallback == null ? FallbackMode.BASE_ENTITY : fallback;
         this.hurtFeedback = hurtFeedback == null ? HurtFeedback.PARTICLES : hurtFeedback;
+        this.sounds = sounds == null ? MobSoundSpec.EMPTY : sounds;
         this.shadowRadius = shadowRadius;
         this.hitboxWidth = hitboxWidth;
         this.hitboxHeight = hitboxHeight;
@@ -180,6 +182,11 @@ public final class MobRenderSpec {
         return hurtFeedback;
     }
 
+    /** Lifecycle sound names (ambient/hurt/death); never {@code null}. */
+    public MobSoundSpec sounds() {
+        return sounds;
+    }
+
     /**
      * Radius of the ground shadow plate in blocks. {@code null} derives it from
      * the hitbox width, {@code 0} removes the shadow.
@@ -213,6 +220,7 @@ public final class MobRenderSpec {
         private final Map<String, HandItem> handItems = new LinkedHashMap<>();
         private FallbackMode fallback = FallbackMode.BASE_ENTITY;
         private HurtFeedback hurtFeedback = HurtFeedback.PARTICLES;
+        private MobSoundSpec sounds = MobSoundSpec.EMPTY;
         private Float shadowRadius;
         private Double hitboxWidth;
         private Double hitboxHeight;
@@ -292,6 +300,26 @@ public final class MobRenderSpec {
             return this;
         }
 
+        /** Sets one lifecycle sound (ambient, hurt or death) by vanilla sound name. */
+        public Builder sound(String which, String soundName) {
+            if (which == null || soundName == null || soundName.isBlank()) {
+                return this;
+            }
+            switch (which.toLowerCase(Locale.ROOT)) {
+                case "ambient" -> this.sounds = new MobSoundSpec(soundName.trim(), this.sounds.hurt(), this.sounds.death());
+                case "hurt" -> this.sounds = new MobSoundSpec(this.sounds.ambient(), soundName.trim(), this.sounds.death());
+                case "death" -> this.sounds = new MobSoundSpec(this.sounds.ambient(), this.sounds.hurt(), soundName.trim());
+                default -> { }
+            }
+            return this;
+        }
+
+        /** Replaces the whole lifecycle sound set. */
+        public Builder sounds(MobSoundSpec value) {
+            this.sounds = value == null ? MobSoundSpec.EMPTY : value;
+            return this;
+        }
+
         /** Ground shadow radius in blocks; {@code 0} removes the shadow. */
         public Builder shadowRadius(float value) {
             this.shadowRadius = Math.max(0.0f, value);
@@ -324,7 +352,7 @@ public final class MobRenderSpec {
             }
             return new MobRenderSpec(type, sourceName, modelBytes, textureBytes, scale,
                     yawOffsetDegrees, yawOffsetAuthored, animationMap, handItems, fallback,
-                    hurtFeedback, shadowRadius, hitboxWidth, hitboxHeight);
+                    hurtFeedback, sounds, shadowRadius, hitboxWidth, hitboxHeight);
         }
     }
 }

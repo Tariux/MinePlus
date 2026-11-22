@@ -49,6 +49,10 @@ import org.bukkit.plugin.Plugin;
  *   weapon_r: IRON_SWORD    # bone -> vanilla material or pack item id
  * animations:
  *   attack: animation.smash # state -> clip alias
+ * sounds:
+ *   ambient: entity.pig.ambient
+ *   hurt: entity.pig.hurt
+ *   death: entity.pig.death
  * </pre>
  *
  * <p><b>Who owns the mob's mind.</b> {@code ai: vanilla} hands the whole brain to
@@ -314,6 +318,15 @@ public final class MobYamlLoader {
             problems.add("unknown render.hurt-feedback '" + hurtText + "' (use particles, flash or none)");
         }
         ConfigurationSection hitbox = yaml.getConfigurationSection("hitbox");
+        ConfigurationSection sounds = section(yaml, migrated, "sounds");
+        if (sounds != null) {
+            for (String which : sounds.getKeys(false)) {
+                String name = sounds.getString(which);
+                if (name != null && !name.isBlank()) {
+                    spec.sound(which, name.trim());
+                }
+            }
+        }
         if (hitbox != null) {
             double width = hitbox.getDouble("width", 0.0);
             double height = hitbox.getDouble("height", 0.0);
