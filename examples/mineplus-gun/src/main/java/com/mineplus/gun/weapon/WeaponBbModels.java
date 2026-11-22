@@ -2,6 +2,7 @@ package com.mineplus.gun.weapon;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -16,9 +17,12 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -115,27 +119,36 @@ public final class WeaponBbModels {
      */
     public static int bakeAll(JavaPlugin plugin, PluginContext context) {
         // The held-pose fix reads the plugin config so a server can tune the
-        // correction without re-authoring the Blockbench source: PACK.HELD_YAW
-        // rotates the held contexts (180 points a +Z barrel forward), and
-        // PACK.HELD_Y_LIFT lowers a model that rides high on the hand.
+        // correction without re-authoring the Blockbench source: pack.held-yaw
+        // rotates the four hand contexts (0 keeps the authored pose — the
+        // shipped sources are posed in hand space), pack.held-y-lift lowers a
+        // model that rides high, and pack.held-yaw-overrides (<gun-id>:
+        // degrees) tunes one stubborn gun without touching the rest.
         var config = plugin.getConfig();
-        BbClipBaker.Style.HeldCorrection correction = new BbClipBaker.Style.HeldCorrection(
-                (float) config.getDouble("PACK.HELD_YAW", 180.0),
-                (float) config.getDouble("PACK.HELD_Y_LIFT", 2.0));
-        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT), correction);
+        float baseYaw = (float) config.getDouble("pack.held-yaw", 180.0);
+        float lift = (float) config.getDouble("pack.held-y-lift", 2.0);
+        Map<String, Double> overrides = new LinkedHashMap<>();
+        if (config.isConfigurationSection("pack.held-yaw-overrides")) {
+            for (String key : config.getConfigurationSection("pack.held-yaw-overrides").getKeys(false)) {
+                overrides.put(key.toLowerCase(Locale.ROOT),
+                        config.getDouble("pack.held-yaw-overrides." + key));
+            }
+        }
+        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT),
+                baseYaw, lift, overrides);
     }
 
     /**
      * The same pass over an explicit {@code models/item} root, so the bake is
      * checkable without a server: {@link #bakeAll} only resolves the path.
-     * Uses the default held-pose correction ({@code 180°} yaw, no lift).
      */
     public static int bakeTree(Logger log, File root) {
-        return bakeTree(log, root, BbClipBaker.Style.HeldCorrection.NONE);
+        return bakeTree(log, root, 0.0f, 0.0f, Map.of());
     }
 
-    /** The pass with an explicit held-pose correction. */
-    public static int bakeTree(Logger log, File root, BbClipBaker.Style.HeldCorrection correction) {
+    /** The pass with an explicit base yaw, lift and per-gun yaw overrides. */
+    public static int bakeTree(Logger log, File root, float baseYaw, float lift,
+                               Map<String, Double> yawOverrides) {
         File[] folders = root.listFiles(File::isDirectory);
         if (folders == null || folders.length == 0) {
             return 0;
@@ -147,8 +160,13 @@ public final class WeaponBbModels {
             if (firstSource(folder) == null) {
                 continue;
             }
+            String id = folder.getName().toLowerCase(Locale.ROOT);
+            Double override = yawOverrides.get(id) != null ? yawOverrides.get(id)
+                    : yawOverrides.get("*");
             try {
-                int baked = bake(log, folder, correction);
+                int baked = override == null
+                        ? bake(log, folder, baseYaw, lift)
+                        : bake(log, folder, override.floatValue(), lift, true);
                 if (baked > 0) {
                     sources++;
                 }
@@ -170,11 +188,22 @@ public final class WeaponBbModels {
     // ------------------------------------------------------------------
 
     private static int bake(Logger log, File folder) throws IOException {
-        return bake(log, folder, BbClipBaker.Style.HeldCorrection.NONE);
+        return bake(log, folder, 0.0f, 0.0f, false);
     }
 
-    private static int bake(Logger log, File folder,
-                            BbClipBaker.Style.HeldCorrection correction) throws IOException {
+    /** The pass with a base yaw that is auto-corrected per gun from geometry. */
+    private static int bake(Logger log, File folder, float baseYaw, float lift) throws IOException {
+        return bake(log, folder, baseYaw, lift, false);
+    }
+
+    /**
+     * {@code yawIsAbsolute} false means the yaw is the config base
+     * ({@code pack.held-yaw}); true means a per-gun override wins and the yaw
+     * is used as given. Either way the yaw is used as authored — the shipped
+     * sources are posed in hand space and need no rotation.
+     */
+    private static int bake(Logger log, File folder, float yaw, float lift,
+                            boolean yawIsAbsolute) throws IOException {
         String id = folder.getName().toLowerCase(Locale.ROOT);
         File source = firstSource(folder);
         ModelData model = BbModelParser.parse(id, Files.readAllBytes(source.toPath()), reference -> null);
@@ -183,6 +212,8 @@ public final class WeaponBbModels {
         // texture name can drift from it ("boom_stick" inside hawk_eye).
         // Resolve every parsed texture name to the registered path so baked
         // frames always reference a sprite that ships.
+        BbClipBaker.Style.HeldCorrection correction =
+                new BbClipBaker.Style.HeldCorrection(yaw, lift);
         JsonObject display = displayOf(folder, id);
         // A display a previous pass already corrected carries the stamp and
         // must not take the fix a second time.
@@ -239,13 +270,24 @@ public final class WeaponBbModels {
 
     /** One {@code .bbmodel} per gun folder, in file order. */
     private static File firstSource(File folder) {
-        File[] files = folder.listFiles((dir, name) -> name.toLowerCase(Locale.ROOT).endsWith(BBMODEL));
-        if (files == null || files.length == 0) {
+        // The shipped defaults keep sources under models/; servers that
+        // extracted an older layout keep them at the folder root. Both bake.
+        List<File> roots = List.of(folder, new File(folder, "models"));
+        List<File> found = new ArrayList<>();
+        for (File root : roots) {
+            File[] files = root.listFiles((dir, name) ->
+                    name.toLowerCase(Locale.ROOT).endsWith(BBMODEL));
+            if (files != null) {
+                found.addAll(Arrays.asList(files));
+            }
+        }
+        if (found.isEmpty()) {
             return null;
         }
-        Arrays.sort(files);
-        return files[0];
+        found.sort(Comparator.comparing(File::getName));
+        return found.get(0);
     }
+
 
     private static void writeRole(File folder, String id, Role role, List<JsonObject> frames,
                                   String source, Set<String> written, boolean poseFixed) throws IOException {

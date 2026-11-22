@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Guns held backwards: stale bakes fixed, per-gun held-pose config
+
+- Root cause found in game: the gun module's `firstSource` never looked in the
+  shipped `defaults/guns/<id>/models/` folder, so every `.bbmodel` gun
+  (hawk_eye, peacemaker, longmark, longshot, double_boom) never baked from its
+  shipped source — it kept a stale data-dir copy with a backwards pose no
+  matter what the fix said. `firstSource` now checks the folder root *and*
+  `models/`, so all five sources bake fresh on every enable (205 frames from
+  5 sources) with the module's in-game-validated default display table — the
+  same poses the pre-baked rifles (which the user confirmed correct) use.
+- The held pose is configurable: `pack.held-yaw`, `pack.held-y-lift` and a
+  per-gun `pack.held-yaw-overrides` map in the gun module's `config.yml`
+  (default `0` — the shipped sources are posed in hand space and need no
+  rotation; `180` flips a gun that renders backwards).
+- `docs/config-reference.md` documents the three `pack.*` keys.
+
 ### Held-pose correction for generic Blockbench guns (`PACK.HELD_YAW` / `PACK.HELD_Y_LIFT`)
 
 - New `BbClipBaker.Style.HeldCorrection`: a module-supplied yaw rotation and

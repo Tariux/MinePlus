@@ -88,6 +88,19 @@ settings:
   disabled-worlds: []          # gameplay (firing/shop use) disabled in these worlds
   pvp-only: false              # only damage players, never other living entities
 
+# Held-pose correction for the baked gun models. Blockbench "generic" geometry
+# has no hand orientation, so the module can rotate the four hand contexts at
+# bake time. The shipped sources are authored in hand space already, so the
+# default is no rotation; only touch these if a gun renders backwards or rides
+# high. held-yaw rotates the four hand contexts (0 keeps the authored pose,
+# 180 flips a barrel-forward gun); held-y-lift lowers the model in display
+# pixels. held-yaw-overrides wins per gun: set the gun id to 0 or 180 and
+# restart — the bake reruns on every enable.
+pack:
+  held-yaw: 0
+  held-y-lift: 2
+  held-yaw-overrides: {}
+
 ammo:
   material: GOLD_NUGGET
   items-per-round: 1
