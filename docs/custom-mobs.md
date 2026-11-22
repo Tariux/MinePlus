@@ -643,6 +643,7 @@ AttackNearestAction.builder()
         .damage(4)              // (0.5–100)
         .cooldownTicks(20)      // between strikes
         .knockback(0.4)         // horizontal knockback (0–3)
+        .preferredDistance(0)   // stand-off range for ranged mobs (0 = melee)
         .target(e -> e instanceof Player || e instanceof Villager)  // default
         .build();
 ```
@@ -652,6 +653,27 @@ Behavior details:
 - Target acquisition is sticky for 60 ticks, so a mob does not flicker between
   two nearby players; the target is re-scanned when it dies, leaves range or
   the stickiness expires.
+- **Target choice is situational, not just nearest** (`TargetSelector`): the
+  score weighs distance against line of sight (+0.3), the mob's hurt memory
+  (+0.6 — a mob retaliates against whoever struck it, see threat memory below)
+  and its current target's stickiness (+0.2), so fights look committed instead
+  of twitchy.
+- **Grudges are fed by real damage**: when a tracked custom mob is hurt, the
+  engine's internal listener records threat for the attacker (decaying linearly
+  over 30 seconds, `MobMemory.recordThreat`); `mostHated()` then outranks plain
+  proximity until the memory fades. Nearby mobs of the same kind share the
+  grudge at half weight — the **pack alarm** — so striking one of a group
+  makes the whole group hostile.
+- **Last-seen search**: when prey breaks line of sight, the hunter walks to
+  where it last saw it (`LostSight` decides pursue/arrived/expired over a
+  5-second trail) instead of pathing blindly toward a position it cannot see;
+  arriving to nothing — or a cold trail — ends the hunt for one cooldown.
+- **Stuck recovery**: a hunter that barely moves while its path is fresh force-
+  re-paths; after three fruitless cycles it drops the hunt for one cooldown
+  instead of pushing into a fence forever.
+- **Stand-off range (`preferredDistance` > 0)**: once prey closes inside half
+  the stand-off distance, the mob backs away to standable ground instead of
+  grinding into it — the primitive behind ranged and kiting mobs.
 - Creative and spectator players are hunted like anyone else — the mob walks up
   and swings at them — but are never damaged or pushed. Excluding those game
   modes from targeting entirely would leave a hostile mob standing perfectly
@@ -662,6 +684,29 @@ Behavior details:
   suppresses its own damage cannot accidentally suppress mob damage.
 - A line-of-sight check runs before the strike; the mob does not hit through
   walls.
+
+## Bundled action: `FleeAction`
+
+Escape behavior for prey and cowardly mobs:
+
+```java
+FleeAction.builder()
+        .triggerHealthFraction(0.4) // flee at/below 40% health
+        .scanRadius(12)             // how far a threat is still feared
+        .fleeDistance(10)           // how far the retreat point is sampled
+        .speed(1.25)                // navigator speed while fleeing
+        .memoryTicks(80)            // keep running after the trigger passes
+        .threat(e -> e instanceof Player)  // default: players
+        .build();
+```
+
+- Threats are the filtered entities around the mob plus whatever its hurt
+  memory remembers; the flee heading is chosen by `FleeLogic` as a **maximin
+  escape** — the heading that maximizes the *worst* predicted distance gain
+  across every threat, so a mob caught between two players slips through the
+  gap instead of running straight into the second one.
+- The retreat point is snapped to standable ground before navigation, so a
+  fleeing mob never aims into a wall.
 
 ---
 

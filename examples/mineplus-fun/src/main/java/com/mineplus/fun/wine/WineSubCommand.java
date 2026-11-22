@@ -3,7 +3,7 @@ package com.mineplus.fun.wine;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
-import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
+import com.mineplus.infrastructure.virtual.PlacementOptions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -34,6 +34,9 @@ public final class WineSubCommand implements SubCommand {
 
     private static final int FLIGHT_SPACING = 2;
     private static final int FLIGHT_CLEAR_RADIUS = 24;
+
+    /** Bottles stand free: default 90° grid, allow placing into air. */
+    private static final PlacementOptions WINE_PLACEMENT = PlacementOptions.DEFAULT;
 
     private final PluginContext context;
 
@@ -106,7 +109,7 @@ public final class WineSubCommand implements SubCommand {
     }
 
     private boolean placeSingle(Player player, WineVariant variant) {
-        var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
+        var placement = context.dev().placementFor(player, 6.0, WINE_PLACEMENT);
         if (placement == null) {
             player.sendMessage(ChatColor.RED + "Look at a nearby block face to place the Wine Bottle.");
             return true;
@@ -142,7 +145,7 @@ public final class WineSubCommand implements SubCommand {
      * insufficient-space path) and are reported.
      */
     private boolean placeFlight(Player player) {
-        var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
+        var placement = context.dev().placementFor(player, 6.0, WINE_PLACEMENT);
         if (placement == null) {
             player.sendMessage(ChatColor.RED + "Look at a nearby surface to lay out the tasting flight.");
             return true;

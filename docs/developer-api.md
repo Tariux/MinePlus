@@ -994,6 +994,7 @@ What runs underneath your feature code:
 | `dev().spawnCustomMob(...)` / `playMobAttack` / `playMobHurt` / `customMobs()` | Custom-mob lifecycle and clips |
 | `dev().renderSnapshot()` | Rendering 2.0 census: live rigs, virtual-block instances, display entities, loaded worlds — watch budgets instead of guessing |
 | `dev().multiblock()` | Multiblock 2.0 facade: `instanceAt`, `instances`, `type`/`types`, `startProcess`/`cancelProcess`/`processOf`, and `advanceProcesses(interval)` returning the ids of machines whose state changed (for event-driven displays instead of polling) |
+| `dev().formation()` | Formation matching: register multi-block patterns, precise formed/broken events on the HookBus, four-rotation matching without NMS |
 
 ### `PlacementOptions`
 
@@ -1004,6 +1005,33 @@ PlacementOptions opts = PlacementOptions.DEFAULT
         .withAirTargetCheck(true); // refuse placing into grass/water
 var placement = context.dev().placementFor(player, 5.0, opts);
 ```
+
+### Formations (multi-block pattern matching)
+
+`dev().formation()` matches real world blocks against registered patterns — the Create/Slimefun-style "build a structure, get a machine" primitive, implemented purely with block scans (no NMS).
+
+```java
+var formation = context.dev().formation();
+
+formation.onFormation(event -> {
+    if (event.formed()) {
+        // pattern matched at event.anchor(); box corners in minCorner/maxCorner
+        plugin.getLogger().info("Formed: " + event.pattern().id());
+    } else {
+        plugin.getLogger().info("Broken: " + event.pattern().id());
+    }
+});
+
+formation.register(FormationPattern.of("myplugin:smeltery")
+        .cell(0, 0, 0, "MAGMA_BLOCK")     // anchor: the block the player places
+        .cell(1, 0, 0, "IRON_BLOCK")
+        .cell(-1, 0, 0, "IRON_BLOCK")
+        .cell(0, 1, 0, "CAULDRON")
+        .build());                         // matched in all four 90° rotations
+                                           // add .rotationLocked() to disable that
+```
+
+Forming: the core's block listener calls `checkFormed` on every block place, so a pattern forms the moment its last block is placed — no polling. Breaking: live formations are tracked by their matched bounding box, so any block change inside the box fires a precise `formed=false` event.
 
 ---
 

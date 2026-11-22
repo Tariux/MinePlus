@@ -145,7 +145,8 @@ public final class MineplusPlugin extends JavaPlugin {
 
     private void registerListeners() {
         getServer().getPluginManager().registerEvents(
-                new InfrastructureListener(context.infrastructureEngine().lifecycleManager(), virtualBlockManager),
+                new InfrastructureListener(context.infrastructureEngine().lifecycleManager(), virtualBlockManager,
+                        context.infrastructureEngine().formationManager()),
                 this
         );
         getServer().getPluginManager().registerEvents(

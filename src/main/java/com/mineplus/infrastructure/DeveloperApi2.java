@@ -33,6 +33,15 @@ public final class DeveloperApi2 {
     }
 
     /**
+     * Formation subsystem: register multi-block patterns, listen for
+     * form/break events on the HookBus, and run manual checks. The automatic
+     * wiring is installed with the engine's block listeners.
+     */
+    public com.mineplus.infrastructure.core.multiblock.formation.FormationApi formation() {
+        return context.infrastructureEngine().formationApi();
+    }
+
+    /**
      * Spawns a virtual model at a location. Collision cells come from the model's
      * {@code collisionMaterial} meta (barrier by default; slime, honey, cobweb,
      * powder snow, soul sand and bubble column give vanilla physics for free).

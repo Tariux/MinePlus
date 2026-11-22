@@ -3,7 +3,7 @@ package com.mineplus.fun.cabinet;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
-import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
+import com.mineplus.infrastructure.virtual.PlacementOptions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +17,11 @@ import org.bukkit.util.StringUtil;
 public final class CabinetSubCommand implements SubCommand {
 
     private static final int CLEAR_RADIUS = 24;
+
+    /** Solid furniture: 45° facing grid, refuse to place inside existing blocks. */
+    private static final PlacementOptions PLACEMENT = PlacementOptions.DEFAULT
+            .withYawSnap(45.0f)
+            .withAirTargetCheck(true);
 
     private final PluginContext context;
 
@@ -93,7 +98,7 @@ public final class CabinetSubCommand implements SubCommand {
         }
         String typeId = pack ? CabinetKeys.PACK_MACHINE_ID : CabinetKeys.MACHINE_ID;
 
-        var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
+        var placement = context.dev().placementFor(player, 6.0, PLACEMENT);
         if (placement == null) {
             player.sendMessage(ChatColor.RED + "Look at a nearby block face to place the cabinet.");
             return true;

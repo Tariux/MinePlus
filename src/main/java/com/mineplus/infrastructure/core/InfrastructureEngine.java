@@ -47,6 +47,9 @@ public final class InfrastructureEngine {
     private final MultiBlockLifecycleManager lifecycleManager;
     private final MultiBlockLinkingSystem linkingSystem;
     private final MachineProcessManager processManager;
+    private final com.mineplus.infrastructure.core.multiblock.formation.FormationRegistry formationRegistry;
+    private final com.mineplus.infrastructure.core.multiblock.formation.FormationManager formationManager;
+    private final com.mineplus.infrastructure.core.multiblock.formation.FormationApi formationApi;
     private final InfrastructureApi api;
     private final BasicInfrastructureApi basicApi;
     private final JsonInfrastructureApi jsonApi;
@@ -90,6 +93,9 @@ public final class InfrastructureEngine {
         this.logger = plugin.getLogger();
         this.registry = new MultiBlockRegistry();
         this.hookBus = new HookBus(plugin.getLogger());
+        this.formationRegistry = new com.mineplus.infrastructure.core.multiblock.formation.FormationRegistry();
+        this.formationManager = new com.mineplus.infrastructure.core.multiblock.formation.FormationManager(formationRegistry, hookBus);
+        this.formationApi = new com.mineplus.infrastructure.core.multiblock.formation.FormationApi(formationManager);
         this.guiManager = new InfrastructureGuiManager();
         this.itemManager = new InfrastructureItemManager(itemRegistry);
         this.recipeManager = new RecipeManager();
@@ -227,6 +233,16 @@ public final class InfrastructureEngine {
      */
     public MachineProcessManager processManager() {
         return processManager;
+    }
+
+    /** Formation subsystem: pattern registry, world matcher and event publisher. */
+    public com.mineplus.infrastructure.core.multiblock.formation.FormationApi formationApi() {
+        return formationApi;
+    }
+
+    /** Formation subsystem: pattern registry, world matcher and event publisher. */
+    public com.mineplus.infrastructure.core.multiblock.formation.FormationManager formationManager() {
+        return formationManager;
     }
 
     public RecipeManager recipeManager() {

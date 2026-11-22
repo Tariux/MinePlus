@@ -537,7 +537,7 @@ public final class MobFunSubCommand implements SubCommand {
                 sender.sendMessage(ChatColor.YELLOW + "No live " + definition.path()
                         + " to swing with; /mobfun spawn " + custom.id() + " first.");
             } else {
-                boolean playing = api.playAttack(mob);
+                boolean playing = plugin.context().dev().playMobAttack(mob);
                 sender.sendMessage((playing ? ChatColor.GREEN : ChatColor.RED)
                         + "Attack clip " + (playing ? "started on " : "refused for ")
                         + shortId(mob.getUniqueId()) + (playing ? "."

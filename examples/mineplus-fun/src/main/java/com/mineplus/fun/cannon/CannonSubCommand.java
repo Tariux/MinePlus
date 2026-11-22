@@ -3,7 +3,7 @@ package com.mineplus.fun.cannon;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
-import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
+import com.mineplus.infrastructure.virtual.PlacementOptions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -15,6 +15,11 @@ import org.bukkit.util.StringUtil;
 import org.joml.Quaternionf;
 
 public final class CannonSubCommand implements SubCommand {
+
+    /** Solid furniture: 45° facing grid, refuse to place inside existing blocks. */
+    private static final PlacementOptions PLACEMENT = PlacementOptions.DEFAULT
+            .withYawSnap(45.0f)
+            .withAirTargetCheck(true);
 
     private final PluginContext context;
 
@@ -56,7 +61,7 @@ public final class CannonSubCommand implements SubCommand {
         String action = args[0].toLowerCase(Locale.ROOT);
         switch (action) {
             case "place" -> {
-                var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
+                var placement = context.dev().placementFor(player, 6.0, PLACEMENT);
                 if (placement == null) {
                     player.sendMessage(ChatColor.RED + "Look at a nearby block face to place the Cannon.");
                     return true;

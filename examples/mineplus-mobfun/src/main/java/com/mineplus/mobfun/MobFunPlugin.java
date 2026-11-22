@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.mob.BehaviorContext;
 import com.mineplus.infrastructure.mob.MobBehaviorApi;
 import com.mineplus.infrastructure.mob.MobProfile;
 import com.mineplus.infrastructure.mob.action.AttackNearestAction;
+import com.mineplus.infrastructure.mob.action.FleeAction;
 import com.mineplus.infrastructure.mob.action.EatPlantsAction;
 import com.mineplus.infrastructure.mob.action.GrowPlantsAction;
 import com.mineplus.infrastructure.mob.action.JourneyToStructureAction;
@@ -321,6 +322,15 @@ public final class MobFunPlugin extends JavaPlugin {
                                 .cooldownTicks(20L)
                                 .knockback(0.4)
                                 .build(), 1.0)
+                        // Even the evil pig is not suicidal: at low health it
+                        // runs from the nearest player — and around a second
+                        // one, not straight into it.
+                        .action(FleeAction.builder()
+                                .triggerHealthFraction(0.3)
+                                .scanRadius(10.0)
+                                .fleeDistance(9.0)
+                                .speed(1.35)
+                                .build(), 3.0)
                         .action(new WanderAction.Builder()
                                 .home(mob -> evilPigHomes.get(mob.getUniqueId()))
                                 .radius(6.0)

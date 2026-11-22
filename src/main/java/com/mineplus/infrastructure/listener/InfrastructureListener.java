@@ -1,6 +1,7 @@
 package com.mineplus.infrastructure.listener;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.multiblock.formation.FormationManager;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import java.util.UUID;
@@ -9,6 +10,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 
@@ -16,13 +18,16 @@ public final class InfrastructureListener implements Listener {
 
     private final MultiBlockLifecycleManager lifecycleManager;
     private final VirtualBlockManager virtualBlockManager;
+    private final FormationManager formationManager;
 
     public InfrastructureListener(
             MultiBlockLifecycleManager lifecycleManager,
-            VirtualBlockManager virtualBlockManager
+            VirtualBlockManager virtualBlockManager,
+            FormationManager formationManager
     ) {
         this.lifecycleManager = lifecycleManager;
         this.virtualBlockManager = virtualBlockManager;
+        this.formationManager = formationManager;
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -66,5 +71,12 @@ public final class InfrastructureListener implements Listener {
             lifecycleManager.remove(byRenderId.id(), event.getPlayer(), true);
             event.setDropItems(false);
         }
+
+        formationManager.checkBroken(block.getLocation(), event.getPlayer());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        formationManager.checkFormed(event.getBlockPlaced().getLocation(), event.getPlayer());
     }
 }

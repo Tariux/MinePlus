@@ -214,6 +214,12 @@ public final class GunSubCommand implements SubCommand {
                 + "emitted=" + services.context().particleFx().emitted()
                 + " dropped=" + services.context().particleFx().dropped()
                 + ChatColor.GRAY + " (shared Core meter)");
+        var snapshot = services.context().dev().renderSnapshot();
+        sender.sendMessage(ChatColor.YELLOW + "Render budgets: " + ChatColor.WHITE
+                + "riggedMobs=" + snapshot.riggedMobs()
+                + " virtualBlocks=" + snapshot.virtualBlockInstances()
+                + " displays=" + snapshot.displayEntities()
+                + ChatColor.GRAY + " (dev().renderSnapshot())");
     }
 
     private void debug(CommandSender sender, String[] args) {

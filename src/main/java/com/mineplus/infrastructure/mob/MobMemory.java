@@ -34,9 +34,79 @@ public final class MobMemory {
 
     private static final int MAX_ENTRIES = 32;
 
+    /** One remembered attacker: accumulated threat and when it was last fed. */
+    private record Threat(double amount, long tick) { }
+
     private final Map<UUID, Memory> seen = new ConcurrentHashMap<>();
+    private final Map<UUID, Threat> threats = new ConcurrentHashMap<>();
     private volatile long lastHurtTick = Long.MIN_VALUE;
     private volatile UUID lastHurtBy = null;
+
+    /**
+     * Adds {@code amount} of threat for {@code source} (the entity that just
+     * hurt the mob, taunted it, shot it from a hill...). Threat decays linearly
+     * over {@link #HURT_MEMORY_TICKS} and feeds targeting: between two
+     * candidates the mob prefers whoever hurt it most recently and hardest.
+     */
+    public void recordThreat(UUID source, double amount, long tick) {
+        if (source == null || amount <= 0.0) {
+            return;
+        }
+        if (threats.size() >= MAX_ENTRIES && !threats.containsKey(source)) {
+            evictOldestThreat();
+        }
+        Threat existing = threats.get(source);
+        // Threat decays toward zero across HURT_MEMORY_TICKS of silence
+        // instead of stacking without bound, so a grinder cannot turn a mob
+        // suicidal.
+        double carried = existing == null ? 0.0
+                : existing.amount() * Math.max(0.0, 1.0 - (tick - existing.tick()) / (double) HURT_MEMORY_TICKS);
+        threats.put(source, new Threat(Math.min(100.0, carried + amount), tick));
+        this.lastHurtTick = tick;
+        this.lastHurtBy = source;
+    }
+
+    /** The undecayed threat {@code source} still carries, or {@code 0}. */
+    public double threatValue(UUID source, long nowTick) {
+        Threat t = threats.get(source);
+        if (t == null) {
+            return 0.0;
+        }
+        double decayed = t.amount() * Math.max(0.0, 1.0 - (nowTick - t.tick()) / (double) HURT_MEMORY_TICKS);
+        if (decayed <= 0.0) {
+            threats.remove(source, t);
+            return 0.0;
+        }
+        return decayed;
+    }
+
+    /** The entity the mob hates most right now, or {@code null} when nothing does. */
+    public UUID mostHated(long nowTick) {
+        UUID best = null;
+        double bestValue = 0.0;
+        for (Map.Entry<UUID, Threat> e : threats.entrySet()) {
+            double v = threatValue(e.getKey(), nowTick);
+            if (v > bestValue) {
+                bestValue = v;
+                best = e.getKey();
+            }
+        }
+        return best;
+    }
+
+    private void evictOldestThreat() {
+        UUID oldestId = null;
+        long oldest = Long.MAX_VALUE;
+        for (Map.Entry<UUID, Threat> e : threats.entrySet()) {
+            if (e.getValue().tick() < oldest) {
+                oldest = e.getValue().tick();
+                oldestId = e.getKey();
+            }
+        }
+        if (oldestId != null) {
+            threats.remove(oldestId);
+        }
+    }
 
     /** Records that the mob senses this entity right now. */
     public void sense(LivingEntity entity, long tick) {
@@ -118,6 +188,7 @@ public final class MobMemory {
     /** Forgets everything (on death or despawn). */
     public void clear() {
         seen.clear();
+        threats.clear();
         lastHurtTick = Long.MIN_VALUE;
         lastHurtBy = null;
     }

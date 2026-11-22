@@ -72,6 +72,8 @@ public final class MobBehaviorEngine {
     private final Map<UUID, ActiveActivity> activities = new ConcurrentHashMap<>();
     /** Per-mob short-term memory (senses, grudges); entries self-expire. */
     private final Map<UUID, MobMemory> memories = new ConcurrentHashMap<>();
+    /** The action that fired last for each mob, for goal stickiness. */
+    private final Map<UUID, String> currentGoals = new ConcurrentHashMap<>();
     private final BehaviorTelemetry telemetry = new BehaviorTelemetry();
     private final BehaviorContext evaluationContext = new BehaviorContext(this);
     /** Long-distance walking state, owned by the engine so one runner serves every module. */
@@ -170,6 +172,55 @@ public final class MobBehaviorEngine {
         this.plugin = plugin;
         this.journeys = new JourneyRunner(plugin);
         this.pipelines = new com.mineplus.infrastructure.mob.pipeline.MobPipelineEngine(this);
+        plugin.getServer().getPluginManager().registerEvents(new HurtMemoryListener(), plugin);
+    }
+
+    /**
+     * Feeds the hurt memory of every mob the engine already tracks: when a
+     * custom mob is struck, its attacker gains threat, so hunting behaviors
+     * retaliate against the striker instead of whoever happens to be nearest.
+     * Nearby mobs of the same kind share the grudge at half weight — the pack
+     * alarm — so striking one zombie does not make the fight one-on-one.
+     * Memories are created only for mobs the engine is evaluating, so damage
+     * anywhere else in the world allocates nothing.
+     */
+    private final class HurtMemoryListener implements org.bukkit.event.Listener {
+
+        /** How far the pack alarm carries, horizontally. */
+        private static final double ALLY_RADIUS = 16.0;
+
+        @org.bukkit.event.EventHandler(ignoreCancelled = true)
+        public void onHurt(org.bukkit.event.entity.EntityDamageByEntityEvent event) {
+            if (!(event.getEntity() instanceof LivingEntity victim)) {
+                return;
+            }
+            MobMemory memory = memories.get(victim.getUniqueId());
+            if (memory == null) {
+                return;
+            }
+            java.util.UUID attackerId = event.getDamager().getUniqueId();
+            if (attackerId.equals(victim.getUniqueId())) {
+                return;
+            }
+            double threat = Math.max(0.5, event.getFinalDamage());
+            long now = victim.getWorld().getGameTime();
+            memory.recordThreat(attackerId, threat, now);
+
+            // Pack alarm: allies of the same kind nearby remember the striker
+            // too, at half weight, so they join the retaliation.
+            org.bukkit.Location at = victim.getLocation();
+            for (org.bukkit.entity.Entity nearby : at.getWorld().getNearbyEntities(
+                    at, ALLY_RADIUS, ALLY_RADIUS * 0.5, ALLY_RADIUS)) {
+                if (nearby.getType() != victim.getType()
+                        || nearby.getUniqueId().equals(victim.getUniqueId())) {
+                    continue;
+                }
+                MobMemory ally = memories.get(nearby.getUniqueId());
+                if (ally != null) {
+                    ally.recordThreat(attackerId, threat * 0.5, now);
+                }
+            }
+        }
     }
 
     /** The active engine settings snapshot. */
@@ -697,6 +748,7 @@ public final class MobBehaviorEngine {
     /** Forgets one entity's memory (on death or removal). */
     public void forgetMemory(UUID entityId) {
         memories.remove(entityId);
+        currentGoals.remove(entityId);
     }
 
     private void evaluate(LivingEntity entity, EntityType type, List<MobProfile> candidates,
@@ -806,7 +858,19 @@ public final class MobBehaviorEngine {
                 continue;
             }
             evaluationContext.bindProfile(profile);
-            for (MobProfile.ActionEntry entry : profile.actions()) {
+            List<MobProfile.ActionEntry> entries = profile.actions();
+            // Goal arbitration: flatten the profile's actions to goals with a
+            // current urgency and try them most-urgent-first, favoring the
+            // goal the mob is already mid-way through. A mob with a grudge
+            // hunts before it wanders; a dying mob flees before it hunts.
+            List<GoalArbiter.Goal> goals = new ArrayList<>(entries.size());
+            for (MobProfile.ActionEntry entry : entries) {
+                goals.add(new GoalArbiter.Goal(entry.action().id(), entry.action().urgency(evaluationContext)));
+            }
+            List<GoalArbiter.Ordered> ordered = GoalArbiter.order(goals,
+                    currentGoals.get(entity.getUniqueId()));
+            for (GoalArbiter.Ordered goal : ordered) {
+                MobProfile.ActionEntry entry = entries.get(goal.index());
                 double seconds = Math.max(0.25, entry.intervalSeconds());
                 double odds = entry.action().continuous() ? 1.0 : Math.min(1.0, 1.0 / (seconds * checksPerSecond));
                 if (random.nextDouble() > odds) {
@@ -825,6 +889,7 @@ public final class MobBehaviorEngine {
                 }
                 if (fired) {
                     telemetry.eventFired(entry.action().id());
+                    currentGoals.put(entity.getUniqueId(), entry.action().id());
                     return;
                 }
                 // Declined: the mob had nothing to do on this spot (no plant to

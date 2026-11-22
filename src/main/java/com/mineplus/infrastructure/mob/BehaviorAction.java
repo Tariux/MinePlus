@@ -35,4 +35,16 @@ public interface BehaviorAction {
     default boolean continuous() {
         return false;
     }
+
+    /**
+     * How badly this action wants to run right now, in {@code [0, 1]}. The
+     * engine tries a profile's actions most-urgent-first, with a small
+     * stickiness bonus for the action that ran last, so drives (fear, anger)
+     * can pre-empt routine behavior without profiles having to encode the
+     * ordering in registration order. Default {@code 0.5} keeps any action
+     * that does not care on par with the others.
+     */
+    default double urgency(BehaviorContext context) {
+        return 0.5;
+    }
 }
