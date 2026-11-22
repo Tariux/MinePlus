@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Baked guns facing backwards: stale-display inheritance fixed
+
+- Second root cause found in game: `displayOf` inherited the display block from
+  the *first existing* frame in the data dir — including frames a previous bake
+  pass had written with the old wrong yaw already folded in, and stamped
+  `mineplus_held_pose_fixed` so no later pass ever re-applied the correction.
+  Baked frames are now never inherited (`mineplus_baked` marker is skipped);
+  only genuinely hand-authored JSON contributes a display, so the held-pose
+  correction always composes fresh from config and `pack.held-yaw` /
+  `pack.held-yaw-overrides` are actually effective on every rebake.
+- Bake-version stamp: every baked frame carries `mineplus_bake_version`; the
+  sweep deletes frames stamped older than the current version, so a wrong pose
+  from an earlier release can never survive an upgrade and no manual
+  "delete the staged models folder" step is needed.
+- Ship working defaults: `pack.held-yaw: 180` (the bbmodel sources are authored
+  on the model table, not hand space) with `peacemaker: 0` pre-set in
+  `held-yaw-overrides` (mirrored source).
+- The bake logs each gun's detected long axis ("barrel forward as authored" vs
+  "sideways as authored") so a future source authored the odd way is visible in
+  the log instead of a mystery in game.
+- `docs/config-reference.md` updated for the new defaults and behavior.
+
 ### Guns held backwards: stale bakes fixed, per-gun held-pose config
 
 - Root cause found in game: the gun module's `firstSource` never looked in the
