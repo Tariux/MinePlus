@@ -1,8 +1,0 @@
-{
-  "textures": { "steel": "#steel", "dark": "#dark" },
-  "textureSizes": { "#steel": [16, 16], "#dark": [16, 16] },
-  "elements": [
-    { "from": [1, 0, 1], "to": [15, 4, 15], "texture": "dark" },
-    { "from": [2, 4, 2], "to": [14, 12, 14], "texture": "steel" }
-  ]
-}

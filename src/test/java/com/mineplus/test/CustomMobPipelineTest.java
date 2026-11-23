@@ -24,6 +24,7 @@ import com.mineplus.pack.item.HeldPoseSolver;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -63,6 +64,7 @@ public final class CustomMobPipelineTest {
         heldPoseSolverPivots();
         heldPoseSolverGeometry();
         bakerAutoHeldPose();
+        heldOrientationFixFacesForward();
         mobAnimatorHurtFlinch();
         if (failures.isEmpty()) {
             System.out.println("CustomMobPipelineTest: all checks passed");
@@ -835,6 +837,107 @@ public final class CustomMobPipelineTest {
             reportedAuthored |= issue.contains("held pose was derived");
         }
         check("no derivation issue when authored", !reportedAuthored);
+    }
+
+    /**
+     * A hand pose that presents the muzzle at the viewer points the weapon
+     * backward; the geometry fix must turn such a model around about its own
+     * centre and leave a forward-facing model byte-for-byte alone.
+     */
+    private static void heldOrientationFixFacesForward() {
+        // grip cube named "stock" at the -Z end, muzzle cube "front_sight" at
+        // the +Z end: with a zero display rotation the muzzle faces the viewer.
+        String backward = "{\"elements\":["
+                + "{\"name\":\"stock\",\"from\":[6,3,-6],\"to\":[10,8,0]},"
+                + "{\"name\":\"front_sight\",\"from\":[7.5,6,20],\"to\":[8.5,7,21]}"
+                + "],\"display\":{"
+                + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[1,2,-3]},"
+                + "\"thirdperson_righthand\":{\"rotation\":[0,0,0]}"
+                + "}}";
+        File backwardFile = writeTempModel("held-fix-backward", backward);
+        java.util.logging.Logger log = java.util.logging.Logger.getLogger("held-fix");
+        boolean changed = com.mineplus.pack.item.HeldOrientationFix.fix(log, backwardFile);
+        check("backward model is rewritten", changed);
+        if (!changed) {
+            return;
+        }
+        JsonObject fixed = readModel(backwardFile);
+        float[] ray = new float[]{0, 0, 1};
+        for (String context : new String[]{"firstperson_righthand", "thirdperson_righthand"}) {
+            JsonObject pose = fixed.getAsJsonObject("display").getAsJsonObject(context);
+            JsonArray rotation = pose.getAsJsonArray("rotation");
+            check(context + " yaw turned by 180",
+                    Math.abs(Math.abs(rotation.get(1).getAsFloat()) - 180f) < 1.0e-2f);
+            check(context + " muzzle now faces away from the viewer",
+                    muzzleWorldZ(pose, ray) < -0.9f);
+        }
+        check("first-person translation preserved as array",
+                fixed.getAsJsonObject("display").getAsJsonObject("firstperson_righthand")
+                        .getAsJsonArray("translation").size() == 3);
+
+        // A forward-facing model (muzzle at -Z) must pass through untouched.
+        String forward = "{\"elements\":["
+                + "{\"name\":\"stock\",\"from\":[6,3,6],\"to\":[10,8,12]},"
+                + "{\"name\":\"front_sight\",\"from\":[7.5,6,-21],\"to\":[8.5,7,-20]}"
+                + "],\"display\":{"
+                + "\"firstperson_righthand\":{\"rotation\":[0,5,0],\"translation\":[1,2,-3]}"
+                + "}}";
+        File forwardFile = writeTempModel("held-fix-forward", forward);
+        boolean untouched = !com.mineplus.pack.item.HeldOrientationFix.fix(log, forwardFile);
+        check("forward-facing model is not rewritten", untouched);
+        check("forward-facing model content unchanged", readModel(forwardFile).toString()
+                .equals(JsonParser.parseString(forward).getAsJsonObject().toString()));
+    }
+
+    private static float centreZDelta(String before, JsonObject after) {
+        JsonObject beforeDisplay = JsonParser.parseString(before).getAsJsonObject()
+                .getAsJsonObject("display").getAsJsonObject("firstperson_righthand");
+        JsonObject afterDisplay = after.getAsJsonObject("display")
+                .getAsJsonObject("firstperson_righthand");
+        return beforeDisplay.getAsJsonArray("translation").get(2).getAsFloat()
+                - afterDisplay.getAsJsonArray("translation").get(2).getAsFloat();
+    }
+
+    private static float muzzleWorldZ(JsonObject pose, float[] ray) {
+        JsonArray rotation = pose.has("rotation") ? pose.getAsJsonArray("rotation") : null;
+        float[] r = new float[3];
+        for (int i = 0; i < 3 && rotation != null && i < rotation.size(); i++) {
+            r[i] = rotation.get(i).getAsFloat();
+        }
+        float[] w = ray.clone();
+        for (int axis = 0; axis < 3; axis++) {
+            double t = Math.toRadians(r[axis]);
+            float c = (float) Math.cos(t);
+            float s = (float) Math.sin(t);
+            float[] in = w;
+            w = switch (axis) {
+                case 0 -> new float[]{in[0], c * in[1] - s * in[2], s * in[1] + c * in[2]};
+                case 1 -> new float[]{c * in[0] + s * in[2], in[1], -s * in[0] + c * in[2]};
+                default -> new float[]{c * in[0] - s * in[1], s * in[0] + c * in[1], in[2]};
+            };
+        }
+        return w[2];
+    }
+
+    private static File writeTempModel(String name, String content) {
+        try {
+            File dir = Files.createTempDirectory("held-fix").toFile();
+            File file = new File(dir, name + "_idle.json");
+            Files.writeString(file.toPath(), content, StandardCharsets.UTF_8);
+            file.deleteOnExit();
+            return file;
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    private static JsonObject readModel(File file) {
+        try {
+            return JsonParser.parseString(Files.readString(file.toPath(), StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     private static float[] firstpersonAnchor() {

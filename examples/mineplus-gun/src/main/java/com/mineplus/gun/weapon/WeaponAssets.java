@@ -87,6 +87,11 @@ public final class WeaponAssets {
         // before anything reads the folder: the densifier, the classifier and the
         // pack all consume what is on disk.
         WeaponBbModels.bakeAll(plugin, context);
+        // A source whose hand pose presents the muzzle at the viewer points
+        // backward in every hand; the geometry check re-orients idle models
+        // before the frames are generated from them.
+        com.mineplus.pack.item.HeldOrientationFix.fixAll(plugin.getLogger(),
+                context.moduleSupport().dataFile("pack/mineplusgun/models/item"));
         // Densify and complete the installed animation before anyone reads the
         // folder: frame discovery and the pack both consume what is on disk.
         WeaponAnimations.generateAll(plugin, context);

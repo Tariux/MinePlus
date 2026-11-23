@@ -1,6 +1,0 @@
-{
-  "name": "mineplus-create-verification",
-  "private": true,
-  "scripts": { "test": "node verify.cjs" },
-  "dependencies": { "mineflayer": "^4.33.0" }
-}

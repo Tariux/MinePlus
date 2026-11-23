@@ -313,7 +313,6 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         instance.setLastValidatedAt(System.currentTimeMillis());
 
         fire(MultiBlockLifecycleEventType.PLACE, type, instance, actor, null);
-        safeHook(instance, "onPlace", () -> type.hook().onPlace(instance, actor));
         instance.setStatus(EntityStatus.ACTIVE);
         fire(MultiBlockLifecycleEventType.ACTIVATE, type, instance, actor, null);
         markDirty(instance);
