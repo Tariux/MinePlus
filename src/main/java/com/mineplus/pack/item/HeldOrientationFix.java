@@ -15,33 +15,37 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * Geometry-driven held-orientation repair for item models.
+ * Dynamic hand-fit for item models, computed from each model's own geometry.
  *
- * <p>Some gun sources carry a display table whose hand contexts present the
- * muzzle toward the viewer instead of away from it — a template authored for
- * opposite-facing geometry and applied verbatim because it is "authored". This
- * pass reads the model's own grip-to-muzzle ray from named cubes, rotates it by
- * each hand context's display rotation, and when the muzzle still points at
- * the viewer (world +Z) it composes a 180° yaw about the model's geometric
- * centre so the weapon points forward while staying where the author put it.</p>
+ * <p>Every item model lives somewhere inside its 0..16 model space, and every
+ * model has a bounding space that fits it. Instead of hand-tuned display
+ * numbers per gun, this pass derives the held pose from that space: the grip
+ * anchor is the model's grip cube (where the hand meets the weapon, falling
+ * back to the lowest cube) and the facing comes from the grip-to-muzzle ray
+ * of named cubes. A model whose hand contexts present the muzzle at the
+ * viewer keeps its exact grip position — the author placed the weapon in the
+ * hand correctly, only the facing is wrong — and is turned around about that
+ * anchor: the yaw flips by 180° and the translation is re-solved as
+ * {@code T1 = T0 + R0·(s·anchor) − R1·(s·anchor)}, so the rendered grip point
+ * is unchanged while the muzzle now points away from the viewer.</p>
  *
- * <p>Models whose facing cannot be established are left alone: the ray only
- * exists when the source names both a grip cube (grip, handle, stock, butt,
- * comb, wrist) and a muzzle-end cube (muzzle, crown, barrel, sight, bead,
- * front). Correct models therefore pass through untouched, and the check runs
- * per context so a pose that is already fine is never rewritten.</p>
+ * <p>Models whose facing cannot be established (no named muzzle end) or whose
+ * contexts already face forward are left untouched, and every hand context is
+ * judged alone.</p>
  */
 public final class HeldOrientationFix {
 
-    /** Element-name fragments that mark the grip end of a weapon. */
+    /** Element-name fragments that mark the grip end of a weapon. "butt" is
+     * deliberately absent: a butt plate or stock butt is the shoulder end, the
+     * opposite of where the hand grips. */
     private static final String[] GRIP_KEYS = {
-        "grip", "handle", "stock", "butt", "comb", "wrist"};
+        "grip", "handle", "stock", "comb", "wrist"};
 
     /** Element-name fragments that mark the muzzle end of a weapon. */
     private static final String[] MUZZLE_KEYS = {
         "muzzle", "crown", "barrel", "sight", "bead", "front"};
 
-    /** The contexts a hand can hold an item in; each is checked and fixed alone. */
+    /** The contexts a hand can hold an item in; each is checked and fitted alone. */
     private static final String[] HAND_CONTEXTS = {
         "firstperson_righthand", "firstperson_lefthand",
         "thirdperson_righthand", "thirdperson_lefthand"};
@@ -50,7 +54,7 @@ public final class HeldOrientationFix {
     }
 
     /**
-     * Walks {@code root} recursively and repairs every item model — the idle
+     * Walks {@code root} recursively and refits every item model — the idle
      * and every animation frame alike — whose hand contexts present the muzzle
      * at the viewer. Frames matter as much as the idle: a gun spends its whole
      * life cycling through frames, so an idle-only repair leaves the weapon
@@ -77,14 +81,14 @@ public final class HeldOrientationFix {
             }
         }
         if (fixed > 0) {
-            log.info("[HeldOrientationFix] Re-oriented " + fixed + " model(s) whose hand"
+            log.info("[HeldOrientationFix] Re-fitted " + fixed + " model(s) whose hand"
                     + " pose presented the muzzle at the viewer.");
         }
         return fixed;
     }
 
     /**
-     * Repairs one model file in place.
+     * Refits one model file in place.
      *
      * @return whether the file was rewritten
      */
@@ -103,10 +107,10 @@ public final class HeldOrientationFix {
             return false;
         }
         float[] ray = gripToMuzzle(elements);
-        if (ray == null) {
+        float[] anchor = gripAnchor(elements);
+        if (ray == null || anchor == null) {
             return false;
         }
-        float[] centre = boundsCentre(elements);
         JsonObject display = root.has("display") && root.get("display").isJsonObject()
                 ? root.getAsJsonObject("display") : null;
         if (display == null) {
@@ -120,27 +124,27 @@ public final class HeldOrientationFix {
             JsonObject pose = display.getAsJsonObject(context);
             float[] rotation = floatArray(pose, "rotation");
             float[] translation = floatArray(pose, "translation");
-            float[] scale = floatArray(pose, "scale");
             float[] world = applyRotation(rotation, ray);
             if (world[2] <= 0.1f) {
                 continue;
             }
-            float[] turned = rotation.clone();
-            turned[1] = normalize(turned[1] + 180f);
-            float[] kept = applyRotation(rotation, centre);
-            float[] now = applyRotation(turned, centre);
-            JsonArray newRotation = new JsonArray();
+            float uniformScale = floatArray(pose, "scale")[0];
+            float[] scaled = {anchor[0] * uniformScale, anchor[1] * uniformScale, anchor[2] * uniformScale};
+            float[] originalGrip = add(translation, applyRotation(rotation, scaled));
+            float[] newRotation = {rotation[0], rotation[1] + 180f, rotation[2]};
+            float[] keptGrip = applyRotation(newRotation, scaled);
+            JsonArray newRotationJson = new JsonArray();
             JsonArray newTranslation = new JsonArray();
             for (int i = 0; i < 3; i++) {
-                newRotation.add(round(turned[i]));
-                newTranslation.add(round(translation[i] + scale[i] * (kept[i] - now[i])));
+                newRotationJson.add(round(newRotation[i]));
+                newTranslation.add(round(originalGrip[i] - keptGrip[i]));
             }
-            pose.add("rotation", newRotation);
+            pose.add("rotation", newRotationJson);
             pose.add("translation", newTranslation);
             changed = true;
             log.info("[HeldOrientationFix] " + file.getName() + " " + context
                     + ": muzzle pointed at the viewer (z=+" + String.format(Locale.ROOT, "%.2f", world[2])
-                    + "); added 180° yaw about the model centre.");
+                    + "); turned 180° about the grip anchor — grip position kept, muzzle forward.");
         }
         if (!changed) {
             return false;
@@ -197,9 +201,15 @@ public final class HeldOrientationFix {
         return false;
     }
 
-    private static float[] boundsCentre(JsonArray elements) {
-        float[] low = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
-        float[] high = {-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
+    /**
+     * Where the hand meets the weapon: the centre of a named grip cube when
+     * the model has one, otherwise the lowest cube. A model's lowest cube is
+     * not always the grip — a trigger guard or butt cap can sit lower — so
+     * the named cube wins when present.
+     */
+    private static float[] gripAnchor(JsonArray elements) {
+        float[] grip = null;
+        float[] lowest = null;
         for (int i = 0; i < elements.size(); i++) {
             if (!elements.get(i).isJsonObject()) {
                 continue;
@@ -208,20 +218,27 @@ public final class HeldOrientationFix {
             if (!element.has("from") || !element.has("to")) {
                 continue;
             }
-            float[] from = floatArray(element, "from");
-            float[] to = floatArray(element, "to");
-            for (int a = 0; a < 3; a++) {
-                low[a] = Math.min(low[a], Math.min(from[a], to[a]));
-                high[a] = Math.max(high[a], Math.max(from[a], to[a]));
+            float[] centre = cubeCentre(element);
+            if (lowest == null || centre[1] < lowest[1]) {
+                lowest = centre;
+            }
+            String name = element.has("name") && !element.get("name").isJsonNull()
+                    ? element.get("name").getAsString().toLowerCase(Locale.ROOT) : "";
+            if (grip == null && matches(name, GRIP_KEYS)) {
+                grip = centre;
             }
         }
-        return new float[]{(low[0] + high[0]) / 2f, (low[1] + high[1]) / 2f, (low[2] + high[2]) / 2f};
+        return grip != null ? grip : lowest;
     }
 
     private static float[] cubeCentre(JsonObject element) {
         float[] from = floatArray(element, "from");
         float[] to = floatArray(element, "to");
         return new float[]{(from[0] + to[0]) / 2f, (from[1] + to[1]) / 2f, (from[2] + to[2]) / 2f};
+    }
+
+    private static float[] add(float[] a, float[] b) {
+        return new float[]{a[0] + b[0], a[1] + b[1], a[2] + b[2]};
     }
 
     /** Display rotation applied as Rx then Ry then Rz (extrinsic XYZ). */
@@ -259,17 +276,6 @@ public final class HeldOrientationFix {
             }
         }
         return out;
-    }
-
-    private static float normalize(float yaw) {
-        float y = yaw % 360f;
-        if (y > 180f) {
-            y -= 360f;
-        }
-        if (y <= -180f) {
-            y += 360f;
-        }
-        return y;
     }
 
     private static float round(float value) {
