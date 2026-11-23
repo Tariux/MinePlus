@@ -1,0 +1,13 @@
+{
+  "id": "mc_steam_engine",
+  "name": "Steam Engine",
+  "levels": {
+    "1": {
+      "model": "models/mc-cogwheel.bbmodel",
+      "speed": 1.0,
+      "durability": 25.0,
+      "upgradeCost": {},
+      "renderMode": "virtual"
+    }
+  }
+}

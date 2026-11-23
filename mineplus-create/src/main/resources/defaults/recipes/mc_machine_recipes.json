@@ -1,0 +1,44 @@
+{
+  "recipes": [
+    {
+      "id": "mc_wheat_flour",
+      "machine": "mc_millstone",
+      "level": 1,
+      "craftTimeTicks": 100,
+      "input": { "minecraft:wheat": 1 },
+      "output": { "mc_wheat_flour": 1 }
+    },
+    {
+      "id": "mc_bonemeal",
+      "machine": "mc_millstone",
+      "level": 1,
+      "craftTimeTicks": 100,
+      "input": { "minecraft:bone": 1 },
+      "output": { "minecraft:bone_meal": 4 }
+    },
+    {
+      "id": "mc_sugar",
+      "machine": "mc_millstone",
+      "level": 1,
+      "craftTimeTicks": 100,
+      "input": { "minecraft:sugar_cane": 1 },
+      "output": { "minecraft:sugar": 2 }
+    },
+    {
+      "id": "mc_iron_sheet",
+      "machine": "mc_mechanical_press",
+      "level": 1,
+      "craftTimeTicks": 120,
+      "input": { "minecraft:iron_ingot": 1 },
+      "output": { "mc_iron_sheet": 1 }
+    },
+    {
+      "id": "mc_gold_sheet",
+      "machine": "mc_mechanical_press",
+      "level": 1,
+      "craftTimeTicks": 120,
+      "input": { "minecraft:gold_ingot": 1 },
+      "output": { "mc_gold_sheet": 1 }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "mc_water_wheel",
+  "name": "Water Wheel",
+  "levels": {
+    "1": {
+      "model": "models/mc-water-wheel.bbmodel",
+      "speed": 1.0,
+      "durability": 20.0,
+      "upgradeCost": {},
+      "renderMode": "virtual"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "mc_dynamo",
+  "name": "Dynamo",
+  "levels": {
+    "1": {
+      "model": "models/mc-cogwheel.bbmodel",
+      "speed": 1.0,
+      "durability": 10.0,
+      "upgradeCost": {},
+      "renderMode": "virtual"
+    }
+  }
+}

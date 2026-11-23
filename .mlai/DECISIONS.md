@@ -16,3 +16,12 @@
 - Modern packs (1.21.4+) express this as a nested `range_dispatch` on `minecraft:cooldown`. Legacy packs express the same thresholds as `cooldown` predicates in the host model's `overrides` (`ItemModelWriter.legacyHostFiles`).
 - Overrides must stay sorted ascending by (custom_model_data, cooldown) across the whole host file: vanilla picks the last matching override.
 - Modules should ask `PackApi.isAvailable()` to decide whether the client can play a clip. `usesModernItemModels()` is diagnostic only.
+
+## Placement must invoke the type hook
+- Creating a multiblock instance only registers it; callers must also invoke lifecycle `place` to render it and activate its hooks.
+- `MultiBlockLifecycleManager.place` invokes the type's `onPlace` hook as well as the PLACE event. MineplusCreate uses this hook to register rotational nodes and dynamo buffers.
+
+## Unpowered rotational nodes must coast to zero
+- `RotationalNetworkManager.tick` takes a predicate that is true for unloaded chunks, not loaded ones.
+- Recompute assigns network id -1 when no source powers a component. Loaded orphan nodes must still decay their signed actual RPM to zero; otherwise released cranks and cold steam engines leave stale rotation and electric output.
+- Regressions: `RotationalNetworkTest.stoppedSourceDecays()` and `removedSourceDecays()`.

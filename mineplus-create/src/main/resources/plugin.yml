@@ -1,0 +1,18 @@
+name: MineplusCreate
+version: ${version}
+main: com.mineplus.create.CreatePlugin
+api-version: '1.21'
+author: Tariux
+description: Mineplus Create module - rotational networks (shafts, cogwheels), machines, electric tier and the Inventor's Journal progression.
+website: https://github.com/Tariux/MinePlus
+
+# Hard dependency: the Core engine must be present and enabled first.
+depend: [Mineplus]
+
+# Commands (/create) are registered dynamically at enable time via
+# context.moduleSupport().registerCommand(...) - no plugin.yml entries needed.
+
+permissions:
+  minepluscreate.admin:
+    description: Allows using /create admin controls
+    default: op
