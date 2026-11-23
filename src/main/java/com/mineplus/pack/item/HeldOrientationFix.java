@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * Geometry-driven held-orientation repair for idle item models.
+ * Geometry-driven held-orientation repair for item models.
  *
  * <p>Some gun sources carry a display table whose hand contexts present the
  * muzzle toward the viewer instead of away from it — a template authored for
@@ -50,8 +50,11 @@ public final class HeldOrientationFix {
     }
 
     /**
-     * Walks {@code root} recursively and repairs every {@code *_idle.json}
-     * whose hand contexts present the muzzle at the viewer.
+     * Walks {@code root} recursively and repairs every item model — the idle
+     * and every animation frame alike — whose hand contexts present the muzzle
+     * at the viewer. Frames matter as much as the idle: a gun spends its whole
+     * life cycling through frames, so an idle-only repair leaves the weapon
+     * visually backward whenever any frame is on screen.
      *
      * @return how many models were rewritten
      */
@@ -59,16 +62,16 @@ public final class HeldOrientationFix {
         if (root == null || !root.isDirectory()) {
             return 0;
         }
-        List<File> idles = new ArrayList<>();
+        List<File> models = new ArrayList<>();
         try (Stream<Path> paths = Files.walk(root.toPath())) {
-            paths.filter(p -> p.getFileName().toString().endsWith("_idle.json"))
-                    .forEach(p -> idles.add(p.toFile()));
+            paths.filter(p -> p.getFileName().toString().endsWith(".json"))
+                    .forEach(p -> models.add(p.toFile()));
         } catch (IOException failure) {
             log.warning("[HeldOrientationFix] Could not walk " + root + ": " + failure.getMessage());
             return 0;
         }
         int fixed = 0;
-        for (File file : idles) {
+        for (File file : models) {
             if (fix(log, file)) {
                 fixed++;
             }
