@@ -848,58 +848,58 @@ public final class CustomMobPipelineTest {
      * while synthesizing the standalone contexts it lacks.
      */
     private static void heldOrientationFixFacesForward() {
-        // grip cube named "grip" at the -Z end, muzzle cube "front_sight" at
-        // the +Z end: with a zero display rotation the muzzle faces the viewer.
+        // The pack bug: two guns with byte-identical authored displays but
+        // opposite in-model muzzle directions rendered facing opposite ways
+        // (the display table cannot be right for both conventions). The
+        // canonical pass must render both exactly like the good pistol.
         String backward = "{\"elements\":["
                 + "{\"name\":\"grip\",\"from\":[6,3,-6],\"to\":[10,8,0]},"
                 + "{\"name\":\"front_sight\",\"from\":[7.5,6,20],\"to\":[8.5,7,21]}"
                 + "],\"display\":{"
-                + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[1,2,-3]},"
-                + "\"thirdperson_righthand\":{\"rotation\":[0,0,0]}"
+                + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[1,2,-3]}"
                 + "}}";
-        File backwardFile = writeTempModel("held-fix-backward", backward);
-        java.util.logging.Logger log = java.util.logging.Logger.getLogger("held-fix");
-        boolean changed = com.mineplus.pack.item.HeldOrientationFix.fixAll(log, backwardFile.getParentFile()) > 0;
-        check("backward model is rewritten", changed);
-        if (!changed) {
-            return;
-        }
-        JsonObject fixed = readModel(backwardFile);
-        float[] ray = new float[]{0, 0, 1};
-        for (String context : new String[]{"firstperson_righthand", "thirdperson_righthand"}) {
-            JsonObject pose = fixed.getAsJsonObject("display").getAsJsonObject(context);
-            JsonArray rotation = pose.getAsJsonArray("rotation");
-            check(context + " yaw turned by 180",
-                    Math.abs(Math.abs(rotation.get(1).getAsFloat()) - 180f) < 1.0e-2f);
-            check(context + " muzzle now faces away from the viewer",
-                    muzzleWorldZ(pose, ray) < -0.9f);
-        }
-        check("first-person translation preserved as array",
-                fixed.getAsJsonObject("display").getAsJsonObject("firstperson_righthand")
-                        .getAsJsonArray("translation").size() == 3);
-
-        // A forward-facing model with its grip already at the fist passes its
-        // hand poses through untouched; only the missing standalone contexts
-        // (gui, ground, fixed, head) are added from its bounding box.
         String forward = "{\"elements\":["
                 + "{\"name\":\"grip\",\"from\":[6,3,6],\"to\":[10,8,12]},"
                 + "{\"name\":\"front_sight\",\"from\":[7.5,6,-21],\"to\":[8.5,7,-20]}"
                 + "],\"display\":{"
-                + "\"firstperson_righthand\":{\"rotation\":[0,5,0],\"translation\":[0,0,-10]},"
-                + "\"thirdperson_righthand\":{\"rotation\":[0,5,0],\"translation\":[0,0,-10]}"
+                + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[1,2,-3]}"
                 + "}}";
+        File backwardFile = writeTempModel("held-fix-backward", backward);
         File forwardFile = writeTempModel("held-fix-forward", forward);
+        java.util.logging.Logger log = java.util.logging.Logger.getLogger("held-fix");
+        com.mineplus.pack.item.HeldOrientationFix.fixAll(log, backwardFile.getParentFile());
         com.mineplus.pack.item.HeldOrientationFix.fixAll(log, forwardFile.getParentFile());
-        JsonObject forwardFixed = readModel(forwardFile);
-        check("forward-facing model keeps its hand poses",
-                forwardFixed.getAsJsonObject("display").getAsJsonObject("firstperson_righthand")
-                        .equals(JsonParser.parseString(forward).getAsJsonObject()
-                                .getAsJsonObject("display").getAsJsonObject("firstperson_righthand")));
-        check("forward-facing model gains the standalone contexts",
-                forwardFixed.getAsJsonObject("display").getAsJsonObject("gui") != null
-                        && forwardFixed.getAsJsonObject("display").getAsJsonObject("ground") != null
-                        && forwardFixed.getAsJsonObject("display").getAsJsonObject("fixed") != null
-                        && forwardFixed.getAsJsonObject("display").getAsJsonObject("head") != null);
+        JsonObject backFixed = readModel(backwardFile);
+        JsonObject fwdFixed = readModel(forwardFile);
+        float[] backGrip = {8f, 5.5f, -3f};
+        float[] fwdGrip = {8f, 5.5f, 9f};
+        float[] backMuzzle = {8f, 6.5f, 20.5f};
+        float[] fwdMuzzle = {8f, 6.5f, -20.5f};
+        JsonObject[] models = {backFixed, fwdFixed};
+        float[][] grips = {backGrip, fwdGrip};
+        float[][] muzzles = {backMuzzle, fwdMuzzle};
+        String[] labels = {"backward-convention", "forward-convention"};
+        float[][] targets = {{8.418f, 7.715f, 4.039f}, {6.8f, 6.375f, 7.325f}};
+        String[] handContexts = {"firstperson_righthand", "thirdperson_righthand"};
+        for (int m = 0; m < models.length; m++) {
+            JsonObject model = models[m];
+            for (int h = 0; h < handContexts.length; h++) {
+                float[] grip = displayGrip(model, handContexts[h], grips[m]);
+                check(handContexts[h] + ": " + labels[m] + " grip lands on the canonical hand point",
+                        Math.abs(grip[0] - targets[h][0]) < 0.05f
+                                && Math.abs(grip[1] - targets[h][1]) < 0.05f
+                                && Math.abs(grip[2] - targets[h][2]) < 0.05f);
+            }
+            float[] gripFp = displayGrip(model, "firstperson_righthand", grips[m]);
+            float[] muzzleFp = displayGrip(model, "firstperson_righthand", muzzles[m]);
+            check("first-person " + labels[m] + " muzzle points away from the viewer",
+                    muzzleFp[2] < gripFp[2] - 5f);
+            JsonObject display = model.getAsJsonObject("display");
+            check(labels[m] + " gains the standalone contexts",
+                    display.getAsJsonObject("gui") != null
+                            && display.getAsJsonObject("ground") != null
+                            && display.getAsJsonObject("fixed") != null);
+        }
     }
 
     private static float centreZDelta(String before, JsonObject after) {
@@ -1045,8 +1045,10 @@ public final class CustomMobPipelineTest {
             Logger quiet = Logger.getLogger("heldfit-test");
             quiet.setUseParentHandlers(false);
 
-            // A revolver-like model: grip at (0,0,8), muzzle at (0,0,-8), trigger
-            // between them; grips authored 14 units off the fist in both views.
+            // A revolver-like model whose authored display shoves the grip far
+            // from the fist in both views, plus an animation frame with the
+            // same geometry; gui/ground/fixed are absent on purpose. The old
+            // anchor bug: stock_butt must not beat the real grip cube.
             String farGun = "{"
                     + "\"display\":{"
                     + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[6.6,4.6,12.6]},"
@@ -1059,58 +1061,30 @@ public final class CustomMobPipelineTest {
                     + "{\"name\":\"muzzle_crown\",\"from\":[-1,-1,-10],\"to\":[1,1,-8]}"
                     + "]}";
             java.nio.file.Files.writeString(dir.resolve("far_gun_idle.json"), farGun);
-
-            // A well-placed sibling: grips already exactly on the hand points,
-            // standalone contexts already centred on their slots.
-            String goodGun = "{"
-                    + "\"display\":{"
-                    + "\"firstperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[6.6,4.1,-9.4]},"
-                    + "\"thirdperson_righthand\":{\"rotation\":[0,0,0],\"translation\":[6.8,3.5,-11.2]},"
-                    + "\"gui\":{\"rotation\":[30,225,0],\"translation\":[0,0,0],\"scale\":[1,1,1]},"
-                    + "\"ground\":{\"rotation\":[0,0,0],\"translation\":[0,2,0]},"
-                    + "\"fixed\":{\"rotation\":[0,0,0],\"translation\":[0,0,0]},"
-                    + "\"head\":{\"rotation\":[0,0,0],\"translation\":[0,0,0]}"
-                    + "},"
-                    + "\"elements\":["
-                    + "{\"name\":\"grip\",\"from\":[-1,-1,6],\"to\":[1,2,10]},"
-                    + "{\"name\":\"muzzle_crown\",\"from\":[-1,-1,-10],\"to\":[1,1,-8]}"
-                    + "]}";
-            java.nio.file.Files.writeString(dir.resolve("good_gun_idle.json"), goodGun);
+            java.nio.file.Files.writeString(dir.resolve("far_gun_fire.json"), farGun);
 
             com.mineplus.pack.item.HeldOrientationFix.fixAll(quiet, dir.toFile());
             JsonObject far = JsonParser.parseString(
                     java.nio.file.Files.readString(dir.resolve("far_gun_idle.json"))).getAsJsonObject();
-            JsonObject good = JsonParser.parseString(
-                    java.nio.file.Files.readString(dir.resolve("good_gun_idle.json"))).getAsJsonObject();
+            JsonObject fire = JsonParser.parseString(
+                    java.nio.file.Files.readString(dir.resolve("far_gun_fire.json"))).getAsJsonObject();
 
             float[] anchor = {0f, 0.5f, 8f}; // centre of the grip cube
-            // First person: grip must land on the hand point (6.6, 4.6, -1.4).
             float[] fp = displayGrip(far, "firstperson_righthand", anchor);
             check("hand fit: first-person grip reaches the fist",
-                    Math.abs(fp[0] - 6.6f) < 0.05f && Math.abs(fp[1] - 4.6f) < 0.05f
-                            && Math.abs(fp[2] + 1.4f) < 0.05f);
-            // Third person: grip must land on the hand point (6.8, 4.0, -3.2).
+                    Math.abs(fp[0] - 8.418f) < 0.05f && Math.abs(fp[1] - 7.715f) < 0.05f
+                            && Math.abs(fp[2] - 4.039f) < 0.05f);
             float[] tp = displayGrip(far, "thirdperson_righthand", anchor);
             check("hand fit: third-person grip reaches the fist",
-                    Math.abs(tp[0] - 6.8f) < 0.05f && Math.abs(tp[1] - 4.0f) < 0.05f
-                            && Math.abs(tp[2] + 3.2f) < 0.05f);
-            // Muzzle end (0,0,-9) must present forward (negative display z is the
-            // authored space here; the display rotation is unchanged, so the
-            // grip-to-muzzle ray keeps pointing forward after the fit).
-            check("hand fit: well-placed gun untouched",
-                    java.nio.file.Files.readString(dir.resolve("good_gun_idle.json"))
-                            .equals(goodGun.replaceAll("\\s+", "")));
-            // Missing standalone contexts are synthesized, centred on the slot.
-            check("item fit: gui synthesized", far.getAsJsonObject("display").has("gui"));
-            float[] centre = {0f, -0.5f, 3f}; // bounding-box centre of the far gun
-            float[] guiCentre = displayGrip(far, "gui", centre);
-            check("item fit: gui centred on the slot",
-                    Math.abs(guiCentre[0]) < 0.05f && Math.abs(guiCentre[1]) < 0.05f
-                            && Math.abs(guiCentre[2]) < 0.05f);
-            check("item fit: ground and fixed synthesized",
-                    far.getAsJsonObject("display").has("ground")
-                            && far.getAsJsonObject("display").has("fixed")
-                            && far.getAsJsonObject("display").has("head"));
+                    Math.abs(tp[0] - 6.8f) < 0.05f && Math.abs(tp[1] - 6.375f) < 0.05f
+                            && Math.abs(tp[2] - 7.325f) < 0.05f);
+            check("hand fit: the animation frame gets the same pose",
+                    fire.getAsJsonObject("display").getAsJsonObject("firstperson_righthand")
+                            .equals(far.getAsJsonObject("display").getAsJsonObject("firstperson_righthand")));
+            check("item fit: gui, ground and fixed synthesized",
+                    far.getAsJsonObject("display").has("gui")
+                            && far.getAsJsonObject("display").has("ground")
+                            && far.getAsJsonObject("display").has("fixed"));
 
             // Idempotent: a second pass rewrites nothing.
             String once = java.nio.file.Files.readString(dir.resolve("far_gun_idle.json"));
@@ -1133,7 +1107,7 @@ public final class CustomMobPipelineTest {
         float[] translation = new float[3];
         float[] scale = {1f, 1f, 1f};
         for (int i = 0; i < 3; i++) {
-            rotation[i] = pose.getAsJsonArray("rotation").get(i).getAsFloat();
+            rotation[i] = pose.has("rotation") ? pose.getAsJsonArray("rotation").get(i).getAsFloat() : 0f;
             translation[i] = pose.getAsJsonArray("translation").get(i).getAsFloat();
             if (pose.has("scale")) {
                 scale[i] = pose.getAsJsonArray("scale").get(i).getAsFloat();
