@@ -39,3 +39,16 @@ Per-cube `collisionMaterial` (slime, honey, cobweb, powder snow, soul sand, bubb
 
 ## Verification
 Final gate: `./gradlew clean compileJava testRunners jar` — see the chat message for the run of record.
+
+## Phase 14 — Held-pose solver & hurt feedback — ✅ applied (this session)
+Dynamic held-item pose system replacing axis-aligned heuristics:
+- `pack/item/HeldPoseSolver.java`: PCA (3x3 covariance + Jacobi eigen-decomposition) over cube corners pooled in **model space** (cube + bone pivot, per `.mlai/DECISIONS.md`), solving both orientation and grip translation for any model shape; per-context Euler for first/third person, left mirrored.
+- `BbClipBaker` fills display contexts from geometry only when none are authored; authored contexts win unchanged.
+- `MobAnimator.hurtFlinchDegrees()`: procedural 12° half-sine flinch over 0.3 s for rigs without an authored `hurt` clip; `MobRenderEngine` adds a 0.08-block root lift and root-bone tilt, and drops the ground-shadow plate onto the heightmap surface.
+- Behaviour preserved exactly: authored display contexts and authored `hurt` clips take precedence over everything derived; models with no dominant axis get no pose (previous behaviour).
+
+## Rollback (Phase 14)
+Revert `src/main/java/com/mineplus/pack/item/HeldPoseSolver.java` (delete), and `git checkout` of `BbClipBaker.java`, `MobAnimator.java`, `MobRenderEngine.java` and `CustomMobPipelineTest.java`. No data paths, config keys or resource-pack formats changed, so rollback is a pure code revert; already-baked packs keep working because authored display blocks are untouched.
+
+## Tests (Phase 14)
+`CustomMobPipelineTest.heldPoseSolverPivots()`, `.heldPoseSolverGeometry()`, `.bakerAutoHeldPose()`, `.mobAnimatorHurtFlinch()`. Run of record: `./gradlew test --rerun-tasks && ./gradlew testRunners --rerun-tasks` — exit 0, all 9 runners "all checks passed".

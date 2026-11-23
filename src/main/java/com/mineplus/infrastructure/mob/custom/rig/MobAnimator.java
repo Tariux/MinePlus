@@ -167,6 +167,22 @@ public final class MobAnimator {
         return hurtClip != null;
     }
 
+    private static final float FLINCH_SECONDS = 0.3f;
+    private static final float FLINCH_DEGREES = 12.0f;
+
+    /**
+     * The procedural hurt recoil for a rig with no authored hurt clip: a smooth
+     * tilt back and return over {@code FLINCH_SECONDS}, applied by the engine to
+     * the root bones. Zero once the flinch has played out and always zero when an
+     * authored clip carries the reaction instead — authored animation wins.
+     */
+    public float hurtFlinchDegrees() {
+        if (dead || hurtClip != null || hurtTime >= FLINCH_SECONDS) {
+            return 0.0f;
+        }
+        return FLINCH_DEGREES * (float) Math.sin(Math.PI * hurtTime / FLINCH_SECONDS);
+    }
+
     private static float overlayLength(ModelAnimation clip) {
         return clip == null || clip.lengthSeconds() <= 0.0f ? 0.5f : clip.lengthSeconds();
     }
@@ -178,11 +194,9 @@ public final class MobAnimator {
         }
     }
 
-    /** Restarts the hurt overlay. */
+    /** Restarts the hurt overlay (or the procedural flinch when no clip is bound). */
     public void notifyHurt() {
-        if (hurtClip != null) {
-            hurtTime = 0.0f;
-        }
+        hurtTime = 0.0f;
     }
 
     /** Plays the eat/graze overlay once. {@code false} when the model has no eat clip. */

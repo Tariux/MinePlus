@@ -10,6 +10,7 @@ import com.mineplus.infrastructure.virtual.CubeFace;
 import com.mineplus.infrastructure.virtual.DisplayEmitter;
 import com.mineplus.infrastructure.virtual.FaceUvAnalyzer;
 import com.mineplus.infrastructure.virtual.ModelMeta;
+import com.mineplus.infrastructure.virtual.LightTier;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
@@ -968,6 +969,12 @@ final class BakeOps {
                 str(overrides, "collisionMode", null) != null
                         ? ModelMeta.CollisionMode.fromKey(str(overrides, "collisionMode", null), null)
                         : base.collisionMode(),
+                str(overrides, "collisionMaterial", null) != null
+                        ? ModelMeta.CollisionMaterial.fromKey(str(overrides, "collisionMaterial", null), null)
+                        : base.collisionMaterial(),
+                str(overrides, "light", null) != null
+                        ? LightTier.fromKey(str(overrides, "light", null))
+                        : base.light(),
                 base.autoplay(),
                 str(overrides, "texelMode", null) != null
                         ? ModelMeta.TexelMode.fromKey(str(overrides, "texelMode", null), null)

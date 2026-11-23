@@ -10,9 +10,9 @@
 | Clip names | `animation.idle` / `animation.fire` / `animation.break_load` / `animation.close` | ✅ `WeaponBbModels.roleOf` strips the `animation.` prefix |
 | No `display` block | — | ✅ DEFAULT_DISPLAY fold, contexts whitelisted |
 | UV space | texture pixels up to u=60 (64×64 texture) | ✅ baker now scales by 16/64 |
-| **Textures** | ONE texture, **embedded base64** (`source: data:image/png;base64,…`), stale internal name **`boom_stick`**, `path: null`; external **`hawk_eye.png`** ships beside it | ❌ **the blocker** — both importers skip base64; resolution by name finds no `boom_stick.png`; the external `hawk_eye.png` is never consulted → pack texture missing (purple), texel bake degrades to palette |
+| **Textures** | ONE texture, **embedded base64** (`source: data:image/png;base64,…`), stale internal name **`boom_stick`**, `path: null`; external **`hawk_eye.png`** ships beside it | ✅ **shipped** — both importers decode embedded base64 and materialize it as `<textureName>.png` beside the model (`BbModelImporter.materializeEmbeddedTextures`, `BbModelParser`), and `TextureImageStore.resolveFile` falls back to the model file's own stem, so the external `hawk_eye.png` resolves even when the embedded name drifted |
 
-Root cause: every `"free"`-format bbmodel (Blockbench's default) embeds its painted texture. The pipeline's file-based texture resolution can never satisfy it unless the author renames the external PNG to the embedded texture's internal name.
+Root cause (historical): every `"free"`-format bbmodel (Blockbench's default) embeds its painted texture, and the pipeline's file-based texture resolution could never satisfy it unless the author renamed the external PNG to the embedded texture's internal name. Fixed as designed below.
 
 ## Design
 

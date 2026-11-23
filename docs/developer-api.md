@@ -42,15 +42,22 @@ context.infrastructureApi()
 context.jsonInfrastructureApi()
 context.animationApi()          // selector-based animation control (play/stop/pause/trigger/enable)
 context.packApi()               // resource pack registration/delivery (never null)
+context.packSystem()            // pack compilation/hosting management
 context.renderRouter()          // unified render routing: policy + telemetry (never null)
 context.moduleSupport()        // module toolkit: resource install, looked-at resolution, command registration
 context.mobBehaviorApi()       // mob behavior engine: profiles, journeys, crews, world-edit grants
+context.customMobs()           // custom mob registration/spawning (CustomMobApi)
 context.particleFx()           // budgeted particle + sound emission (shared, never throws)
 context.ballistics()           // core projectile simulation
 context.heldItemInput()        // held-item press/release/swap seam with vanilla-interaction freeze
 context.perf()                 // telemetry counters/gauges + adaptive valve (never null)
 context.deferredEdits()        // deferred world-edit queue: enqueue(World, List<BlockEdit>), HIGH/LOW, per-tick budget
 context.visualUnits()          // composed impact units: spawn(VisualUnit) / impact(Location, ImpactProfile)
+context.hud()                  // per-player HUD service
+context.stances()              // per-observer equipment stances (packet-based)
+context.hitTest()              // world ray/hit testing against models and mobs
+context.magazine(owner, slot)  // per-owner item magazine storage
+context.dev()                  // DeveloperApi2: placement/formation/dev spawns
 ```
 
 `/mineplus perf` prints the live telemetry table, `/mineplus perf reset` zeroes counters and the valve, `/mineplus perf dump` writes a JSON snapshot under `plugins/Mineplus/perf/`.

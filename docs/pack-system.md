@@ -23,7 +23,7 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 
 | Layer | Responsibility |
 |---|---|
-| `com.mineplus.infrastructure.render.RenderMode` | the unified vocabulary; one value names subsystem + primitive (`virtual`, `pack_item`, `pack_block`, `hybrid_item`, `hybrid_block`) |
+| `com.mineplus.infrastructure.render.RenderMode` | the unified vocabulary; one value names subsystem + primitive (`virtual`, `pack_item`, `pack_block`, `pack_bones`, `hybrid_item`, `hybrid_block`, `hybrid_bones`) |
 | `RenderBackend` / `RenderKind` | the underlying two axes (`RenderBackend` = subsystem, `RenderKind` = primitive); `RenderMode.of(...)` maps a legacy pair onto a mode |
 | `com.mineplus.infrastructure.render.RenderRouter` | the routing choke point: applies subsystem availability + `RenderPolicy` and records telemetry |
 | `com.mineplus.pack.PackLighting` | how pack display entities are lit (`AUTO` / `NATURAL` / `EMISSIVE` / `FULLBRIGHT`) |
@@ -45,8 +45,8 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
   public collision-only spawn API — barriers, break handling, occupancy and
   restore dedupe behave identically for both backends.
 - Backend selection lives in multiblock level definitions, as a single
-  `"renderMode"` (`virtual` | `pack_item` | `pack_block` | `hybrid_item` |
-  `hybrid_block`, default `virtual`). The legacy pair
+  `"renderMode"` (`virtual` | `pack_item` | `pack_block` | `pack_bones` |
+  `hybrid_item` | `hybrid_block` | `hybrid_bones`, default `virtual`). The legacy pair
   (`"renderBackend": "virtual" | "pack" | "virtual+pack"` +
   `"renderKind": "model" | "block"`) still parses and maps onto the same modes.
   The `RenderRouter` is the single place a level's mode becomes an effective

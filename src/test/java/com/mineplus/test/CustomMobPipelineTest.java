@@ -19,6 +19,8 @@ import com.mineplus.pack.PackApi;
 import com.mineplus.pack.PlayerPackState;
 import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.compile.PackArtifact;
+import com.mineplus.pack.item.BbClipBaker;
+import com.mineplus.pack.item.HeldPoseSolver;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -58,6 +60,10 @@ public final class CustomMobPipelineTest {
         emitterWindowFitting();
         mobAnimatorBaseLayer();
         mobAnimatorSlots();
+        heldPoseSolverPivots();
+        heldPoseSolverGeometry();
+        bakerAutoHeldPose();
+        mobAnimatorHurtFlinch();
         if (failures.isEmpty()) {
             System.out.println("CustomMobPipelineTest: all checks passed");
             return;
@@ -638,6 +644,275 @@ public final class CustomMobPipelineTest {
             ambientWhileWalking = walker.snapshot().contains("+ambient");
         }
         check("ambient never fires while walking", !ambientWhileWalking);
+    }
+
+    /** Regression: the solver must read cubes in model space (cube + bone pivot). */
+    private static void heldPoseSolverPivots() {
+        // Two near-cubic bones stacked along Y by their pivots: in model space the
+        // shape is 2 x 42 x 2 (Y-long); raw cube coords alone collapse to one 2x2x2
+        // blob at the origin with no dominant axis, so solve() would return null.
+        ModelCube cube = new ModelCube(-1, -1, -1, 1, 1, 1, 0, 0, null);
+        ModelBone root = new ModelBone("root", "root", -1, 0, 0, 0, 0, 0, 0,
+                List.of(cube), ModelBone.Attachment.NONE);
+        ModelBone stacked = new ModelBone("stack", "stack", 0, 0, 40, 0, 0, 0, 0,
+                List.of(cube), ModelBone.Attachment.NONE);
+
+        HeldPoseSolver.Pose pose = HeldPoseSolver.solve(List.of(root, stacked));
+        check("pivot-offset bones give a dominant axis", pose != null);
+        if (pose == null) {
+            return;
+        }
+        // Y-long alignment is the identity, so each context rotation must represent
+        // the same matrix as the vanilla handheld Euler (compared as matrices, since
+        // the extracted triples differ at the y=-90 gimbal lock).
+        check("first-person right rotation matches vanilla Y-long pose",
+                sameRotation(rotationOf(pose.firstpersonRotationRight()), eulerXyzMatrix(0, -90, 25)));
+        check("third-person right rotation matches vanilla Y-long pose",
+                sameRotation(rotationOf(pose.thirdpersonRotationRight()), eulerXyzMatrix(0, -90, 55)));
+
+        // Cube far from origin via pivot only, on the X axis.
+        ModelBone offset = new ModelBone("side", "side", -1, 50, 0, 0, 0, 0, 0,
+                List.of(new ModelCube(-1, -6, -1, 1, 6, 1, 0, 0, null),
+                        new ModelCube(10, -1, -1, 12, 1, 1, 0, 0, null)),
+                ModelBone.Attachment.NONE);
+        HeldPoseSolver.Pose xPose = HeldPoseSolver.solve(List.of(offset));
+        // With the pivot: X 49..63 (14) vs Y -6..6 (12) -> X-long. Without it:
+        // X 2, Y 12 -> Y-long, so the assertion below fails on the old code.
+        check("pivot-only X offset flips the solved axis", xPose != null);
+        if (xPose == null) {
+            return;
+        }
+        // X-long alignment carries +X onto +Y: a +90-degree rotation about Z.
+        check("X-long model composes vanilla rotation with Rz(+90)",
+                sameRotation(rotationOf(xPose.firstpersonRotationRight()),
+                        matMul(eulerXyzMatrix(0, -90, 25), eulerXyzMatrix(0, 0, 90))));
+    }
+
+    /**
+     * The procedural hurt flinch (rigs without an authored hurt clip): a
+     * half-sine of 12 degrees over 0.3 s, suppressed when an authored clip
+     * carries the reaction or the mob is dead.
+     */
+    private static void mobAnimatorHurtFlinch() {
+        MobAnimator animator = new MobAnimator(Map.of(), Map.of(), List.of(), List.of());
+        check("no flinch before a hit", animator.hurtFlinchDegrees() == 0.0f);
+        check("no clip means no authored hurt reaction", !animator.hasHurtClip());
+        animator.notifyHurt();
+        check("flinch starts at zero degrees", near(animator.hurtFlinchDegrees(), 0.0f));
+        animator.tick(0.15f, 0.0f);
+        check("flinch peaks mid-window", near(animator.hurtFlinchDegrees(), 12.0f));
+        animator.tick(0.15f, 0.0f);
+        check("flinch ends at 0.3s", animator.hurtFlinchDegrees() == 0.0f);
+        animator.tick(1.0f, 0.0f);
+        check("flinch stays zero after the window", animator.hurtFlinchDegrees() == 0.0f);
+
+        // An authored hurt clip owns the reaction: the procedural flinch reads
+        // zero for its whole window.
+        MobAnimator clipped = new MobAnimator(Map.of("hurt",
+                ModelAnimation.builder("hurt").lengthSeconds(0.5f).build()),
+                Map.of(), List.of(), List.of());
+        check("authored hurt clip binds", clipped.hasHurtClip());
+        clipped.notifyHurt();
+        clipped.tick(0.15f, 0.0f);
+        check("authored hurt clip disables the flinch", clipped.hurtFlinchDegrees() == 0.0f);
+
+        // A dead mob never flinches.
+        MobAnimator corpse = new MobAnimator(Map.of(), Map.of(), List.of(), List.of());
+        corpse.markDead();
+        corpse.notifyHurt();
+        corpse.tick(0.15f, 0.0f);
+        check("dead mobs do not flinch", corpse.hurtFlinchDegrees() == 0.0f);
+    }
+
+    /**
+     * Solver geometry beyond the pivot rule: degenerate inputs, the grip
+     * translation anchor, inflate and diagonal axes.
+     */
+    private static void heldPoseSolverGeometry() {
+        check("empty model solves nothing", HeldPoseSolver.solve(List.of()) == null);
+
+        ModelCube cube = new ModelCube(-1, -1, -1, 1, 1, 1, 0, 0, null);
+        ModelBone cubeBone = new ModelBone("cube", "cube", -1, 0, 0, 0, 0, 0, 0,
+                List.of(cube), ModelBone.Attachment.NONE);
+        check("uniform cube has no dominant axis",
+                HeldPoseSolver.solve(List.of(cubeBone)) == null);
+
+        // A Y-long blade centred on the origin: the alignment is the identity,
+        // so the rotation is the vanilla handheld triple and the translation
+        // must place the solved grip (0, 7.8, 0) at the vanilla anchor:
+        // t = anchor - R_hand * (scale * grip), scale 0.68 first / 0.85 third.
+        ModelCube blade = new ModelCube(-0.5f, -6, -0.5f, 0.5f, 6, 0.5f, 0, 0, null);
+        ModelBone bladeBone = new ModelBone("blade", "blade", -1, 0, 0, 0, 0, 0, 0,
+                List.of(blade), ModelBone.Attachment.NONE);
+        HeldPoseSolver.Pose pose = HeldPoseSolver.solve(List.of(bladeBone));
+        check("Y-long blade solves", pose != null);
+        if (pose == null) {
+            return;
+        }
+        float[] grip = {0.0f, 7.8f, 0.0f};
+        check("Y-long first-person rotation is the vanilla handheld triple",
+                sameRotation(rotationOf(pose.firstpersonRotationRight()), eulerXyzMatrix(0, -90, 25)));
+        float[] rotatedFp = apply(eulerXyzMatrix(0, -90, 25), scaleVec(grip, 0.68f));
+        check("Y-long first-person translation anchors the grip",
+                near(pose.firstpersonTranslationRight(), firstpersonAnchor(), neg(rotatedFp), 1.0e-2f));
+        check("Y-long third-person rotation is the vanilla handheld triple",
+                sameRotation(rotationOf(pose.thirdpersonRotationRight()), eulerXyzMatrix(0, -90, 55)));
+        float[] rotatedTp = apply(eulerXyzMatrix(0, -90, 55), scaleVec(grip, 0.85f));
+        check("Y-long third-person translation anchors the grip",
+                near(pose.thirdpersonTranslationRight(), thirdpersonAnchor(), neg(rotatedTp), 1.0e-2f));
+        check("left hand mirrors the right",
+                near(pose.firstpersonRotationLeft()[1], -pose.firstpersonRotationRight()[1])
+                        && near(pose.firstpersonRotationLeft()[2], -pose.firstpersonRotationRight()[2])
+                        && java.util.Arrays.equals(pose.firstpersonTranslationLeft(),
+                                pose.firstpersonTranslationRight()));
+
+        // Inflate that erases the dominance (Y 56 vs X/Z 45 > 0.8 * 56) cancels.
+        ModelCube fat = new ModelCube(-0.5f, -6, -0.5f, 0.5f, 6, 0.5f, 22, 0, null);
+        ModelBone fatBone = new ModelBone("fat", "fat", -1, 0, 0, 0, 0, 0, 0,
+                List.of(fat), ModelBone.Attachment.NONE);
+        check("inflate that erases dominance cancels the pose",
+                HeldPoseSolver.solve(List.of(fatBone)) == null);
+
+        // A staircase of cubes along the XY diagonal: the corner covariance has
+        // a strong xy term, the long axis is (1,1,0)/sqrt(2), and the solved
+        // rotation must carry it onto the same line the vanilla pose gives +Y
+        // (parallel, either sign, since the axis sign is free).
+        List<ModelCube> steps = new ArrayList<>();
+        for (int k = 0; k < 7; k++) {
+            steps.add(new ModelCube(2 * k, 2 * k, 0, 2 * k + 1, 2 * k + 1, 1, 0, 0, null));
+        }
+        ModelBone diag = new ModelBone("diag", "diag", -1, 0, 0, 0, 0, 0, 0,
+                steps, ModelBone.Attachment.NONE);
+        HeldPoseSolver.Pose dPose = HeldPoseSolver.solve(List.of(diag));
+        check("diagonal model solves", dPose != null);
+        if (dPose == null) {
+            return;
+        }
+        float unit = (float) (1.0 / Math.sqrt(2.0));
+        float[] carried = apply(rotationOf(dPose.firstpersonRotationRight()),
+                new float[]{unit, unit, 0.0f});
+        float[] want = apply(eulerXyzMatrix(0, -90, 25), new float[]{0, 1, 0});
+        check("diagonal model lands on the vanilla Y axis",
+                parallel(carried, want, 2.0e-2f));
+    }
+
+    /** BbClipBaker fills the hand contexts from geometry only when none are authored. */
+    private static void bakerAutoHeldPose() {
+        ModelCube blade = new ModelCube(-0.5f, -6, -0.5f, 0.5f, 6, 0.5f, 0, 0, null);
+        ModelBone bone = new ModelBone("blade", "blade", -1, 0, 0, 0, 0, 0, 0,
+                List.of(blade), ModelBone.Attachment.NONE);
+        ModelData model = new ModelData("blade", 32, 32, List.of(bone),
+                List.of(new ModelTexture("skin", 32, 32, PngUtil.neutralPlaceholder(32, 32), true)),
+                Map.of(), List.of());
+
+        BbClipBaker.Result unauthored = BbClipBaker.rest(model,
+                new BbClipBaker.Style(new JsonObject(), "skin", false));
+        check("unauthored bake emits one model", unauthored.models().size() == 1);
+        if (unauthored.models().isEmpty()) {
+            return;
+        }
+        JsonObject display = unauthored.models().get(0).getAsJsonObject("display");
+        check("auto pose fills first-person right",
+                display != null && display.getAsJsonObject("firstperson_righthand") != null);
+        check("auto pose fills third-person right",
+                display != null && display.getAsJsonObject("thirdperson_righthand") != null);
+        boolean reported = false;
+        for (String issue : unauthored.issues()) {
+            reported |= issue.contains("held pose was derived");
+        }
+        check("auto pose is reported as an issue", reported);
+
+        JsonObject authored = new JsonObject();
+        authored.add("firstperson_righthand", new JsonObject());
+        BbClipBaker.Result authoredResult = BbClipBaker.rest(model,
+                new BbClipBaker.Style(authored, "skin", false));
+        JsonObject authoredDisplay = authoredResult.models().isEmpty()
+                ? null : authoredResult.models().get(0).getAsJsonObject("display");
+        check("an authored context cancels the auto pose",
+                authoredDisplay != null && authoredDisplay.getAsJsonObject("firstperson_lefthand") == null);
+        boolean reportedAuthored = false;
+        for (String issue : authoredResult.issues()) {
+            reportedAuthored |= issue.contains("held pose was derived");
+        }
+        check("no derivation issue when authored", !reportedAuthored);
+    }
+
+    private static float[] firstpersonAnchor() {
+        return new float[]{1.13f, 3.2f, 1.13f};
+    }
+
+    private static float[] thirdpersonAnchor() {
+        return new float[]{0.0f, 4.0f, 0.5f};
+    }
+
+    private static float[] scaleVec(float[] v, float s) {
+        return new float[]{v[0] * s, v[1] * s, v[2] * s};
+    }
+
+    private static float[] neg(float[] v) {
+        return new float[]{-v[0], -v[1], -v[2]};
+    }
+
+    private static float[] apply(float[] matrix, float[] point) {
+        return new float[]{
+                matrix[0] * point[0] + matrix[1] * point[1] + matrix[2] * point[2],
+                matrix[3] * point[0] + matrix[4] * point[1] + matrix[5] * point[2],
+                matrix[6] * point[0] + matrix[7] * point[1] + matrix[8] * point[2]};
+    }
+
+    /** got ~= ±want: parallel up to a global sign (the axis sign is free). */
+    private static boolean parallel(float[] got, float[] want, float tolerance) {
+        float dot = got[0] * want[0] + got[1] * want[1] + got[2] * want[2];
+        float s = dot < 0 ? -1.0f : 1.0f;
+        return near(new float[]{got[0] * s, got[1] * s, got[2] * s}, want,
+                new float[]{0, 0, 0}, tolerance);
+    }
+
+    private static boolean near(float[] got, float[] want, float[] offset, float tolerance) {
+        for (int i = 0; i < 3; i++) {
+            if (Math.abs(got[i] - (want[i] + offset[i])) > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static float[] rotationOf(float[] triple) {
+        return eulerXyzMatrix(triple[0], triple[1], triple[2]);
+    }
+
+    private static float[] matMul(float[] a, float[] b) {
+        float[] out = new float[9];
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                out[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+            }
+        }
+        return out;
+    }
+
+    /** R = Rx(x)·Ry(y)·Rz(z), the solver's Euler convention (HeldPoseSolver.eulerXYZ). */
+    private static float[] eulerXyzMatrix(float x, float y, float z) {
+        float cx = (float) Math.cos(Math.toRadians(x));
+        float sx = (float) Math.sin(Math.toRadians(x));
+        float cy = (float) Math.cos(Math.toRadians(y));
+        float sy = (float) Math.sin(Math.toRadians(y));
+        float cz = (float) Math.cos(Math.toRadians(z));
+        float sz = (float) Math.sin(Math.toRadians(z));
+        // Ry·Rz then Rx·(that), row-major 3x3.
+        return new float[]{
+                cy * cz, -cy * sz, sy,
+                cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy,
+                sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy};
+    }
+
+    private static boolean sameRotation(float[] a, float[] b) {
+        for (int i = 0; i < 9; i++) {
+            if (Math.abs(a[i] - b[i]) > 1.0e-2f) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void check(String name, boolean condition) {

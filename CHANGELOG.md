@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### HeldPoseSolver: diagonal geometry mis-solved (PCA fixes)
+
+- `eigenVectors` accumulated the corner covariance only in the upper triangle
+  (`a[1]=xy`, `a[2]=xz`, `a[5]=yz`), but the Jacobi rotations read the full
+  matrix, so every `yx`/`zx`/`zy` entry stayed 0. Correlated geometry — guns,
+  staircases, anything diagonal — collapsed to a near-diagonal covariance and
+  the long axis came out along a coordinate axis. The covariance is now
+  mirrored before iterating.
+- The decomposition returned rows of the accumulated rotation matrix instead
+  of its columns. Jacobi eigenvectors are columns; rows are perpendicular to
+  them for any real rotation, invisible only while `v` stayed near-identity.
+  Axes now read from the columns.
+- Found by the new `heldPoseSolverGeometry` checks (staircase model). Existing
+  axis-aligned poses are unchanged in value; the pivot regression still passes.
+
+### Documentation accuracy pass
+
+- Docs now match the code: the render-mode vocabulary includes the bones
+  variants (`pack_bones`, `hybrid_bones`) wherever it was listed, the
+  `PluginContext` accessor summary in the developer API covers every current
+  service, and the embedded-texture design note reflects that base64 texture
+  materialization and stem-fallback resolution shipped.
+
+### Rigged mobs flinch without an authored hurt clip
+
+- A mob with no `hurt` clip used to give no rig feedback beyond the particle
+  burst; now the animator's `notifyHurt()` always restarts the flinch clock and
+  `MobAnimator.hurtFlinchDegrees()` derives a procedural recoil (a smooth ~12°
+  root-bone tilt back and return over 0.3 s, plus a small whole-rig lift). An
+  authored `hurt` clip still takes over as soon as it plays — the procedural
+  flinch reads zero while a clip carries the reaction.
+
+### Shadow plates sit on the ground, not at the mob's spawn height
+
+- The generated ground-shadow plate was posed at the base entity's tracked
+  height, so on slopes and stairs it hung in the air or sank into the block.
+  `poseShadow` now drops the plate onto the first solid ground under the mob
+  via the world heightmap (`getHighestBlockAt`), cached per block column and
+  re-checked when the mob climbs; over air it holds the last ground the mob
+  stood on.
+
+### Display-less sources get a solved held pose
+
+- `HeldPoseSolver` derives the in-hand pose for any display-less model from
+  its own vertex data: a PCA of the cube corners finds the long axis
+  (barrel/blade/shaft) regardless of how the model was oriented in
+  Blockbench, one alignment rotation carries that axis onto +Y, and the
+  translation is solved so the derived grip point (the axis end nearest the
+  model origin, raised 15% of the axis length) lands where the vanilla
+  `handheld` pose expects the grip — separately for first- and third-person,
+  with mirrored left-hand contexts. Cubes are read in model space (cube plus
+  its bone's pivot), so multi-bone models with off-origin pivots are analysed
+  correctly. Authored hand contexts still win outright,
+  near-cubic models are left alone, and every applied pose is reported as a
+  bake issue. See design rule 3 in
+  `docs/design/blockbench-item-animation-design.md`.
+
 ### Geometry-facing comparison was inverted (bake v6)
 
 - In-game result of bake v5: every no-display single-model gun

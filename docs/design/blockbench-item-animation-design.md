@@ -90,8 +90,25 @@ only — the pack itself is always compiled once, for the server.
    `pack.held-yaw-overrides` entry is the only way to tune an authored gun
    (for a mirrored source). Author the pose in Blockbench's display settings
    and it reaches the hand untouched.
-3. **Never unsort overrides.** Any new writer touching `overrides` must merge
+3. **Held pose is solved from geometry, not defaulted.** For a display-less
+   source, `HeldPoseSolver` derives the pose for all four hand contexts from
+   the model's own vertex data — so it works for any model, not just
+   axis-aligned ones. A principal-component analysis of the cube corners
+   finds the item's long axis (barrel, blade, shaft) and its thickness; one
+   alignment rotation carries that axis onto +Y (where vanilla's `handheld`
+   defaults expect it), the vanilla per-context rotation is composed ahead of
+   it, and the translation is solved so the derived grip point — the end of
+   the long axis nearest the model origin, raised 15% of its length along it —
+   lands exactly where the vanilla pose puts the grip. Left-hand contexts
+   mirror the vanilla convention (Y and Z Euler negated). Two guards keep the
+   solve honest: any authored hand context on the source cancels the whole
+   pass (display data always wins — this refines, never overrides, rule 2),
+   and a model whose shortest and longest spreads are within 20% of each other
+   (a cube — no dominant axis) is left alone. Every applied pose is reported
+   as a bake issue, so an author can see it happened and replace it with a
+   hand-tuned display block.
+4. **Never unsort overrides.** Any new writer touching `overrides` must merge
    into the existing ascending (custom_model_data, cooldown) order.
-4. **One compile, many clients.** Version differences are handled at the
+5. **One compile, many clients.** Version differences are handled at the
    guard/gate level (`ModelGeometryGuard`, `ViaCompatProbe`), never by
    compiling a second pack.

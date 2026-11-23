@@ -68,7 +68,6 @@ public final class BbClipBaker {
             "firstperson_righthand", "firstperson_lefthand",
             "thirdperson_righthand", "thirdperson_lefthand"
     };
-
     private static final float CENTRE = 8.0f;
     private static final float MAX_ELEMENT_ANGLE = 45.0f;
     private static final String[] FACE_NAMES = {"north", "east", "south", "west", "up", "down"};
@@ -281,6 +280,7 @@ public final class BbClipBaker {
         }
         root.add("elements", elements);
         JsonObject displayJson = display(style, bones, fold, deltas, model.sourceName(), issues, warned);
+        autoHeldPose(root, displayJson, model.sourceName(), bones, issues);
         fitWindow(root, displayJson, model.sourceName(), issues);
         root.add("display", displayJson);
         if (style.frontLight()) {
@@ -292,6 +292,48 @@ public final class BbClipBaker {
     // ------------------------------------------------------------------
     // Window fitting
     // ------------------------------------------------------------------
+
+    /**
+     * Fills the four hand contexts from the model's own geometry when the
+     * source authors none of them — see {@link HeldPoseSolver} for the
+     * derivation. The applied pose is reported as an issue so an author can
+     * see it happened and replace it with a hand-tuned display block; an
+     * authored hand context on any of the four cancels the pass outright
+     * (display data always wins).
+     */
+    private static void autoHeldPose(JsonObject root, JsonObject display, String sourceName,
+                                     List<ModelBone> bones, List<String> issues) {
+        for (String context : HELD_CONTEXTS) {
+            if (object(display, context) != null) {
+                return;
+            }
+        }
+        HeldPoseSolver.Pose pose = HeldPoseSolver.solve(bones);
+        if (pose == null) {
+            return;
+        }
+        setHandContext(display, "firstperson_righthand",
+                pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(), 0.68f);
+        setHandContext(display, "firstperson_lefthand",
+                pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(), 0.68f);
+        setHandContext(display, "thirdperson_righthand",
+                pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(), 0.85f);
+        setHandContext(display, "thirdperson_lefthand",
+                pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(), 0.85f);
+        issues.add(sourceName + ": no hand display contexts were authored; a held"
+                + " pose was derived from the model's geometry (principal-axis grip"
+                + " alignment). Author a display block to replace it.");
+    }
+
+    /** Writes one hand context in the vanilla {rotation, translation, scale} shape. */
+    private static void setHandContext(JsonObject display, String context,
+                                       float[] rotation, float[] translation, float scale) {
+        JsonObject transform = new JsonObject();
+        addPair(transform, "rotation", rotation);
+        addPair(transform, "translation", translation);
+        addPair(transform, "scale", new float[]{scale, scale, scale});
+        display.add(context, transform);
+    }
 
     /** Every display context a vanilla item model carries. */
     private static final String[] DISPLAY_CONTEXTS = {

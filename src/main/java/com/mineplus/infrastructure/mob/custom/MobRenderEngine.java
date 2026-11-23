@@ -44,6 +44,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -120,6 +121,8 @@ public final class MobRenderEngine {
     private static final int HURT_REVEAL_TICKS = 8;
     /** Pose passes between two hurt particle bursts of the same mob. */
     private static final int HURT_BURST_COOLDOWN = 4;
+    /** How far the whole rig rises at the peak of the procedural hurt flinch. */
+    private static final float FLINCH_LIFT_BLOCKS = 0.08f;
     /** Ticks between ambient-sound opportunities; a random 1-in-N of those actually plays. */
     private static final int AMBIENT_CADENCE_TICKS = 100;
     /** One ambient opportunity in this many actually vocalizes. */
@@ -810,13 +813,20 @@ public final class MobRenderEngine {
         session.leadZ = velZ;
 
         session.animator.tick(TICK_SECONDS * elapsedTicks, speed);
+        // A rig with no authored hurt clip still answers a hit: the root bones
+        // recoil for a fraction of a second and the whole rig lifts a little,
+        // so the mob visibly flinches. An authored clip takes over as soon as
+        // the playhead leaves the flinch window (the flinch reads zero).
+        float flinch = session.animator.hurtFlinchDegrees();
+        float flinchLift = flinch == 0.0f ? 0.0f
+                : Math.abs((float) Math.sin(Math.toRadians(flinch))) * FLINCH_LIFT_BLOCKS;
         if (!session.hasRig) {
             return;
         }
         double leadX = location.getX() + session.leadX;
-        double leadY = location.getY() + session.leadY;
+        double leadY = location.getY() + session.leadY + flinchLift;
         double leadZ = location.getZ() + session.leadZ;
-        poseShadow(session, leadX, leadY, leadZ, interpolation);
+        poseShadow(session, leadX, location.getY() + session.leadY, leadZ, interpolation);
         if (session.generic) {
             poseGenericCube(session, location, interpolation);
             return;
@@ -861,6 +871,11 @@ public final class MobRenderEngine {
             if (hasHead && i == session.headBone) {
                 rx += headPitch;
                 ry += headYaw;
+            }
+            if (flinch != 0.0f && session.parent[i] < 0) {
+                // Root bones tilt back around the rig frame's X axis; the pose
+                // pass runs again next tick, so the recoil eases out on its own.
+                rx += flinch;
             }
             BoneTransformMath.localMatrix(relX, relY, relZ, rx, ry, rz, boneScale,
                     session.local[i], session.scratchQuaternion);
@@ -955,8 +970,26 @@ public final class MobRenderEngine {
         }
         session.scratchMatrix.identity();
         session.scratchMatrix.scale(session.shadowDiameter);
-        poseSlot(session, session.shadow, session.entity.getWorld(), x,
-                y + 0.03, z, interpolation);
+        // The plate is spawned at the base entity's eye line and only ever told
+        // where the mob is, so on a slope or a stair it hangs in the air or
+        // sinks into the block. Dropping the plate onto the first solid block
+        // below the mob's feet (via the world's own heightmap, so the query is
+        // one call and never loads chunks) makes it sit on the ground the way
+        // the vanilla shadow does. When the mob is over air the last known
+        // ground keeps showing until it lands again, instead of the plate
+        // falling into the void or jumping to bedrock.
+        World world = session.entity.getWorld();
+        Location feet = session.entity.getLocation();
+        if (!world.equals(session.groundWorld) || feet.getBlockX() != session.groundX
+                || feet.getBlockZ() != session.groundZ
+                || session.groundY > feet.getY() + 0.01) {
+            session.groundWorld = world;
+            session.groundX = feet.getBlockX();
+            session.groundZ = feet.getBlockZ();
+            Block highest = world.getHighestBlockAt(session.groundX, session.groundZ);
+            session.groundY = highest.getY() + 1.0;
+        }
+        poseSlot(session, session.shadow, world, x, session.groundY + 0.03, z, interpolation);
     }
 
     /** Positions the debug markers at the bone pivots (reuses the tick's matrices). */
@@ -1546,6 +1579,11 @@ public final class MobRenderEngine {
         boolean baseHidden;
         /** The pose pass this rig last pushed; drives the mid-range cadence. */
         long lastPosePass;
+        /** The ground level the shadow plate last sat on (cached per block column). */
+        World groundWorld;
+        int groundX = Integer.MIN_VALUE;
+        int groundZ = Integer.MIN_VALUE;
+        double groundY;
 
         double lastX;
         double lastY;
