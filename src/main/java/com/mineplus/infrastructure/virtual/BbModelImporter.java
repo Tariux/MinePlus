@@ -80,6 +80,8 @@ public class BbModelImporter {
      * reports) resolves them with no new seams.
      */
     private static final ThreadLocal<Map<String, byte[]>> EMBEDDED_TEXTURES = new ThreadLocal<>();
+    /** {@code mineplus} template metadata captured by the most recent streamed parse. */
+    private static final ThreadLocal<MineplusTemplate> LAST_TEMPLATE = new ThreadLocal<>();
 
     /**
      * Decodes each embedded texture source and writes it as
@@ -127,11 +129,17 @@ public class BbModelImporter {
 
     public static VirtualModel parse(String name, Reader reader, Logger logger) {
         try {
+            LAST_TEMPLATE.remove();
             VirtualModel model = parseStreamed(name, reader);
             EMBEDDED_TEXTURES.remove(); // file-less parse: nothing to materialize
+            MineplusTemplate template = LAST_TEMPLATE.get();
+            if (template != null && logger != null) {
+                logger.info("Imported " + template.describe() + " — model '" + name + "'.");
+            }
             return model;
         } catch (Exception exception) {
             EMBEDDED_TEXTURES.remove();
+            LAST_TEMPLATE.remove();
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
             } else {
@@ -171,6 +179,7 @@ public class BbModelImporter {
                 case "meta" -> modelFormat = parseMeta(json);
                 case "display" -> display = ModelDisplay.fromJson(json);
                 case "animations" -> parseAnimations(json, rawAnimations);
+                case "mineplus" -> LAST_TEMPLATE.set(parseMineplusBlock(json));
                 default -> json.skipValue();
             }
         }
@@ -333,6 +342,34 @@ public class BbModelImporter {
 
     /** Decoded-byte ceiling for one embedded texture (a 4096x4096 PNG fits comfortably). */
     private static final int MAX_EMBEDDED_TEXTURE_BYTES = 8 * 1024 * 1024;
+
+    /** Reads the top-level {@code mineplus} template-stamp block (all fields optional). */
+    private static MineplusTemplate parseMineplusBlock(JsonReader json) throws Exception {
+        Integer format = null;
+        String plugin = null;
+        String template = null;
+        String kind = null;
+        String title = null;
+        json.beginObject();
+        while (json.hasNext()) {
+            switch (json.nextName()) {
+                case "format" -> format = json.nextInt();
+                case "plugin" -> plugin = nextStringOrNull(json);
+                case "template" -> template = nextStringOrNull(json);
+                case "kind" -> kind = nextStringOrNull(json);
+                case "title" -> title = nextStringOrNull(json);
+                default -> json.skipValue();
+            }
+        }
+        json.endObject();
+        return MineplusTemplate.of(format, plugin, template, kind, title);
+    }
+
+    /** The template stamp captured from the most recently parsed model, or null. */
+    public static MineplusTemplate lastTemplate() {
+        MineplusTemplate template = LAST_TEMPLATE.get();
+        return template;
+    }
 
     private static void parseTextures(JsonReader json, TextureLookup lookup, Map<String, byte[]> embedded) throws Exception {
         lookup.beginParse();

@@ -1,19 +1,36 @@
-/* Mineplus Generic Display — Blockbench plugin v2.
+/* Mineplus Generic Display — Blockbench plugin v3.1.
  *
  * Tools (Tools menu, all logged):
- *   - Mineplus Display Editor     edit rotation/translation/scale per context
- *   - Mineplus: Copy Display      copy the display block as JSON
- *   - Mineplus: Validate Display  report out-of-range/NaN values before save
- *   - Mineplus: Save as .mpmodel  save the open model in the Mineplus format
- *   - Mineplus: Show Log          in-app log panel
+ *   - Mineplus Display Editor        edit rotation/translation/scale per context
+ *   - Mineplus: Copy Display         copy the display block as JSON
+ *   - Mineplus: Validate Display     display-only validation
+ *   - Mineplus: Validate Model       full Mine Plus compatibility check
+ *                                    (budgets, 22.5° angles, textures, animations)
+ *   - Mineplus: Template Settings    stamp the model as a Mine Plus template
+ *                                    (the top-level "mineplus" metadata block)
+ *   - Mineplus: Check Template       is this file detected as a Mine Plus template?
+ *   - Mineplus: Save as .mpmodel     save in the Mineplus format
+ *   - Mineplus: Export as .bbmodel   save a plain bbmodel (also fully loadable)
+ *   - Mineplus: Open Generic / Java Item Model
+ *                                    start a vanilla Java Item project or open
+ *                                    a .json/.bbmodel/.mpmodel file
+ *   - Mineplus: Fix Duplicates       remove accidentally duplicated cubes/groups
+ *                                    (merge/import) and rename same-name elements
+ *   - Mineplus: Model Report         cubes/bones/textures/animations summary
+ *   - Mineplus: Show Log             in-app log panel
  *
- * Format: registers the `mineplus_model` format (extension .mpmodel). An
- * .mpmodel file is a standard bbmodel JSON plus an optional top-level
- * "mineplus" metadata block, so the Mineplus server plugin parses it with the
- * same streaming importer it uses for .bbmodel.
+ * Formats: registers the `mineplus_model` format (.mpmodel), bound to the
+ * built-in project codec (Codecs.project) so .mpmodel saves, loads and
+ * re-saves exactly like a .bbmodel — a full model, no conversion. Plain
+ * .bbmodel files open natively and can be stamped with Template Settings;
+ * .mpmodel files carry the stamp from the start. The stamp travels through a
+ * registered ModelProject property (`mineplus`), so Blockbench itself writes
+ * and reads it on every save/load of either format. The Mine Plus server
+ * plugin loads both, with display and animations.
  *
- * Every step logs through [Mineplus] in the console (Console > Developer
- * Tools) and into the in-app log panel (Tools > Mineplus: Show Log).
+ * Duplication debug trail: the merge_project and edit_texture events log
+ * cube/bone counts, so a log from a session that showed the "changed a texture
+ * and cubes/groups were copied" bug pinpoints the exact step.
  */
 (function () {
   'use strict';
@@ -28,8 +45,17 @@
   var LIMITS = { rotation: 180, translation: 80, scale: 100 };
   var SCALE_MIN = 0.01;
   var MP_FORMAT_ID = 'mineplus_model';
+  // Soft budgets enforced server-side by ModelAssetValidator (pack compile).
+  var BUDGETS = {
+    cubes: 512, bones: 128, animations: 64,
+    textureEdge: 2048, sourceBytes: 2 * 1024 * 1024
+  };
+  // Clients below 1.21.6 reject whole item models whose element rotations are
+  // off the 22.5° grid or beyond ±45° (see .mlai/DECISIONS.md).
+  var ANGLE_STEP = 22.5;
+  var ANGLE_MAX = 45;
 
-  var state = { actions: [], hooks: [], logLines: [] };
+  var state = { actions: [], hooks: [], logLines: [], property: null, addedExtension: false };
 
   /* ------------------------------------------------------------------ log */
 
@@ -68,6 +94,13 @@
     return model.display;
   }
 
+  function templateBlock() {
+    var model = currentModel();
+    if (!model) return null;
+    if (!model.mineplus || typeof model.mineplus !== 'object') model.mineplus = {};
+    return model.mineplus;
+  }
+
   function clamp(value, bound) {
     if (typeof value !== 'number' || isNaN(value)) return 0;
     return Math.max(-bound, Math.min(bound, value));
@@ -98,6 +131,8 @@
     if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
   }
 
+  /* ----------------------------------------------------------- validation */
+
   function validateDisplay() {
     var block = displayBlock();
     var problems = [];
@@ -112,7 +147,8 @@
             problems.push(context + '.' + field + '[' + axis + '] is NaN/missing');
           } else if (Math.abs(component) > LIMITS[field]) {
             problems.push(context + '.' + field + '[' + axis + '] = ' + component
-                + ' exceeds ±' + LIMITS[field]);
+                + ' exceeds ±' + LIMITS[field]
+                + ' (the bake clamps it, author it inside the range)');
           } else if (field === 'scale' && Math.abs(component) < SCALE_MIN) {
             problems.push(context + '.scale[' + axis + '] = ' + component
                 + ' below ' + SCALE_MIN + ' (would collapse the model)');
@@ -121,11 +157,197 @@
       });
     });
     if (problems.length) {
-      warn('validation found ' + problems.length + ' problem(s): ' + problems.join('; '));
+      warn('display validation found ' + problems.length + ' problem(s): ' + problems.join('; '));
     } else {
-      log('validation clean (' + Object.keys(block).length + ' context(s))');
+      log('display validation clean (' + Object.keys(block).length + ' context(s))');
     }
     return problems;
+  }
+
+  // Elements rotated on more than one axis, or beyond ±45°, cannot survive the
+  // 22.5° snap applied for clients below 1.21.6 (ModelGeometryGuard).
+  function snapRisk(rotation) {
+    if (!Array.isArray(rotation)) return null;
+    var axes = rotation.filter(function (a) { return a !== 0; }).length;
+    if (axes > 1) return 'rotated on more than one axis';
+    if (rotation.some(function (a) { return Math.abs(a) > ANGLE_MAX; })) {
+      return 'rotated beyond ±' + ANGLE_MAX + '°';
+    }
+    var off = rotation.some(function (a) { return a !== 0 && (a / ANGLE_STEP) % 1 !== 0; });
+    if (off) return 'off the ' + ANGLE_STEP + '° grid';
+    return null;
+  }
+
+  function cubeList() {
+    var model = currentModel();
+    if (!model || !model.elements) return [];
+    return model.elements.filter(function (el) {
+      return typeof Cube === 'function' ? el instanceof Cube : true;
+    });
+  }
+
+  function boneList() {
+    var model = currentModel();
+    if (!model || !model.groups) return [];
+    return model.groups.filter(function (g) { return !!g.export; });
+  }
+
+  function validateModel() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return [];
+    }
+    log('validate model: starting full Mine Plus compatibility check');
+    var problems = validateDisplay();
+
+    var cubes = cubeList();
+    var bones = boneList();
+    if (cubes.length > BUDGETS.cubes) {
+      problems.push(cubes.length + ' cubes exceed the soft budget of '
+          + BUDGETS.cubes + ' (packets scale with cubes)');
+    }
+    if (bones.length > BUDGETS.bones) {
+      problems.push(bones.length + ' bones exceed the soft budget of ' + BUDGETS.bones);
+    }
+    var snapCases = 0;
+    cubes.forEach(function (cube) {
+      if (cube.rotation && snapRisk(cube.rotation)) snapCases++;
+    });
+    if (snapCases) {
+      problems.push(snapCases + ' cube(s) ' + snapRisk([90]) + '-class rotations'
+          + ' — off-grid or multi-axis angles are snapped to ' + ANGLE_STEP
+          + '° for clients below 1.21.6 (check any cube you want exact)');
+    }
+    (model.textures || []).forEach(function (tex) {
+      var w = tex.width || 0, h = tex.height || 0;
+      if (w > BUDGETS.textureEdge || h > BUDGETS.textureEdge) {
+        problems.push('texture "' + (tex.name || tex.id) + '" is ' + w + 'x' + h
+            + ' px; the soft budget edge is ' + BUDGETS.textureEdge + ' px');
+      }
+    });
+    var animations = model.animations ? Object.keys(model.animations) : [];
+    if (animations.length > BUDGETS.animations) {
+      problems.push(animations.length + ' animations exceed the soft budget of '
+          + BUDGETS.animations);
+    }
+    if (templateBlock() && !templateStampProblems().length) {
+      log('template stamp present and well-formed');
+    } else if (templateBlock() && templateStampProblems().length) {
+      problems = problems.concat(templateStampProblems());
+    } else {
+      problems.push('not stamped as a Mine Plus template — run "Mineplus: Template Settings"'
+          + ' so pack tools and the MCP server detect it');
+    }
+    if (problems.length) {
+      warn('model validation found ' + problems.length + ' problem(s): '
+          + problems.join('; '));
+      Blockbench.showQuickMessage(problems.length + ' problem(s) — see log');
+    } else {
+      log('model validation clean: fully matches the Mine Plus format');
+      Blockbench.showQuickMessage('Model fully matches the Mine Plus format');
+    }
+    return problems;
+  }
+
+  /* ---------------------------------------------------------- template */
+
+  function templateStampProblems() {
+    var stamp = templateBlock();
+    if (!stamp) return [];
+    var problems = [];
+    if (!stamp.template) {
+      problems.push('template stamp: "template" id is missing (e.g. "mineplus:guns/peacemaker")');
+    } else if (!/^[\w./-]+:[\w./-]+$/.test(stamp.template)) {
+      problems.push('template stamp: "' + stamp.template
+          + '" is not a namespaced id like "mineplus:guns/peacemaker"');
+    }
+    var kinds = ['item', 'block', 'mob', 'generic'];
+    if (!stamp.kind) {
+      problems.push('template stamp: "kind" is missing (one of ' + kinds.join(', ') + ')');
+    } else if (kinds.indexOf(stamp.kind) < 0) {
+      problems.push('template stamp: kind "' + stamp.kind + '" is not one of ' + kinds.join(', '));
+    }
+    return problems;
+  }
+
+  function templateSettings() {
+    if (!currentModel()) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var stamp = templateBlock();
+    var dialog = new Dialog({
+      title: 'Mineplus Template Settings',
+      id: 'mineplus_template_dialog',
+      form: {
+        template: {
+          label: 'Template id (namespaced)', type: 'text',
+          placeholder: 'mineplus:guns/peacemaker', value: stamp.template || ''
+        },
+        kind: {
+          label: 'Kind', type: 'select', value: stamp.kind || 'item',
+          options: { item: 'item', block: 'block', mob: 'mob', generic: 'generic' }
+        },
+        title: {
+          label: 'Human title', type: 'text',
+          placeholder: 'Peacemaker', value: stamp.title || ''
+        }
+      },
+      buttons: ['Apply', 'Clear stamp', 'Cancel'],
+      onButton: function (button) {
+        var form = dialog.form;
+        if (button === 1) {
+          var model = currentModel();
+          model.mineplus = {
+            format: 1,
+            plugin: PLUGIN_ID,
+            template: (form.template && form.template.value ? form.template.value : '').trim(),
+            kind: form.kind && form.kind.value ? form.kind.value : 'item',
+            title: (form.title && form.title.value ? form.title.value : '').trim()
+          };
+          if (model.mineplus.title === '') delete model.mineplus.title;
+          log('template stamp written: ' + JSON.stringify(model.mineplus));
+          var problems = templateStampProblems();
+          if (problems.length) {
+            warn(problems.join('; '));
+            Blockbench.showQuickMessage('Stamp saved with problem(s) — see log');
+          } else {
+            Blockbench.showQuickMessage('Mine Plus template stamped');
+          }
+        } else if (button === 2) {
+          var m = currentModel();
+          delete m.mineplus;
+          log('template stamp cleared');
+        }
+      }
+    });
+    dialog.show();
+  }
+
+  function checkTemplate() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var stamp = templateBlock();
+    if (!stamp || !stamp.template) {
+      log('check template: no well-formed "mineplus" block — this file will NOT'
+          + ' be detected as a Mine Plus template');
+      Blockbench.showQuickMessage('Not detected as a Mine Plus template — stamp it first');
+      return;
+    }
+    var problems = templateStampProblems();
+    log('check template: ' + JSON.stringify(stamp));
+    log('check template: ' + (problems.length
+        ? 'problems: ' + problems.join('; ')
+        : 'detectable: format v' + (stamp.format || 1) + ', id "' + stamp.template
+          + '", kind ' + stamp.kind + ' — the server plugin logs it on import and'
+          + ' the devtools MCP server reports it as a Mine Plus template'));
+    Blockbench.showQuickMessage(problems.length
+        ? 'Template stamp has problem(s) — see log'
+        : 'Detected as Mine Plus template "' + stamp.template + '"');
   }
 
   /* --------------------------------------------------------------- tools */
@@ -144,14 +366,26 @@
       Blockbench.showQuickMessage('Open or create a model first');
       return;
     }
+    var block = displayBlock();
+    var context = CONTEXTS.filter(function (c) { return block[c]; })[0] || CONTEXTS[0];
+    var entry = block[context] || {};
     var dialog = new Dialog({
       title: 'Mineplus Display Editor',
       id: 'mineplus_display_editor_dialog',
       form: {
-        context: { label: 'Context', type: 'select', options: CONTEXTS },
-        rotation: { label: 'Rotation XYZ (deg, ±180)', type: 'text', placeholder: '0, 0, 0' },
-        translation: { label: 'Translation XYZ (px, ±80)', type: 'text', placeholder: '0, 0, 0' },
-        scale: { label: 'Scale XYZ (0.01–100)', type: 'text', placeholder: '1, 1, 1' }
+        context: { label: 'Context', type: 'select', options: CONTEXTS, value: context },
+        rotation: {
+          label: 'Rotation XYZ (deg, ±180)', type: 'text',
+          placeholder: '0, 0, 0', value: entry.rotation ? entry.rotation.join(', ') : ''
+        },
+        translation: {
+          label: 'Translation XYZ (px, ±80)', type: 'text',
+          placeholder: '0, 0, 0', value: entry.translation ? entry.translation.join(', ') : ''
+        },
+        scale: {
+          label: 'Scale XYZ (0.01–100)', type: 'text',
+          placeholder: '1, 1, 1', value: entry.scale ? entry.scale.join(', ') : ''
+        }
       },
       buttons: ['Apply', 'Clear context', 'Cancel'],
       onButton: function (button) {
@@ -184,7 +418,7 @@
     });
   }
 
-  function saveAsMpmodel() {
+  function saveAs(saveFormat) {
     if (!currentModel()) {
       Blockbench.showQuickMessage('Open or create a model first');
       return;
@@ -193,20 +427,185 @@
     if (problems.length) {
       Blockbench.showQuickMessage(problems.length + ' display problem(s) — see log');
     }
+    var isMp = saveFormat === 'mpmodel';
     var path = Blockbench.pickPath({
       type: 'save',
-      name: (currentModel().name || 'model') + '.mpmodel',
-      filter: 'Mineplus Model (*.mpmodel)'
+      name: (currentModel().name || 'model') + '.' + saveFormat,
+      filter: isMp ? 'Mineplus Model (*.mpmodel)' : 'Blockbench Model (*.bbmodel)'
     });
     if (!path) {
-      log('.mpmodel save cancelled');
+      log('.' + saveFormat + ' save cancelled');
       return;
     }
-    currentModel().extension = 'mpmodel';
+    currentModel().extension = saveFormat;
     currentModel().saveFile = path;
     currentModel().saved = false;
     currentModel().export();
-    log('.mpmodel saved to ' + path + ' (with ' + problems.length + ' validation problem(s))');
+    log('.' + saveFormat + ' saved to ' + path
+        + ' (with ' + problems.length + ' display validation problem(s))');
+  }
+
+  /* -------------------------------------------------- generic/java models */
+
+  // Open a plain vanilla Java block/item model (or any bbmodel/mpmodel) and
+  // start a fresh Java Item project — both keep working inside Mine Plus,
+  // since the pack compiler reads authored display and cubes from either.
+  function openGenericModel() {
+    log('open generic/java-item: chooser shown');
+    new Dialog({
+      title: 'Mineplus: Open Generic / Java Item Model',
+      id: 'mineplus_open_generic_dialog',
+      lines: [
+        'Start a new Java Block/Item model project (vanilla format), or open'
+            + ' an existing .json (vanilla item/block model), .bbmodel or'
+            + ' .mpmodel file.<br><br>'
+            + 'Any model opened this way works with the Mine Plus plugin:'
+            + ' stamp it with Template Settings to mark it as a Mine Plus'
+            + ' template.'
+      ],
+      buttons: ['New Java Item model', 'Open model file…', 'Cancel'],
+      onButton: function (button) {
+        log('open-generic button ' + button);
+        if (button === 0) startJavaItemProject();
+        if (button === 1) pickAndOpenModel();
+      }
+    }).show();
+  }
+
+  function startJavaItemProject() {
+    var format = typeof Formats !== 'undefined' && Formats.java_block
+        ? Formats.java_block : null;
+    if (!format || typeof newProject !== 'function') {
+      warn('Java Block/Item format or newProject() missing in this build');
+      Blockbench.showQuickMessage('This Blockbench build has no Java Block/Item format');
+      return;
+    }
+    log('new project: Java Block/Item Model (vanilla generic format)');
+    format.select();
+    newProject(format);
+    var model = currentModel();
+    if (model && !model.mineplus) {
+      model.mineplus = {
+        template: 'mineplus-generic',
+        kind: 'java_item',
+        plugin: PLUGIN_ID,
+        format: 1
+      };
+      log('new Java Item project stamped as Mine Plus generic template');
+    }
+    Blockbench.showQuickMessage('New Java Item model — edit display, then save as .mpmodel');
+  }
+
+  function pickAndOpenModel() {
+    if (typeof loadModelFile !== 'function') {
+      warn('loadModelFile missing in this build; use File > Open model instead');
+      Blockbench.showQuickMessage('Use File > Open Model in this build');
+      return;
+    }
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.bbmodel,.mpmodel';
+    input.onchange = function () {
+      var file = input.files && input.files[0];
+      if (!file) {
+        log('open model file: cancelled');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        log('opening "' + file.name + '" (' + reader.result.length + ' chars)'
+            + ' through the matching Blockbench codec');
+        try {
+          loadModelFile({ content: reader.result, path: file.name, name: file.name }, {});
+        } catch (failure) {
+          warn('open failed: ' + (failure && failure.message));
+        }
+      };
+      reader.onerror = function () { warn('file read failed for ' + file.name); };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  /* ------------------------------------------------------- duplicate repair */
+
+  // Repair tool for accidentally duplicated cubes/groups (for example after a
+  // drag-drop import or a merge). It removes exact UUID duplicates and renames
+  // same-name elements instead of deleting anything unique — compatibility
+  // only, no structural changes.
+  function fixDuplicates() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var seen = {}, removedCubes = 0, removedBones = 0, renamed = 0;
+    var usedNames = {};
+    boneList().forEach(function (b) { usedNames[b.name] = true; });
+
+    cubeList().slice().forEach(function (cube) {
+      if (seen[cube.uuid]) {
+        cube.remove();
+        removedCubes++;
+        return;
+      }
+      seen[cube.uuid] = true;
+      if (usedNames[cube.name] && cube.name) {
+        var i = 2;
+        while (usedNames[cube.name + '.' + i]) i++;
+        cube.name = cube.name + '.' + i;
+        usedNames[cube.name] = true;
+        renamed++;
+      } else if (cube.name) {
+        usedNames[cube.name] = true;
+      }
+    });
+    seen = {};
+    boneList().slice().forEach(function (bone) {
+      if (seen[bone.uuid]) {
+        bone.remove();
+        removedBones++;
+        return;
+      }
+      seen[bone.uuid] = true;
+    });
+    log('duplicate repair: removed ' + removedCubes + ' duplicate cube(s), '
+        + removedBones + ' duplicate bone(s), renamed ' + renamed
+        + ' same-name element(s); '
+        + cubeList().length + ' cubes and ' + boneList().length
+        + ' bones remain');
+    Blockbench.showQuickMessage('Repair done — see log (undo with Ctrl+Z)');
+  }
+
+  function modelReport() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var cubes = cubeList();
+    var bones = boneList();
+    var textures = model.textures || [];
+    var animations = model.animations ? Object.keys(model.animations) : [];
+    var contexts = CONTEXTS.filter(function (c) { return displayBlock()[c]; });
+    var lines = [
+      'Cubes: ' + cubes.length + ' (budget ' + BUDGETS.cubes + ')',
+      'Bones: ' + bones.length + ' (budget ' + BUDGETS.bones + ')',
+      'Textures: ' + textures.length,
+      'Animations: ' + animations.length + ' (budget ' + BUDGETS.animations + ')'
+          + (animations.length ? ' — ' + animations.join(', ') : ''),
+      'Display contexts authored: ' + contexts.length
+          + (contexts.length ? ' — ' + contexts.join(', ') : ' (vanilla defaults apply)'),
+      'Template: ' + (templateBlock() && templateBlock().template
+          ? templateBlock().template + ' (' + templateBlock().kind + ')'
+          : 'not stamped')
+    ];
+    log('model report:\n  ' + lines.join('\n  '));
+    new Dialog({
+      title: 'Mineplus Model Report',
+      id: 'mineplus_report_dialog',
+      lines: [lines.map(function (l) { return l + '<br>'; }).join('')]
+    }).show();
   }
 
   /* -------------------------------------------------------------- format */
@@ -218,29 +617,27 @@
       return ModelFormat.all;
     }
     if (typeof Formats !== 'undefined' && Formats) {
-      return Object.keys(Formats).map(function (id) { return Formats[id]; });
+      return Object.keys(Formats).map(function (k) { return Formats[k]; });
     }
+    warn('no format registry found (ModelFormat.all and Formats both missing)');
     return [];
   }
 
   function registerFormat() {
-    if (typeof ModelFormat !== 'function') {
-      warn('ModelFormat constructor not available in this Blockbench build;'
-          + ' skipping .mpmodel format registration (display tools still work)');
-      return;
-    }
-    var existing = allFormats().find(function (f) { return f && f.id === MP_FORMAT_ID; });
-    if (existing) {
+    if (allFormats().some(function (f) { return f && f.id === MP_FORMAT_ID; })) {
       log('format ' + MP_FORMAT_ID + ' already registered; skipping');
       return;
     }
-    // An .mpmodel file is a bbmodel JSON plus our metadata block, so the
-    // server-side streaming importer parses it unchanged.
+    if (typeof ModelFormat !== 'function') {
+      warn('ModelFormat constructor missing in this Blockbench build;'
+          + ' .mpmodel registration skipped, display tools still work');
+      return;
+    }
     new ModelFormat({
       id: MP_FORMAT_ID,
       name: 'Mineplus Model',
-      category: 'minecraft',
-      description: 'Mineplus server plugin model: bbmodel JSON with an optional "mineplus" metadata block. Save with the .mpmodel extension.',
+      description: 'Mineplus template format — a standard bbmodel plus the'
+          + ' "mineplus" metadata block. Save with the .mpmodel extension.',
       extension: 'mpmodel',
       icon: 'icon-format_free',
       model_identifier: 'model',
@@ -251,7 +648,57 @@
       bone_rig: true,
       centered_grid: true
     });
-    log('format ' + MP_FORMAT_ID + ' registered (.mpmodel)');
+    // .mpmodel is a full bbmodel: let the built-in project codec compile and
+    // parse it. Without this the format has no codec and save/export breaks. Without this the format has no codec and save/export breaks.
+    if (typeof Codecs !== 'undefined' && Codecs.project && Codecs.project.load_filter) {
+      var fmt = allFormats().filter(function (f) { return f && f.id === MP_FORMAT_ID; })[0];
+      fmt.codec = Codecs.project;
+      fmt.animation_codec = Codecs.project.animation_codec;
+      var exts = Codecs.project.load_filter.extensions;
+      if (exts.indexOf('mpmodel') < 0) {
+        exts.push('mpmodel');
+        state.addedExtension = true;
+      }
+      log('format ' + MP_FORMAT_ID + ' registered (.mpmodel), bound to the'
+          + ' project codec (save/load via Codecs.project)');
+    } else {
+      log('format ' + MP_FORMAT_ID + ' registered (.mpmodel), but Codecs.project'
+          + ' is unavailable — the format has no codec in this build');
+    }
+  }
+
+  // Serialization: `mineplus` is a registered ModelProject property, so
+  // Blockbench itself writes it into every saved bbmodel/mpmodel on compile
+  // (bbmodel.js: Property.copy loop) and reads it back on load (merge loop).
+  // This replaces the old approach of pushing into `Codecs.project`, which is
+  // a single Codec object, not an array — that push never ran.
+  function registerCodec() {
+    if (typeof ModelProject === 'function' && typeof Property === 'function') {
+      ModelProject.properties = ModelProject.properties || {};
+      if (ModelProject.properties.mineplus) {
+        log('property ModelProject.mineplus already registered; skipping');
+      } else {
+        state.property = new Property(ModelProject, 'object', 'mineplus', {
+          exposed: false,
+          default: {}
+        });
+        log('property ModelProject.mineplus registered — the template stamp is'
+            + ' saved into .bbmodel and .mpmodel files and restored on load');
+      }
+    } else {
+      warn('ModelProject/Property missing in this build; the stamp is set on'
+          + ' the model but only "Template Settings" re-stamps after reload');
+    }
+    // Belt and braces: at the very end of compile the save_project event fires
+    // with the finished model object — drop empty stamps there.
+    hook('save_project', function (data) {
+      var model = data && data.model;
+      if (model && model.mineplus && !Object.keys(model.mineplus).length) {
+        delete model.mineplus;
+        log('save_project: removed empty mineplus block');
+      }
+    });
+    log('save_project hook registered (empty-stamp cleanup)');
   }
 
   /* --------------------------------------------------------------- hooks */
@@ -264,9 +711,30 @@
         warn('hook ' + event + ' threw: ' + (failure && failure.message));
       }
     };
-    Blockbench.on(event, wrapped);
+    try {
+      Blockbench.on(event, wrapped);
+    } catch (failure) {
+      warn('hook ' + event + ' could not register: ' + (failure && failure.message));
+      return;
+    }
     state.hooks.push({ event: event, handler: wrapped });
     log('hook ' + event + ' registered');
+  }
+
+  // After a load, surface the template stamp if the event fires with the raw
+  // model object (Blockbench versions differ; the file itself always keeps it).
+  function restoreStamp(data) {
+    var model = currentModel();
+    if (!model) return;
+    var stamp = data && data.mineplus ? data.mineplus
+        : (data && data.model && data.model.mineplus ? data.model.mineplus : null);
+    if (stamp && !model.mineplus) {
+      model.mineplus = stamp;
+      log('loaded template stamp: ' + JSON.stringify(stamp));
+    } else if (!model.mineplus) {
+      log('loaded a model without a template stamp (plain bbmodel or older save)'
+          + ' — use "Mineplus: Template Settings" to stamp it');
+    }
   }
 
   /* --------------------------------------------------------------- setup */
@@ -282,16 +750,17 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '2.0.1',
+    version: '3.1.0',
     min_version: '4.0.0',
-    tags: ['mineplus', 'display', 'minecraft', 'mpmodel'],
+    tags: ['mineplus', 'display', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v2.0.1)');
+      log('onload: starting (v3.1.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
       [
         ['format .mpmodel', registerFormat],
+        ['codec template stamp', registerCodec],
         ['action mineplus_display_editor', function () {
           registerAction('mineplus_display_editor', 'Mineplus Display Editor',
               'icon-configure', openEditor);
@@ -304,9 +773,37 @@
           registerAction('mineplus_validate_display', 'Mineplus: Validate Display',
               'icon-verified', function () { validateDisplay(); });
         }],
+        ['action mineplus_validate_model', function () {
+          registerAction('mineplus_validate_model', 'Mineplus: Validate Model',
+              'icon-verified_list', function () { validateModel(); });
+        }],
+        ['action mineplus_template_settings', function () {
+          registerAction('mineplus_template_settings', 'Mineplus: Template Settings',
+              'icon-bookmark', templateSettings);
+        }],
+        ['action mineplus_check_template', function () {
+          registerAction('mineplus_check_template', 'Mineplus: Check Template',
+              'icon-search', checkTemplate);
+        }],
         ['action mineplus_save_mpmodel', function () {
           registerAction('mineplus_save_mpmodel', 'Mineplus: Save as .mpmodel',
-              'icon-save', saveAsMpmodel);
+              'icon-save', function () { saveAs('mpmodel'); });
+        }],
+        ['action mineplus_export_bbmodel', function () {
+          registerAction('mineplus_export_bbmodel', 'Mineplus: Export as .bbmodel',
+              'icon-export', function () { saveAs('bbmodel'); });
+        }],
+        ['action mineplus_open_generic', function () {
+          registerAction('mineplus_open_generic', 'Mineplus: Open Generic / Java Item Model',
+              'icon-open', openGenericModel);
+        }],
+        ['action mineplus_fix_duplicates', function () {
+          registerAction('mineplus_fix_duplicates', 'Mineplus: Fix Duplicates',
+              'icon-clone', fixDuplicates);
+        }],
+        ['action mineplus_model_report', function () {
+          registerAction('mineplus_model_report', 'Mineplus: Model Report',
+              'icon-chart', modelReport);
         }],
         ['action mineplus_show_log', function () {
           registerAction('mineplus_show_log', 'Mineplus: Show Log',
@@ -332,6 +829,24 @@
             + '; validating display…');
         validateDisplay();
       });
+      // Debug trail for the reported "changing a texture duplicates cubes and
+      // groups" problem: both events log element counts, so the next log shows
+      // exactly which step introduces the copies.
+      hook('merge_project', function (data) {
+        var model = currentModel();
+        log('EVENT merge_project: model now has ' + cubeList().length + ' cube(s), '
+            + boneList().length + ' bone(s)'
+            + ' — if cubes were just duplicated, this merge is where it happened');
+      });
+      hook('edit_texture', function (data) {
+        var model = currentModel();
+        log('EVENT edit_texture: model now has ' + cubeList().length + ' cube(s), '
+            + boneList().length + ' bone(s)');
+      });
+      // Load events differ across versions; register both and restore the
+      // stamp from whichever fires with the raw model data.
+      hook('load_project', restoreStamp);
+      hook('project_loaded', restoreStamp);
       log('onload: all actions registered under Tools');
     },
     onunload: function () {
@@ -343,8 +858,26 @@
       state.hooks.forEach(function (h) {
         try { Blockbench.off(h.event, h.handler); } catch (e) { /* already gone */ }
       });
+      if (state.property) {
+        try {
+          if (ModelProject.properties && ModelProject.properties.mineplus) {
+            delete ModelProject.properties.mineplus;
+            log('property ModelProject.mineplus removed');
+          }
+        } catch (e) { /* best effort */ }
+      }
+      if (state.addedExtension && typeof Codecs !== 'undefined' && Codecs.project
+          && Codecs.project.load_filter && Codecs.project.load_filter.extensions) {
+        var index = Codecs.project.load_filter.extensions.indexOf('mpmodel');
+        if (index >= 0) {
+          Codecs.project.load_filter.extensions.splice(index, 1);
+          log('mpmodel extension removed from project codec');
+        }
+      }
       state.actions = [];
       state.hooks = [];
+      state.property = null;
+      state.addedExtension = false;
     },
     oninstall: function () { log('oninstall'); },
     onenabled: function () { log('onenabled'); },

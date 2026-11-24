@@ -21,6 +21,7 @@ import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.item.BbClipBaker;
 import com.mineplus.infrastructure.virtual.ModelDisplay;
+import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -59,6 +60,7 @@ public final class CustomMobPipelineTest {
         pivotAndNesting();
         bbmodelFixture();
         bbmodelFormat5Fixture();
+        mineplusTemplateStamp();
         emitterWindowFitting();
         mobAnimatorBaseLayer();
         mobAnimatorSlots();
@@ -283,6 +285,61 @@ public final class CustomMobPipelineTest {
         track.rotation().sample(0.75f, out);
         check("catmullrom segment", near(out[0], 5.625f));
         check("walk wrap", near(walk.wrap(1.25f), 0.25f));
+    }
+
+    /**
+     * The {@code mineplus} template-stamp block (written by the Blockbench
+     * plugin / devtools MCP server) is captured by {@link
+     * com.mineplus.infrastructure.virtual.BbModelImporter} and ignored by the
+     * mob-side {@link BbModelParser}; both paths must still parse a file that
+     * carries it.
+     */
+    private static void mineplusTemplateStamp() {
+        String pngBase64 = Base64.getEncoder().encodeToString(PngUtil.neutralPlaceholder(16, 16));
+        String stamp = "\"mineplus\": {\"format\": 1,"
+                + " \"plugin\": \"mineplus_generic_display\","
+                + " \"template\": \"mineplus:guns/peacemaker\","
+                + " \"kind\": \"item\", \"title\": \"Peacemaker\"},";
+        String json = "{"
+                + "\"meta\": {\"format_version\": \"4.5\", \"model_format\": \"free\","
+                + " \"box_uv\": false},"
+                + "\"resolution\": {\"width\": 16, \"height\": 16},"
+                + stamp
+                + "\"elements\": ["
+                + "  {\"name\": \"body\", \"uuid\": \"t1\", \"from\": [12, 0, 4],"
+                + "   \"to\": [20, 8, 12], \"color\": 0,"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 0, 8, 8], \"texture\": 0}}}"
+                + "],"
+                + "\"outliner\": [\"t1\"],"
+                + "\"textures\": [{\"name\": \"tex\", \"source\": \"data:image/png;base64,"
+                + pngBase64 + "\"}]"
+                + "}";
+
+        // Mob-side parser: unknown top-level key must be ignored, not fatal.
+        ModelData mob = BbModelParser.parse("stamped.bbmodel",
+                json.getBytes(StandardCharsets.UTF_8), reference -> null);
+        check("stamped bbmodel still parses (mob path)", mob != null && mob.boneCount() >= 1);
+
+        VirtualModel stamped = com.mineplus.infrastructure.virtual.BbModelImporter.parse(
+                "stamped.bbmodel", new java.io.StringReader(json), null);
+        com.mineplus.infrastructure.virtual.MineplusTemplate template =
+                com.mineplus.infrastructure.virtual.BbModelImporter.lastTemplate();
+        check("stamped bbmodel parses (virtual path)", stamped != null);
+        check("template detected", template != null);
+        check("template id", template != null && "mineplus:guns/peacemaker".equals(template.id()));
+        check("template kind", template != null && "item".equals(template.kind()));
+        check("template format", template != null && template.format() == 1);
+        check("template plugin", template != null
+                && "mineplus_generic_display".equals(template.plugin()));
+        check("template describe", template != null
+                && template.describe().contains("mineplus:guns/peacemaker"));
+
+        // A plain bbmodel without the block is simply not a template.
+        String plain = json.replace(stamp, "");
+        com.mineplus.infrastructure.virtual.BbModelImporter.parse(
+                "plain.bbmodel", new java.io.StringReader(plain), null);
+        check("no template when block absent",
+                com.mineplus.infrastructure.virtual.BbModelImporter.lastTemplate() == null);
     }
 
     /**
