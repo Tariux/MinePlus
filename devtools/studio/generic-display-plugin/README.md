@@ -1,4 +1,4 @@
-# mineplus_generic_display (Blockbench plugin) — v4.0
+# mineplus_generic_display (Blockbench plugin) — v5.0
 
 Author, animate and validate Mine Plus models: edit a model's `display`
 block, animate it in Blockbench's Animate tab, and save in the Mineplus-native
@@ -28,7 +28,6 @@ menu noise — toggle Mineplus tools on whenever display/animation work starts.
 | Mineplus: Save as .mpmodel | save in the Mineplus format |
 | Mineplus: Export as .bbmodel | save a plain bbmodel (also fully loadable) |
 | Mineplus: Open Generic / Java Item Model | start a vanilla Java item project or open any model file |
-| Mineplus: Studio (Display + Animate) | one click: enables both tabs, enters display mode, brings the default Display + Animations panels forward |
 | Mineplus: Fix Duplicates | remove UUID-duplicated cubes/groups, rename same-name elements |
 | Mineplus: Model Report | cubes/bones/textures/animations summary |
 | Mineplus: Show Log | in-app log panel (last 400 lines) |
@@ -44,27 +43,27 @@ stamp and never touches cubes, bones, textures, the display block or
 animations; it verifies afterwards that no content count dropped and logs the
 before/after numbers.
 
-## Mineplus Studio
+## Getting both tabs (Display + Animate)
 
-**Tools > Mineplus: Studio (Display + Animate)** does not build any custom
-GUI — it wires up Blockbench's own tools in one click:
+The Animate and Display tabs follow Blockbench's *global* format
+(`Format.animation_mode` / `Format.display_mode`). Old `.bbmodel` files load
+in the generic "free" format, which sets `animation_mode` but **not**
+`display_mode` — that is exactly the "Animate works, Display never appears"
+bug. v5.0 fixes it for good:
 
-- makes sure the project is on the mineplus format, so **both** the Display
-  and Animate tabs exist,
-- enters **display mode**, so the viewport previews the authored transforms
-  the way Minecraft renders the item,
-- brings the default **Display panel** (and the **Animations** panel) forward
-  in the sidebar.
+- After every load the plugin auto-applies the mineplus format (which sets
+  both flags) and re-selects the *global* format (`Format.select()`, with
+  codec and direct fallbacks, all logged).
+- After every conversion the plugin **verifies** the global format actually
+  landed on mineplus with both tab flags on; if the native
+  `ModelFormat.convertTo()` did not land, it falls back to select()
+  automatically and the log names the exact step.
 
-From there you edit display transforms with the standard Display panel and
-create/play animations with the standard Animate timeline — exactly the tools
-you already know, nothing new to learn.
-
-Opening old animated models: since v4.0 the auto-apply after load also
-re-selects the *global* format (via `Format.select()`, with codec and direct
-fallbacks, all logged) — the Display/Animate tabs follow the global format, so
-reopened models now always get both tabs, even when `model.format` was already
-mineplus. If anything still fails the log names the exact step.
+If anything still fails, the `[Mineplus]` log tells you which step; run
+**Mineplus: Convert to Mineplus Model** to retry — it only changes the
+project's format stamp and never touches cubes, bones, textures, the display
+block or animations, and it verifies afterwards that no content count dropped
+(logs the before/after numbers).
 
 ## The `.mpmodel` format
 

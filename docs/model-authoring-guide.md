@@ -50,11 +50,9 @@ is what the game shows. All vanilla contexts are supported:
 
 Two ways to author:
 - In Blockbench's **Display** tab (per-context sliders) — imported on export.
-- Tools > **Mineplus: Studio (Display + Animate)** — one click that turns on
-  both tabs and enters display mode, so Blockbench's default Display panel and
-  Animate timeline are open together; the viewport then renders the transforms
-  exactly as the game would. Use it to pose a gun in the hand while its
-  animations are running.
+- Switch to **display mode** in Blockbench while an animation is playing in
+  the Animate timeline, so the viewport renders the transforms exactly as the
+  game would. Use it to pose a gun in the hand while its animations run.
 
 Rules the core enforces (so you cannot break the client):
 - rotation clamped to ±180°, translation to ±80 px, scale 0.01–100; NaN → 0.
@@ -95,7 +93,8 @@ textures, animations or the display block.
 3. Play each animation via the API (`AnimationApi.playAnimation(instanceId,
    name, playback)`) — supports play/pause/resume/stop, priority, fade in/out,
    events, and state queries.
-4. If a pose looks wrong in game but right in Studio, check the log: the
+4. If a pose looks wrong in game but right in Blockbench's display mode,
+   check the log: the
    compiler warns per-context about dropped non-vanilla contexts and the
    importer logs every clip it built.
 
@@ -103,7 +102,7 @@ textures, animations or the display block.
 
 - [ ] Every animated group has a readable `snake_case` name.
 - [ ] Display block authored for every context the item is seen in.
-- [ ] Display mode (via "Mineplus: Studio") looks right for each context.
+- [ ] Display mode looks right for each context.
 - [ ] Validate Display passes; no duplicate cubes/groups.
 - [ ] Exported as `.mpmodel` (or `.bbmodel`), textures embedded.
 - [ ] Registered in pack config/code; pack rebuilt.

@@ -4,6 +4,10 @@
  * the real onload() and the real action clicks, and asserts the behaviours
  * added in v3.2+: tools toggle, mineplus format with animation support, and
  * the old-model conversion that keeps cubes/bones/textures/display/animations.
+ * v5.0 reverts the Studio experiment and hardens the convert path: after any
+ * conversion the GLOBAL format is verified (the Display and Animate tabs are
+ * gated by Format.display_mode / Format.animation_mode), with a select()
+ * fallback when the native convertTo() does not land.
  *
  * The sandbox mirrors the REAL Blockbench globals: the open project is
  * `Project` (and Blockbench.Project), and there is no `Model` global — that
@@ -73,6 +77,7 @@ const sandbox = {
     // (and the open project's format via the project object)
     opts.select = function () {
       sandbox.__selectedFormat = this;
+      sandbox.Format = this; // real select() sets the page-scope global `Format`
       if (sandbox.Project) sandbox.Project.format = this;
     };
     registeredFormats[opts.id] = opts;
@@ -186,6 +191,35 @@ check('convert falls back to select when native convertTo() throws',
 delete fmt.convertTo;
 sandbox.Blockbench.Format = undefined;
 
+// 3c. REGRESSION (v5.0): native convertTo() is used even when the global
+// format is unset (fresh Blockbench state). The old guard skipped the native
+// path whenever `Blockbench.Format` was falsy — on exactly the old models
+// that had never been touched by the plugin, so Display stayed missing.
+sandbox.Project = makeProject();
+sandbox.Blockbench.Format = null;
+let nativeUsedUnset = false;
+fmt.convertTo = function () { nativeUsedUnset = true; this.select(); };
+actions.mineplus_convert.click();
+check('native convertTo() used even when global Format is unset',
+  nativeUsedUnset && sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model');
+
+// 3d. REGRESSION (v5.0): if native convertTo() runs but does not update the
+// global format (older builds / odd states), the plugin falls back to select
+// so the Display tab flags (`display_mode`/`animation_mode`) still come on.
+sandbox.Project = makeProject();
+sandbox.Blockbench.Format = { id: 'free' }; // old generic format: Animate yes, Display no
+sandbox.Format = sandbox.Blockbench.Format; // page-scope global is stale too
+sandbox.__selectedFormat = null;
+fmt.convertTo = function () { /* no-op: did not land */ };
+actions.mineplus_convert.click();
+check('convert verifies global format and falls back to select when convertTo() did not land',
+  sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model'
+    && sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model'
+    && sandbox.Format && sandbox.Format.display_mode === true
+    && sandbox.Format.animation_mode === true);
+delete fmt.convertTo;
+sandbox.Blockbench.Format = undefined;
+
 // 4. Converting an already-mineplus project is a no-op that still succeeds.
 actions.mineplus_convert.click();
 check('second convert is idempotent', project.format.id === 'mineplus_model'
@@ -210,20 +244,9 @@ check('project_loaded hook auto-applies mineplus format',
   project2.format && project2.format.id === 'mineplus_model'
     && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
 
-// 6. Studio: opens the DEFAULT Blockbench UI — mineplus format selected,
-// display mode entered, and the default Display/Animations panels brought
-// forward. No custom GUI.
-sandbox.Panel.stored.display = { select() { this.selected = true; } };
-sandbox.Panel.stored.animations = { select() { this.selected = true; } };
-sandbox.Modes.display.selected = false;
-sandbox.__selectedFormat = null;
-actions.mineplus_studio.click();
-check('studio action registered', toolIds.includes('mineplus_studio'));
-check('studio re-selects the mineplus format',
-  sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
-check('studio enters display mode', sandbox.Modes.display.selected === true);
-check('studio opens the default Display panel', sandbox.Panel.stored.display.selected === true);
-check('studio opens the default Animations panel', sandbox.Panel.stored.animations.selected === true);
+// 6. Studio was reverted (v5.0): it added nothing the default UI doesn't do
+// and confused designers. The tool and its tests are gone on purpose.
+check('studio action is gone (reverted)', actions.mineplus_studio === undefined);
 
 // 6b. onunload removes the actions.
 sandbox.__plugin.onunload();

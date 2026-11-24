@@ -1,5 +1,10 @@
 # Decisions
 
+## Mineplus Studio reverted (v5.0, 2026-11-24)
+- The "Mineplus: Studio" tool (custom launcher that entered display mode and forwarded panels) was deleted — designers found it confusing; the plugin offers no Studio entry. Do not reintroduce it.
+- Tab visibility rule (verified in Blockbench source): the Animate/Display tabs follow the page-scope global `Format.animation_mode` / `Format.display_mode`. The generic "free" format (js/formats/generic.ts) sets `animation_mode` but NOT `display_mode` — old bbmodel files therefore show Animate but never Display until converted.
+- `applyMineplusFormat` must always try native `fmt.convertTo()` (no `Blockbench.Format` precondition — the old guard skipped it on fresh state), then verify the global `Format` landed on mineplus with both flags; fall back to `fmt.select()` if not, logging each step.
+
 ## Model-space coordinates are cube + bone pivot
 - `ModelCube` stores from/to relative to its own bone's pivot; `BbClipBaker` adds the bone pivot (`cube.fromX() + pivot[0]`) to reach model space.
 - Any code that pools cube geometry across bones must add the bone pivot itself, or bones with off-origin pivots collapse onto the origin.

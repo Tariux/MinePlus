@@ -1,4 +1,4 @@
-/* Mineplus Generic Display — Blockbench plugin v4.2.
+/* Mineplus Generic Display — Blockbench plugin v5.0.
  *
  * Tools (Tools menu, all logged):
  *   - Mineplus: Toggle Tools         show/hide all other Mineplus tools
@@ -806,6 +806,20 @@
   // 3. global Format + model   — last resort, then ask Blockbench to refresh
   // Every step logs; one path succeeding is enough for the Display/Animate
   // tabs to follow the mineplus flags (display_mode + animation_mode both on).
+  // The global active format — the thing the Display/Animate tabs actually
+  // follow (Blockbench's page-scope `Format` var, mirrored on
+  // `Blockbench.Format`). Never trust model.format alone for tab visibility.
+  function globalFormat() {
+    try {
+      // eslint-disable-next-line no-undef
+      if (typeof Format !== 'undefined' && Format) return Format;
+    } catch (ignored) { /* page-scope var not reachable */ }
+    if (typeof Blockbench !== 'undefined' && Blockbench.Format) {
+      return Blockbench.Format;
+    }
+    return null;
+  }
+
   function selectMineplusFormat(fmt, model) {
     if (typeof fmt.select === 'function') {
       try {
@@ -874,8 +888,7 @@
     // migrates box UV, bone rig grouping (loose cubes get a root group) and
     // rotation snapping per format, which a bare select() skips and which old
     // .bbmodel files saved in generic/java formats need.
-    if (typeof fmt.convertTo === 'function' && typeof Blockbench !== 'undefined'
-        && Blockbench.Format && Blockbench.Format !== fmt) {
+    if (typeof fmt.convertTo === 'function') {
       try {
         fmt.convertTo();
         log('format converted via native convertTo() (box UV, bone rig and'
@@ -893,8 +906,35 @@
       // old format and the Display tab never appears.
       selectMineplusFormat(fmt, model);
     }
+    // Verify the GLOBAL format actually landed on mineplus. The Animate and
+    // Display tabs are gated by Format.animation_mode
+    // (js/animations/animation_mode.js:923) and Format.display_mode
+    // (js/display_mode/display_mode.js:1590). Old .bbmodel files load in the
+    // generic 'free' format, which sets animation_mode but NOT display_mode —
+    // that exact combination is the reported "Animate exists, no Display
+    // tab" bug. If the native path did not land, fall back to select().
+    var global = globalFormat();
+    if (!global || global.id !== MP_FORMAT_ID) {
+      warn('convert: global Format did not land on ' + MP_FORMAT_ID
+          + ' — re-selecting');
+      selectMineplusFormat(fmt, model);
+      global = globalFormat();
+    }
+    if (global && global.display_mode === true && global.animation_mode === true) {
+      log('tabs after convert: Animate ON, Display ON (global format '
+          + MP_FORMAT_ID + ')');
+    } else {
+      warn('tab check after convert: global format '
+          + (global && global.id ? global.id : '(none)')
+          + ' animation_mode=' + !!(global && global.animation_mode)
+          + ' display_mode=' + !!(global && global.display_mode)
+          + ' — if Display is still missing, reload the plugin and retry');
+    }
     model.mode = 'edit';
-    if (typeof Mode !== 'undefined' && Mode.edit) Mode.select(Mode.edit);
+    var modes = typeof Modes !== 'undefined' ? Modes : null;
+    var editMode = modes && (modes.edit || (modes.options && modes.options.edit));
+    if (editMode && typeof editMode.select === 'function') editMode.select();
+    else if (typeof Mode !== 'undefined' && Mode.edit) Mode.select(Mode.edit);
     if (!model.mineplus) model.mineplus = { format: 1, plugin: PLUGIN_ID };
     if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
     log('format switched to ' + MP_FORMAT_ID
@@ -985,59 +1025,6 @@
     input.click();
   }
 
-  /* ------------------------------------------------------ studio (experimental) */
-
-  // Mineplus Studio is intentionally thin: it opens Blockbench's OWN display
-  // and animation UI together — no custom GUI. The designer works with the
-  // default Display panel, the default Animate timeline and the standard mode
-  // toggle; the plugin only makes sure both are enabled and reachable.
-  function enterDisplayMode() {
-    var modes = typeof Modes !== 'undefined' ? Modes : null;
-    var display = modes && (modes.display || (modes.options && modes.options.display));
-    if (display && typeof display.select === 'function') {
-      display.select();
-      log('studio: display mode entered — the preview now shows the authored'
-          + ' slot transforms exactly as in game');
-      return true;
-    }
-    warn('studio: display mode not available on this build');
-    return false;
-  }
-
-  // Mineplus Studio is intentionally thin (see note above): it opens
-  // Blockbench's own Display panel and Animate side by side. No custom GUI.
-  function openStudio() {
-    log('studio: opening — using the default Blockbench Display + Animate UI');
-    if (!currentModel()) {
-      Blockbench.showQuickMessage('Open or create a model first');
-      return;
-    }
-    applyMineplusFormat(false); // enables both the Display and Animate tabs
-    enterDisplayMode();         // preview shows the authored slot transforms
-    var opened = [];
-    try {
-      if (typeof Panel !== 'undefined' && Panel.stored) {
-        if (Panel.stored.animations
-            && typeof Panel.stored.animations.select === 'function') {
-          Panel.stored.animations.select();
-          opened.push('Animations panel');
-        }
-        if (Panel.stored.display
-            && typeof Panel.stored.display.select === 'function') {
-          Panel.stored.display.select();
-          opened.push('Display panel');
-        }
-      }
-    } catch (failure) {
-      warn('studio: opening default panels failed: '
-          + (failure && failure.message));
-    }
-    log('studio: default panels brought forward: '
-        + (opened.join(', ') || 'mode defaults'));
-    Blockbench.showQuickMessage('Mineplus Studio: display mode on — edit in the'
-        + ' default Display panel and Animate timeline');
-  }
-
   /* --------------------------------------------------------------- setup */
 
   function registerAction(id, name, icon, click) {
@@ -1058,7 +1045,7 @@
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v4.2.0)');
+      log('onload: starting (v5.0.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
@@ -1079,10 +1066,6 @@
         ['action mineplus_display_editor', function () {
           registerAction('mineplus_display_editor', 'Mineplus Display Editor',
               'icon-configure', openEditor);
-        }],
-        ['action mineplus_studio', function () {
-          registerAction('mineplus_studio', 'Mineplus: Studio (Display + Animate)',
-              'icon-3d', openStudio);
         }],
         ['action mineplus_convert', function () {
           registerAction('mineplus_convert', 'Mineplus: Convert to Mineplus Model',
