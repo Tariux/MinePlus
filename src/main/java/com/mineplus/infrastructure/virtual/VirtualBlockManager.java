@@ -395,7 +395,7 @@ public class VirtualBlockManager implements Listener {
                                               ModelMeta meta, File modelsFolder) {
         String declared = meta == null ? null : meta.displayFile();
         if (declared != null && !declared.isBlank()) {
-            if (!declared.toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
+            if (!hasModelExtension(declared)) {
                 declared = declared + ".bbmodel";
             }
             File file = new File(modelsFolder, declared.trim());
@@ -414,8 +414,22 @@ public class VirtualBlockManager implements Listener {
         String name = modelFile.getName();
         int dot = name.lastIndexOf('.');
         String stem = dot < 0 ? name : name.substring(0, dot);
-        File sibling = new File(modelFile.getParentFile(), stem + ".display.bbmodel");
-        return sibling.isFile() ? sibling : null;
+        for (String extension : MODEL_SIDECAR_EXTENSIONS) {
+            File sibling = new File(modelFile.getParentFile(), stem + extension);
+            if (sibling.isFile()) {
+                return sibling;
+            }
+        }
+        return null;
+    }
+
+    /** Display sidecar extensions, most specific first. */
+    private static final String[] MODEL_SIDECAR_EXTENSIONS = {".display.mpmodel", ".display.bbmodel"};
+
+    /** True when a meta-declared path already names a model source. */
+    private static boolean hasModelExtension(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".bbmodel") || lower.endsWith(".mpmodel");
     }
 
     /**
@@ -431,7 +445,7 @@ public class VirtualBlockManager implements Listener {
             return model;
         }
         String declared = meta.animationFile().trim();
-        if (!declared.toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
+        if (!hasModelExtension(declared)) {
             declared = declared + ".bbmodel";
         }
         File animationFile = new File(modelsFolder, declared);

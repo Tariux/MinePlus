@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: Mineplus plugin v2 and the .mpmodel format
+
+- `devtools/studio/generic-display-plugin/mineplus_generic_display.js` v2:
+  all actions are registered into the **Tools** menu via
+  `MenuBar.addAction(action, 'tools')` (v1 relied on the action category,
+  which never shows there — the "duplicate ID" error and the missing entry
+  were the same bug), every step logs as `[Mineplus]` to the console and an
+  in-app log panel, and new tools join the editor: Copy Display, Validate
+  Display, Save as .mpmodel, Show Log. Hooks log display-mode enter/exit and
+  auto-validate on save.
+- The plugin registers the **Mineplus Model** Blockbench format
+  (`mineplus_model`, extension `.mpmodel`): a bbmodel JSON with an optional
+  top-level `mineplus` metadata block.
+- `ModelImportCoordinator` and `VirtualBlockManager` accept `.mpmodel`
+  everywhere `.bbmodel` was accepted: model files, `.display.`/`.anim.`/
+  `.animations.` sidecars, and bare `displayFile`/`animationFile` meta
+  declarations (which still default to `.bbmodel`).
+
 ### Removed: derived-display workaround layer (bbmodel is the source of truth)
 
 - `HeldPoseSolver`, `ItemDisplaySolver` and `HeldOrientationFix` are deleted,

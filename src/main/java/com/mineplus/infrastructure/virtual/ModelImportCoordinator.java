@@ -95,7 +95,8 @@ public final class ModelImportCoordinator {
         if (!animationFiles.isEmpty()) {
             animationFiles.sort(Comparator.comparing(File::getPath));
             for (File animationFile : animationFiles) {
-                if (animationFile.getName().toLowerCase(Locale.ROOT).endsWith(".display.bbmodel")) {
+                if (animationFile.getName().toLowerCase(Locale.ROOT).endsWith(".display.bbmodel")
+                        || animationFile.getName().toLowerCase(Locale.ROOT).endsWith(".display.mpmodel")) {
                     continue; // display sidecar: merged by the manager's display pass
                 }
                 ModelEntry target = siblingTarget(animationFile, loaded);
@@ -152,6 +153,9 @@ public final class ModelImportCoordinator {
         return false;
     }
 
+    /** Model source extensions that share the bbmodel JSON layout. */
+    private static final String[] MODEL_EXTENSIONS = {".bbmodel", ".mpmodel"};
+
     /** The loaded model a sibling animation file belongs to (same directory, same stem). */
     private static ModelEntry siblingTarget(File animationFile, Map<String, ModelEntry> loaded) {
         String stem = stemOf(animationFile);
@@ -170,8 +174,11 @@ public final class ModelImportCoordinator {
     /** The bbmodel stem with any {@code .anim} / {@code .animations} suffix removed. */
     private static String stemOf(File file) {
         String name = file.getName().toLowerCase(Locale.ROOT);
-        if (name.endsWith(".bbmodel")) {
-            name = name.substring(0, name.length() - ".bbmodel".length());
+        for (String extension : MODEL_EXTENSIONS) {
+            if (name.endsWith(extension)) {
+                name = name.substring(0, name.length() - extension.length());
+                break;
+            }
         }
         if (name.endsWith(".animations")) {
             name = name.substring(0, name.length() - ".animations".length());
@@ -193,15 +200,22 @@ public final class ModelImportCoordinator {
             } else {
                 String name = child.getName().toLowerCase(Locale.ROOT);
                 if (name.endsWith(".anim.bbmodel") || name.endsWith(".animations.bbmodel")
-                        || name.endsWith(".display.bbmodel")) {
+                        || name.endsWith(".display.bbmodel")
+                        || name.endsWith(".anim.mpmodel") || name.endsWith(".animations.mpmodel")
+                        || name.endsWith(".display.mpmodel")) {
                     // Dedicated animation / display-adjustment sidecar files,
                     // merged into their sibling model later — never models of
                     // their own.
                     animationOutput.add(child);
-                } else if (name.endsWith(".bbmodel")) {
+                } else if (isModelFile(name)) {
                     output.add(child);
                 }
             }
         }
+    }
+
+    /** Accepted model sources: Blockbench (.bbmodel) and Mineplus (.mpmodel). */
+    private static boolean isModelFile(String lowerCaseName) {
+        return lowerCaseName.endsWith(".bbmodel") || lowerCaseName.endsWith(".mpmodel");
     }
 }

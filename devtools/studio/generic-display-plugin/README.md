@@ -1,9 +1,9 @@
-# mineplus_generic_display (Blockbench plugin)
+# mineplus_generic_display (Blockbench plugin) — v2
 
-Edits the `display` block of a `.bbmodel` directly, context by context, so
-held/GUI/ground poses are authored rather than derived. The plugin writes the
-values into the model file; the Mineplus pack compiler copies them verbatim
-into the resource pack (see `docs/display-slot-mapping.md`).
+Author and validate a model's `display` block, and save models in the
+Mineplus-native `.mpmodel` format. Every step logs to the browser console
+(`[Mineplus]` prefix) and to an in-app log panel, so a missing menu entry or a
+failed save is always traceable.
 
 ## Install
 
@@ -13,21 +13,56 @@ into the resource pack (see `docs/display-slot-mapping.md`).
    - Linux: `~/.blockbench/plugins/`
 2. Restart Blockbench, open **File › Plugins**, enable
    **Mineplus Generic Display**.
-3. Open a `.bbmodel`, then run **Tools › Mineplus Display Editor**.
+3. Open **Tools** — the Mineplus entries appear at the bottom of the menu
+   (they are added with `MenuBar.addAction(action, 'tools')`, which is the
+   only way an action lands in that menu). If anything is missing, open
+   **Tools › Mineplus: Show Log** — every registration step is logged there.
 
-## Use
+## Tools
 
-- Pick a context (`firstperson_righthand`, `thirdperson_lefthand`, `head`,
-  `gui`, `ground`, `fixed`, …) and edit rotation / translation / scale
-  numerically, or nudge with the buttons.
-- **Apply** writes the value into the model's `display` object immediately
-  (visible in the bbmodel JSON — no hidden state).
-- **Clear context** removes that context from the `display` block so vanilla
-  defaults apply again.
-- Values outside the validated ranges (rotation ±180°, translation ±80,
-  scale 0.01–100) are clamped on write to match the bake-time validation.
+| Menu entry | What it does |
+|---|---|
+| Mineplus Display Editor | Edit rotation / translation / scale per vanilla context (`firstperson_righthand`, `gui`, `ground`, `head`, …). Values are clamped to the server's validated ranges on write. |
+| Mineplus: Copy Display | Copy the current `display` block as pretty JSON (paste into a meta file or issue). |
+| Mineplus: Validate Display | Report NaN / out-of-range / collapsing-scale values before they reach the bake. |
+| Mineplus: Save as .mpmodel | Save the open model in the Mineplus format (below); validates first. |
+| Mineplus: Show Log | In-app panel with the last 400 log lines. |
 
-## Source
+## Event hooks (all logged, exception-safe)
 
-`mineplus_generic_display.js` is a single-file Blockbench plugin, no build
-step required.
+- `display_mode_entered` / `display_mode_exited` — logs when you enter
+  Blockbench's display editor and dumps the display block on exit.
+- `project_saved` — runs **Validate Display** automatically after every save.
+- `oninstall` / `onenabled` / `ondisabled` / `onunload` lifecycle logging.
+
+## The .mpmodel format
+
+Registered as the Blockbench format **Mineplus Model** (`mineplus_model`,
+extension `mpmodel`, visible in File › New and File › Save As). An `.mpmodel`
+file is a standard bbmodel JSON plus an optional top-level metadata block:
+
+```json
+{
+  "meta": { "model_format": "mineplus_model", ... },
+  "mineplus": {
+    "format": 1,
+    "plugin": "mineplus_generic_display"
+  },
+  "elements": [ ... ],
+  "display": { ... }
+}
+```
+
+Full compatibility: the Mineplus server plugin's streaming importer
+(`BbModelImporter`) skips unknown keys, so `.mpmodel` is parsed by exactly the
+same code path as `.bbmodel` — the coordinator accepts either extension for
+models, sidecars (`.display.mpmodel`, `.anim.mpmodel`) and meta-declared
+files. Save as `.mpmodel` when the model is Mineplus-only; keep `.bbmodel`
+when you also want vanilla Blockbench round-trips.
+
+## Server side
+
+`ModelImportCoordinator` / `VirtualBlockManager` accept `.mpmodel` everywhere
+`.bbmodel` was accepted: model files, display sidecars, animation sidecars and
+`displayFile` / `animationFile` meta declarations (a bare name in a meta still
+defaults to `.bbmodel`).
