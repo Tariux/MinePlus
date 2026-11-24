@@ -357,9 +357,65 @@ public class VirtualBlockManager implements Listener {
             VirtualModel model = entry.model();
             ModelMeta meta = ModelMeta.load(entry.file());
             model = mergeDeclaredAnimations(entry, model, meta, modelsFolder);
+            model = mergeDisplayAdjustment(entry, model, meta, modelsFolder);
             registerModel(entry.key(), model, meta, entry.file());
             textureReports.put(entry.key(), resolveTextureReport(model));
         }
+    }
+
+    /**
+     * Applies a dedicated display-adjustment model ({@code "displayFile"} in
+     * the meta, or a sibling {@code <stem>.display.bbmodel}) to a model. The
+     * adjustment file's authored item display transforms replace the target's
+     * display entirely: authors who animate a complicated model in one
+     * bbmodel can tune the first-person / hand / GUI pose in a second file
+     * with Blockbench's display editor, without touching the animation file.
+     */
+    private VirtualModel mergeDisplayAdjustment(ModelImportCoordinator.ModelEntry entry,
+                                                VirtualModel model, ModelMeta meta, File modelsFolder) {
+        File adjustmentFile = resolveDisplayAdjustmentFile(entry, meta, modelsFolder);
+        if (adjustmentFile == null) {
+            return model;
+        }
+        VirtualModel parsed = BbModelImporter.parse(
+                entry.key() + "#display-adjust", adjustmentFile, plugin.getLogger());
+        if (parsed == null || parsed.display() == null || parsed.display().isEmpty()) {
+            DebugLogger.warning("[ModelImport] Display adjustment '"
+                    + adjustmentFile.getName() + "' for model '" + entry.key()
+                    + "' carries no display transforms; ignored.");
+            return model;
+        }
+        DebugLogger.info("[ModelImport] Applied display adjustments from '"
+                + adjustmentFile.getName() + "' to model '" + entry.key() + "'.");
+        return model.withDisplay(parsed.display());
+    }
+
+    /** The meta-declared or sibling display-adjustment file, or null when neither exists. */
+    private File resolveDisplayAdjustmentFile(ModelImportCoordinator.ModelEntry entry,
+                                              ModelMeta meta, File modelsFolder) {
+        String declared = meta == null ? null : meta.displayFile();
+        if (declared != null && !declared.isBlank()) {
+            if (!declared.toLowerCase(Locale.ROOT).endsWith(".bbmodel")) {
+                declared = declared + ".bbmodel";
+            }
+            File file = new File(modelsFolder, declared.trim());
+            if (!file.isFile()) {
+                DebugLogger.warning("[ModelImport] Model '" + entry.key()
+                        + "' declares displayFile '" + meta.displayFile()
+                        + "' but no such file exists in the models folder.");
+                return null;
+            }
+            return file;
+        }
+        File modelFile = entry.file();
+        if (modelFile == null || modelFile.getParentFile() == null) {
+            return null;
+        }
+        String name = modelFile.getName();
+        int dot = name.lastIndexOf('.');
+        String stem = dot < 0 ? name : name.substring(0, dot);
+        File sibling = new File(modelFile.getParentFile(), stem + ".display.bbmodel");
+        return sibling.isFile() ? sibling : null;
     }
 
     /**

@@ -297,32 +297,48 @@ public final class BbClipBaker {
      * Fills the four hand contexts from the model's own geometry when the
      * source authors none of them — see {@link HeldPoseSolver} for the
      * derivation. The applied pose is reported as an issue so an author can
-     * see it happened and replace it with a hand-tuned display block; an
-     * authored hand context on any of the four cancels the pass outright
-     * (display data always wins).
+     * see it happened and replace it with a hand-tuned display block. Each of
+     * the four hand contexts is filled independently, so a partially authored
+     * display (say, only a gui pose) still gets the solved hand contexts
+     * instead of vanilla's generated defaults.
      */
     private static void autoHeldPose(JsonObject root, JsonObject display, String sourceName,
                                      List<ModelBone> bones, List<String> issues) {
+        HeldPoseSolver.Pose pose = null;
+        boolean filled = false;
         for (String context : HELD_CONTEXTS) {
             if (object(display, context) != null) {
-                return;
+                continue; // authored context wins
             }
+            if (pose == null) {
+                pose = HeldPoseSolver.solve(bones);
+                if (pose == null) {
+                    return; // degenerate geometry; leave vanilla defaults
+                }
+            }
+            fillContext(display, context, pose);
+            filled = true;
         }
-        HeldPoseSolver.Pose pose = HeldPoseSolver.solve(bones);
-        if (pose == null) {
-            return;
+        if (filled) {
+            issues.add(sourceName + ": some hand display contexts were not authored; a held"
+                    + " pose was derived from the model's geometry (principal-axis grip"
+                    + " alignment). Author a display block to replace it.");
         }
-        setHandContext(display, "firstperson_righthand",
-                pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(), 0.68f);
-        setHandContext(display, "firstperson_lefthand",
-                pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(), 0.68f);
-        setHandContext(display, "thirdperson_righthand",
-                pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(), 0.85f);
-        setHandContext(display, "thirdperson_lefthand",
-                pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(), 0.85f);
-        issues.add(sourceName + ": no hand display contexts were authored; a held"
-                + " pose was derived from the model's geometry (principal-axis grip"
-                + " alignment). Author a display block to replace it.");
+    }
+
+    /** Writes one hand context of {@code pose} into {@code display}. */
+    private static void fillContext(JsonObject display, String context, HeldPoseSolver.Pose pose) {
+        switch (context) {
+            case "firstperson_righthand" -> setHandContext(display, context,
+                    pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(), 0.68f);
+            case "firstperson_lefthand" -> setHandContext(display, context,
+                    pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(), 0.68f);
+            case "thirdperson_righthand" -> setHandContext(display, context,
+                    pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(), 0.85f);
+            case "thirdperson_lefthand" -> setHandContext(display, context,
+                    pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(), 0.85f);
+            default -> { }
+        }
     }
 
     /** Writes one hand context in the vanilla {rotation, translation, scale} shape. */

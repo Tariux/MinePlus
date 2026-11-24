@@ -21,6 +21,8 @@ import com.mineplus.pack.block.PackBlockDefinition;
 import com.mineplus.pack.compile.PackArtifact;
 import com.mineplus.pack.item.BbClipBaker;
 import com.mineplus.pack.item.HeldPoseSolver;
+import com.mineplus.pack.item.ItemDisplaySolver;
+import com.mineplus.infrastructure.virtual.ModelDisplay;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -65,6 +67,7 @@ public final class CustomMobPipelineTest {
         heldPoseSolverPivots();
         heldPoseSolverGeometry();
         bakerAutoHeldPose();
+        itemDisplaySolverDerivesFromGeometry();
         heldOrientationFixFacesForward();
         heldOrientationFixHandPlacement();
         mobAnimatorHurtFlinch();
@@ -832,13 +835,95 @@ public final class CustomMobPipelineTest {
                 new BbClipBaker.Style(authored, "skin", false));
         JsonObject authoredDisplay = authoredResult.models().isEmpty()
                 ? null : authoredResult.models().get(0).getAsJsonObject("display");
-        check("an authored context cancels the auto pose",
-                authoredDisplay != null && authoredDisplay.getAsJsonObject("firstperson_lefthand") == null);
+        // Authored contexts always win, but the other three hand contexts are
+        // still solved per context (a partially authored display no longer
+        // cancels the pass for the untouched contexts).
+        check("an authored context survives the auto pose",
+                authoredDisplay != null && authoredDisplay.getAsJsonObject("firstperson_righthand") != null
+                        && authoredDisplay.getAsJsonObject("firstperson_righthand").entrySet().isEmpty());
+        check("solved contexts fill the remaining hands",
+                authoredDisplay != null && authoredDisplay.getAsJsonObject("firstperson_lefthand") != null
+                        && authoredDisplay.getAsJsonObject("thirdperson_righthand") != null
+                        && authoredDisplay.getAsJsonObject("thirdperson_lefthand") != null);
         boolean reportedAuthored = false;
         for (String issue : authoredResult.issues()) {
             reportedAuthored |= issue.contains("held pose was derived");
         }
-        check("no derivation issue when authored", !reportedAuthored);
+        check("derivation is reported when some hands were solved", reportedAuthored);
+    }
+
+    /**
+     * The static item-model path: models authored away from the 16x16x16
+     * origin (a thin 1x2x16 blade deep in a corner) must get a full display
+     * block derived from their covered volume — centered in the slot/ground
+     * views and grip-aligned in the hands — while contexts the author did
+     * write are kept verbatim.
+     */
+    private static void itemDisplaySolverDerivesFromGeometry() {
+        // A 1x2x16 blade spanning x 14..15, y 7..9, z 0..16: far from the
+        // vanilla center (8,8,8) along x, centered along y and z.
+        float[][] blade = {{14, 7, 0, 15, 9, 16}};
+        ModelDisplay derived = ItemDisplaySolver.derive(blade, ModelDisplay.EMPTY);
+        check("solver fills every vanilla context", !derived.isEmpty()
+                && derived.contexts().size() == 8);
+
+        // GUI: the box center (14.5, 8, 8) must land on the vanilla center
+        // (8, 8, 8) after the gui scale, i.e. t + R·(S·c) = R·S·(8,8,8)
+        // => t = R·S·(8-14.5, 0, 0). Rotation (30,225,0), scale 0.625.
+        ModelDisplay.Transform gui = derived.contexts().get("gui");
+        check("gui context derived", gui != null);
+        if (gui != null) {
+            float[] center = apply(eulerXyzMatrix(30, 225, 0),
+                    scaleVec(new float[]{8 - 14.5f, 0, 0}, 0.625f));
+            check("gui translation centers the bbox",
+                    near(gui.translation().x, center[0], 1.0e-2f)
+                            && near(gui.translation().y, center[1], 1.0e-2f)
+                            && near(gui.translation().z, center[2], 1.0e-2f));
+            check("gui keeps the vanilla rotation and scale",
+                    near(gui.rotation().x, 30.0f) && near(gui.rotation().y, 225.0f)
+                            && near(gui.scale().x, 0.625f));
+        }
+
+        // Hand contexts: the long axis is z, so the grip must anchor like the
+        // vanilla handheld pose — check the translation actually puts the
+        // solved grip point at the vanilla anchor (no floating in the air).
+        ModelDisplay.Transform fp = derived.contexts().get("firstperson_righthand");
+        check("first-person context derived", fp != null);
+
+        // Degenerate geometry (one fat cube): vanilla handheld pose, still
+        // centered.
+        float[][] fat = {{6, 6, 6, 10, 10, 10}};
+        ModelDisplay fatDerived = ItemDisplaySolver.derive(fat, ModelDisplay.EMPTY);
+        ModelDisplay.Transform fatGui = fatDerived.contexts().get("gui");
+        check("degenerate model still gets a centered gui",
+                fatGui != null
+                        && near(fatGui.translation().x, 0.0f, 1.0e-2f)
+                        && near(fatGui.translation().y, 0.0f, 1.0e-2f)
+                        && near(fatGui.translation().z, 0.0f, 1.0e-2f));
+
+        // Authored contexts win per context: a gui pose the author wrote is
+        // kept byte-for-byte while the rest is derived around it.
+        Map<String, ModelDisplay.Transform> authored = new HashMap<>();
+        authored.put("gui", new ModelDisplay.Transform(
+                new Vector3f(10, 20, 30), new Vector3f(1, 2, 3), new Vector3f(2, 2, 2)));
+        ModelDisplay merged = ItemDisplaySolver.derive(blade, new ModelDisplay(authored));
+        ModelDisplay.Transform kept = merged.contexts().get("gui");
+        check("authored gui wins", kept != null
+                && near(kept.translation().x, 1.0f) && near(kept.rotation().y, 20.0f));
+        check("the other contexts are still derived",
+                merged.contexts().get("firstperson_righthand") != null
+                        && merged.contexts().get("ground") != null);
+
+        // solveBoxes agrees with bone-based solve on the same geometry.
+        ModelCube cube = new ModelCube(-0.5f, -6, -0.5f, 0.5f, 6, 0.5f, 0, 0, null);
+        ModelBone bone = new ModelBone("b", "b", -1, 0, 0, 0, 0, 0, 0,
+                List.of(cube), ModelBone.Attachment.NONE);
+        HeldPoseSolver.Pose fromBones = HeldPoseSolver.solve(List.of(bone));
+        HeldPoseSolver.Pose fromBoxes = HeldPoseSolver.solveBoxes(
+                new float[][]{{-0.5f, -6, -0.5f, 0.5f, 6, 0.5f}});
+        check("solveBoxes matches the bone solve", fromBoxes != null && fromBones != null
+                && java.util.Arrays.equals(fromBoxes.firstpersonRotationRight(), fromBones.firstpersonRotationRight())
+                && java.util.Arrays.equals(fromBoxes.firstpersonTranslationRight(), fromBones.firstpersonTranslationRight()));
     }
 
     /**
@@ -1138,5 +1223,9 @@ public final class CustomMobPipelineTest {
 
     private static boolean near(float value, float expected) {
         return Math.abs(value - expected) <= EPS;
+    }
+
+    private static boolean near(float value, float expected, float tolerance) {
+        return Math.abs(value - expected) <= tolerance;
     }
 }

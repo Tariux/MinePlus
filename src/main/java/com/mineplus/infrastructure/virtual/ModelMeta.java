@@ -24,6 +24,7 @@ import java.util.Map;
  *   "maxTexelPlatesPerInstance": 150,
  *   "texelBrightness": 15,
  *   "animationFile": "alchemy-animations.bbmodel",
+ *   "displayFile": "alchemy-display.bbmodel",
  *   "triggers": { "reload": "reload_clip", "fire": "fire_clip" }
  * }
  * }</pre>
@@ -43,6 +44,7 @@ public record ModelMeta(
         ModelDisplay display,
         String itemParent,
         String animationFile,
+        String displayFile,
         Map<String, String> triggers
 ) {
 
@@ -56,6 +58,7 @@ public record ModelMeta(
         display = display == null ? ModelDisplay.EMPTY : display;
         itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
         animationFile = animationFile == null || animationFile.isBlank() ? null : animationFile.trim();
+        displayFile = displayFile == null || displayFile.isBlank() ? null : displayFile.trim();
         triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
     }
 
@@ -270,7 +273,7 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
@@ -310,6 +313,7 @@ public record ModelMeta(
             ModelDisplay display = ModelDisplay.EMPTY;
             String itemParent = null;
             String animationFile = null;
+            String displayFile = null;
             Map<String, String> triggers = new LinkedHashMap<>();
 
             json.beginObject();
@@ -329,6 +333,7 @@ public record ModelMeta(
                     case "display" -> display = ModelDisplay.fromJson(json);
                     case "itemParent" -> itemParent = readString(json);
                     case "animationFile" -> animationFile = readString(json);
+                    case "displayFile" -> displayFile = readString(json);
                     case "triggers" -> readTriggerMap(json, triggers);
                     default -> json.skipValue();
                 }
@@ -337,7 +342,7 @@ public record ModelMeta(
 
             return new ModelMeta(originMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
                     maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
-                    animationFile, triggers);
+                    animationFile, displayFile, triggers);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());

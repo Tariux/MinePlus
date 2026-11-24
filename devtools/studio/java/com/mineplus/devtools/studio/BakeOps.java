@@ -988,6 +988,7 @@ final class BakeOps {
                 base.display(),
                 str(overrides, "itemParent", base.itemParent()),
                 base.animationFile(),
+                base.displayFile(),
                 base.triggers());
     }
 

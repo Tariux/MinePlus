@@ -95,6 +95,9 @@ public final class ModelImportCoordinator {
         if (!animationFiles.isEmpty()) {
             animationFiles.sort(Comparator.comparing(File::getPath));
             for (File animationFile : animationFiles) {
+                if (animationFile.getName().toLowerCase(Locale.ROOT).endsWith(".display.bbmodel")) {
+                    continue; // display sidecar: merged by the manager's display pass
+                }
                 ModelEntry target = siblingTarget(animationFile, loaded);
                 if (target == null) {
                     DebugLogger.warning("[ModelImport] Animation file '"
@@ -189,7 +192,11 @@ public final class ModelImportCoordinator {
                 collect(child, output, animationOutput);
             } else {
                 String name = child.getName().toLowerCase(Locale.ROOT);
-                if (name.endsWith(".anim.bbmodel") || name.endsWith(".animations.bbmodel")) {
+                if (name.endsWith(".anim.bbmodel") || name.endsWith(".animations.bbmodel")
+                        || name.endsWith(".display.bbmodel")) {
+                    // Dedicated animation / display-adjustment sidecar files,
+                    // merged into their sibling model later — never models of
+                    // their own.
                     animationOutput.add(child);
                 } else if (name.endsWith(".bbmodel")) {
                     output.add(child);

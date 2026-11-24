@@ -49,19 +49,32 @@ public final class HeldPoseSolver {
     }
 
     /**
+     * The vanilla {@code handheld} pose itself, so callers that cannot solve
+     * (a degenerate cube) still start from the same base the writer used to
+     * fall back to. Compose a centering translation on top of it — see
+     * {@link ItemDisplaySolver}.
+     */
+    public static Pose vanillaPose() {
+        return new Pose(
+                new float[]{0.0f, -90.0f, 25.0f}, FIRSTPERSON_TRANSLATION.clone(),
+                new float[]{0.0f, 90.0f, -25.0f}, FIRSTPERSON_TRANSLATION.clone(),
+                new float[]{0.0f, -90.0f, 55.0f}, THIRDPERSON_TRANSLATION.clone(),
+                new float[]{0.0f, 90.0f, -55.0f}, THIRDPERSON_TRANSLATION.clone());
+    }
+
+    /**
      * Solves the held pose for the model's cubes, or returns null when the
      * geometry has no dominant axis (the caller keeps the vanilla defaults).
      */
     public static Pose solve(List<ModelBone> bones) {
-        // ---- corners of every cube ----
-        int count = 0;
+        int boxCount = 0;
         for (ModelBone bone : bones) {
-            count += bone.cubes().size() * 8;
+            boxCount += bone.cubes().size();
         }
-        if (count == 0) {
+        if (boxCount == 0) {
             return null;
         }
-        float[] corners = new float[count * 3];
+        float[][] boxes = new float[boxCount][];
         int at = 0;
         for (ModelBone bone : bones) {
             // Cubes are stored relative to their own bone's pivot (the baker's
@@ -73,19 +86,37 @@ public final class HeldPoseSolver {
             float py = bone.pivotY();
             float pz = bone.pivotZ();
             for (ModelCube cube : bone.cubes()) {
-                float minX = Math.min(cube.fromX(), cube.toX()) - cube.inflate() + px;
-                float minY = Math.min(cube.fromY(), cube.toY()) - cube.inflate() + py;
-                float minZ = Math.min(cube.fromZ(), cube.toZ()) - cube.inflate() + pz;
-                float maxX = Math.max(cube.fromX(), cube.toX()) + cube.inflate() + px;
-                float maxY = Math.max(cube.fromY(), cube.toY()) + cube.inflate() + py;
-                float maxZ = Math.max(cube.fromZ(), cube.toZ()) + cube.inflate() + pz;
-                for (float x : new float[]{minX, maxX}) {
-                    for (float y : new float[]{minY, maxY}) {
-                        for (float z : new float[]{minZ, maxZ}) {
-                            corners[at++] = x;
-                            corners[at++] = y;
-                            corners[at++] = z;
-                        }
+                boxes[at++] = new float[]{
+                        Math.min(cube.fromX(), cube.toX()) - cube.inflate() + px,
+                        Math.min(cube.fromY(), cube.toY()) - cube.inflate() + py,
+                        Math.min(cube.fromZ(), cube.toZ()) - cube.inflate() + pz,
+                        Math.max(cube.fromX(), cube.toX()) + cube.inflate() + px,
+                        Math.max(cube.fromY(), cube.toY()) + cube.inflate() + py,
+                        Math.max(cube.fromZ(), cube.toZ()) + cube.inflate() + pz};
+            }
+        }
+        return solveBoxes(boxes);
+    }
+
+    /**
+     * Solves the held pose for plain axis-aligned boxes
+     * ({@code {minX, minY, minZ, maxX, maxY, maxZ}} in model pixels) — the
+     * static item-model path, which has baked cubes instead of bones.
+     */
+    public static Pose solveBoxes(float[][] boxes) {
+        int count = boxes.length * 8;
+        if (count == 0) {
+            return null;
+        }
+        float[] corners = new float[count * 3];
+        int at = 0;
+        for (float[] box : boxes) {
+            for (float x : new float[]{box[0], box[3]}) {
+                for (float y : new float[]{box[1], box[4]}) {
+                    for (float z : new float[]{box[2], box[5]}) {
+                        corners[at++] = x;
+                        corners[at++] = y;
+                        corners[at++] = z;
                     }
                 }
             }
@@ -307,7 +338,7 @@ public final class HeldPoseSolver {
         return new float[]{xAngle, yAngle, zAngle};
     }
 
-    private static float[] eulerXYZ(float x, float y, float z) {
+    static float[] eulerXYZ(float x, float y, float z) {
         return multiply(multiply(rotation(0, x), rotation(1, y)), rotation(2, z));
     }
 
@@ -325,7 +356,7 @@ public final class HeldPoseSolver {
         return matrix;
     }
 
-    private static float[] multiply(float[] left, float[] right) {
+    static float[] multiply(float[] left, float[] right) {
         float[] out = new float[9];
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 3; column++) {
@@ -337,14 +368,14 @@ public final class HeldPoseSolver {
         return out;
     }
 
-    private static float[] apply(float[] matrix, float[] point) {
+    static float[] apply(float[] matrix, float[] point) {
         return new float[]{
                 matrix[0] * point[0] + matrix[1] * point[1] + matrix[2] * point[2],
                 matrix[3] * point[0] + matrix[4] * point[1] + matrix[5] * point[2],
                 matrix[6] * point[0] + matrix[7] * point[1] + matrix[8] * point[2]};
     }
 
-    private static float[] scale(float[] point, float factor) {
+    static float[] scale(float[] point, float factor) {
         return new float[]{point[0] * factor, point[1] * factor, point[2] * factor};
     }
 

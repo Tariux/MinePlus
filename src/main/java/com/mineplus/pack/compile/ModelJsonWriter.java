@@ -12,6 +12,7 @@ import com.mineplus.infrastructure.virtual.ElementGeometry;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.ModelDisplay;
 import com.mineplus.infrastructure.virtual.VirtualModel;
+import com.mineplus.pack.item.ItemDisplaySolver;
 import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -138,22 +139,61 @@ public final class ModelJsonWriter {
             if (itemParent != null && !itemParent.isBlank()) {
                 root.addProperty("parent", itemParent);
             }
-            // Display: authored contexts win; if a parent is set, missing contexts
-            // come from the parent. If no parent and no authored display, fall back
-            // to vanilla generated defaults for compatibility.
-            ModelDisplay display = model.display();
-            if (display != null && !display.isEmpty()) {
-                // Authored contexts always win; without a parent, contexts the
-                // author never touched fall back to the handheld pose so a gun
-                // or tool does not render backward/up in the hand.
-                root.add("display", itemParent == null
-                        ? withDefaults(displayTransforms(display))
-                        : displayTransforms(display));
-            } else if (itemParent == null) {
-                root.add("display", vanillaDisplayTransforms());
+            // Display: authored contexts win. Without a parent, contexts the
+            // author never touched are DERIVED from the model's covered
+            // volume (bbox wrap + PCA grip for the hand contexts, centered
+            // bbox for gui/ground/fixed/head) so a model authored anywhere
+            // inside its 16x16x16 space still sits correctly in the hand,
+            // first person, the slot and on the ground. A parent model
+            // supplies vanilla's own defaults for missing contexts.
+            if (itemParent == null) {
+                float[][] boxes = cubeBoxes(model.cubes(), originMode);
+                ModelDisplay solved = ItemDisplaySolver.derive(boxes, orEmpty(model.display()));
+                root.add("display", displayTransforms(solved));
+            } else if (model.display() != null && !model.display().isEmpty()) {
+                root.add("display", displayTransforms(model.display()));
             }
         }
         return GSON.toJson(root);
+    }
+
+    /** {@link ModelDisplay#EMPTY} for a null display, else the display. */
+    private static ModelDisplay orEmpty(ModelDisplay display) {
+        return display == null ? ModelDisplay.EMPTY : display;
+    }
+
+    /**
+     * One axis-aligned box per cube in the coordinates the emitted elements
+     * use (raw authored geometry plus the origin shift), so the display
+     * solver sees exactly what the client will render.
+     */
+    private static float[][] cubeBoxes(List<BakedCube> cubes, ModelMeta.OriginMode originMode) {
+        float centerShift = originMode == ModelMeta.OriginMode.CENTER ? -8.0f : 0.0f;
+        float[][] boxes = new float[cubes.size()][];
+        int at = 0;
+        for (BakedCube cube : cubes) {
+            ElementGeometry geom = cube.geometry();
+            float shiftX = centerShift;
+            float shiftZ = centerShift;
+            float minX, minY, minZ, maxX, maxY, maxZ;
+            if (geom != null) {
+                minX = Math.min(geom.from().x, geom.to().x) + shiftX;
+                minY = Math.min(geom.from().y, geom.to().y);
+                minZ = Math.min(geom.from().z, geom.to().z) + shiftZ;
+                maxX = Math.max(geom.from().x, geom.to().x) + shiftX;
+                maxY = Math.max(geom.from().y, geom.to().y);
+                maxZ = Math.max(geom.from().z, geom.to().z) + shiftZ;
+            } else {
+                minX = cube.translation().x * 16.0f + shiftX;
+                minY = cube.translation().y * 16.0f;
+                minZ = cube.translation().z * 16.0f + shiftZ;
+                maxX = minX + cube.scale().x * 16.0f;
+                maxY = minY + cube.scale().y * 16.0f;
+                maxZ = minZ + cube.scale().z * 16.0f;
+            }
+            boxes[at++] = new float[]{minX, minY, minZ, maxX, maxY, maxZ};
+        }
+        return boxes;
     }
 
     private static JsonObject element(
@@ -468,42 +508,6 @@ public final class ModelJsonWriter {
      * display transforms must hold like a sword: blade forward along the arm,
      * not the "generated" backward/up pose.
      */
-    private static JsonObject vanillaDisplayTransforms() {
-        JsonObject display = new JsonObject();
-        display.add("gui", displayEntry(new float[]{30, 225, 0}, new float[]{0, 0, 0}, new float[]{0.625f, 0.625f, 0.625f}));
-        display.add("ground", displayEntry(new float[]{0, 0, 0}, new float[]{0, 3, 0}, new float[]{0.25f, 0.25f, 0.25f}));
-        display.add("head", displayEntry(new float[]{0, 180, 0}, new float[3], new float[]{1, 1, 1}));
-        display.add("fixed", displayEntry(new float[3], new float[3], new float[]{1, 1, 1}));
-        display.add("thirdperson_righthand", displayEntry(new float[]{0, -90, 55}, new float[]{0, 4.0f, 0.5f}, new float[]{0.85f, 0.85f, 0.85f}));
-        display.add("thirdperson_lefthand", displayEntry(new float[]{0, 90, -55}, new float[]{0, 4.0f, 0.5f}, new float[]{0.85f, 0.85f, 0.85f}));
-        display.add("firstperson_righthand", displayEntry(new float[]{0, -90, 25}, new float[]{1.13f, 3.2f, 1.13f}, new float[]{0.68f, 0.68f, 0.68f}));
-        display.add("firstperson_lefthand", displayEntry(new float[]{0, 90, -25}, new float[]{1.13f, 3.2f, 1.13f}, new float[]{0.68f, 0.68f, 0.68f}));
-        return display;
-    }
-
-    /**
-     * Fills the contexts the author never authored with the handheld defaults
-     * (contexts they did author are already present and win).
-     */
-    private static JsonObject withDefaults(JsonObject authored) {
-        JsonObject defaults = vanillaDisplayTransforms();
-        JsonObject merged = new JsonObject();
-        for (String context : new String[]{
-                "thirdperson_righthand", "thirdperson_lefthand",
-                "firstperson_righthand", "firstperson_lefthand",
-                "head", "gui", "ground", "fixed"}) {
-            JsonElement authoredEntry = authored.get(context);
-            merged.add(context, authoredEntry != null ? authoredEntry : defaults.get(context));
-        }
-        // Keep any additional authored contexts (none today; contexts are a fixed set).
-        for (java.util.Map.Entry<String, com.google.gson.JsonElement> entry : authored.entrySet()) {
-            if (!merged.has(entry.getKey())) {
-                merged.add(entry.getKey(), entry.getValue());
-            }
-        }
-        return merged;
-    }
-
     private static JsonObject displayEntry(float[] rotation, float[] translation, float[] scale) {
         JsonObject entry = new JsonObject();
         entry.add("rotation", vec3(rotation));
