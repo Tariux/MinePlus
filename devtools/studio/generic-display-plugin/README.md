@@ -96,7 +96,13 @@ Copy `mineplus_generic_display.js` into your Blockbench plugins folder —
 
 Headless checks (no Blockbench needed) live in `test/plugin.test.js`; they load
 the real plugin in a sandboxed stub of the Blockbench API and exercise the
-toggle, the format registration and the old-model conversion:
+toggle, the format registration and the old-model conversion. The sandbox uses
+Blockbench's real globals — the open project is `Project` (`Blockbench.Project`),
+there is no `Model` global — which is exactly what v4.1 got wrong: every
+convert/display tool required a nonexistent `Model` global and silently did
+nothing on old models. Conversion prefers Blockbench's native
+`ModelFormat.convertTo()` (it also migrates box UV, bone-rig grouping and
+rotation limits), with the plugin's own select-based path as fallback.
 
 ```
 node test/plugin.test.js

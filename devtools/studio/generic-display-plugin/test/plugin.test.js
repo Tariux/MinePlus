@@ -2,8 +2,13 @@
  *
  * Loads the plugin source in a vm sandbox with a stubbed Blockbench API, runs
  * the real onload() and the real action clicks, and asserts the behaviours
- * added in v3.2: tools toggle, mineplus format with animation support, and the
- * old-model conversion that keeps cubes/bones/textures/display/animations.
+ * added in v3.2+: tools toggle, mineplus format with animation support, and
+ * the old-model conversion that keeps cubes/bones/textures/display/animations.
+ *
+ * The sandbox mirrors the REAL Blockbench globals: the open project is
+ * `Project` (and Blockbench.Project), and there is no `Model` global — that
+ * mismatch was the v4.1 bug where convert/display silently did nothing on
+ * old models.
  */
 'use strict';
 const fs = require('fs');
@@ -30,7 +35,7 @@ function FakeGroup(opts) { Object.assign(this, { export: true }, opts); }
 function makeProject() {
   return {
     name: 'test_model',
-    mesh: true,
+    uuid: 'project-uuid',
     format: { id: 'bb_model' },
     mode: 'edit',
     elements: [new FakeCube(), new FakeCube(), new FakeCube()],
@@ -64,11 +69,11 @@ const sandbox = {
   },
   Action: function (id, opts) { this.id = id; this.name = opts.name; this.condition = opts.condition; this.click = opts.click; },
   ModelFormat: function (opts) {
-    // like Blockbench's real Format.select(): updates the active project's
-    // format via the global selector, not a direct assignment
+    // like Blockbench's real Format.select(): sets the global active format
+    // (and the open project's format via the project object)
     opts.select = function () {
       sandbox.__selectedFormat = this;
-      if (sandbox.Model) sandbox.Model.format = this;
+      if (sandbox.Project) sandbox.Project.format = this;
     };
     registeredFormats[opts.id] = opts;
     sandbox.Formats[opts.id] = opts;
@@ -99,6 +104,7 @@ sandbox.Panel.stored = {};
 sandbox.Dialog.last = null;
 sandbox.Dialog.prototype.show = function () { this.shown = true; };
 sandbox.Panel.prototype.delete = function () { delete sandbox.Panel.stored[this.id]; };
+// No `Model` and no `Project` before a project is opened — like real Blockbench.
 
 function load() {
   vm.createContext(sandbox);
@@ -139,10 +145,15 @@ check('toggle on shows tools again', editor.condition() === true);
 check('toggle state remembered', localStorageData.mineplus_tools_visible === '1');
 
 // 3. Conversion of an old-format model keeps all content and switches format.
-sandbox.Model = makeProject();
+// REGRESSION (v4.2.0): the sandbox has the real Blockbench globals — `Project`
+// only, no `Model` — and conversion must still work end to end. On v4.1 the
+// plugin required a `Model` global that does not exist in Blockbench, so the
+// convert tool and every display tool silently did nothing on old models.
+sandbox.Project = makeProject();
 actions.mineplus_convert.click();
-const project = sandbox.Model;
-check('converted to mineplus format', project.format && project.format.id === 'mineplus_model');
+const project = sandbox.Project;
+check('converted to mineplus format (via Project global, old-model bug fixed)',
+  project.format && project.format.id === 'mineplus_model');
 check('format switched via Format.select() (Display tab global updated)', sandbox.__selectedFormat
   && sandbox.__selectedFormat.id === 'mineplus_model');
 check('cubes kept (3)', project.elements.length === 3);
@@ -152,6 +163,29 @@ check('animations kept (2 — Animate tab content survives)', Object.keys(projec
 check('display block kept (1 context)', Object.keys(project.display).length === 1);
 check('template stamp added', project.mineplus && project.mineplus.plugin === 'mineplus_generic_display');
 
+// 3a. When the old format is still the active global and Blockbench's native
+// ModelFormat.convertTo() is available, it is used — it also migrates box UV,
+// bone-rig grouping and rotation limits, which old .bbmodel files need.
+sandbox.Project = makeProject();
+sandbox.Blockbench.Format = { id: 'bb_model' };
+let nativeUsed = false;
+fmt.convertTo = function () { nativeUsed = true; this.select(); };
+actions.mineplus_convert.click();
+check('convert uses native convertTo() when available',
+  nativeUsed && sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model');
+
+// 3b. …and conversion still succeeds when native convertTo throws.
+sandbox.Project = makeProject();
+sandbox.Blockbench.Format = { id: 'bb_model' };
+sandbox.__selectedFormat = null;
+fmt.convertTo = function () { throw new Error('native convert failed'); };
+actions.mineplus_convert.click();
+check('convert falls back to select when native convertTo() throws',
+  sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model'
+    && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
+delete fmt.convertTo;
+sandbox.Blockbench.Format = undefined;
+
 // 4. Converting an already-mineplus project is a no-op that still succeeds.
 actions.mineplus_convert.click();
 check('second convert is idempotent', project.format.id === 'mineplus_model'
@@ -160,8 +194,8 @@ check('second convert is idempotent', project.format.id === 'mineplus_model'
 // 5b. Reopened mineplus project: even when format is already mineplus, the
 // global format (which drives the Display/Animate tabs) gets re-selected —
 // the "display but no Animate/Display tab" bug on old models.
-sandbox.Model = makeProject();
-sandbox.Model.format = fmt;           // model says mineplus…
+sandbox.Project = makeProject();
+sandbox.Project.format = fmt;         // model says mineplus…
 sandbox.__selectedFormat = null;      // …but the global format is stale
 actions.mineplus_convert.click();
 check('reopened model re-selects global format (Display tab fix)',
@@ -169,7 +203,7 @@ check('reopened model re-selects global format (Display tab fix)',
 
 // 5c. The project_loaded hook runs the auto-apply (logged, not silently caught).
 const project2 = makeProject();
-sandbox.Model = project2;
+sandbox.Project = project2;
 sandbox.__selectedFormat = null;
 (hooks.project_loaded || []).forEach(h => h());
 check('project_loaded hook auto-applies mineplus format',

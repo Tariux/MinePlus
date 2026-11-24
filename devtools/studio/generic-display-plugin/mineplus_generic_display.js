@@ -1,4 +1,4 @@
-/* Mineplus Generic Display — Blockbench plugin v3.2.
+/* Mineplus Generic Display — Blockbench plugin v4.2.
  *
  * Tools (Tools menu, all logged):
  *   - Mineplus: Toggle Tools         show/hide all other Mineplus tools
@@ -124,8 +124,16 @@
 
   /* ------------------------------------------------------- model helpers */
 
+  // The open project. Blockbench exposes it as the global `Project`
+  // (mirrored on Blockbench.Project); some very old builds used a `model`
+  // global instead. A truthy check is not enough on modern builds where
+  // Blockbench.Project is 0 when nothing is open, so require a uuid.
   function currentModel() {
-    return (typeof Model !== 'undefined' && Model && Model.mesh) ? Model : null;
+    if (typeof Project !== 'undefined' && Project && Project.uuid) return Project;
+    if (typeof Blockbench !== 'undefined' && Blockbench.Project
+        && Blockbench.Project.uuid) return Blockbench.Project;
+    if (typeof Model !== 'undefined' && Model && Model.uuid) return Model;
+    return null;
   }
 
   function displayBlock() {
@@ -862,12 +870,29 @@
     }
     log('format switch: ' + (model.format && model.format.id ? model.format.id
         : '(unknown)') + ' → ' + MP_FORMAT_ID);
-    // Format.select() is the only correct switch: it sets the global Format
-    // (which drives the Display/Animate tabs via Format.display_mode /
-    // Format.animation_mode), updates the mode selector and panels. A plain
-    // `model.format = fmt` leaves the global stale — Animate stays from the
-    // old format and the Display tab never appears.
-    selectMineplusFormat(fmt, model);
+    // Preferred path: Blockbench's native ModelFormat.convertTo() — it also
+    // migrates box UV, bone rig grouping (loose cubes get a root group) and
+    // rotation snapping per format, which a bare select() skips and which old
+    // .bbmodel files saved in generic/java formats need.
+    if (typeof fmt.convertTo === 'function' && typeof Blockbench !== 'undefined'
+        && Blockbench.Format && Blockbench.Format !== fmt) {
+      try {
+        fmt.convertTo();
+        log('format converted via native convertTo() (box UV, bone rig and'
+            + ' rotation limits migrated)');
+      } catch (failure) {
+        warn('native convertTo() threw: ' + (failure && failure.message)
+            + ' — falling back to plain select');
+        selectMineplusFormat(fmt, model);
+      }
+    } else {
+      // Format.select() is the only correct switch: it sets the global Format
+      // (which drives the Display/Animate tabs via Format.display_mode /
+      // Format.animation_mode), updates the mode selector and panels. A plain
+      // `model.format = fmt` leaves the global stale — Animate stays from the
+      // old format and the Display tab never appears.
+      selectMineplusFormat(fmt, model);
+    }
     model.mode = 'edit';
     if (typeof Mode !== 'undefined' && Mode.edit) Mode.select(Mode.edit);
     if (!model.mineplus) model.mineplus = { format: 1, plugin: PLUGIN_ID };
@@ -1029,11 +1054,11 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '4.1.0',
+    version: '4.2.0',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v4.1.0)');
+      log('onload: starting (v4.2.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
