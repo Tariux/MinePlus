@@ -211,8 +211,25 @@
 
   /* -------------------------------------------------------------- format */
 
+  function allFormats() {
+    // `ModelFormat.all` does not exist in every Blockbench build (5.2.2
+    // desktop ships it undefined); fall back to the legacy `Formats` map.
+    if (typeof ModelFormat !== 'undefined' && Array.isArray(ModelFormat.all)) {
+      return ModelFormat.all;
+    }
+    if (typeof Formats !== 'undefined' && Formats) {
+      return Object.keys(Formats).map(function (id) { return Formats[id]; });
+    }
+    return [];
+  }
+
   function registerFormat() {
-    var existing = ModelFormat.all.find(function (f) { return f.id === MP_FORMAT_ID; });
+    if (typeof ModelFormat !== 'function') {
+      warn('ModelFormat constructor not available in this Blockbench build;'
+          + ' skipping .mpmodel format registration (display tools still work)');
+      return;
+    }
+    var existing = allFormats().find(function (f) { return f && f.id === MP_FORMAT_ID; });
     if (existing) {
       log('format ' + MP_FORMAT_ID + ' already registered; skipping');
       return;
@@ -265,27 +282,44 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '2.0.0',
+    version: '2.0.1',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'minecraft', 'mpmodel'],
     onload: function () {
-      log('onload: starting (v2.0.0)');
-      try {
-        registerFormat();
-        registerAction('mineplus_display_editor', 'Mineplus Display Editor',
-            'icon-configure', openEditor);
-        registerAction('mineplus_copy_display', 'Mineplus: Copy Display',
-            'icon-copy', copyDisplay);
-        registerAction('mineplus_validate_display', 'Mineplus: Validate Display',
-            'icon-verified', function () { validateDisplay(); });
-        registerAction('mineplus_save_mpmodel', 'Mineplus: Save as .mpmodel',
-            'icon-save', saveAsMpmodel);
-        registerAction('mineplus_show_log', 'Mineplus: Show Log',
-            'icon-list', showLog);
-      } catch (failure) {
-        warn('onload failed: ' + (failure && failure.message));
-        throw failure;
-      }
+      log('onload: starting (v2.0.1)');
+      // Each step is isolated: one failure (for example the format
+      // constructor missing on a Blockbench build) logs a warning and the
+      // remaining tools still register.
+      [
+        ['format .mpmodel', registerFormat],
+        ['action mineplus_display_editor', function () {
+          registerAction('mineplus_display_editor', 'Mineplus Display Editor',
+              'icon-configure', openEditor);
+        }],
+        ['action mineplus_copy_display', function () {
+          registerAction('mineplus_copy_display', 'Mineplus: Copy Display',
+              'icon-copy', copyDisplay);
+        }],
+        ['action mineplus_validate_display', function () {
+          registerAction('mineplus_validate_display', 'Mineplus: Validate Display',
+              'icon-verified', function () { validateDisplay(); });
+        }],
+        ['action mineplus_save_mpmodel', function () {
+          registerAction('mineplus_save_mpmodel', 'Mineplus: Save as .mpmodel',
+              'icon-save', saveAsMpmodel);
+        }],
+        ['action mineplus_show_log', function () {
+          registerAction('mineplus_show_log', 'Mineplus: Show Log',
+              'icon-list', showLog);
+        }]
+      ].forEach(function (step) {
+        try {
+          step[1]();
+        } catch (failure) {
+          warn('could not register ' + step[0] + ': '
+              + (failure && failure.message));
+        }
+      });
       hook('display_mode_entered', function () {
         log('display mode entered — edit contexts above the preview');
       });
