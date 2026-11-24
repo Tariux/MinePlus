@@ -1,4 +1,4 @@
-# mineplus_generic_display (Blockbench plugin) — v3.2
+# mineplus_generic_display (Blockbench plugin) — v4.0
 
 Author, animate and validate Mine Plus models: edit a model's `display`
 block, animate it in Blockbench's Animate tab, and save in the Mineplus-native
@@ -28,6 +28,7 @@ menu noise — toggle Mineplus tools on whenever display/animation work starts.
 | Mineplus: Save as .mpmodel | save in the Mineplus format |
 | Mineplus: Export as .bbmodel | save a plain bbmodel (also fully loadable) |
 | Mineplus: Open Generic / Java Item Model | start a vanilla Java item project or open any model file |
+| Mineplus: Studio (Display + Animate) | open the Mineplus Studio: display transforms and animation playback in one view |
 | Mineplus: Fix Duplicates | remove UUID-duplicated cubes/groups, rename same-name elements |
 | Mineplus: Model Report | cubes/bones/textures/animations summary |
 | Mineplus: Show Log | in-app log panel (last 400 lines) |
@@ -42,6 +43,28 @@ manual step. If a load ever comes in without them (log says so), run
 stamp and never touches cubes, bones, textures, the display block or
 animations; it verifies afterwards that no content count dropped and logs the
 before/after numbers.
+
+## Mineplus Studio (experimental)
+
+**Tools > Mineplus: Studio (Display + Animate)** opens a combined view —
+display contexts and animation playback together, the "in-game view" of a gun
+or item. It is also registered as a sidebar panel tab named **Mineplus Studio**
+(where the Blockbench build exposes the Panel API), so it sits beside the other
+panels like a third tab next to Display and Animate. From it you can:
+
+- edit rotation / translation / scale per display context and Apply (same
+  clamping as the server),
+- **Preview in game slot** — switches to Blockbench's display mode so the
+  viewport renders the authored transforms exactly as Minecraft would,
+- play / pause any animation in the model while editing,
+- **Display + Animate side by side** — one click that ensures the mineplus
+  format is active (both tabs' flags) and enters display mode.
+
+Opening old animated models: since v4.0 the auto-apply after load also
+re-selects the *global* format (via `Format.select()`, with codec and direct
+fallbacks, all logged) — the Display/Animate tabs follow the global format, so
+reopened models now always get both tabs, even when `model.format` was already
+mineplus. If anything still fails the log names the exact step.
 
 ## The `.mpmodel` format
 

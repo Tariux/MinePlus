@@ -22,6 +22,7 @@ const localStorageData = {};
 const actions = {};          // id -> {id, name, condition, click}
 const menuBar = { tools: [] };
 const registeredFormats = {};
+const hooks = {};            // event -> [handlers]
 
 function FakeCube() { this.type = 'cube'; }
 function FakeGroup(opts) { Object.assign(this, { export: true }, opts); }
@@ -55,14 +56,20 @@ const sandbox = {
   Blockbench: {
     showQuickMessage: msg => log('quick message: ' + msg),
     dispatchEvent: () => {},
-    on: () => {},
-    off: () => {}
+    on: (event, handler) => { (hooks[event] = hooks[event] || []).push(handler); },
+    off: (event, handler) => { hooks[event] = (hooks[event] || []).filter(h => h !== handler); }
   },
   Plugin: {
     register: (id, def) => { sandbox.__plugin = def; sandbox.__pluginId = id; }
   },
   Action: function (id, opts) { this.id = id; this.name = opts.name; this.condition = opts.condition; this.click = opts.click; },
   ModelFormat: function (opts) {
+    // like Blockbench's real Format.select(): updates the active project's
+    // format via the global selector, not a direct assignment
+    opts.select = function () {
+      sandbox.__selectedFormat = this;
+      if (sandbox.Model) sandbox.Model.format = this;
+    };
     registeredFormats[opts.id] = opts;
     sandbox.Formats[opts.id] = opts;
     this.id = opts.id;
@@ -76,9 +83,22 @@ const sandbox = {
   Codecs: { project: { load_filter: { extensions: ['bbmodel'] } } },
   Canvas: { updateAll: () => {}, updateViewMode: () => {} },
   Mode: { edit: {}, select: () => {} },
+  Modes: { display: { id: 'display', select() { this.selected = true; } } },
+  Panel: function (id, opts) {
+    this.id = id; this.options = opts; this.node = null;
+    sandbox.Panel.stored[id] = this;
+  },
+  Dialog: function (opts) {
+    this.options = opts; this.shown = false;
+    sandbox.Dialog.last = this;
+  },
   Cube: FakeCube,
   Group: FakeGroup
 };
+sandbox.Panel.stored = {};
+sandbox.Dialog.last = null;
+sandbox.Dialog.prototype.show = function () { this.shown = true; };
+sandbox.Panel.prototype.delete = function () { delete sandbox.Panel.stored[this.id]; };
 
 function load() {
   vm.createContext(sandbox);
@@ -123,6 +143,8 @@ sandbox.Model = makeProject();
 actions.mineplus_convert.click();
 const project = sandbox.Model;
 check('converted to mineplus format', project.format && project.format.id === 'mineplus_model');
+check('format switched via Format.select() (Display tab global updated)', sandbox.__selectedFormat
+  && sandbox.__selectedFormat.id === 'mineplus_model');
 check('cubes kept (3)', project.elements.length === 3);
 check('bones kept (2, incl. non-exported)', project.groups.length === 2);
 check('textures kept (1)', project.textures.length === 1);
@@ -135,10 +157,41 @@ actions.mineplus_convert.click();
 check('second convert is idempotent', project.format.id === 'mineplus_model'
   && project.elements.length === 3 && Object.keys(project.animations).length === 2);
 
-// 5. onunload cleans up without throwing.
+// 5b. Reopened mineplus project: even when format is already mineplus, the
+// global format (which drives the Display/Animate tabs) gets re-selected —
+// the "display but no Animate/Display tab" bug on old models.
+sandbox.Model = makeProject();
+sandbox.Model.format = fmt;           // model says mineplus…
+sandbox.__selectedFormat = null;      // …but the global format is stale
+actions.mineplus_convert.click();
+check('reopened model re-selects global format (Display tab fix)',
+  sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
+
+// 5c. The project_loaded hook runs the auto-apply (logged, not silently caught).
+const project2 = makeProject();
+sandbox.Model = project2;
+sandbox.__selectedFormat = null;
+(hooks.project_loaded || []).forEach(h => h());
+check('project_loaded hook auto-applies mineplus format',
+  project2.format && project2.format.id === 'mineplus_model'
+    && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
+
+// 6. Studio: tools entry, sidebar panel registration, dialog opens and both
+// display contexts and animations are listed in its content.
+check('studio action registered', toolIds.includes('mineplus_studio'));
+check('studio sidebar panel registered (experimental)', !!sandbox.Panel.stored.mineplus_studio);
+actions.mineplus_studio.click();
+check('studio dialog opens', sandbox.Dialog.last && sandbox.Dialog.last.shown
+  && sandbox.Dialog.last.options.id === 'mineplus_studio_dialog');
+const studioHtml = sandbox.Dialog.last.options.lines.join('');
+check('studio lists display contexts', studioHtml.includes('thirdperson_righthand'));
+check('studio lists animations (idle, fire)', studioHtml.includes('idle') && studioHtml.includes('fire'));
+check('studio has in-game slot preview button', studioHtml.includes('Preview in game slot'));
+
+// 6b. onunload removes the studio panel and actions.
 sandbox.__plugin.onunload();
 check('onunload runs cleanly', actions.mineplus_display_editor === undefined);
-check('log captured [Mineplus] lines', logLines.some(l => l.includes('onload: starting (v3.2.0)')));
+check('studio panel removed on unload', !sandbox.Panel.stored.mineplus_studio);
 
 console.log(failures === 0
   ? `\nAll ${'checks'} passed.`

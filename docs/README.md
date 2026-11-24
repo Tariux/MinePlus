@@ -11,7 +11,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | I want to... | Read this |
 |---|---|
 | Add machines **without writing code** | [Configuration Reference](config-reference.md) → [JSON-Only Workflow](extension-workflows.md#a-json-only-servers-no-coding) |
-| Author models in **Blockbench** | [Configuration Reference → Blockbench Guide](config-reference.md#blockbench-designer-guidelines) |
+| Author models in **Blockbench** | [Model Authoring Guide](model-authoring-guide.md) |
 | Build a **small add-on plugin** | [Developer API](developer-api.md#tier-2-basic-infrastructure-api) → [Basic Add-on Workflow](extension-workflows.md#b-basic-add-on-developers) |
 | Build a **full machine framework** | [Developer API](developer-api.md) → [Advanced Workflow](extension-workflows.md#c-advanced-framework-developers) |
 | See a **complete working module** | [MineplusFun (Juicer, Cannon, Wine, Cabinet, Alchemy)](../examples/mineplus-fun/README.md) · [MineplusGun (firearms)](../examples/mineplus-gun/README.md) |
