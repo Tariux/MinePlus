@@ -176,22 +176,24 @@ check('project_loaded hook auto-applies mineplus format',
   project2.format && project2.format.id === 'mineplus_model'
     && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
 
-// 6. Studio: tools entry, sidebar panel registration, dialog opens and both
-// display contexts and animations are listed in its content.
-check('studio action registered', toolIds.includes('mineplus_studio'));
-check('studio sidebar panel registered (experimental)', !!sandbox.Panel.stored.mineplus_studio);
+// 6. Studio: opens the DEFAULT Blockbench UI — mineplus format selected,
+// display mode entered, and the default Display/Animations panels brought
+// forward. No custom GUI.
+sandbox.Panel.stored.display = { select() { this.selected = true; } };
+sandbox.Panel.stored.animations = { select() { this.selected = true; } };
+sandbox.Modes.display.selected = false;
+sandbox.__selectedFormat = null;
 actions.mineplus_studio.click();
-check('studio dialog opens', sandbox.Dialog.last && sandbox.Dialog.last.shown
-  && sandbox.Dialog.last.options.id === 'mineplus_studio_dialog');
-const studioHtml = sandbox.Dialog.last.options.lines.join('');
-check('studio lists display contexts', studioHtml.includes('thirdperson_righthand'));
-check('studio lists animations (idle, fire)', studioHtml.includes('idle') && studioHtml.includes('fire'));
-check('studio has in-game slot preview button', studioHtml.includes('Preview in game slot'));
+check('studio action registered', toolIds.includes('mineplus_studio'));
+check('studio re-selects the mineplus format',
+  sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
+check('studio enters display mode', sandbox.Modes.display.selected === true);
+check('studio opens the default Display panel', sandbox.Panel.stored.display.selected === true);
+check('studio opens the default Animations panel', sandbox.Panel.stored.animations.selected === true);
 
-// 6b. onunload removes the studio panel and actions.
+// 6b. onunload removes the actions.
 sandbox.__plugin.onunload();
 check('onunload runs cleanly', actions.mineplus_display_editor === undefined);
-check('studio panel removed on unload', !sandbox.Panel.stored.mineplus_studio);
 
 console.log(failures === 0
   ? `\nAll ${'checks'} passed.`

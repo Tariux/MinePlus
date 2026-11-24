@@ -962,11 +962,10 @@
 
   /* ------------------------------------------------------ studio (experimental) */
 
-  // Mineplus Studio: one tab with DISPLAY and ANIMATION together. Registered
-  // as a sidebar Panel (a real tab next to Preview/Console) when the build has
-  // the Panel API, and always reachable from Tools → "Mineplus: Studio" as the
-  // same UI in a Dialog. "Preview in game slot" enters Blockbench's display
-  // mode, which renders the authored transforms exactly like the game would.
+  // Mineplus Studio is intentionally thin: it opens Blockbench's OWN display
+  // and animation UI together — no custom GUI. The designer works with the
+  // default Display panel, the default Animate timeline and the standard mode
+  // toggle; the plugin only makes sure both are enabled and reachable.
   function enterDisplayMode() {
     var modes = typeof Modes !== 'undefined' ? Modes : null;
     var display = modes && (modes.display || (modes.options && modes.options.display));
@@ -980,214 +979,38 @@
     return false;
   }
 
-  function listAnimations() {
-    var model = currentModel();
-    if (!model || !model.animations) return [];
-    if (typeof Animation !== 'undefined' && Animation.stored
-        && Object.keys(Animation.stored).length) {
-      return Object.keys(Animation.stored);
-    }
-    return Object.keys(model.animations);
-  }
-
-  function playAnimation(name) {
-    var anim = (typeof Animation !== 'undefined' && Animation.stored)
-        ? Animation.stored[name] : null;
-    try {
-      if (anim && typeof Animation.select === 'function') Animation.select(anim);
-      else if (anim && typeof anim.select === 'function') anim.select();
-      if (typeof Timeline !== 'undefined' && typeof Timeline.play === 'function') {
-        Timeline.play();
-      }
-      log('studio: playing animation "' + name + '"');
-      return true;
-    } catch (failure) {
-      warn('studio: play "' + name + '" failed: ' + (failure && failure.message));
-      return false;
-    }
-  }
-
-  function stopAnimations() {
-    try {
-      if (typeof Timeline !== 'undefined' && typeof Timeline.pause === 'function') {
-        Timeline.pause();
-      }
-      log('studio: playback paused');
-      return true;
-    } catch (failure) {
-      warn('studio: pause failed: ' + (failure && failure.message));
-      return false;
-    }
-  }
-
-  // The studio UI as plain HTML. `embed` gives the styles used both in the
-  // panel and in the dialog so the two look the same.
-  function buildStudioContent(embed) {
-    var block = displayBlock();
-    var anims = listAnimations();
-    var contexts = CONTEXTS.map(function (context) {
-      var entry = block[context];
-      var f = function (field) {
-        return entry && entry[field] ? entry[field].join(', ') : '—';
-      };
-      return '<option value="' + context + '">' + context
-          + (entry ? ' ●' : '') + '</option>';
-    }).join('');
-    var animRows = anims.length
-        ? anims.map(function (name) {
-          return '<div class="mp-studio-anim-row"><span>' + name + '</span>'
-              + '<button type="button" data-mp-anim="' + name + '">Play</button></div>';
-        }).join('')
-        : '<div class="mp-studio-empty">No animations in this model — use Animate to add one.</div>';
-    var contextRows = CONTEXTS.map(function (context) {
-      var entry = block[context];
-      if (!entry) return '';
-      return '<div class="mp-studio-ctx-row"><span>' + context + '</span><span>'
-          + ['rotation', 'translation', 'scale'].map(function (field) {
-            return entry[field] ? entry[field].join('/') : '–';
-          }).join(' | ') + '</span></div>';
-    }).join('');
-    var ctxList = contextRows
-        || '<div class="mp-studio-empty">No authored contexts yet — vanilla defaults apply.</div>';
-    return ''
-        + '<div class="mp-studio" style="' + embed + '">'
-        + '<div class="mp-studio-col">'
-        + '<h3>Display — in-game transforms</h3>'
-        + '<label>Context<br><select id="mp_studio_context">' + contexts + '</select></label>'
-        + '<label>Rotation (x,y,z)<br><input id="mp_studio_rot" placeholder="0, 0, 0"></label>'
-        + '<label>Translation (x,y,z)<br><input id="mp_studio_trans" placeholder="0, 0, 0"></label>'
-        + '<label>Scale (x,y,z)<br><input id="mp_studio_scale" placeholder="1, 1, 1"></label>'
-        + '<div class="mp-studio-buttons">'
-        + '<button type="button" data-mp-apply="1">Apply</button>'
-        + '<button type="button" data-mp-clear="1">Clear context</button>'
-        + '<button type="button" data-mp-preview="1">Preview in game slot</button>'
-        + '</div>'
-        + '<h4>Authored contexts</h4>' + ctxList
-        + '</div>'
-        + '<div class="mp-studio-col">'
-        + '<h3>Animation</h3>' + animRows
-        + '<div class="mp-studio-buttons">'
-        + '<button type="button" data-mp-stop="1">Pause playback</button>'
-        + '<button type="button" data-mp-display-mode="1">Display + Animate side by side</button>'
-        + '</div>'
-        + '<h4>How to use</h4>'
-        + '<p>Edit the transform for a display context, Apply, then "Preview in'
-        + ' game slot" to see it as Minecraft would render it. Play animations'
-        + ' while editing to fine-tune gun poses.</p>'
-        + '</div>'
-        + '</div>';
-  }
-
-  function wireStudioContent(root) {
-    if (!root || typeof root.querySelector !== 'function') return;
-    var contextSel = root.querySelector('#mp_studio_context');
-    root.addEventListener('click', function (event) {
-      var target = event.target;
-      if (!target || !target.getAttribute) return;
-      var context = contextSel ? contextSel.value : CONTEXTS[0];
-      if (target.getAttribute('data-mp-apply')) {
-        var fields = {
-          rotation: parseTriple(root.querySelector('#mp_studio_rot').value),
-          translation: parseTriple(root.querySelector('#mp_studio_trans').value),
-          scale: parseTriple(root.querySelector('#mp_studio_scale').value)
-        };
-        var wrote = ['rotation', 'translation', 'scale'].some(function (f) {
-          return !!fields[f];
-        });
-        if (!wrote) {
-          Blockbench.showQuickMessage('Enter at least one triple (e.g. 0, 45, 0)');
-          return;
-        }
-        writeContext(context, fields);
-        Blockbench.showQuickMessage('Display "' + context + '" applied');
-      } else if (target.getAttribute('data-mp-clear')) {
-        clearContext(context);
-        Blockbench.showQuickMessage('Display "' + context + '" cleared');
-      } else if (target.getAttribute('data-mp-preview')) {
-        enterDisplayMode();
-      } else if (target.getAttribute('data-mp-display-mode')) {
-        applyMineplusFormat(false);
-        enterDisplayMode();
-      } else if (target.getAttribute('data-mp-anim')) {
-        playAnimation(target.getAttribute('data-mp-anim'));
-      } else if (target.getAttribute('data-mp-stop')) {
-        stopAnimations();
-      }
-    });
-  }
-
-  var STUDIO_CSS = '.mp-studio{display:flex;gap:12px;font-size:12px;}'
-      + '.mp-studio-col{flex:1;min-width:200px;}'
-      + '.mp-studio h3{margin:4px 0 8px;}'
-      + '.mp-studio label{display:block;margin:6px 0;}'
-      + '.mp-studio input,.mp-studio select{width:100%;box-sizing:border-box;}'
-      + '.mp-studio-buttons{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}'
-      + '.mp-studio-ctx-row,.mp-studio-anim-row{display:flex;'
-      + 'justify-content:space-between;gap:8px;padding:2px 0;}'
-      + '.mp-studio-empty{opacity:0.7;padding:2px 0;}';
-
-  function openStudioDialog() {
-    log('studio: opening (dialog)');
+  // Mineplus Studio is intentionally thin (see note above): it opens
+  // Blockbench's own Display panel and Animate side by side. No custom GUI.
+  function openStudio() {
+    log('studio: opening — using the default Blockbench Display + Animate UI');
     if (!currentModel()) {
       Blockbench.showQuickMessage('Open or create a model first');
       return;
     }
-    applyMineplusFormat(false); // guarantee both tabs' flags are active
-    var dialog = new Dialog({
-      title: 'Mineplus Studio — Display + Animation',
-      id: 'mineplus_studio_dialog',
-      buttons: ['Close'],
-      lines: ['<style>' + STUDIO_CSS + '</style>' + buildStudioContent('')]
-    });
-    dialog.show();
-    var host = null;
+    applyMineplusFormat(false); // enables both the Display and Animate tabs
+    enterDisplayMode();         // preview shows the authored slot transforms
+    var opened = [];
     try {
-      if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
-        host = document.getElementById('mineplus_studio_dialog');
+      if (typeof Panel !== 'undefined' && Panel.stored) {
+        if (Panel.stored.animations
+            && typeof Panel.stored.animations.select === 'function') {
+          Panel.stored.animations.select();
+          opened.push('Animations panel');
+        }
+        if (Panel.stored.display
+            && typeof Panel.stored.display.select === 'function') {
+          Panel.stored.display.select();
+          opened.push('Display panel');
+        }
       }
     } catch (failure) {
-      warn('studio: dialog host lookup failed: ' + (failure && failure.message));
+      warn('studio: opening default panels failed: '
+          + (failure && failure.message));
     }
-    if (host) wireStudioContent(host);
-    else warn('studio: dialog host node not found — buttons inert on this build');
-    log('studio: dialog opened');
-  }
-
-  // The sidebar tab. Built with the real Panel API when present so "Mineplus
-  // Studio" appears as a tab in the left panel strip, next to the others.
-  function registerStudioPanel() {
-    if (typeof Panel !== 'function') {
-      warn('Panel API missing on this build — the studio is available from'
-          + ' Tools > "Mineplus: Studio"');
-      return null;
-    }
-    var panel = new Panel('mineplus_studio', {
-      name: 'Mineplus Studio',
-      icon: 'icon-3d',
-      // experimental: always visible while the plugin tools are visible
-      condition: function () { return toolsVisible(); },
-      toolbars: [],
-      onshow: function () { log('studio: panel tab selected'); }
-    });
-    try {
-      var host = panel.node || document.getElementById('panel_mineplus_studio');
-      if (host) {
-        var style = document.createElement('style');
-        style.textContent = STUDIO_CSS;
-        (document.head || document).appendChild(style);
-        var wrap = document.createElement('div');
-        wrap.innerHTML = buildStudioContent('');
-        host.appendChild(wrap);
-        wireStudioContent(wrap);
-        log('studio: sidebar panel "mineplus_studio" built');
-      } else {
-        warn('studio: panel node not found — Tools entry still works');
-      }
-    } catch (failure) {
-      warn('studio: panel content failed: ' + (failure && failure.message));
-    }
-    log('studio: sidebar panel registered (experimental)');
-    return panel;
+    log('studio: default panels brought forward: '
+        + (opened.join(', ') || 'mode defaults'));
+    Blockbench.showQuickMessage('Mineplus Studio: display mode on — edit in the'
+        + ' default Display panel and Animate timeline');
   }
 
   /* --------------------------------------------------------------- setup */
@@ -1206,11 +1029,11 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '4.0.0',
+    version: '4.1.0',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v4.0.0)');
+      log('onload: starting (v4.1.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
@@ -1234,9 +1057,8 @@
         }],
         ['action mineplus_studio', function () {
           registerAction('mineplus_studio', 'Mineplus: Studio (Display + Animate)',
-              'icon-3d', openStudioDialog);
+              'icon-3d', openStudio);
         }],
-        ['studio sidebar panel', registerStudioPanel],
         ['action mineplus_convert', function () {
           registerAction('mineplus_convert', 'Mineplus: Convert to Mineplus Model',
               'icon-change_format', convertToMineplus);
@@ -1350,12 +1172,6 @@
       state.actions.forEach(function (action) {
         try { MenuBar.removeAction(action); } catch (e) { /* already gone */ }
       });
-      try {
-        if (typeof Panel === 'function' && Panel.stored && Panel.stored.mineplus_studio) {
-          Panel.stored.mineplus_studio.delete();
-          log('studio sidebar panel removed');
-        }
-      } catch (e) { /* best effort */ }
       state.hooks.forEach(function (h) {
         try { Blockbench.off(h.event, h.handler); } catch (e) { /* already gone */ }
       });
