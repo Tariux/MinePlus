@@ -1,6 +1,15 @@
-/* Mineplus Generic Display — Blockbench plugin v3.1.
+/* Mineplus Generic Display — Blockbench plugin v3.2.
  *
  * Tools (Tools menu, all logged):
+ *   - Mineplus: Toggle Tools         show/hide all other Mineplus tools
+ *                                    (state is remembered across sessions)
+ *   - Mineplus: Convert to Mineplus Model
+ *                                    migrate the open model (old bbmodel,
+ *                                    java_block, free, …) into the mineplus
+ *                                    format — cubes, bones, textures, DISPLAY
+ *                                    and ANIMATIONS all survive, so the
+ *                                    Animate tab and the display editor both
+ *                                    work afterwards
  *   - Mineplus Display Editor        edit rotation/translation/scale per context
  *   - Mineplus: Copy Display         copy the display block as JSON
  *   - Mineplus: Validate Display     display-only validation
@@ -56,6 +65,38 @@
   var ANGLE_MAX = 45;
 
   var state = { actions: [], hooks: [], logLines: [], property: null, addedExtension: false };
+  var TOOLS_VISIBLE_KEY = 'mineplus_tools_visible';
+
+  /* ------------------------------------------------------- tools visibility */
+
+  function toolsVisible() {
+    try {
+      var stored = localStorage.getItem(TOOLS_VISIBLE_KEY);
+      return stored === null ? true : stored === '1';
+    } catch (e) {
+      return state.toolsVisible !== false;
+    }
+  }
+
+  function setToolsVisible(visible) {
+    state.toolsVisible = visible;
+    try { localStorage.setItem(TOOLS_VISIBLE_KEY, visible ? '1' : '0'); } catch (e) { /* private mode */ }
+    log('tools ' + (visible ? 'shown' : 'hidden')
+        + ' — run "Mineplus: Toggle Tools" (or reload the plugin) to switch back');
+    Blockbench.showQuickMessage('Mineplus tools ' + (visible ? 'shown' : 'hidden'));
+    if (typeof Canvas !== 'undefined' && Canvas.updateViewMode) Canvas.updateViewMode();
+  }
+
+  function toggleTools() {
+    setToolsVisible(!toolsVisible());
+  }
+
+  // Condition on every Mineplus menu entry except the toggle itself: Blockbench
+  // evaluates it each time the Tools menu opens, so hiding is instant and the
+  // toggle stays reachable.
+  function visibilityCondition() {
+    return function () { return toolsVisible(); };
+  }
 
   /* ------------------------------------------------------------------ log */
 
@@ -644,6 +685,7 @@
       vertex_color: false,
       texture_meshes: false,
       animation_mode: true,
+      animation_files: false,
       display_mode: true,
       bone_rig: true,
       centered_grid: true
@@ -733,14 +775,139 @@
       log('loaded template stamp: ' + JSON.stringify(stamp));
     } else if (!model.mineplus) {
       log('loaded a model without a template stamp (plain bbmodel or older save)'
-          + ' — use "Mineplus: Template Settings" to stamp it');
+          + ' — "Mineplus: Convert to Mineplus Model" migrates it in one step');
     }
+    var animations = model.animations ? Object.keys(model.animations) : [];
+    var animFiles = typeof Animation !== 'undefined' && model.animations
+        && model.animations.length !== undefined ? model.animations.length : animations.length;
+    log('loaded model "' + model.name + '": format ' + (model.format && model.format.id
+        ? model.format.id : '(unknown)')
+        + ', ' + animations.length + ' animation(s) in project'
+        + ', ' + animFiles + ' in animations registry'
+        + ', display contexts: ' + CONTEXTS.filter(function (c) {
+          return model.display && model.display[c];
+        }).length + ' — if the Animate tab is still missing, run'
+        + ' "Mineplus: Convert to Mineplus Model"');
+  }
+
+  /* ------------------------------------------------------------ conversion */
+
+  // Switch the open project to the mineplus format. Returns true on success.
+  // `auto` marks silent calls from the load hook (kept out of quick messages).
+  function applyMineplusFormat(auto) {
+    var model = currentModel();
+    if (!model) return false;
+    var fmt = allFormats().filter(function (f) { return f && f.id === MP_FORMAT_ID; })[0];
+    if (!fmt) {
+      if (!auto) warn('convert: mineplus format not registered in this build');
+      return false;
+    }
+    if (model.format && model.format.id === MP_FORMAT_ID) {
+      log('format already ' + MP_FORMAT_ID + ' — nothing to do');
+      return true;
+    }
+    log('format switch: ' + (model.format && model.format.id ? model.format.id
+        : '(unknown)') + ' → ' + MP_FORMAT_ID);
+    model.format = fmt;
+    model.mode = 'edit';
+    if (typeof Mode !== 'undefined' && Mode.edit) Mode.select(Mode.edit);
+    if (!model.mineplus) model.mineplus = { format: 1, plugin: PLUGIN_ID };
+    if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
+    log('format switched to ' + MP_FORMAT_ID
+        + ' — project object untouched (cubes, bones, textures, display,'
+        + ' animations all kept)');
+    return true;
+  }
+
+  // Migrate ANY open model (an old .bbmodel saved in another format, a
+  // java_block project, a free model, …) into the Mineplus format: cubes,
+  // bones, textures, the authored display block and every animation are kept
+  // untouched — only the project's format stamp changes, so both the Animate
+  // tab and the display editor work afterwards.
+  function convertToMineplus() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var before = {
+      cubes: cubeList().length,
+      bones: boneList().length,
+      textures: (model.textures || []).length,
+      animations: model.animations ? Object.keys(model.animations).length : 0,
+      display: Object.keys(displayBlock()).length
+    };
+    log('convert: starting from format ' + (model.format && model.format.id
+        ? model.format.id : '(unknown)') + ' — ' + JSON.stringify(before));
+    if (typeof Animation === 'undefined' || !Animation.stored) {
+      warn('convert: Animation.stored missing — animations may not survive');
+    }
+    var ok = applyMineplusFormat(false);
+    if (!ok) {
+      Blockbench.showQuickMessage('Mineplus format unavailable — see log');
+      return;
+    }
+    var after = {
+      cubes: cubeList().length,
+      bones: boneList().length,
+      textures: (model.textures || []).length,
+      animations: model.animations ? Object.keys(model.animations).length : 0,
+      display: Object.keys(displayBlock()).length
+    };
+    var lost = Object.keys(before).filter(function (k) { return after[k] < before[k]; });
+    if (lost.length) {
+      warn('convert: some content count dropped: before ' + JSON.stringify(before)
+          + ' after ' + JSON.stringify(after) + ' — undo (Ctrl+Z) and report the log');
+    } else {
+      log('convert: content intact ' + JSON.stringify(after)
+          + ' — save as .mpmodel to keep it');
+    }
+    if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
+    Blockbench.showQuickMessage(lost.length
+        ? 'Converted with content changes — see log'
+        : 'Converted to Mineplus Model — Animate tab and display editor enabled');
+  }
+
+  // Open an old .bbmodel (or any project file) and convert it in one step.
+  function openAndMigrate() {
+    if (typeof loadModelFile !== 'function') {
+      warn('loadModelFile missing in this build; open the file with File > Open Model, then run Convert');
+      Blockbench.showQuickMessage('Open the file first, then run Convert to Mineplus Model');
+      return;
+    }
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.bbmodel,.bbmodel.old,.json,.mpmodel';
+    input.onchange = function () {
+      var file = input.files && input.files[0];
+      if (!file) {
+        log('migrate open: cancelled');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        log('migrate open: loading "' + file.name + '" through its matching codec');
+        try {
+          loadModelFile({ content: reader.result, path: file.name, name: file.name }, {});
+          log('migrate open: loaded — converting to Mineplus Model');
+          setTimeout(function () { convertToMineplus(); }, 50);
+        } catch (failure) {
+          warn('migrate open failed: ' + (failure && failure.message));
+        }
+      };
+      reader.onerror = function () { warn('file read failed for ' + file.name); };
+      reader.readAsText(file);
+    };
+    input.click();
   }
 
   /* --------------------------------------------------------------- setup */
 
   function registerAction(id, name, icon, click) {
-    var action = new Action(id, { name: name, icon: icon, click: click });
+    var action = new Action(id, {
+      name: name, icon: icon, category: 'edit',
+      condition: visibilityCondition(), click: click
+    });
     MenuBar.addAction(action, 'tools');
     state.actions.push(action);
     log('action ' + id + ' registered in Tools menu');
@@ -750,20 +917,39 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '3.1.0',
+    version: '3.2.0',
     min_version: '4.0.0',
-    tags: ['mineplus', 'display', 'minecraft', 'mpmodel', 'template'],
+    tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v3.1.0)');
+      log('onload: starting (v3.2.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
       [
         ['format .mpmodel', registerFormat],
         ['codec template stamp', registerCodec],
+        ['action mineplus_toggle_tools', function () {
+          var toggle = new Action('mineplus_toggle_tools', {
+            name: 'Mineplus: Toggle Tools',
+            icon: 'icon-explore',
+            description: 'Show or hide all other Mineplus tools in this menu',
+            click: toggleTools
+          });
+          MenuBar.addAction(toggle, 'tools');
+          state.actions.push(toggle);
+          log('action mineplus_toggle_tools registered in Tools menu (always visible)');
+        }],
         ['action mineplus_display_editor', function () {
           registerAction('mineplus_display_editor', 'Mineplus Display Editor',
               'icon-configure', openEditor);
+        }],
+        ['action mineplus_convert', function () {
+          registerAction('mineplus_convert', 'Mineplus: Convert to Mineplus Model',
+              'icon-change_format', convertToMineplus);
+        }],
+        ['action mineplus_open_migrate', function () {
+          registerAction('mineplus_open_migrate', 'Mineplus: Open & Migrate Old Model…',
+              'icon-open_folder', openAndMigrate);
         }],
         ['action mineplus_copy_display', function () {
           registerAction('mineplus_copy_display', 'Mineplus: Copy Display',
@@ -847,6 +1033,11 @@
       // stamp from whichever fires with the raw model data.
       hook('load_project', restoreStamp);
       hook('project_loaded', restoreStamp);
+      // After any load, make sure the mineplus format is active so the Animate
+      // tab and the display editor are both available without a manual step.
+      hook('project_loaded', function () {
+        try { applyMineplusFormat(false); } catch (e) { /* non-fatal */ }
+      });
       log('onload: all actions registered under Tools');
     },
     onunload: function () {

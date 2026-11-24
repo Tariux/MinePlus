@@ -1,82 +1,87 @@
-# mineplus_generic_display (Blockbench plugin) — v3.1
+# mineplus_generic_display (Blockbench plugin) — v3.2
 
-Author and validate a model's `display` block, and save models in the
-Mineplus-native `.mpmodel` format. Every step logs to the browser console
-(`[Mineplus]` prefix) and to an in-app log panel, so a missing menu entry or a
+Author, animate and validate Mine Plus models: edit a model's `display`
+block, animate it in Blockbench's Animate tab, and save in the Mineplus-native
+`.mpmodel` format (or plain `.bbmodel` — both stay fully loadable). Every step
+logs to the browser console and to the in-app log panel, so a failed step or a
 failed save is always traceable.
 
-## Install
+## Tools menu
 
-1. Copy this folder (or a zip of it) into your Blockbench plugins directory:
-   - Windows: `%appdata%/../.blockbench/plugins/`
-   - macOS: `~/.blockbench/plugins/`
-   - Linux: `~/.blockbench/plugins/`
-2. Restart Blockbench, open **File › Plugins**, enable
-   **Mineplus Generic Display**.
-3. Open **Tools** — the Mineplus entries appear at the bottom of the menu
-   (they are added with `MenuBar.addAction(action, 'tools')`, which is the
-   only way an action lands in that menu). If anything is missing, open
-   **Tools › Mineplus: Show Log** — every registration step is logged there.
+All Mineplus entries live under **Tools**. **Mineplus: Toggle Tools** shows or
+hides every other Mineplus entry (the state is remembered across sessions, and
+the toggle itself stays visible so you can always switch back). Useful when a
+designer is working in a plain Blockbench model and does not want the extra
+menu noise — toggle Mineplus tools on whenever display/animation work starts.
 
-## Tools
-
-| Menu entry | What it does |
+| Tool | What it does |
 |---|---|
-| Mineplus Display Editor | Edit rotation / translation / scale per vanilla context (`firstperson_righthand`, `gui`, `ground`, `head`, …). Values are clamped to the server's validated ranges on write. |
-| Mineplus: Copy Display | Copy the current `display` block as pretty JSON (paste into a meta file or issue). |
-| Mineplus: Validate Display | Report NaN / out-of-range / collapsing-scale values before they reach the bake. |
-| Mineplus: Save as .mpmodel | Save the open model in the Mineplus format (below); validates first. |
-| Mineplus: Open Generic / Java Item Model | Start a new vanilla Java Block/Item project (stamped as a Mine Plus generic template), or open any `.json` (vanilla item/block model), `.bbmodel` or `.mpmodel` file through its matching codec. |
-| Mineplus: Fix Duplicates | Repair tool for accidentally duplicated cubes/groups (drag-drop import, merge): removes exact UUID duplicates, renames same-name elements instead of deleting anything unique. Undo with Ctrl+Z. |
-| Mineplus: Model Report | Cubes / bones / textures / animations summary dialog. |
-| Mineplus: Show Log | In-app panel with the last 400 log lines. |
+| Mineplus: Toggle Tools | show/hide all other Mineplus tools |
+| Mineplus: Convert to Mineplus Model | migrate the open model (old bbmodel, java_block, free, …) to the mineplus format; cubes, bones, textures, display and animations are all kept |
+| Mineplus: Open & Migrate Old Model… | pick a `.bbmodel` / `.json` / `.mpmodel` file, open it and convert it in one step |
+| Mineplus Display Editor | edit rotation/translation/scale per display context |
+| Mineplus: Copy Display | copy the display block as JSON |
+| Mineplus: Validate Display | display-only validation (clamps match the server) |
+| Mineplus: Validate Model | full compatibility check: budgets, 22.5° angles, textures, animations |
+| Mineplus: Template Settings | edit the `mineplus` metadata stamp |
+| Mineplus: Check Template | is this file detected as a Mine Plus template? |
+| Mineplus: Save as .mpmodel | save in the Mineplus format |
+| Mineplus: Export as .bbmodel | save a plain bbmodel (also fully loadable) |
+| Mineplus: Open Generic / Java Item Model | start a vanilla Java item project or open any model file |
+| Mineplus: Fix Duplicates | remove UUID-duplicated cubes/groups, rename same-name elements |
+| Mineplus: Model Report | cubes/bones/textures/animations summary |
+| Mineplus: Show Log | in-app log panel (last 400 lines) |
+
+## Opening old models / animations
+
+Opening any `.bbmodel`, `.json` or `.mpmodel` (via File > Open Model or the
+plugin's open tools) auto-switches the project to the mineplus format after
+load, so **both** the Animate tab and the display editor are available — no
+manual step. If a load ever comes in without them (log says so), run
+**Mineplus: Convert to Mineplus Model**: it only changes the project's format
+stamp and never touches cubes, bones, textures, the display block or
+animations; it verifies afterwards that no content count dropped and logs the
+before/after numbers.
+
+## The `.mpmodel` format
+
+- A `.bbmodel` file (zipped project JSON) with extension `.mpmodel`, plus the
+  top-level `mineplus` metadata stamp — registered as a real Blockbench format
+  bound to the built-in project codec, so File > Open/Save handles it natively.
+- Saves/loads animations and display settings exactly like bbmodel does.
+- The server side (`BbModelImporter`, `MineplusTemplate`) reads both
+  `.bbmodel` and `.mpmodel`.
 
 ## Event hooks (all logged, exception-safe)
 
-- `display_mode_entered` / `display_mode_exited` — logs when you enter
-  Blockbench's display editor and dumps the display block on exit.
-- `project_saved` — runs **Validate Display** automatically after every save.
-- `merge_project` / `edit_texture` — debug trail for the "changing a texture
-  duplicated cubes and groups" report: each logs cube/bone counts at the moment
-  it fires, so a log from a session that showed the bug pinpoints which step
-  introduced the copies. If you hit it again, send **Tools › Mineplus: Show
-  Log** output — Fix Duplicates repairs the copies meanwhile.
-- `oninstall` / `onenabled` / `ondisabled` / `onunload` lifecycle logging.
+- `display_mode_entered` / `display_mode_exited` — log the display block
+- `project_saved` — validate the display after each save
+- `merge_project`, `edit_texture` — debug trail for the reported
+  texture-change duplication: both log cube/bone counts, so a log shows
+  exactly which step introduced copies
+- `load_project` / `project_loaded` — restore the template stamp, log
+  animation/display counts, auto-apply the mineplus format
 
-## The .mpmodel format
+## Install
 
-Registered as the Blockbench format **Mineplus Model** (`mineplus_model`,
-extension `mpmodel`, visible in File › New and File › Save As), and bound to
-Blockbench's built-in project codec (`Codecs.project`) — so `.mpmodel` saves,
-loads and re-saves through exactly the same code path as `.bbmodel`, with
-animations and display included. An `.mpmodel` file is a standard bbmodel JSON
-plus an optional top-level metadata block. The block travels through a
-registered `ModelProject` property (`mineplus`), so Blockbench itself writes it
-on compile and reads it back on load — no custom codec hooks that can silently
-fail:
+Copy `mineplus_generic_display.js` into your Blockbench plugins folder —
+`~/.blockbench/plugins/` on Linux/macOS or
+`%appdata%/../.blockbench/plugins/` on Windows — restart Blockbench, enable
+**Mineplus Generic Display** under File > Plugins, then use the **Tools** menu.
 
-```json
-{
-  "meta": { "model_format": "mineplus_model", ... },
-  "mineplus": {
-    "format": 1,
-    "plugin": "mineplus_generic_display"
-  },
-  "elements": [ ... ],
-  "display": { ... }
-}
+## Tests
+
+Headless checks (no Blockbench needed) live in `test/plugin.test.js`; they load
+the real plugin in a sandboxed stub of the Blockbench API and exercise the
+toggle, the format registration and the old-model conversion:
+
+```
+node test/plugin.test.js
 ```
 
-Full compatibility: the Mineplus server plugin's streaming importer
-(`BbModelImporter`) skips unknown keys, so `.mpmodel` is parsed by exactly the
-same code path as `.bbmodel` — the coordinator accepts either extension for
-models, sidecars (`.display.mpmodel`, `.anim.mpmodel`) and meta-declared
-files. Save as `.mpmodel` when the model is Mineplus-only; keep `.bbmodel`
-when you also want vanilla Blockbench round-trips.
+## Logging
 
-## Server side
-
-`ModelImportCoordinator` / `VirtualBlockManager` accept `.mpmodel` everywhere
-`.bbmodel` was accepted: model files, display sidecars, animation sidecars and
-`displayFile` / `animationFile` meta declarations (a bare name in a meta still
-defaults to `.bbmodel`).
+Every registration, conversion, save, validation and hook logs with the
+`[Mineplus]` prefix (console + Show Log panel). Reload the plugin to re-run
+onload with fresh logs; each onload step is isolated, so one failed step
+cannot stop the others from registering.
