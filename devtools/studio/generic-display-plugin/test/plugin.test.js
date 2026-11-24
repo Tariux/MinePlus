@@ -1,18 +1,20 @@
 /* Headless tests for mineplus_generic_display.js — run with `node test/plugin.test.js`.
  *
  * Loads the plugin source in a vm sandbox with a stubbed Blockbench API, runs
- * the real onload() and the real action clicks, and asserts the behaviours
- * added in v3.2+: tools toggle, mineplus format with animation support, and
- * the old-model conversion that keeps cubes/bones/textures/display/animations.
- * v5.0 reverts the Studio experiment and hardens the convert path: after any
- * conversion the GLOBAL format is verified (the Display and Animate tabs are
- * gated by Format.display_mode / Format.animation_mode), with a select()
- * fallback when the native convertTo() does not land.
+ * the real onload() and the real action clicks, and asserts the behaviours the
+ * plugin exists for (v6.0.0, the simplified final version):
+ *   - the mineplus format registers with animation_mode + display_mode, so the
+ *     Animate tab and the Display tab both exist for new and converted models;
+ *   - converting an old model keeps cubes/bones/textures/display/animations
+ *     and switches the GLOBAL format (what the tabs actually follow);
+ *   - the display panel repair enters display mode and loads a slot, so the
+ *     default Display editor is never empty;
+ *   - everything else from v5.x (custom editors, validators, templates,
+ *     toggles, reports) is gone on purpose.
  *
  * The sandbox mirrors the REAL Blockbench globals: the open project is
  * `Project` (and Blockbench.Project), and there is no `Model` global — that
- * mismatch was the v4.1 bug where convert/display silently did nothing on
- * old models.
+ * mismatch was the v4.1 bug where convert silently did nothing on old models.
  */
 'use strict';
 const fs = require('fs');
@@ -27,7 +29,6 @@ const PLUGIN_SRC = fs.readFileSync(
 const logLines = [];
 function log(line) { logLines.push(String(line)); }
 
-const localStorageData = {};
 const actions = {};          // id -> {id, name, condition, click}
 const menuBar = { tools: [] };
 const registeredFormats = {};
@@ -52,11 +53,6 @@ function makeProject() {
 
 const sandbox = {
   console: { log: log, warn: log, error: log },
-  localStorage: {
-    getItem: k => (k in localStorageData ? localStorageData[k] : null),
-    setItem: (k, v) => { localStorageData[k] = String(v); },
-    removeItem: k => { delete localStorageData[k]; }
-  },
   setTimeout: fn => fn(),
   document: {
     createElement: () => ({ type: '', click() {}, set accept(v) {}, set onchange(v) {} })
@@ -89,43 +85,11 @@ const sandbox = {
     addAction: (action, menu) => { if (menu === 'tools') menuBar.tools.push(action); actions[action.id] = action; },
     removeAction: action => { delete actions[action.id]; menuBar.tools = menuBar.tools.filter(a => a !== action); }
   },
-  ModelProject: { properties: {} },
   Codecs: { project: { load_filter: { extensions: ['bbmodel'] } } },
   Canvas: { updateAll: () => {}, updateViewMode: () => {} },
   Mode: { edit: {}, select: () => {} },
-  Modes: { display: { id: 'display', select() { this.selected = true; } } },
-  Panel: function (id, opts) {
-    this.id = id; this.options = opts; this.node = null;
-    sandbox.Panel.stored[id] = this;
-  },
-  Dialog: function (opts) {
-    this.options = opts; this.shown = false;
-    if (opts && opts.form) {
-      // Blockbench 5.x: dialog.form is an InputForm object (js/interface/
-      // form.ts) — values only through getResult(), no raw `{value}` fields.
-      const def = opts.form;
-      this.form = {
-        getResult: function () {
-          const result = {};
-          for (const key in def) {
-            const el = def[key];
-            if (el && typeof el === 'object' && 'value' in el) result[key] = el.value;
-            else if (el && el.options) result[key] = Object.keys(el.options)[0];
-            else result[key] = '';
-          }
-          return result;
-        }
-      };
-    }
-    sandbox.Dialog.last = this;
-  },
-  Cube: FakeCube,
-  Group: FakeGroup
+  Modes: { display: { id: 'display', select() { this.selected = true; } } }
 };
-sandbox.Panel.stored = {};
-sandbox.Dialog.last = null;
-sandbox.Dialog.prototype.show = function () { this.shown = true; };
-sandbox.Panel.prototype.delete = function () { delete sandbox.Panel.stored[this.id]; };
 // No `Model` and no `Project` before a project is opened — like real Blockbench.
 
 function load() {
@@ -143,36 +107,27 @@ function check(name, cond) {
 
 load();
 
-// 1. onload registers the toggle plus every tool, and the mpmodel format.
+// 1. onload registers exactly the two tools plus the mpmodel format.
 sandbox.__plugin.onload();
 const toolIds = menuBar.tools.map(a => a.id);
-check('onload runs without throwing and registers actions', toolIds.length > 0);
-check('toggle action registered', toolIds.includes('mineplus_toggle_tools'));
-check('convert action registered', toolIds.includes('mineplus_convert'));
-check('open-and-migrate action registered', toolIds.includes('mineplus_open_migrate'));
-check('display editor registered', toolIds.includes('mineplus_display_editor'));
+check('onload runs without throwing', toolIds.length > 0);
+check('exactly two menu actions (convert + open&convert)',
+  toolIds.length === 2 && toolIds.includes('mineplus_convert')
+    && toolIds.includes('mineplus_open_convert'));
 const fmt = registeredFormats.mineplus_model;
 check('mineplus_model format registered', !!fmt);
 check('format enables animation mode (Animate tab exists)', fmt && fmt.animation_mode === true);
 check('format enables display mode', fmt && fmt.display_mode === true);
+check('.mpmodel bound to the project codec (save/load via File menu)',
+  fmt && fmt.codec === sandbox.Codecs.project);
+check('.mpmodel added to the project codec load filter',
+  sandbox.Codecs.project.load_filter.extensions.includes('mpmodel'));
 
-// 2. Toggle hides every other Mineplus action and can toggle back.
-const editor = actions.mineplus_display_editor;
-check('tools visible by default', editor.condition() === true);
-actions.mineplus_toggle_tools.click();
-check('toggle off hides tools', editor.condition() === false);
-check('toggle itself stays visible', actions.mineplus_toggle_tools.condition === undefined);
-actions.mineplus_toggle_tools.click();
-check('toggle on shows tools again', editor.condition() === true);
-check('toggle state remembered', localStorageData.mineplus_tools_visible === '1');
-
-// 3. Conversion of an old-format model keeps all content and switches format.
+// 2. Conversion of an old-format model keeps all content and switches format.
 // REGRESSION (v4.2.0): the sandbox has the real Blockbench globals — `Project`
-// only, no `Model` — and conversion must still work end to end. On v4.1 the
-// plugin required a `Model` global that does not exist in Blockbench, so the
-// convert tool and every display tool silently did nothing on old models.
-// DisplayMode exists in the real app from startup; the convert step now drops
-// the designer into display mode via repairDisplayPanel.
+// only, no `Model` — and conversion must still work end to end. DisplayMode
+// exists in the real app from startup; convert drops the designer into
+// display mode via repairDisplayPanel.
 sandbox.DisplayMode = { display_slot: null, vue: null, load() {} };
 sandbox.Interface = { Panels: { display: { inside_vue: { _data: {} } } } };
 sandbox.Project = makeProject();
@@ -186,10 +141,11 @@ check('cubes kept (3)', project.elements.length === 3);
 check('bones kept (2, incl. non-exported)', project.groups.length === 2);
 check('textures kept (1)', project.textures.length === 1);
 check('animations kept (2 — Animate tab content survives)', Object.keys(project.animations).length === 2);
-check('display block kept (1 context)', Object.keys(project.display).length === 1);
-check('template stamp added', project.mineplus && project.mineplus.plugin === 'mineplus_generic_display');
+check('display block kept (1 context — vanilla defaults apply elsewhere)',
+  Object.keys(project.display).length === 1);
+check('no metadata stamp written (plain bbmodel content only)', project.mineplus === undefined);
 
-// 3a. When the old format is still the active global and Blockbench's native
+// 2a. When the old format is still the active global and Blockbench's native
 // ModelFormat.convertTo() is available, it is used — it also migrates box UV,
 // bone-rig grouping and rotation limits, which old .bbmodel files need.
 sandbox.Project = makeProject();
@@ -200,7 +156,7 @@ actions.mineplus_convert.click();
 check('convert uses native convertTo() when available',
   nativeUsed && sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model');
 
-// 3b. …and conversion still succeeds when native convertTo throws.
+// 2b. …and conversion still succeeds when native convertTo throws.
 sandbox.Project = makeProject();
 sandbox.Blockbench.Format = { id: 'bb_model' };
 sandbox.__selectedFormat = null;
@@ -212,10 +168,8 @@ check('convert falls back to select when native convertTo() throws',
 delete fmt.convertTo;
 sandbox.Blockbench.Format = undefined;
 
-// 3c. REGRESSION (v5.0): native convertTo() is used even when the global
-// format is unset (fresh Blockbench state). The old guard skipped the native
-// path whenever `Blockbench.Format` was falsy — on exactly the old models
-// that had never been touched by the plugin, so Display stayed missing.
+// 2c. REGRESSION (v5.0): native convertTo() is used even when the global
+// format is unset (fresh Blockbench state).
 sandbox.Project = makeProject();
 sandbox.Blockbench.Format = null;
 let nativeUsedUnset = false;
@@ -224,7 +178,7 @@ actions.mineplus_convert.click();
 check('native convertTo() used even when global Format is unset',
   nativeUsedUnset && sandbox.Project.format && sandbox.Project.format.id === 'mineplus_model');
 
-// 3d. REGRESSION (v5.0): if native convertTo() runs but does not update the
+// 2d. REGRESSION (v5.0): if native convertTo() runs but does not update the
 // global format (older builds / odd states), the plugin falls back to select
 // so the Display tab flags (`display_mode`/`animation_mode`) still come on.
 sandbox.Project = makeProject();
@@ -241,14 +195,13 @@ check('convert verifies global format and falls back to select when convertTo() 
 delete fmt.convertTo;
 sandbox.Blockbench.Format = undefined;
 
-// 4. Converting an already-mineplus project is a no-op that still succeeds.
+// 3. Converting an already-mineplus project is a no-op that still succeeds.
 actions.mineplus_convert.click();
 check('second convert is idempotent', project.format.id === 'mineplus_model'
   && project.elements.length === 3 && Object.keys(project.animations).length === 2);
 
-// 5b. Reopened mineplus project: even when format is already mineplus, the
-// global format (which drives the Display/Animate tabs) gets re-selected —
-// the "display but no Animate/Display tab" bug on old models.
+// 4. Reopened mineplus project: even when format is already mineplus, the
+// global format (which drives the Display/Animate tabs) gets re-selected.
 sandbox.Project = makeProject();
 sandbox.Project.format = fmt;         // model says mineplus…
 sandbox.__selectedFormat = null;      // …but the global format is stale
@@ -256,7 +209,7 @@ actions.mineplus_convert.click();
 check('reopened model re-selects global format (Display tab fix)',
   sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
 
-// 5c. The project_loaded hook runs the auto-apply (logged, not silently caught).
+// 5. The project_loaded hook runs the auto-apply (logged, not silently caught).
 const project2 = makeProject();
 sandbox.Project = project2;
 sandbox.__selectedFormat = null;
@@ -265,37 +218,15 @@ check('project_loaded hook auto-applies mineplus format',
   project2.format && project2.format.id === 'mineplus_model'
     && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
 
-// 5d. Regression for the reported crash: "Uncaught TypeError: Cannot read
-// properties of undefined (reading 'value')" at display editor onButton —
-// on Blockbench 5.x dialog.form is an InputForm, so `form.context.value` etc.
-// were undefined. Button 2 (Clear context) is the exact path from the log.
-sandbox.Project = makeProject();
-sandbox.Project.format = fmt;
-actions.mineplus_display_editor.click();
-const editorDialog = sandbox.Dialog.last;
-check('display editor dialog builds an InputForm-style form',
-  !!editorDialog && editorDialog.form && typeof editorDialog.form.getResult === 'function');
-let editorCrash = null;
-try { editorDialog.options.onButton(2); editorDialog.options.onButton(1); }
-catch (e) { editorCrash = e; }
-check('editor onButton reads values via getResult() (no undefined .value crash)',
-  editorCrash === null);
-const applied = sandbox.Project.display.thirdperson_righthand || {};
-check('editor Apply writes clamped rotation into the display block',
-  Array.isArray(applied.rotation) && applied.rotation.length === 3
-    && applied.rotation.every(n => typeof n === 'number' && !isNaN(n)));
-
-// 5e. Regression for the still-empty Display tab: the panel only renders its
-// slot list and sliders while display MODE is active (condition
-// {modes: ['display']}); the plugin's repair must therefore enter display
-// mode itself when the current format allows it.
+// 6. REGRESSION (v5.1): the Display panel only renders its slot list and
+// sliders while display MODE is active (condition {modes: ['display']}); the
+// repair must enter display mode itself and load the default slot.
 sandbox.Modes = {
   options: { display: { id: 'display', select() { sandbox.Modes.displaySelected = true; } } },
   displaySelected: false
 };
 sandbox.Mode = { id: 'edit' };
-// Real Blockbench keeps the active format as a page-scope global; the repair
-// reads its display_mode flag before entering display mode.
+// Real Blockbench keeps the active format as a page-scope global.
 sandbox.Format = { id: 'mineplus_model', display_mode: true, animation_mode: true };
 sandbox.DisplayMode = {
   display_slot: null, vue: null, loadedSlot: null,
@@ -307,7 +238,7 @@ check('empty Display panel repair enters display mode (default tools)',
   sandbox.Modes.displaySelected === true
     && sandbox.DisplayMode.loadedSlot === 'thirdperson_righthand'
     && !!sandbox.DisplayMode.vue._data.slot);
-// When the format does not allow display mode, the repair must not throw.
+// When the mode switch fails, the repair must not throw.
 delete sandbox.Modes;
 sandbox.Modes = { display: { select() { throw new Error('nope'); } } };
 let repairFail = null;
@@ -318,15 +249,22 @@ check('display panel repair failure is caught and logged, not thrown',
 delete sandbox.DisplayMode;
 delete sandbox.Interface;
 
-// 6. Studio was reverted (v5.0): it added nothing the default UI doesn't do
-// and confused designers. The tool and its tests are gone on purpose.
-check('studio action is gone (reverted)', actions.mineplus_studio === undefined);
+// 7. The v5.x extras are gone on purpose (simplified final version):
+// no custom editor, validators, template tools, reports, toggles or Studio.
+['mineplus_display_editor', 'mineplus_copy_display', 'mineplus_validate_display',
+  'mineplus_validate_model', 'mineplus_template_settings', 'mineplus_check_template',
+  'mineplus_save_mpmodel', 'mineplus_export_bbmodel', 'mineplus_open_generic',
+  'mineplus_fix_duplicates', 'mineplus_model_report', 'mineplus_show_log',
+  'mineplus_toggle_tools', 'mineplus_open_migrate', 'mineplus_studio'
+].forEach(id => check('removed tool stays removed: ' + id, actions[id] === undefined));
 
-// 6b. onunload removes the actions.
+// 8. onunload removes the actions and hooks.
 sandbox.__plugin.onunload();
-check('onunload runs cleanly', actions.mineplus_display_editor === undefined);
+check('onunload removes the actions', actions.mineplus_convert === undefined
+  && actions.mineplus_open_convert === undefined);
+check('onunload removes the hooks', Object.keys(hooks).every(k => hooks[k].length === 0));
 
 console.log(failures === 0
-  ? `\nAll ${'checks'} passed.`
+  ? '\nAll checks passed.'
   : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);
