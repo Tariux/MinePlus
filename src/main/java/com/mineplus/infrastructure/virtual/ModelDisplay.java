@@ -35,6 +35,24 @@ public final class ModelDisplay {
             } else {
                 scale = new Vector3f(scale);
             }
+            // A NaN or absurd value in one slot would reject the whole model
+            // client-side; clamp to sane bounds so one bad field cannot break
+            // rendering. (Vanilla itself rejects |rotation| > 180° and
+            // translations beyond ±80 pixels.)
+            rotation = sanitize(rotation, -180.0f, 180.0f);
+            translation = sanitize(translation, -80.0f, 80.0f);
+            scale = sanitize(scale, 0.01f, 100.0f);
+        }
+
+        private static Vector3f sanitize(Vector3f v, float min, float max) {
+            return new Vector3f(clamp(v.x, min, max), clamp(v.y, min, max), clamp(v.z, min, max));
+        }
+
+        private static float clamp(float value, float min, float max) {
+            if (Float.isNaN(value)) {
+                return 0.0f;
+            }
+            return Math.max(min, Math.min(max, value));
         }
 
         /** Identity transform (no rotation/translation, unit scale). */

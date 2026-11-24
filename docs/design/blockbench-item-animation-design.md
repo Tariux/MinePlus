@@ -76,37 +76,19 @@ only — the pack itself is always compiled once, for the server.
 1. **Gameplay owns time.** Retiming a clip is always the caller's job
    (`start(clip, ticks)`); the animator never stretches to a declared duration
    against the action.
-2. **Authored display wins.** When a model authors `display` transforms,
-   contexts it wrote are emitted verbatim; only contexts it never touched fall
-   back to the vanilla `handheld` pose (`ModelJsonWriter.withDefaults`). A
-   model without any display gets the handheld defaults so tools/guns hold
-   like a sword, not like a flat texture.
-   The bake honours the same rule at the pack level (`WeaponBbModels`,
-   bake version 5): a source with an authored display — a hand-authored
-   frame JSON, or a `.bbmodel` carrying its own `display` block — receives
-   **no automatic held-pose correction** (no geometry facing flip, no
-   `pack.held-yaw`, no lift); the geometry-facing pass runs only for
-   display-less sources such as `hawk_eye`. An explicit
-   `pack.held-yaw-overrides` entry is the only way to tune an authored gun
-   (for a mirrored source). Author the pose in Blockbench's display settings
-   and it reaches the hand untouched.
-3. **Held pose is solved from geometry, not defaulted.** For a display-less
-   source, `HeldPoseSolver` derives the pose for all four hand contexts from
-   the model's own vertex data — so it works for any model, not just
-   axis-aligned ones. A principal-component analysis of the cube corners
-   finds the item's long axis (barrel, blade, shaft) and its thickness; one
-   alignment rotation carries that axis onto +Y (where vanilla's `handheld`
-   defaults expect it), the vanilla per-context rotation is composed ahead of
-   it, and the translation is solved so the derived grip point — the end of
-   the long axis nearest the model origin, raised 15% of its length along it —
-   lands exactly where the vanilla pose puts the grip. Left-hand contexts
-   mirror the vanilla convention (Y and Z Euler negated). Two guards keep the
-   solve honest: any authored hand context on the source cancels the whole
-   pass (display data always wins — this refines, never overrides, rule 2),
-   and a model whose shortest and longest spreads are within 20% of each other
-   (a cube — no dominant axis) is left alone. Every applied pose is reported
-   as a bake issue, so an author can see it happened and replace it with a
-   hand-tuned display block.
+2. **Authored display is the only display.** When a model authors `display`
+   transforms, the contexts it wrote are emitted verbatim; contexts it never
+   touched get vanilla's own defaults — either directly, or through the
+   model's parent when the item model declares one. No geometry-facing pass,
+   no `pack.held-yaw`, no lift exists anymore: the derived-display workaround
+   layer (`HeldPoseSolver`, `ItemDisplaySolver`, `HeldOrientationFix`,
+   `BbClipBaker.autoHeldPose`) was removed. Author the pose in Blockbench's
+   display settings (or with the `mineplus_generic_display` plugin) and it
+   reaches the hand untouched. See `docs/display-slot-mapping.md`.
+3. **Display values are validated, never invented.** Rotation is clamped to
+   ±180°, translation to ±80 pixels, scale to 0.01–100, NaN becomes 0 (unit
+   scale fallback) — one malformed field cannot make the client reject the
+   whole model.
 4. **Never unsort overrides.** Any new writer touching `overrides` must merge
    into the existing ascending (custom_model_data, cooldown) order.
 5. **One compile, many clients.** Version differences are handled at the

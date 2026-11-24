@@ -82,26 +82,17 @@ public final class WeaponBbModels {
     private static final String MARKER = "mineplus_baked";
 
     /**
-     * Bumped whenever the way a bake composes a pose changes (display
-     * inheritance, held-pose correction, ...). Frames stamped with an older
-     * version are deleted by the sweep before the new pass writes, so a wrong
-     * pose from an earlier release can never survive an upgrade — no manual
-     * "delete the staged folder" step. Version 2: displays are no longer
-     * inherited from previously baked frames and the held-pose correction is
-     * always applied fresh from config. Version 4: the held-pose correction
-     * defaults to none — facing comes from the source's grip-to-muzzle ray and
-     * the validated display table, so the old 180° base yaw that pointed
-     * -Z-authored guns backward is gone. Version 5: a source that carries an
-     * authored display (a hand-authored frame JSON, or a {@code .bbmodel}
-     * with its own {@code display} block) is treated as the author's final
-     * word — no facing flip, base yaw or lift is composed onto it; the
-     * geometry-facing pass runs only for sources with no display at all.
-     * Version 6: the geometry-facing comparison was inverted — it flipped
-     * -Z-muzzle sources and left +Z-muzzle sources (every shipped no-display
-     * gun) unflipped, pointing them backward. The flip now applies to
-     * muzzle-ahead-of-grip (+Z) sources.
+     * Bumped whenever the way a bake produces a display changes. Frames
+     * stamped with an older version are deleted by the sweep before the new
+     * pass writes, so a wrong pose from an earlier release can never survive
+     * an upgrade — no manual "delete the staged folder" step.
+     * Version 7: the derived-display workaround layer is gone. The bake keeps
+     * the source's own display block verbatim; sources without one get
+     * vanilla's defaults. No geometry facing flip, no pack.held-yaw /
+     * held-y-lift / held-yaw-overrides. Re-author the pose in Blockbench
+     * (docs/display-slot-mapping.md).
      */
-    static final int BAKE_VERSION = 6;
+    static final int BAKE_VERSION = 7;
     private static final String VERSION_KEY = "mineplus_bake_version";
 
     /** Element-name fragments that mark the hand end of a weapon source. */
@@ -148,28 +139,12 @@ public final class WeaponBbModels {
      * @return how many frame files the sources define
      */
     public static int bakeAll(JavaPlugin plugin, PluginContext context) {
-        // The held-pose fix reads the plugin config so a server can tune the
-        // correction without re-authoring the Blockbench source. Facing is NOT
-        // assumed here: facingFlipZ reads each source's grip-to-muzzle ray and
-        // flips only the sources authored barrel-backward, and the default
-        // display table is the pose already validated in game — so both
-        // defaults are 0 and the correction exists purely for tuning.
-        // pack.held-yaw rotates the four hand contexts,
-        // pack.held-y-lift lowers a model that rides high, and
-        // pack.held-yaw-overrides (<gun-id>: degrees) tunes one
-        // gun — e.g. a mirrored source — without touching the rest.
-        var config = plugin.getConfig();
-        float baseYaw = (float) config.getDouble("pack.held-yaw", 0.0);
-        float lift = (float) config.getDouble("pack.held-y-lift", 0.0);
-        Map<String, Double> overrides = new LinkedHashMap<>();
-        if (config.isConfigurationSection("pack.held-yaw-overrides")) {
-            for (String key : config.getConfigurationSection("pack.held-yaw-overrides").getKeys(false)) {
-                overrides.put(key.toLowerCase(Locale.ROOT),
-                        config.getDouble("pack.held-yaw-overrides." + key));
-            }
-        }
-        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT),
-                baseYaw, lift, overrides);
+        // Held poses are authored: the bake keeps whatever display block the
+        // source carries and composes nothing on top of it. The old
+        // pack.held-yaw / held-y-lift / held-yaw-overrides keys and the
+        // geometry-facing pass are gone — author the pose in Blockbench
+        // (see docs/display-slot-mapping.md).
+        return bakeTree(plugin.getLogger(), context.moduleSupport().dataFile(MODEL_ROOT));
     }
 
     /**
@@ -177,12 +152,6 @@ public final class WeaponBbModels {
      * checkable without a server: {@link #bakeAll} only resolves the path.
      */
     public static int bakeTree(Logger log, File root) {
-        return bakeTree(log, root, 0.0f, 0.0f, Map.of());
-    }
-
-    /** The pass with an explicit base yaw, lift and per-gun yaw overrides. */
-    public static int bakeTree(Logger log, File root, float baseYaw, float lift,
-                               Map<String, Double> yawOverrides) {
         File[] folders = root.listFiles(File::isDirectory);
         if (folders == null || folders.length == 0) {
             return 0;
@@ -222,71 +191,24 @@ public final class WeaponBbModels {
     // ------------------------------------------------------------------
 
     private static int bake(Logger log, File folder) throws IOException {
-        return bake(log, folder, 0.0f, 0.0f, false);
-    }
-
-    /** The pass with a base yaw that is auto-corrected per gun from geometry. */
-    private static int bake(Logger log, File folder, float baseYaw, float lift) throws IOException {
-        return bake(log, folder, baseYaw, lift, false);
-    }
-
-    /**
-     * {@code yawIsAbsolute} false means the yaw is the config base
-     * ({@code pack.held-yaw}); true means a per-gun override wins and the yaw
-     * is used as given. Either way the correction composes fresh on every
-     * bake: displays are only ever inherited from hand-authored files, so a
-     * config change takes effect on the next restart.
-     */
-    private static int bake(Logger log, File folder, float yaw, float lift,
-                            boolean yawIsAbsolute) throws IOException {
         String id = folder.getName().toLowerCase(Locale.ROOT);
         File source = firstSource(folder);
         byte[] sourceBytes = Files.readAllBytes(source.toPath());
         ModelData model = BbModelParser.parse(id, sourceBytes, reference -> null);
-        // Two model types, two rules:
-        //
-        // 1. A source with an authored display (a hand-authored frame JSON the
-        //    author posed in Blockbench's display settings, or a .bbmodel that
-        //    carries its own display block) is the author's final word. The
-        //    bake applies nothing automatic on top of it — no facing flip, no
-        //    base yaw, no lift — because the author already oriented the gun
-        //    for the hand. Only an explicit pack.held-yaw-overrides entry may
-        //    tune such a gun (e.g. a mirrored source).
-        // 2. A source with no display at all has no hand pose, so facing is
-        //    read from the geometry: a grip-to-muzzle ray pointing along +Z
-        //    means the model's muzzle is toward the viewer's back of the
-        //    default pose and needs a 180° flip on top of the base yaw and
-        //    the validated default table; a -Z ray is left as authored.
+        // The author's display is the final word: whatever display block the
+        // source (or a hand-authored frame JSON) carries is baked verbatim;
+        // sources without one get vanilla's defaults through the pack. No
+        // facing flip, no base yaw, no lift is composed on top.
         AuthoredDisplay display = displayOf(folder, id, sourceBytes);
-        BbClipBaker.Style.HeldCorrection correction;
-        float effectiveYaw;
-        if (yawIsAbsolute) {
-            // A per-gun override is explicit: it composes on any display.
-            effectiveYaw = yaw;
-            correction = new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
-        } else if (display.authored()) {
-            effectiveYaw = 0.0f;
-            correction = BbClipBaker.Style.HeldCorrection.NONE;
-        } else {
-            int facingFlip = facingFlipZ(sourceBytes);
-            effectiveYaw = normalizeYaw(yaw + facingFlip);
-            correction = new BbClipBaker.Style.HeldCorrection(effectiveYaw, lift);
-        }
-        // The module registers every folder's sprite under the folder id
-        // (flat registration: mineplusgun:item/<id>), while a bbmodel's own
-        // texture name can drift from it ("boom_stick" inside hawk_eye).
-        // Resolve every parsed texture name to the registered path so baked
-        // frames always reference a sprite that ships.
         BbClipBaker.Style style = new BbClipBaker.Style(display.display(),
                 WeaponFrames.NAMESPACE + ":item/" + id, true,
-                name -> WeaponFrames.NAMESPACE + ":item/" + id, correction);
+                name -> WeaponFrames.NAMESPACE + ":item/" + id);
 
         log.info("[MineplusGun] '" + id + "': baking from '" + source.getName()
                 + "' with long axis " + longAxis(model) + ", display "
                 + (display.authored()
-                        ? "authored (kept as-is, no auto correction)"
-                        : "default table + geometry facing (held yaw "
-                                + effectiveYaw + "\u00b0, lift " + lift + ")")
+                        ? "authored (kept as-is)"
+                        : "not authored (vanilla defaults apply)")
                 + ".");
         List<String> issues = new ArrayList<>();
         Set<String> written = new LinkedHashSet<>();
@@ -490,52 +412,6 @@ public final class WeaponBbModels {
         }
     }
 
-    /**
-     * Where the gun's barrel points, from the rest geometry: the model-space
-     * axis carrying the largest cube extent. One log line per bake, so a source
-     * authored the wrong way round is visible in the log instead of a mystery
-     * in game. See the return's comment for the +Z-muzzle convention and why
-     * it needs the flip.
-     */
-    /** Extra yaw (0 or 180) that points the source's muzzle forward. */
-    static int facingFlipZ(byte[] sourceBytes) {
-        JsonObject json = JsonParser.parseString(new String(sourceBytes, StandardCharsets.UTF_8))
-                .getAsJsonObject();
-        JsonArray elements = json.getAsJsonArray("elements");
-        if (elements == null || elements.isEmpty()) {
-            return 0;
-        }
-        Float gripZ = null;
-        Float muzzleZ = null;
-        for (JsonElement element : elements) {
-            JsonObject el = element.getAsJsonObject();
-            String name = el.has("name") ? el.get("name").getAsString().toLowerCase(Locale.ROOT) : "";
-            if (!el.has("from") || !el.has("to")) {
-                continue;
-            }
-            float fromZ = el.getAsJsonArray("from").get(2).getAsFloat();
-            float toZ = el.getAsJsonArray("to").get(2).getAsFloat();
-            float z = (fromZ + toZ) / 2f;
-            if (matches(name, GRIP_KEYS)) {
-                gripZ = gripZ == null ? z : (gripZ + z) / 2f;
-            } else if (matches(name, MUZZLE_KEYS)) {
-                muzzleZ = muzzleZ == null ? z : (muzzleZ + z) / 2f;
-            }
-        }
-        if (gripZ == null || muzzleZ == null || Math.abs(muzzleZ - gripZ) < 4f) {
-            return 0; // unclear facing: keep the authored pose rather than guess
-        }
-        // The default display table (and the vanilla handheld pose it mirrors)
-        // presents a model whose muzzle points along +Z. Every shipped source is
-        // authored that way (Blockbench's front view looks down -Z, so the
-        // barrel extends toward +Z), so a muzzle behind the grip (-Z) needs no
-        // correction and a muzzle ahead of the grip (+Z) needs the 180° flip.
-        // Verified in game: hawk_eye and double_boom (muzzleZ > gripZ) aim
-        // correctly only with the flip; the previous inverted comparison was
-        // what pointed them backward.
-        return muzzleZ > gripZ ? 180 : 0;
-    }
-
     private static boolean matches(String name, String[] keys) {
         for (String key : keys) {
             if (name.contains(key)) {
@@ -543,11 +419,6 @@ public final class WeaponBbModels {
             }
         }
         return false;
-    }
-
-    private static float normalizeYaw(float yaw) {
-        float normalized = yaw % 360f;
-        return normalized < 0 ? normalized + 360f : normalized;
     }
 
     private static String longAxis(ModelData model) {

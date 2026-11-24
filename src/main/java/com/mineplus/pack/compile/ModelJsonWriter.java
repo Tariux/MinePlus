@@ -12,7 +12,6 @@ import com.mineplus.infrastructure.virtual.ElementGeometry;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.ModelDisplay;
 import com.mineplus.infrastructure.virtual.VirtualModel;
-import com.mineplus.pack.item.ItemDisplaySolver;
 import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -139,61 +138,14 @@ public final class ModelJsonWriter {
             if (itemParent != null && !itemParent.isBlank()) {
                 root.addProperty("parent", itemParent);
             }
-            // Display: authored contexts win. Without a parent, contexts the
-            // author never touched are DERIVED from the model's covered
-            // volume (bbox wrap + PCA grip for the hand contexts, centered
-            // bbox for gui/ground/fixed/head) so a model authored anywhere
-            // inside its 16x16x16 space still sits correctly in the hand,
-            // first person, the slot and on the ground. A parent model
-            // supplies vanilla's own defaults for missing contexts.
-            if (itemParent == null) {
-                float[][] boxes = cubeBoxes(model.cubes(), originMode);
-                ModelDisplay solved = ItemDisplaySolver.derive(boxes, orEmpty(model.display()));
-                root.add("display", displayTransforms(solved));
-            } else if (model.display() != null && !model.display().isEmpty()) {
+            // Display: only what the author set is emitted; vanilla supplies
+            // its own defaults for contexts the author never touched. A parent
+            // model supplies vanilla's defaults through inheritance.
+            if (model.display() != null && !model.display().isEmpty()) {
                 root.add("display", displayTransforms(model.display()));
             }
         }
         return GSON.toJson(root);
-    }
-
-    /** {@link ModelDisplay#EMPTY} for a null display, else the display. */
-    private static ModelDisplay orEmpty(ModelDisplay display) {
-        return display == null ? ModelDisplay.EMPTY : display;
-    }
-
-    /**
-     * One axis-aligned box per cube in the coordinates the emitted elements
-     * use (raw authored geometry plus the origin shift), so the display
-     * solver sees exactly what the client will render.
-     */
-    private static float[][] cubeBoxes(List<BakedCube> cubes, ModelMeta.OriginMode originMode) {
-        float centerShift = originMode == ModelMeta.OriginMode.CENTER ? -8.0f : 0.0f;
-        float[][] boxes = new float[cubes.size()][];
-        int at = 0;
-        for (BakedCube cube : cubes) {
-            ElementGeometry geom = cube.geometry();
-            float shiftX = centerShift;
-            float shiftZ = centerShift;
-            float minX, minY, minZ, maxX, maxY, maxZ;
-            if (geom != null) {
-                minX = Math.min(geom.from().x, geom.to().x) + shiftX;
-                minY = Math.min(geom.from().y, geom.to().y);
-                minZ = Math.min(geom.from().z, geom.to().z) + shiftZ;
-                maxX = Math.max(geom.from().x, geom.to().x) + shiftX;
-                maxY = Math.max(geom.from().y, geom.to().y);
-                maxZ = Math.max(geom.from().z, geom.to().z) + shiftZ;
-            } else {
-                minX = cube.translation().x * 16.0f + shiftX;
-                minY = cube.translation().y * 16.0f;
-                minZ = cube.translation().z * 16.0f + shiftZ;
-                maxX = minX + cube.scale().x * 16.0f;
-                maxY = minY + cube.scale().y * 16.0f;
-                maxZ = minZ + cube.scale().z * 16.0f;
-            }
-            boxes[at++] = new float[]{minX, minY, minZ, maxX, maxY, maxZ};
-        }
-        return boxes;
     }
 
     private static JsonObject element(

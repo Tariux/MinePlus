@@ -63,7 +63,7 @@ import java.util.Set;
  */
 public final class BbClipBaker {
 
-    /** The contexts a held item's own motion is allowed to change. */
+    /** The contexts a held item's own motion is allowed to change (kept for animated display folding). */
     private static final String[] HELD_CONTEXTS = {
             "firstperson_righthand", "firstperson_lefthand",
             "thirdperson_righthand", "thirdperson_lefthand"
@@ -92,75 +92,16 @@ public final class BbClipBaker {
      *                         reference exactly the registered path
      */
     public record Style(JsonObject display, String textureReference, boolean frontLight,
-                        java.util.function.UnaryOperator<String> textureResolver,
-                        HeldCorrection heldCorrection) {
+                        java.util.function.UnaryOperator<String> textureResolver) {
 
         public Style {
             display = display == null ? new JsonObject() : display.deepCopy();
             textureReference = textureReference == null ? "" : textureReference.trim().toLowerCase(Locale.ROOT);
-            heldCorrection = heldCorrection == null ? HeldCorrection.NONE : heldCorrection;
-            display = heldCorrection.apply(display);
         }
 
         /** Convenience constructor for the prefix-derivation default. */
         public Style(JsonObject display, String textureReference, boolean frontLight) {
-            this(display, textureReference, frontLight, null, null);
-        }
-
-        /** Convenience constructor with a texture resolver and no pose fix. */
-        public Style(JsonObject display, String textureReference, boolean frontLight,
-                     java.util.function.UnaryOperator<String> textureResolver) {
-            this(display, textureReference, frontLight, textureResolver, null);
-        }
-
-        /**
-         * A held-context pose fix applied on top of whatever display block the
-         * style carries (authored, baked or the module's default table). The
-         * gun geometry the baker sees runs along model +Z, which in the vanilla
-         * hand contexts points back at the player, so a module whose Blockbench
-         * source was authored without a display section renders its barrel
-         * backwards; {@code yawDegrees} rotates the four held contexts (180
-         * points a +Z barrel forward) and {@code yLiftPixels} is subtracted
-         * from their translation Y to drop a model that rides high. NONE keeps
-         * the authored pose untouched.
-         */
-        public record HeldCorrection(float yawDegrees, float yLiftPixels) {
-
-            public static final HeldCorrection NONE = new HeldCorrection(0.0f, 0.0f);
-
-            public boolean isNone() {
-                return yawDegrees == 0.0f && yLiftPixels == 0.0f;
-            }
-
-            private JsonObject apply(JsonObject display) {
-                if (isNone()) {
-                    return display;
-                }
-                for (String context : HELD_CONTEXTS) {
-                    if (!display.has(context) || !display.get(context).isJsonObject()) {
-                        continue;
-                    }
-                    JsonObject transform = display.getAsJsonObject(context).deepCopy();
-                    if (transform.has("rotation") && transform.get("rotation").isJsonArray()) {
-                        addY(transform, "rotation", yawDegrees);
-                    }
-                    if (transform.has("translation") && transform.get("translation").isJsonArray()) {
-                        addY(transform, "translation", -yLiftPixels);
-                    }
-                    display.add(context, transform);
-                }
-                return display;
-            }
-
-            private static void addY(JsonObject transform, String key, float deltaY) {
-                JsonArray axis = transform.getAsJsonArray(key).deepCopy();
-                while (axis.size() < 3) {
-                    axis.add(0.0f);
-                }
-                axis.set(1, new com.google.gson.JsonPrimitive(
-                        Math.round((axis.get(1).getAsFloat() + deltaY) * 1000.0f) / 1000.0f));
-                transform.add(key, axis);
-            }
+            this(display, textureReference, frontLight, null);
         }
     }
 
@@ -280,7 +221,6 @@ public final class BbClipBaker {
         }
         root.add("elements", elements);
         JsonObject displayJson = display(style, bones, fold, deltas, model.sourceName(), issues, warned);
-        autoHeldPose(root, displayJson, model.sourceName(), bones, issues);
         fitWindow(root, displayJson, model.sourceName(), issues);
         root.add("display", displayJson);
         if (style.frontLight()) {
@@ -292,68 +232,6 @@ public final class BbClipBaker {
     // ------------------------------------------------------------------
     // Window fitting
     // ------------------------------------------------------------------
-
-    /**
-     * Fills the four hand contexts from the model's own geometry when the
-     * source authors none of them — see {@link HeldPoseSolver} for the
-     * derivation. The applied pose is reported as an issue so an author can
-     * see it happened and replace it with a hand-tuned display block. Each of
-     * the four hand contexts is filled independently, so a partially authored
-     * display (say, only a gui pose) still gets the solved hand contexts
-     * instead of vanilla's generated defaults.
-     */
-    private static void autoHeldPose(JsonObject root, JsonObject display, String sourceName,
-                                     List<ModelBone> bones, List<String> issues) {
-        HeldPoseSolver.Pose pose = null;
-        boolean filled = false;
-        for (String context : HELD_CONTEXTS) {
-            if (object(display, context) != null) {
-                continue; // authored context wins
-            }
-            if (pose == null) {
-                pose = HeldPoseSolver.solve(bones);
-                if (pose == null) {
-                    return; // degenerate geometry; leave vanilla defaults
-                }
-            }
-            fillContext(display, context, pose);
-            filled = true;
-        }
-        if (filled) {
-            issues.add(sourceName + ": some hand display contexts were not authored; a held"
-                    + " pose was derived from the model's geometry (principal-axis grip"
-                    + " alignment). Author a display block to replace it.");
-        }
-    }
-
-    /** Writes one hand context of {@code pose} into {@code display}. */
-    private static void fillContext(JsonObject display, String context, HeldPoseSolver.Pose pose) {
-        switch (context) {
-            case "firstperson_righthand" -> setHandContext(display, context,
-                    pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(),
-                    pose.firstpersonScale());
-            case "firstperson_lefthand" -> setHandContext(display, context,
-                    pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(),
-                    pose.firstpersonScale());
-            case "thirdperson_righthand" -> setHandContext(display, context,
-                    pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(),
-                    pose.thirdpersonScale());
-            case "thirdperson_lefthand" -> setHandContext(display, context,
-                    pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(),
-                    pose.thirdpersonScale());
-            default -> { }
-        }
-    }
-
-    /** Writes one hand context in the vanilla {rotation, translation, scale} shape. */
-    private static void setHandContext(JsonObject display, String context,
-                                       float[] rotation, float[] translation, float scale) {
-        JsonObject transform = new JsonObject();
-        addPair(transform, "rotation", rotation);
-        addPair(transform, "translation", translation);
-        addPair(transform, "scale", new float[]{scale, scale, scale});
-        display.add(context, transform);
-    }
 
     /** Every display context a vanilla item model carries. */
     private static final String[] DISPLAY_CONTEXTS = {

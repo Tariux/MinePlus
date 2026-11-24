@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed: derived-display workaround layer (bbmodel is the source of truth)
+
+- `HeldPoseSolver`, `ItemDisplaySolver` and `HeldOrientationFix` are deleted,
+  as is `BbClipBaker.autoHeldPose`. A model's held/GUI/ground presentation now
+  comes from exactly one place: the `display` block the author set. Nothing is
+  derived from cube geometry, cube names or calibration constants anymore.
+- `ModelJsonWriter` emits only the authored display contexts; contexts the
+  author left out get vanilla's own defaults (directly, or via the model's
+  parent). `ModelDisplay.Transform` now validates values: rotation clamped to
+  ±180°, translation to ±80 px, scale to 0.01–100, NaN → 0 — so one malformed
+  field cannot make the client reject the whole model.
+- Migration: models that relied on the old auto-pose must author their
+  display block. The `mineplus_generic_display` Blockbench plugin
+  (`devtools/studio/generic-display-plugin/`) edits it directly; the mapping
+  table and value rules are in `docs/display-slot-mapping.md`.
+- The `pack.held-yaw` / `pack.held-y-lift` / `pack.held-yaw-overrides` keys
+  are gone from the config reference; they had no code behind them.
+- Blockbench item animation design doc rewritten around the authored-display
+  rule (rules 2–3); tests that exercised the deleted solvers were removed.
+
 ### HeldPoseSolver: diagonal geometry mis-solved (PCA fixes)
+
+*(historical — the solver itself was removed above; kept for the record)*
 
 - `eigenVectors` accumulated the corner covariance only in the upper triangle
   (`a[1]=xy`, `a[2]=xz`, `a[5]=yz`), but the Jacobi rotations read the full
