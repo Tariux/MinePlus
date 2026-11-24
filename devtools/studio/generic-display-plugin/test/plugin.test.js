@@ -100,6 +100,23 @@ const sandbox = {
   },
   Dialog: function (opts) {
     this.options = opts; this.shown = false;
+    if (opts && opts.form) {
+      // Blockbench 5.x: dialog.form is an InputForm object (js/interface/
+      // form.ts) — values only through getResult(), no raw `{value}` fields.
+      const def = opts.form;
+      this.form = {
+        getResult: function () {
+          const result = {};
+          for (const key in def) {
+            const el = def[key];
+            if (el && typeof el === 'object' && 'value' in el) result[key] = el.value;
+            else if (el && el.options) result[key] = Object.keys(el.options)[0];
+            else result[key] = '';
+          }
+          return result;
+        }
+      };
+    }
     sandbox.Dialog.last = this;
   },
   Cube: FakeCube,
@@ -243,6 +260,41 @@ sandbox.__selectedFormat = null;
 check('project_loaded hook auto-applies mineplus format',
   project2.format && project2.format.id === 'mineplus_model'
     && sandbox.__selectedFormat && sandbox.__selectedFormat.id === 'mineplus_model');
+
+// 5d. Regression for the reported crash: "Uncaught TypeError: Cannot read
+// properties of undefined (reading 'value')" at display editor onButton —
+// on Blockbench 5.x dialog.form is an InputForm, so `form.context.value` etc.
+// were undefined. Button 2 (Clear context) is the exact path from the log.
+sandbox.Project = makeProject();
+sandbox.Project.format = fmt;
+actions.mineplus_display_editor.click();
+const editorDialog = sandbox.Dialog.last;
+check('display editor dialog builds an InputForm-style form',
+  !!editorDialog && editorDialog.form && typeof editorDialog.form.getResult === 'function');
+let editorCrash = null;
+try { editorDialog.options.onButton(2); editorDialog.options.onButton(1); }
+catch (e) { editorCrash = e; }
+check('editor onButton reads values via getResult() (no undefined .value crash)',
+  editorCrash === null);
+const applied = sandbox.Project.display.thirdperson_righthand || {};
+check('editor Apply writes clamped rotation into the display block',
+  Array.isArray(applied.rotation) && applied.rotation.length === 3
+    && applied.rotation.every(n => typeof n === 'number' && !isNaN(n)));
+
+// 5e. Regression for the empty Display tab: entering display mode must leave
+// the panel with its slot list and sliders. If Blockbench's own first load
+// did not bind the panel, the plugin re-runs the native DisplayMode.load().
+sandbox.DisplayMode = {
+  display_slot: null, vue: null, loadedSlot: null,
+  load: function (key) { this.loadedSlot = key; this.vue._data.slot = { key: key }; }
+};
+sandbox.Interface = { Panels: { display: { inside_vue: { _data: {} } } } };
+(hooks.select_mode || []).forEach(h => h({ mode: { id: 'display' } }));
+check('empty Display panel repaired on entering display mode',
+  sandbox.DisplayMode.loadedSlot === 'thirdperson_righthand'
+    && !!sandbox.DisplayMode.vue._data.slot);
+delete sandbox.DisplayMode;
+delete sandbox.Interface;
 
 // 6. Studio was reverted (v5.0): it added nothing the default UI doesn't do
 // and confused designers. The tool and its tests are gone on purpose.

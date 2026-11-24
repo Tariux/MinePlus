@@ -1,4 +1,4 @@
-/* Mineplus Generic Display — Blockbench plugin v5.0.
+/* Mineplus Generic Display — Blockbench plugin v5.1.0.
  *
  * Tools (Tools menu, all logged):
  *   - Mineplus: Toggle Tools         show/hide all other Mineplus tools
@@ -345,15 +345,15 @@
       },
       buttons: ['Apply', 'Clear stamp', 'Cancel'],
       onButton: function (button) {
-        var form = dialog.form;
+        var values = formValues(dialog.form);
         if (button === 1) {
           var model = currentModel();
           model.mineplus = {
             format: 1,
             plugin: PLUGIN_ID,
-            template: (form.template && form.template.value ? form.template.value : '').trim(),
-            kind: form.kind && form.kind.value ? form.kind.value : 'item',
-            title: (form.title && form.title.value ? form.title.value : '').trim()
+            template: (values.template ? String(values.template) : '').trim(),
+            kind: values.kind ? String(values.kind) : 'item',
+            title: (values.title ? String(values.title) : '').trim()
           };
           if (model.mineplus.title === '') delete model.mineplus.title;
           log('template stamp written: ' + JSON.stringify(model.mineplus));
@@ -408,6 +408,30 @@
     return parts;
   }
 
+  // Read a finished dialog's values. In current Blockbench (5.x) `dialog.form`
+  // is an InputForm object (js/interface/form.ts): the raw `{key: value}` map
+  // is `form.getResult()` — so `form.rotation.value` reads undefined and every
+  // `onButton` that reads it throws "Cannot read properties of undefined
+  // (reading 'value')" (the reported crash at editor button 2). Prefer
+  // getResult() and fall back to the legacy raw field map of older builds.
+  function formValues(form) {
+    var out = {};
+    if (!form) return out;
+    if (typeof form.getResult === 'function') {
+      try {
+        var result = form.getResult();
+        if (result && typeof result === 'object') return result;
+      } catch (failure) {
+        warn('form.getResult() threw: ' + (failure && failure.message));
+      }
+    }
+    Object.keys(form).forEach(function (key) {
+      var field = form[key];
+      if (field && typeof field === 'object' && 'value' in field) out[key] = field.value;
+    });
+    return out;
+  }
+
   function openEditor() {
     log('display editor opened for "' + (currentModel()
         ? currentModel().name : '(no model)') + '"');
@@ -439,18 +463,18 @@
       buttons: ['Apply', 'Clear context', 'Cancel'],
       onButton: function (button) {
         log('editor button ' + button);
-        var form = dialog.form;
+        var values = formValues(dialog.form);
         if (button === 1) {
           var fields = {};
-          var rot = parseTriple(form.rotation && form.rotation.value);
-          var tra = parseTriple(form.translation && form.translation.value);
-          var sca = parseTriple(form.scale && form.scale.value);
+          var rot = parseTriple(values.rotation);
+          var tra = parseTriple(values.translation);
+          var sca = parseTriple(values.scale);
           if (rot) fields.rotation = rot;
           if (tra) fields.translation = tra;
           if (sca) fields.scale = sca;
-          writeContext(form.context.value, fields);
+          writeContext(values.context, fields);
         } else if (button === 2) {
-          clearContext(form.context.value);
+          clearContext(values.context);
         }
       }
     });
@@ -798,6 +822,60 @@
         + ' "Mineplus: Convert to Mineplus Model"');
   }
 
+  /* -------------------------------------------------------- display panel */
+
+  // The Display tab's sliders live in Blockbench's `display` panel; when the
+  // mode is entered, `enterDisplaySettings()` -> `DisplayMode.load()` is what
+  // fills the panel with the slot list and the rotation/translation/scale
+  // sliders (js/display_mode/display_mode.js: loadDisp writes
+  // `DisplayMode.vue._data.slot`). If that chain fails once (panel not yet
+  // mounted, project loaded in a new window, plugin converting the format a
+  // moment too late), the panel stays EMPTY — the reported "display tab opens
+  // but there is nothing inside to adjust". This repair re-runs the same
+  // native load once the mode is entered; every step is guarded and logged.
+  function repairDisplayPanel() {
+    var model = currentModel();
+    if (!model) return;
+    if (typeof DisplayMode === 'undefined' || !DisplayMode) {
+      warn('repairDisplayPanel: no DisplayMode object in this build');
+      return;
+    }
+    try {
+      // display_settings must exist for loadDisp to read the slot values.
+      if (!model.display_settings) model.display_settings = {};
+    } catch (failure) {
+      warn('repairDisplayPanel: cannot init display_settings: '
+          + (failure && failure.message));
+    }
+    try {
+      if (!DisplayMode.vue && typeof Interface !== 'undefined' && Interface.Panels
+          && Interface.Panels.display) {
+        DisplayMode.vue = Interface.Panels.display.inside_vue;
+        log('repairDisplayPanel: bound display panel vue (was missing)');
+      }
+    } catch (failure) {
+      warn('repairDisplayPanel: panel vue binding failed: '
+          + (failure && failure.message));
+    }
+    try {
+      var slot = DisplayMode.display_slot || 'thirdperson_righthand';
+      var bound = DisplayMode.vue;
+      var hasSlot = bound && bound._data && bound._data.slot;
+      if (!hasSlot) {
+        if (typeof DisplayMode.load === 'function') {
+          DisplayMode.load(slot);
+          log('repairDisplayPanel: re-loaded display slot "' + slot
+              + '" — panel sliders restored');
+        } else {
+          warn('repairDisplayPanel: DisplayMode.load missing in this build');
+        }
+      }
+    } catch (failure) {
+      warn('repairDisplayPanel: slot re-load failed: '
+          + (failure && failure.message));
+    }
+  }
+
   /* ------------------------------------------------------------ conversion */
 
   // Make `fmt` the ACTIVE format everywhere it matters. Tries, in order:
@@ -1041,11 +1119,11 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '4.2.0',
+    version: '5.1.0',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel', 'template'],
     onload: function () {
-      log('onload: starting (v5.0.0)');
+      log('onload: starting (v5.1.0)');
       // Each step is isolated: one failure (for example the format
       // constructor missing on a Blockbench build) logs a warning and the
       // remaining tools still register.
@@ -1129,6 +1207,14 @@
       });
       hook('display_mode_entered', function () {
         log('display mode entered — edit contexts above the preview');
+        repairDisplayPanel();
+      });
+      // Blockbench dispatches `select_mode` when a mode tab is clicked
+      // (js/modes.ts:139); `display_mode_entered` is not a real event, so the
+      // panel repair is wired to the event that actually fires.
+      hook('select_mode', function (data) {
+        var mode = data && data.mode;
+        if (mode && mode.id === 'display') repairDisplayPanel();
       });
       hook('display_mode_exited', function () {
         log('display mode exited; display block now: '
