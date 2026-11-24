@@ -74,6 +74,13 @@ public final class HeldOrientationFix {
     private static final float[] FIXED_TARGET = {10.086f, 0.73f, -8.25f};
     /** An item-frame render wider than this is shrunk to fit the frame. */
     private static final float FIXED_MAX_SPAN = 15f;
+    /**
+     * A hand-context render wider than this is shrunk to fit: the canonical
+     * scale was calibrated on a ~13 px pistol, so anything longer (rifles are
+     * 26-34 px) must shrink or it fills the screen in first person and floats
+     * far out of the hand in third person.
+     */
+    private static final float HAND_MAX_SPAN = 16f;
 
     /** Cube-name fragments that mark a grip. */
     private static final String[] GRIP_NAMES = {"grip", "wrist", "neck", "handle"};
@@ -89,9 +96,9 @@ public final class HeldOrientationFix {
     }
 
     private static final Pose FIRSTPERSON =
-            new Pose(FP_ROT, FP_SCALE, FP_TARGET, true, 0f);
+            new Pose(FP_ROT, FP_SCALE, FP_TARGET, true, HAND_MAX_SPAN);
     private static final Pose THIRDPERSON =
-            new Pose(TP_ROT, TP_SCALE, TP_TARGET, true, 0f);
+            new Pose(TP_ROT, TP_SCALE, TP_TARGET, true, HAND_MAX_SPAN);
     private static final Pose GUI =
             new Pose(GUI_ROT, GUI_SCALE, GUI_TARGET, false, GUI_MAX_SPAN);
     private static final Pose GROUND =

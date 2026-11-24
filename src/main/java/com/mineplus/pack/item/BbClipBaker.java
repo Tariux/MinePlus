@@ -330,13 +330,17 @@ public final class BbClipBaker {
     private static void fillContext(JsonObject display, String context, HeldPoseSolver.Pose pose) {
         switch (context) {
             case "firstperson_righthand" -> setHandContext(display, context,
-                    pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(), 0.68f);
+                    pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(),
+                    pose.firstpersonScale());
             case "firstperson_lefthand" -> setHandContext(display, context,
-                    pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(), 0.68f);
+                    pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(),
+                    pose.firstpersonScale());
             case "thirdperson_righthand" -> setHandContext(display, context,
-                    pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(), 0.85f);
+                    pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(),
+                    pose.thirdpersonScale());
             case "thirdperson_lefthand" -> setHandContext(display, context,
-                    pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(), 0.85f);
+                    pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(),
+                    pose.thirdpersonScale());
             default -> { }
         }
     }

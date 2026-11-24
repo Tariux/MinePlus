@@ -64,11 +64,15 @@ public final class ItemDisplaySolver {
      */
     public static ModelDisplay derive(float[][] boxes, ModelDisplay authored) {
         Vector3f center = bboxCenter(boxes);
+        // Oversized models are shrunk so they fit a vanilla 16 px slot/hand:
+        // without this a 33 px rifle overflows the inventory and the screen.
+        float fit = fitScale(boxes);
 
         HeldPoseSolver.Pose pose = HeldPoseSolver.solveBoxes(boxes);
         // When solved, hand translations are already grip-anchored in model
-        // space. The vanilla fallback pose assumes a 0..16 model, so its hand
-        // translations still need the centering delta (see centered()).
+        // space at the pose's own (size-normalized) scale. The vanilla fallback
+        // pose assumes a 0..16 model, so its hand translations still need the
+        // centering delta (see centered()).
         boolean solved = pose != null;
         if (pose == null) {
             // No dominant axis (e.g. one fat cube): keep the vanilla handheld
@@ -80,23 +84,43 @@ public final class ItemDisplaySolver {
         for (Map.Entry<String, ModelDisplay.Transform> entry : authored.contexts().entrySet()) {
             contexts.put(entry.getKey(), entry.getValue());
         }
-        contexts.putIfAbsent("gui", centered(GUI_ROTATION, GUI_SCALE, new Vector3f(), center));
-        contexts.putIfAbsent("ground", centered(GROUND_ROTATION, GROUND_SCALE, GROUND_TRANSLATION, center));
-        contexts.putIfAbsent("fixed", centered(FIXED_ROTATION, FIXED_SCALE, new Vector3f(), center));
-        contexts.putIfAbsent("head", centered(HEAD_ROTATION, HEAD_SCALE, new Vector3f(), center));
+        contexts.putIfAbsent("gui", centered(GUI_ROTATION, GUI_SCALE * fit, new Vector3f(), center));
+        contexts.putIfAbsent("ground", centered(GROUND_ROTATION, GROUND_SCALE * fit, GROUND_TRANSLATION, center));
+        contexts.putIfAbsent("fixed", centered(FIXED_ROTATION, FIXED_SCALE * fit, new Vector3f(), center));
+        contexts.putIfAbsent("head", centered(HEAD_ROTATION, HEAD_SCALE * fit, new Vector3f(), center));
+        float firstScale = solved ? pose.firstpersonScale() : FIRSTPERSON_SCALE * fit;
+        float thirdScale = solved ? pose.thirdpersonScale() : THIRDPERSON_SCALE * fit;
         contexts.putIfAbsent("firstperson_righthand", hand(
                 pose.firstpersonRotationRight(), pose.firstpersonTranslationRight(),
-                FIRSTPERSON_SCALE, center, solved));
+                firstScale, center, solved));
         contexts.putIfAbsent("firstperson_lefthand", hand(
                 pose.firstpersonRotationLeft(), pose.firstpersonTranslationLeft(),
-                FIRSTPERSON_SCALE, center, solved));
+                firstScale, center, solved));
         contexts.putIfAbsent("thirdperson_righthand", hand(
                 pose.thirdpersonRotationRight(), pose.thirdpersonTranslationRight(),
-                THIRDPERSON_SCALE, center, solved));
+                thirdScale, center, solved));
         contexts.putIfAbsent("thirdperson_lefthand", hand(
                 pose.thirdpersonRotationLeft(), pose.thirdpersonTranslationLeft(),
-                THIRDPERSON_SCALE, center, solved));
+                thirdScale, center, solved));
         return new ModelDisplay(contexts);
+    }
+
+    /**
+     * The fraction that keeps the wrapped box inside a vanilla 16 px cube
+     * (1.0 when the model already fits).
+     */
+    private static float fitScale(float[][] boxes) {
+        float span = 0.0f;
+        for (int i = 0; i < 3; i++) {
+            float min = Float.POSITIVE_INFINITY;
+            float max = Float.NEGATIVE_INFINITY;
+            for (float[] box : boxes) {
+                min = Math.min(min, box[i]);
+                max = Math.max(max, box[3 + i]);
+            }
+            span = Math.max(span, max - min);
+        }
+        return span <= 16.0f ? 1.0f : 16.0f / span;
     }
 
     /**

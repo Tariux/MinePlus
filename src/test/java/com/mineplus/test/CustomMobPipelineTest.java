@@ -69,6 +69,7 @@ public final class CustomMobPipelineTest {
         bakerAutoHeldPose();
         itemDisplaySolverDerivesFromGeometry();
         heldOrientationFixFacesForward();
+        heldOrientationFixShrinksOversizedRifles();
         heldOrientationFixHandPlacement();
         mobAnimatorHurtFlinch();
         if (failures.isEmpty()) {
@@ -985,6 +986,47 @@ public final class CustomMobPipelineTest {
                             && display.getAsJsonObject("ground") != null
                             && display.getAsJsonObject("fixed") != null);
         }
+    }
+
+    /**
+     * The pack bug from the field screenshots: a 33.5 px battle rifle was
+     * rendered at the pistol-calibrated 0.9 scale, so in first person it
+     * filled half the screen and in third person it floated far out of the
+     * hand. Hand contexts must shrink oversized models so the whole weapon
+     * stays within about a vanilla tool's reach of the grip.
+     */
+    private static void heldOrientationFixShrinksOversizedRifles() {
+        String rifle = "{\"elements\":["
+                + "{\"name\":\"grip\",\"from\":[7,1,-4],\"to\":[9,6,3]},"
+                + "{\"name\":\"body\",\"from\":[7.5,3.5,3],\"to\":[9,5.5,24]},"
+                + "{\"name\":\"muzzle\",\"from\":[7.75,4,24],\"to\":[8.75,5,29.5]}"
+                + "]}";
+        File file = writeTempModel("held-fix-rifle", rifle);
+        java.util.logging.Logger log = java.util.logging.Logger.getLogger("held-fix");
+        com.mineplus.pack.item.HeldOrientationFix.fixAll(log, file.getParentFile());
+        JsonObject fixed = readModel(file);
+        float[] grip = {8f, 3.5f, -0.5f};
+        float[] muzzle = {8.25f, 4.5f, 29.5f};
+        float[] muzzleFp = displayGrip(fixed, "firstperson_righthand", muzzle);
+        float[] gripFp = displayGrip(fixed, "firstperson_righthand", grip);
+        check("oversized rifle first-person grip still lands on the canonical hand point",
+                Math.abs(gripFp[0] - 8.418f) < 0.05f
+                        && Math.abs(gripFp[1] - 7.715f) < 0.05f
+                        && Math.abs(gripFp[2] - 4.039f) < 0.05f);
+        check("oversized rifle first-person muzzle stays near the hand, not off-screen",
+                Math.abs(muzzleFp[2] - gripFp[2]) < 20f && muzzleFp[2] < gripFp[2]);
+        float[] muzzleTp = displayGrip(fixed, "thirdperson_righthand", muzzle);
+        float[] gripTp = displayGrip(fixed, "thirdperson_righthand", grip);
+        check("oversized rifle third-person grip lands on the canonical hand point",
+                Math.abs(gripTp[0] - 6.8f) < 0.05f
+                        && Math.abs(gripTp[1] - 6.375f) < 0.05f
+                        && Math.abs(gripTp[2] - 7.325f) < 0.05f);
+        check("oversized rifle third-person muzzle stays near the hand",
+                Math.abs(muzzleTp[2] - gripTp[2]) < 20f);
+        float scale = fixed.getAsJsonObject("display")
+                .getAsJsonObject("firstperson_righthand").getAsJsonArray("scale").get(0).getAsFloat();
+        check("oversized rifle first-person scale is shrunk below the pistol calibration",
+                scale < 0.9f);
     }
 
     private static float centreZDelta(String before, JsonObject after) {

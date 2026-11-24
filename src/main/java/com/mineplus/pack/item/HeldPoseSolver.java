@@ -34,16 +34,24 @@ import java.util.List;
  */
 public final class HeldPoseSolver {
 
-    /** The solved pose: Euler triples and translations for each hand context. */
+    /**
+     * The solved pose: Euler triples, translations and scales for each hand
+     * context. The scales shrink an oversized model so its long axis is no
+     * longer than a vanilla tool's 16 px — translations are grip-anchored at
+     * that same scale, so callers must emit the scale with the translation.
+     */
     public record Pose(float[] firstpersonRotationRight, float[] firstpersonTranslationRight,
                 float[] firstpersonRotationLeft, float[] firstpersonTranslationLeft,
                 float[] thirdpersonRotationRight, float[] thirdpersonTranslationRight,
-                float[] thirdpersonRotationLeft, float[] thirdpersonTranslationLeft) {}
+                float[] thirdpersonRotationLeft, float[] thirdpersonTranslationLeft,
+                float firstpersonScale, float thirdpersonScale) {}
 
     /** The vanilla handheld first-person anchor (see ModelJsonWriter). */
     private static final float[] FIRSTPERSON_TRANSLATION = {1.13f, 3.2f, 1.13f};
     /** The vanilla handheld third-person anchor. */
     private static final float[] THIRDPERSON_TRANSLATION = {0.0f, 4.0f, 0.5f};
+    /** Longest model span (px) rendered at full vanilla scale in the hands. */
+    private static final float HAND_MAX_SPAN = 16.0f;
 
     private HeldPoseSolver() {
     }
@@ -59,7 +67,8 @@ public final class HeldPoseSolver {
                 new float[]{0.0f, -90.0f, 25.0f}, FIRSTPERSON_TRANSLATION.clone(),
                 new float[]{0.0f, 90.0f, -25.0f}, FIRSTPERSON_TRANSLATION.clone(),
                 new float[]{0.0f, -90.0f, 55.0f}, THIRDPERSON_TRANSLATION.clone(),
-                new float[]{0.0f, 90.0f, -55.0f}, THIRDPERSON_TRANSLATION.clone());
+                new float[]{0.0f, 90.0f, -55.0f}, THIRDPERSON_TRANSLATION.clone(),
+                0.68f, 0.85f);
     }
 
     /**
@@ -185,19 +194,26 @@ public final class HeldPoseSolver {
         float[] alignGrip = apply(align, grip);
 
         // ---- compose per context: R = R_hand·R_align, t = t_hand − R_hand·(s·R_align·grip) ----
+        // Oversized models are shrunk so their long axis is no longer than a
+        // vanilla tool's 16 px at the vanilla base scale: without this a 33 px
+        // rifle renders two blocks long, off the screen and out of the hand.
+        float shrink = Math.min(1.0f, HAND_MAX_SPAN / longest);
+        float firstScale = 0.68f * shrink;
+        float thirdScale = 0.85f * shrink;
         float[] rightRotation = composeEuler(0.0f, -90.0f, 25.0f, align);
         float[] rightTranslation = anchorMinus(FIRSTPERSON_TRANSLATION,
-                eulerXYZ(0.0f, -90.0f, 25.0f), alignGrip, 0.68f);
+                eulerXYZ(0.0f, -90.0f, 25.0f), alignGrip, firstScale);
         float[] thirdRotation = composeEuler(0.0f, -90.0f, 55.0f, align);
         float[] thirdTranslation = anchorMinus(THIRDPERSON_TRANSLATION,
-                eulerXYZ(0.0f, -90.0f, 55.0f), alignGrip, 0.85f);
+                eulerXYZ(0.0f, -90.0f, 55.0f), alignGrip, thirdScale);
 
         // Left hand mirrors the vanilla convention: Y and Z Euler negated,
         // translation unchanged.
         float[] leftRotation = {rightRotation[0], -rightRotation[1], -rightRotation[2]};
         float[] thirdLeftRotation = {thirdRotation[0], -thirdRotation[1], -thirdRotation[2]};
         return new Pose(rightRotation, rightTranslation, leftRotation, rightTranslation.clone(),
-                thirdRotation, thirdTranslation, thirdLeftRotation, thirdTranslation.clone());
+                thirdRotation, thirdTranslation, thirdLeftRotation, thirdTranslation.clone(),
+                firstScale, thirdScale);
     }
 
     private static void addOuter(float[] covariance, float dx, float dy, float dz) {
