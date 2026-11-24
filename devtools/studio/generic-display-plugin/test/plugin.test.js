@@ -171,6 +171,10 @@ check('toggle state remembered', localStorageData.mineplus_tools_visible === '1'
 // only, no `Model` — and conversion must still work end to end. On v4.1 the
 // plugin required a `Model` global that does not exist in Blockbench, so the
 // convert tool and every display tool silently did nothing on old models.
+// DisplayMode exists in the real app from startup; the convert step now drops
+// the designer into display mode via repairDisplayPanel.
+sandbox.DisplayMode = { display_slot: null, vue: null, load() {} };
+sandbox.Interface = { Panels: { display: { inside_vue: { _data: {} } } } };
 sandbox.Project = makeProject();
 actions.mineplus_convert.click();
 const project = sandbox.Project;
@@ -281,18 +285,36 @@ check('editor Apply writes clamped rotation into the display block',
   Array.isArray(applied.rotation) && applied.rotation.length === 3
     && applied.rotation.every(n => typeof n === 'number' && !isNaN(n)));
 
-// 5e. Regression for the empty Display tab: entering display mode must leave
-// the panel with its slot list and sliders. If Blockbench's own first load
-// did not bind the panel, the plugin re-runs the native DisplayMode.load().
+// 5e. Regression for the still-empty Display tab: the panel only renders its
+// slot list and sliders while display MODE is active (condition
+// {modes: ['display']}); the plugin's repair must therefore enter display
+// mode itself when the current format allows it.
+sandbox.Modes = {
+  options: { display: { id: 'display', select() { sandbox.Modes.displaySelected = true; } } },
+  displaySelected: false
+};
+sandbox.Mode = { id: 'edit' };
+// Real Blockbench keeps the active format as a page-scope global; the repair
+// reads its display_mode flag before entering display mode.
+sandbox.Format = { id: 'mineplus_model', display_mode: true, animation_mode: true };
 sandbox.DisplayMode = {
   display_slot: null, vue: null, loadedSlot: null,
   load: function (key) { this.loadedSlot = key; this.vue._data.slot = { key: key }; }
 };
 sandbox.Interface = { Panels: { display: { inside_vue: { _data: {} } } } };
 (hooks.select_mode || []).forEach(h => h({ mode: { id: 'display' } }));
-check('empty Display panel repaired on entering display mode',
-  sandbox.DisplayMode.loadedSlot === 'thirdperson_righthand'
+check('empty Display panel repair enters display mode (default tools)',
+  sandbox.Modes.displaySelected === true
+    && sandbox.DisplayMode.loadedSlot === 'thirdperson_righthand'
     && !!sandbox.DisplayMode.vue._data.slot);
+// When the format does not allow display mode, the repair must not throw.
+delete sandbox.Modes;
+sandbox.Modes = { display: { select() { throw new Error('nope'); } } };
+let repairFail = null;
+try { (hooks.select_mode || []).forEach(h => h({ mode: { id: 'edit' } })); }
+catch (e) { repairFail = e; }
+check('display panel repair failure is caught and logged, not thrown',
+  repairFail === null);
 delete sandbox.DisplayMode;
 delete sandbox.Interface;
 

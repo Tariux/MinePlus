@@ -824,18 +824,36 @@
 
   /* -------------------------------------------------------- display panel */
 
-  // The Display tab's sliders live in Blockbench's `display` panel; when the
-  // mode is entered, `enterDisplaySettings()` -> `DisplayMode.load()` is what
-  // fills the panel with the slot list and the rotation/translation/scale
-  // sliders (js/display_mode/display_mode.js: loadDisp writes
-  // `DisplayMode.vue._data.slot`). If that chain fails once (panel not yet
-  // mounted, project loaded in a new window, plugin converting the format a
-  // moment too late), the panel stays EMPTY — the reported "display tab opens
-  // but there is nothing inside to adjust". This repair re-runs the same
-  // native load once the mode is entered; every step is guarded and logged.
+  // The Display panel (Panel 'display') has `condition: {modes: ['display']}`
+  // (js/display_mode/display_mode.js:1717): it renders its slot list and the
+  // rotation/translation/scale sliders ONLY while the display *mode* is
+  // active — and that mode's tab requires `Format.display_mode` (line 1590).
+  // Opening the panel from View > Panels while still in edit mode therefore
+  // shows a completely empty column — the reported bug. Repair = re-run the
+  // native chain with default tools only: enter display mode, bind the vue,
+  // init display_settings, re-load the slot.
   function repairDisplayPanel() {
     var model = currentModel();
     if (!model) return;
+    try {
+      // 1. The panel is empty whenever display mode is not the active mode.
+      if (typeof Modes !== 'undefined' && Modes.options && Modes.options.display) {
+        if (typeof Mode === 'undefined' || !Mode || Mode.id !== 'display') {
+          var displayFormat = globalFormat();
+          if (displayFormat && displayFormat.display_mode === true
+              && typeof Modes.options.display.select === 'function') {
+            Modes.options.display.select();
+            log('repairDisplayPanel: entered display mode — panel now populated');
+          } else {
+            log('repairDisplayPanel: display mode not available for format "'
+                + (displayFormat && displayFormat.id) + '" — run Convert first');
+          }
+        }
+      }
+    } catch (failure) {
+      warn('repairDisplayPanel: entering display mode failed: '
+          + (failure && failure.message));
+    }
     if (typeof DisplayMode === 'undefined' || !DisplayMode) {
       warn('repairDisplayPanel: no DisplayMode object in this build');
       return;
@@ -860,15 +878,12 @@
     try {
       var slot = DisplayMode.display_slot || 'thirdperson_righthand';
       var bound = DisplayMode.vue;
-      var hasSlot = bound && bound._data && bound._data.slot;
-      if (!hasSlot) {
-        if (typeof DisplayMode.load === 'function') {
-          DisplayMode.load(slot);
-          log('repairDisplayPanel: re-loaded display slot "' + slot
-              + '" — panel sliders restored');
-        } else {
-          warn('repairDisplayPanel: DisplayMode.load missing in this build');
-        }
+      var hasSlot = bound && bound._data && bound._data.slot
+          && bound._data.slot.slot_id;
+      if (!hasSlot && typeof DisplayMode.load === 'function') {
+        DisplayMode.load(slot);
+        log('repairDisplayPanel: re-loaded display slot "' + slot
+            + '" — panel sliders restored');
       }
     } catch (failure) {
       warn('repairDisplayPanel: slot re-load failed: '
@@ -1013,6 +1028,10 @@
     var editMode = modes && (modes.edit || (modes.options && modes.options.edit));
     if (editMode && typeof editMode.select === 'function') editMode.select();
     else if (typeof Mode !== 'undefined' && Mode.edit) Mode.select(Mode.edit);
+    // The Display panel only renders content in display mode (condition
+    // {modes: ['display']}), so drop the designer straight into it with the
+    // slot list and sliders visible — default Blockbench UI, no custom GUI.
+    repairDisplayPanel();
     if (!model.mineplus) model.mineplus = { format: 1, plugin: PLUGIN_ID };
     if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
     log('format switched to ' + MP_FORMAT_ID
