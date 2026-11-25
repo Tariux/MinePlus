@@ -51,7 +51,14 @@ function makeProject() {
   };
 }
 
+// `display_presets` mirrors the real fixed preset list: Blockbench's Java
+// Block/Item template gets its display defaults from the fixed `item` preset,
+// applied to ALL slots through DisplayMode.applyPreset(preset, true).
 const sandbox = {
+  display_presets: [
+    { id: 'block', fixed: true, areas: {} },
+    { id: 'item', fixed: true, areas: { ground: { rotation: [0, 0, 0] } } }
+  ],
   console: { log: log, warn: log, error: log },
   setTimeout: fn => fn(),
   document: {
@@ -128,7 +135,11 @@ check('.mpmodel added to the project codec load filter',
 // only, no `Model` — and conversion must still work end to end. DisplayMode
 // exists in the real app from startup; convert drops the designer into
 // display mode via repairDisplayPanel.
-sandbox.DisplayMode = { display_slot: null, vue: null, load() {} };
+sandbox.DisplayMode = {
+  display_slot: null, vue: null, load() {},
+  presetCalls: [],
+  applyPreset(preset, all) { this.presetCalls.push({ id: preset && preset.id, all: all === true }); }
+};
 sandbox.Interface = { Panels: { display: { inside_vue: { _data: {} } } } };
 sandbox.Project = makeProject();
 actions.mineplus_convert.click();
@@ -144,6 +155,21 @@ check('animations kept (2 — Animate tab content survives)', Object.keys(projec
 check('display block kept (1 context — vanilla defaults apply elsewhere)',
   Object.keys(project.display).length === 1);
 check('no metadata stamp written (plain bbmodel content only)', project.mineplus === undefined);
+// v6.1: a model without display settings gets the built-in Java-item preset
+// on ALL slots — the same mechanism as the default Java Block/Item template.
+check('built-in Java-item display preset applied to all slots',
+  sandbox.DisplayMode.presetCalls.length === 1
+    && sandbox.DisplayMode.presetCalls[0].id === 'item'
+    && sandbox.DisplayMode.presetCalls[0].all === true);
+
+// 2z. A model with AUTHORED display settings must keep them untouched.
+sandbox.Project = makeProject();
+sandbox.Project.display_settings = { thirdperson_righthand: { rotation: [10, 20, 30] } };
+sandbox.DisplayMode.presetCalls = [];
+actions.mineplus_convert.click();
+check('authored display settings are not overwritten by the preset',
+  sandbox.DisplayMode.presetCalls.length === 0
+    && sandbox.Project.display_settings.thirdperson_righthand.rotation[0] === 10);
 
 // 2a. When the old format is still the active global and Blockbench's native
 // ModelFormat.convertTo() is available, it is used — it also migrates box UV,

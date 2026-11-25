@@ -1,5 +1,11 @@
 # Decisions
 
+## Display defaults via Blockbench's built-in item preset (v6.1.0, 2026-11-25)
+- The Java-item default display values are NOT hardcoded in the plugin. `applyJavaItemDisplayDefaults()` finds the fixed `item` entry in Blockbench's own `display_presets` (js/display_mode/display_mode.js) and calls `DisplayMode.applyPreset(preset, true)` — the exact mechanism of the default Java Block/Item template.
+- It only runs when `Project.display_settings` is empty/absent, so authored display data is never overwritten.
+- Order inside applyMineplusFormat success path: format switch → applyJavaItemDisplayDefaults() → repairDisplayPanel().
+- The plugin copy the web app loads is `.bbweb/mineplus_generic_display.js`; it must be re-copied after every source change (git-ignored folder, md5 must match the tracked source).
+
 ## Mineplus Studio reverted (v5.0, 2026-11-24)
 - The "Mineplus: Studio" tool (custom launcher that entered display mode and forwarded panels) was deleted — designers found it confusing; the plugin offers no Studio entry. Do not reintroduce it.
 - Tab visibility rule (verified in Blockbench source): the Animate/Display tabs follow the page-scope global `Format.animation_mode` / `Format.display_mode`. The generic "free" format (js/formats/generic.ts) sets `animation_mode` but NOT `display_mode` — old bbmodel files therefore show Animate but never Display until converted.

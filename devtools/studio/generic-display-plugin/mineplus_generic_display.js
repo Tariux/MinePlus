@@ -1,4 +1,4 @@
-/* Mineplus Generic Display — Blockbench plugin v6.0.0.
+/* Mineplus Generic Display — Blockbench plugin v6.1.0.
  *
  * One job: after converting an old bbmodel — or creating a brand-new model —
  * the Animate tab AND the Display tab (with the default Java-item slot list
@@ -246,12 +246,56 @@
           + ' animation_mode=' + !!(landed && landed.animation_mode)
           + ' display_mode=' + !!(landed && landed.display_mode));
     }
+    // Fill the Display panel the way Blockbench's own Java Block/Item template
+    // does: its fixed `item` display preset (js/display_mode/display_mode.js,
+    // `display_presets`) applied to ALL slots through the built-in
+    // DisplayMode.applyPreset(.., true). Only when the model carries no
+    // authored display settings, so real display data is never overwritten.
+    applyJavaItemDisplayDefaults();
     // Drop the designer into Blockbench's own display mode so the Display
     // panel (which only renders in display mode) shows the default slot list
     // and sliders immediately.
     repairDisplayPanel();
     if (typeof Canvas !== 'undefined' && Canvas.updateAll) Canvas.updateAll();
     return true;
+  }
+
+  // Blockbench's Java Block/Item template gets its display defaults from the
+  // fixed `item` entry in `display_presets` (js/display_mode/display_mode.js),
+  // applied to every slot at once via DisplayMode.applyPreset(preset, true).
+  // This reuses exactly that built-in preset and API — no custom values — and
+  // only fills models that carry no display settings at all.
+  function applyJavaItemDisplayDefaults() {
+    var model = currentModel();
+    if (!model) return false;
+    if (model.display_settings && Object.keys(model.display_settings).length > 0) {
+      log('display settings present — leaving authored values untouched');
+      return false;
+    }
+    if (typeof DisplayMode === 'undefined' || !DisplayMode
+        || typeof DisplayMode.applyPreset !== 'function') {
+      warn('DisplayMode.applyPreset unavailable — skipping display defaults');
+      return false;
+    }
+    var itemPreset = null;
+    if (typeof display_presets !== 'undefined' && display_presets
+        && typeof display_presets.forEach === 'function') {
+      display_presets.forEach(function (preset) {
+        if (preset && preset.id === 'item') itemPreset = preset;
+      });
+    }
+    if (!itemPreset) {
+      warn('built-in Java-item display preset not found — skipping');
+      return false;
+    }
+    try {
+      DisplayMode.applyPreset(itemPreset, true);
+      log('vanilla Java-item display preset applied to all slots');
+      return true;
+    } catch (failure) {
+      warn('applyPreset threw: ' + (failure && failure.message));
+      return false;
+    }
   }
 
   // The Display panel only renders its slot list and sliders while display
@@ -365,11 +409,11 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '6.0.0',
+    version: '6.1.0',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel'],
     onload: function () {
-      log('onload: starting (v6.0.0)');
+      log('onload: starting (v6.1.0)');
       registerFormat();
 
       var convert = new Action('mineplus_convert', {
