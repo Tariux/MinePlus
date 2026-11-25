@@ -1,11 +1,11 @@
-/* Mineplus Generic Display — Blockbench plugin v6.1.0.
+/* Mineplus Generic Display — Blockbench plugin v6.2.0.
  *
  * One job: after converting an old bbmodel — or creating a brand-new model —
  * the Animate tab AND the Display tab (with the default Java-item slot list
  * and rotation/translation/scale sliders) are both available, using nothing
  * but Blockbench's built-in tools. No custom GUI, no extra editors.
  *
- * Tools menu (2 items):
+ * Tools menu (4 items):
  *   - Mineplus: Convert to Mineplus Model
  *       switch the OPEN model to the mineplus format. Cubes, bones, textures,
  *       the authored display block and every animation are kept untouched —
@@ -14,6 +14,17 @@
  *   - Mineplus: Open & Convert Old Model…
  *       pick a .bbmodel / .json / .mpmodel file; it is opened through the
  *       matching codec and converted in one step.
+ *   - Mineplus: Copy Display Settings
+ *       snapshot the OPEN model's complete Display tab settings — every slot
+ *       (thirdperson/firstperson/head/ground/gui/fixed/…): rotation,
+ *       translation, scale, pivots, mirror — through the built-in
+ *       DisplaySlot.copy() path. Kept in memory and put on the system
+ *       clipboard as marked JSON, so it survives closing the model.
+ *   - Mineplus: Paste Display Settings
+ *       apply the copied snapshot to the OPEN model slot by slot through the
+ *       built-in DisplaySlot.extend() path (the same call Blockbench's own
+ *       preset apply uses), with undo support. Values land exactly as
+ *       authored — nothing is recomputed or overridden.
  *
  * New models: the plugin registers the "Mineplus Model" format, so it appears
  * in Blockbench's normal New Model format list — picking it gives a fresh
@@ -31,7 +42,7 @@
   var LOG_PREFIX = '[Mineplus]';
   var MP_FORMAT_ID = 'mineplus_model';
 
-  var state = { actions: [], hooks: [], addedExtension: false };
+  var state = { actions: [], hooks: [], addedExtension: false, copiedDisplay: null };
 
   /* ------------------------------------------------------------------ log */
 
@@ -69,6 +80,229 @@
       animations: model.animations ? Object.keys(model.animations).length : 0,
       display: Object.keys(displayBlock(model)).length
     };
+  }
+
+  /* ------------------------------------------------- display copy / paste */
+
+  // Canonical Display tab slots (js/display_mode/display_references.js plus
+  // the classic Java-item slots). DisplayMode.slots is preferred when the
+  // running build exposes it, so new slots are picked up automatically.
+  var FALLBACK_SLOTS = ['thirdperson_righthand', 'thirdperson_lefthand',
+    'firstperson_righthand', 'firstperson_lefthand', 'head', 'ground',
+    'gui', 'fixed', 'embedded', 'on_shelf'];
+
+  function knownSlots(model) {
+    var slots = [];
+    function push(s) {
+      s = String(s);
+      if (s && slots.indexOf(s) < 0) slots.push(s);
+    }
+    try {
+      if (typeof DisplayMode !== 'undefined' && DisplayMode
+          && Array.isArray(DisplayMode.slots)) {
+        DisplayMode.slots.forEach(push);
+      }
+    } catch (failure) {
+      warn('DisplayMode.slots unreadable: ' + (failure && failure.message));
+    }
+    FALLBACK_SLOTS.forEach(push);
+    var ds = model && model.display_settings;
+    if (ds && typeof ds === 'object') Object.keys(ds).forEach(push);
+    return slots;
+  }
+
+  // Plain-data snapshot of one slot. DisplaySlot.copy() (the built-in full
+  // copy: rotation, translation, scale, pivots, mirror, fit_to_frame) is the
+  // preferred path; the plain fallback reads the same fields so it works on
+  // raw bbmodel `display` objects too.
+  function snapshotSlot(slot) {
+    if (!slot || typeof slot !== 'object') return null;
+    if (typeof slot.copy === 'function') {
+      try {
+        var copied = slot.copy();
+        if (copied && typeof copied === 'object') return copied;
+      } catch (failure) {
+        warn('slot copy() threw: ' + (failure && failure.message));
+      }
+    }
+    var out = {};
+    ['rotation', 'translation', 'scale', 'rotation_pivot', 'scale_pivot',
+      'mirror'].forEach(function (k) {
+      if (Array.isArray(slot[k])) out[k] = slot[k].slice();
+    });
+    if (typeof slot.fit_to_frame === 'boolean') out.fit_to_frame = slot.fit_to_frame;
+    return Object.keys(out).length ? out : null;
+  }
+
+  function collectDisplaySnapshot(model) {
+    var slots = knownSlots(model);
+    var ds = model.display_settings;
+    var raw = (!ds || typeof ds !== 'object' || Object.keys(ds).length === 0)
+        ? (model.display || null) : ds;   // raw bbmodel display block fallback
+    if (!raw || typeof raw !== 'object') return {};
+    var out = {};
+    slots.forEach(function (sl) {
+      var snap = raw[sl] ? snapshotSlot(raw[sl]) : null;
+      if (snap) out[sl] = snap;
+    });
+    return out;
+  }
+
+  var MARKER = 'mineplus_display_copy';
+  function clipboardPayload(model, slots) {
+    return JSON.stringify({
+      mineplus_display_copy: 1,
+      version: 1,
+      source_model: (model && model.name) || 'model',
+      slots: slots
+    });
+  }
+  function parseClipboardPayload(text) {
+    if (typeof text !== 'string' || text.indexOf(MARKER) < 0) return null;
+    try {
+      var data = JSON.parse(text);
+      if (data && data[MARKER] === 1 && data.slots
+          && typeof data.slots === 'object' && Object.keys(data.slots).length) {
+        return data;
+      }
+    } catch (failure) {
+      warn('clipboard display payload unparsable: ' + (failure && failure.message));
+    }
+    return null;
+  }
+
+  function copyDisplaySettings() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var slots = collectDisplaySnapshot(model);
+    if (!Object.keys(slots).length) {
+      log('copy: model has no display settings — nothing to copy');
+      Blockbench.showQuickMessage('No display settings on this model — nothing to copy');
+      return;
+    }
+    state.copiedDisplay = { source_model: model.name || 'model', slots: slots };
+    var payload = clipboardPayload(model, slots);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard
+          && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(payload);
+        log('copy: ' + Object.keys(slots).length + ' slot(s) copied'
+            + ' to clipboard and memory');
+      } else {
+        log('copy: ' + Object.keys(slots).length + ' slot(s) copied'
+            + ' to memory (system clipboard unavailable)');
+      }
+    } catch (failure) {
+      warn('clipboard write failed (memory copy kept): '
+          + (failure && failure.message));
+    }
+    Blockbench.showQuickMessage('Display settings copied ('
+        + Object.keys(slots).length + ' slots) — open the target model and paste');
+  }
+
+  // Merge one pasted slot the same way DisplayMode.applyPreset does: build a
+  // fresh DisplaySlot when the target has none, extend() it with the snapshot
+  // (extend normalises degrees, mirror-from-negative-scale, pivots), and
+  // reset pivots the snapshot does not carry — identical to preset semantics.
+  function pasteSlotData(model, slotId, data) {
+    if (!model.display_settings || typeof model.display_settings !== 'object') {
+      model.display_settings = {};
+    }
+    var target = model.display_settings[slotId];
+    if (!target || typeof target !== 'object') {
+      if (typeof DisplaySlot === 'function') {
+        target = new DisplaySlot(slotId);
+      } else {
+        target = { rotation: [0, 0, 0], translation: [0, 0, 0], scale: [1, 1, 1] };
+      }
+      model.display_settings[slotId] = target;
+    }
+    if (typeof target.extend === 'function') {
+      target.extend(data);
+    } else {
+      ['rotation', 'translation', 'scale', 'rotation_pivot', 'scale_pivot',
+        'mirror'].forEach(function (k) {
+        if (Array.isArray(data[k])) target[k] = data[k].slice();
+      });
+      if (typeof data.fit_to_frame === 'boolean') target.fit_to_frame = data.fit_to_frame;
+    }
+    ['rotation_pivot', 'scale_pivot'].forEach(function (pivot) {
+      if (!Array.isArray(data[pivot])) {
+        var current = target[pivot];
+        if (current && typeof current.replace === 'function') current.replace([0, 0, 0]);
+        else if (Array.isArray(current)) target[pivot] = [0, 0, 0];
+        else target[pivot] = [0, 0, 0];
+      }
+    });
+  }
+
+  function pasteDisplaySettings() {
+    var model = currentModel();
+    if (!model) {
+      Blockbench.showQuickMessage('Open or create a model first');
+      return;
+    }
+    var payload = state.copiedDisplay || null;
+    if (!payload && typeof navigator !== 'undefined' && navigator.clipboard
+        && navigator.clipboard.readText) {
+      // readText is async and needs document focus; the in-memory copy is the
+      // primary path — the clipboard is only a bonus across sessions.
+      warn('paste: no in-memory copy — use Copy Display Settings in this'
+          + ' Blockbench session (clipboard paste-back is not supported here)');
+    }
+    if (!payload) {
+      Blockbench.showQuickMessage('Nothing to paste — copy display settings first');
+      return;
+    }
+    var allowed = knownSlots(model);
+    var applied = [];
+    try {
+      if (typeof Undo !== 'undefined' && Undo && Undo.initEdit && Undo.finishEdit) {
+        Undo.initEdit({ display_slots: Object.keys(payload.slots).filter(
+            function (s) { return allowed.indexOf(s) >= 0; }) });
+      }
+    } catch (failure) {
+      warn('undo init failed (paste continues): ' + (failure && failure.message));
+    }
+    Object.keys(payload.slots).forEach(function (slotId) {
+      if (allowed.indexOf(slotId) < 0) {
+        warn('paste: skipping unknown slot "' + slotId + '"');
+        return;
+      }
+      var snap = payload.slots[slotId];
+      if (!snap || typeof snap !== 'object') return;
+      pasteSlotData(model, slotId, snap);
+      applied.push(slotId);
+    });
+    if (!applied.length) {
+      Blockbench.showQuickMessage('Nothing to paste — no compatible slots');
+      return;
+    }
+    try {
+      if (typeof Undo !== 'undefined' && Undo && Undo.finishEdit) {
+        Undo.finishEdit('Paste display settings');
+      }
+    } catch (failure) {
+      warn('undo finish failed (paste kept): ' + (failure && failure.message));
+    }
+    try {
+      if (typeof Mode !== 'undefined' && Mode && Mode.id === 'display'
+          && typeof DisplayMode !== 'undefined' && DisplayMode
+          && typeof DisplayMode.load === 'function') {
+        DisplayMode.load(DisplayMode.display_slot || 'thirdperson_righthand');
+      } else if (typeof Canvas !== 'undefined' && Canvas.updateAll) {
+        Canvas.updateAll();
+      }
+    } catch (failure) {
+      warn('post-paste refresh failed: ' + (failure && failure.message));
+    }
+    log('paste: applied ' + applied.length + ' slot(s) from "'
+        + (payload.source_model || 'model') + '"');
+    Blockbench.showQuickMessage('Display settings pasted (' + applied.length
+        + ' slots) — press Ctrl+Z to undo');
   }
 
   /* --------------------------------------------------------------- format */
@@ -409,11 +643,11 @@
   Plugin.register(PLUGIN_ID, {
     title: 'Mineplus Generic Display',
     author: 'Mineplus',
-    version: '6.1.0',
+    version: '6.2.0',
     min_version: '4.0.0',
     tags: ['mineplus', 'display', 'animation', 'minecraft', 'mpmodel'],
     onload: function () {
-      log('onload: starting (v6.1.0)');
+      log('onload: starting (v6.2.0)');
       registerFormat();
 
       var convert = new Action('mineplus_convert', {
@@ -434,7 +668,25 @@
       MenuBar.addAction(openConvert, 'tools');
       state.actions.push(openConvert);
 
-      log('onload: 2 actions registered under Tools');
+      var copyDisplay = new Action('mineplus_copy_display', {
+        name: 'Mineplus: Copy Display Settings',
+        icon: 'icon-copy',
+        category: 'edit',
+        click: copyDisplaySettings
+      });
+      MenuBar.addAction(copyDisplay, 'tools');
+      state.actions.push(copyDisplay);
+
+      var pasteDisplay = new Action('mineplus_paste_display', {
+        name: 'Mineplus: Paste Display Settings',
+        icon: 'icon-paste',
+        category: 'edit',
+        click: pasteDisplaySettings
+      });
+      MenuBar.addAction(pasteDisplay, 'tools');
+      state.actions.push(pasteDisplay);
+
+      log('onload: 4 actions registered under Tools');
 
       // After any load, make sure the mineplus format is active so both tabs
       // are available without a manual step. Load events differ across

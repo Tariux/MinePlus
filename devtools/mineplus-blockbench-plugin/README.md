@@ -1,4 +1,4 @@
-# Mineplus Generic Display (Blockbench plugin) — v6.1.0
+# Mineplus Generic Display (Blockbench plugin) — v6.2.0
 
 Author, animate and validate Mine Plus models: edit a model's `display`
 block, animate it in Blockbench's Animate tab, and save in the Mineplus-native
@@ -8,29 +8,21 @@ failed save is always traceable.
 
 ## Tools menu
 
-All Mineplus entries live under **Tools**. **Mineplus: Toggle Tools** shows or
-hides every other Mineplus entry (the state is remembered across sessions, and
-the toggle itself stays visible so you can always switch back). Useful when a
-designer is working in a plain Blockbench model and does not want the extra
-menu noise — toggle Mineplus tools on whenever display/animation work starts.
+All Mineplus entries live under **Tools** (four of them: Convert to Mineplus
+Model, Open & Convert Old Model…, Copy Display Settings, Paste Display
+Settings).
 
 | Tool | What it does |
 |---|---|
 | Mineplus: Toggle Tools | show/hide all other Mineplus tools |
 | Mineplus: Convert to Mineplus Model | migrate the open model (old bbmodel, java_block, free, …) to the mineplus format; cubes, bones, textures, display and animations are all kept |
 | Mineplus: Open & Migrate Old Model… | pick a `.bbmodel` / `.json` / `.mpmodel` file, open it and convert it in one step |
-| Mineplus Display Editor | edit rotation/translation/scale per display context |
-| Mineplus: Copy Display | copy the display block as JSON |
-| Mineplus: Validate Display | display-only validation (clamps match the server) |
-| Mineplus: Validate Model | full compatibility check: budgets, 22.5° angles, textures, animations |
-| Mineplus: Template Settings | edit the `mineplus` metadata stamp |
-| Mineplus: Check Template | is this file detected as a Mine Plus template? |
-| Mineplus: Save as .mpmodel | save in the Mineplus format |
-| Mineplus: Export as .bbmodel | save a plain bbmodel (also fully loadable) |
-| Mineplus: Open Generic / Java Item Model | start a vanilla Java item project or open any model file |
-| Mineplus: Fix Duplicates | remove UUID-duplicated cubes/groups, rename same-name elements |
-| Mineplus: Model Report | cubes/bones/textures/animations summary |
-| Mineplus: Show Log | in-app log panel (last 400 lines) |
+| Mineplus: Copy Display Settings | copy the open model's complete Display tab settings (every slot: rotation, translation, scale, pivots, mirror) to memory + clipboard, as marked JSON |
+| Mineplus: Paste Display Settings | apply the copied settings to the open model slot by slot through the built-in `DisplaySlot.extend()` path — values land exactly as copied, with undo (Ctrl+Z) |
+
+(The simplified v6 plugin has only the four tools above; the v5.x extras —
+Display Editor, validators, template tools, reports, exports, log panel,
+Studio — were removed on purpose.)
 
 ## Opening old models / animations
 

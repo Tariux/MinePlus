@@ -114,13 +114,15 @@ function check(name, cond) {
 
 load();
 
-// 1. onload registers exactly the two tools plus the mpmodel format.
+// 1. onload registers exactly the four tools plus the mpmodel format.
 sandbox.__plugin.onload();
 const toolIds = menuBar.tools.map(a => a.id);
 check('onload runs without throwing', toolIds.length > 0);
-check('exactly two menu actions (convert + open&convert)',
-  toolIds.length === 2 && toolIds.includes('mineplus_convert')
-    && toolIds.includes('mineplus_open_convert'));
+check('exactly four menu actions (convert, open&convert, copy display, paste display)',
+  toolIds.length === 4 && toolIds.includes('mineplus_convert')
+    && toolIds.includes('mineplus_open_convert')
+    && toolIds.includes('mineplus_copy_display')
+    && toolIds.includes('mineplus_paste_display'));
 const fmt = registeredFormats.mineplus_model;
 check('mineplus_model format registered', !!fmt);
 check('format enables animation mode (Animate tab exists)', fmt && fmt.animation_mode === true);
@@ -275,9 +277,88 @@ check('display panel repair failure is caught and logged, not thrown',
 delete sandbox.DisplayMode;
 delete sandbox.Interface;
 
-// 7. The v5.x extras are gone on purpose (simplified final version):
+// 6d-preflight. Paste with nothing copied must be a no-op message, never a
+// throw (the in-memory buffer is still empty here — no copy happened yet).
+const pasteTarget2 = makeProject();
+sandbox.Project = pasteTarget2;
+let noCopyThrow = null;
+try { actions.mineplus_paste_display.click(); }
+catch (e) { noCopyThrow = e; }
+check('paste with nothing copied is a safe no-op',
+  noCopyThrow === null && Object.keys(pasteTarget2.display_settings || {}).length === 0);
+
+// 6d. Display settings copy/paste (v6.2.0): the complete Display tab of one
+// model moves unchanged onto another model, through the same built-in paths
+// Blockbench's own presets use (DisplaySlot.copy()/extend()).
+function FakeDisplaySlot(data) {
+  this.rotation = [0, 0, 0];
+  this.translation = [0, 0, 0];
+  this.scale = [1, 1, 1];
+  this.rotation_pivot = [0, 0, 0];
+  this.scale_pivot = [0, 0, 0];
+  this.mirror = [false, false, false];
+  if (data) this.extend(data);
+}
+FakeDisplaySlot.prototype.copy = function () {
+  const o = {};
+  for (const k of ['rotation', 'translation', 'scale', 'rotation_pivot',
+    'scale_pivot', 'mirror']) o[k] = this[k].slice();
+  return o;
+};
+FakeDisplaySlot.prototype.extend = function (d) {
+  for (const k of ['rotation', 'translation', 'scale', 'rotation_pivot',
+    'scale_pivot', 'mirror'])
+    if (Array.isArray(d[k])) this[k] = d[k].slice();
+};
+
+sandbox.DisplayMode = { slots: ['gui', 'head', 'firstperson_righthand'] };
+sandbox.Project = makeProject();
+sandbox.Project.display_settings = {
+  firstperson_righthand: new FakeDisplaySlot({
+    rotation: [15, 45, 0], translation: [0, -2, 0],
+    scale: [0.5, 0.5, 0.5], rotation_pivot: [8, 8, 8]
+  }),
+  gui: { rotation: [30, 0, 0], translation: [0, 0, 0], scale: [1, 1, 1] },
+  bogus_custom_slot: { rotation: [1, 1, 1] }
+};
+actions.mineplus_copy_display.click();
+check('copy does not modify the source model',
+  sandbox.Project.display_settings.firstperson_righthand.rotation[0] === 15);
+
+const pasteTarget = makeProject();
+sandbox.Project = pasteTarget;
+actions.mineplus_paste_display.click();
+check('paste applies the copied firstperson pose unchanged',
+  Array.isArray(pasteTarget.display_settings.firstperson_righthand)
+    ? false
+    : pasteTarget.display_settings.firstperson_righthand.rotation[0] === 15
+      && pasteTarget.display_settings.firstperson_righthand.rotation[1] === 45
+      && pasteTarget.display_settings.firstperson_righthand.translation[1] === -2
+      && pasteTarget.display_settings.firstperson_righthand.scale[0] === 0.5);
+check('paste carries the copied rotation pivot',
+  pasteTarget.display_settings.firstperson_righthand.rotation_pivot[0] === 8);
+check('paste applies a plain-object slot too (gui)',
+  pasteTarget.display_settings.gui.rotation[0] === 30);
+check('paste resets pivots the copy does not carry (preset semantics)',
+  pasteTarget.display_settings.gui.rotation_pivot[0] === 0);
+check('paste drops non-standard slots (bogus_custom_slot)',
+  pasteTarget.display_settings.bogus_custom_slot === undefined);
+
+// Copy from a model with NO display settings at all: message, never a throw.
+sandbox.Project = makeProject(); // display_settings undefined, display {}
+let emptyCopyThrow = null;
+try { actions.mineplus_copy_display.click(); }
+catch (e) { emptyCopyThrow = e; }
+check('copy on a model without display settings is a safe no-op',
+  emptyCopyThrow === null);
+
+delete sandbox.DisplayMode;
+
+
 // no custom editor, validators, template tools, reports, toggles or Studio.
-['mineplus_display_editor', 'mineplus_copy_display', 'mineplus_validate_display',
+// (mineplus_copy_display is back in v6.2.0 as copy display settings, and
+// mineplus_paste_display joins it — see section 6d.)
+['mineplus_display_editor', 'mineplus_validate_display',
   'mineplus_validate_model', 'mineplus_template_settings', 'mineplus_check_template',
   'mineplus_save_mpmodel', 'mineplus_export_bbmodel', 'mineplus_open_generic',
   'mineplus_fix_duplicates', 'mineplus_model_report', 'mineplus_show_log',
