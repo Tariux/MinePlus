@@ -1075,6 +1075,47 @@ async function handleAudit(res, body) {
   }
 }
 
+// three.js from unpkg is the app's only network dependency; when it is
+// unreachable the whole module graph fails and the UI sticks on "starting…".
+// Serve it locally instead, downloading each file once into app/vendor/three
+// and reusing the cache from then on.
+const vendorRoot = path.join(appDir, 'vendor');
+const THREE_CDN = 'https://unpkg.com/three@0.160.0';
+
+async function serveVendor(res, pathname) {
+  const rel = pathname.replace(/^\/vendor\/three\//, '');
+  const file = path.join(vendorRoot, 'three', rel);
+  if (rel.includes('..') || path.extname(file) !== '.js' ||
+      !(file.startsWith(vendorRoot + path.sep))) {
+    sendError(res, 403, 'bad vendor path'); return;
+  }
+  const cdnRel = rel === 'three.module.js' ? 'build/three.module.js' : rel;
+  const headers = {
+    'Content-Type': MIME['.js'],
+    'Cache-Control': 'no-store',
+  };
+  try {
+    const data = await fsp.readFile(file);
+    res.writeHead(200, { ...headers, 'Content-Length': data.length });
+    res.end(data);
+    return;
+  } catch {
+    // not cached yet — fall through to the download
+  }
+  try {
+    const reply = await fetch(`${THREE_CDN}/${cdnRel}`);
+    if (!reply.ok) { sendError(res, 502, `three.js download failed: ${reply.status}`); return; }
+    const data = Buffer.from(await reply.arrayBuffer());
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    await fsp.writeFile(file, data);
+    res.writeHead(200, { ...headers, 'Content-Length': data.length });
+    res.end(data);
+  } catch (e) {
+    sendError(res, 502, `three.js download failed: ${e.cause?.code ?? e.message}`,
+      { hint: 'the UI needs three.js once; restore internet or copy three.module.js + OrbitControls.js into devtools/studio/app/vendor/three/' });
+  }
+}
+
 async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
   if (rel.includes('\0')) { sendError(res, 400, 'bad path'); return; }
@@ -1199,6 +1240,7 @@ const server = http.createServer(async (req, res) => {
       sendError(res, 405, `${req.method} is not allowed here`, { path: pathname });
       return;
     }
+    if (pathname.startsWith('/vendor/')) { await serveVendor(res, pathname); return; }
     if (pathname.startsWith('/api/')) { sendError(res, 404, 'unknown api route', { path: pathname }); return; }
 
     // ---- static app files

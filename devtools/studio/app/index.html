@@ -8,13 +8,22 @@
     <script type="importmap">
     {
         "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            "three": "/vendor/three/three.module.js",
+            "three/addons/": "/vendor/three/examples/jsm/"
         }
     }
     </script>
 </head>
 <body>
+    <script>
+    // Module-load failures (offline three.js, blocked CDN) otherwise leave the
+    // page stuck on "starting…" with no clue why.
+    window.addEventListener('error', e => {
+        const el = document.getElementById('status-text');
+        const why = e.target?.src ? `failed to load ${e.target.src}` : e.message;
+        if (el && why) el.textContent = `startup error: ${why}`;
+    }, true);
+    </script>
     <header id="topbar">
         <span id="brand">studio</span>
         <span class="dot" id="dot-code" title="pipeline code"></span>

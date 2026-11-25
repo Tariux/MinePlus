@@ -164,12 +164,8 @@ public final class WeaponBbModels {
                 continue;
             }
             String id = folder.getName().toLowerCase(Locale.ROOT);
-            Double override = yawOverrides.get(id) != null ? yawOverrides.get(id)
-                    : yawOverrides.get("*");
             try {
-                int baked = override == null
-                        ? bake(log, folder, baseYaw, lift)
-                        : bake(log, folder, override.floatValue(), lift, true);
+                int baked = bake(log, folder);
                 if (baked > 0) {
                     sources++;
                 }
