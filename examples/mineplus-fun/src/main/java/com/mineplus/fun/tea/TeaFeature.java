@@ -49,6 +49,10 @@ public final class TeaFeature extends ModuleFeature {
         // name the model references it by (tea.png).
         support.installDefault(plugin, "defaults/models/tea.bbmodel", "models/tea.bbmodel", true);
         support.installDefault(plugin, "defaults/models/tea.png", "models/tea.png", true);
+        // The cup's authored cubes sit far from the bbmodel origin, so the
+        // AUTO resolution would pick GRID (a 2x2 cell lattice) and the cup
+        // would straddle four block cells. CENTER pins it to one block.
+        support.installDefault(plugin, "defaults/models/tea.meta.json", "models/tea.meta.json", true);
 
         packApi = context.packApi();
         // Registered before the coordinated reload, so the baked frame models

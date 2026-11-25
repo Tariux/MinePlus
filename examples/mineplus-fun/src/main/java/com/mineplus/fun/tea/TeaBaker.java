@@ -36,7 +36,7 @@ final class TeaBaker {
 
     /** Where the baked frame models are staged (module data folder). */
     private static final String STAGE_ROOT = "pack/fun/models/item/tea";
-    /** The pack path the frame models register under. */
+    /** The pack path the frame models register under (with extension, like the gun). */
     private static final String PACK_ROOT = "models/item/tea";
     /** The texture reference every baked frame points at. */
     private static final String TEXTURE_REFERENCE = TeaKeys.NAMESPACE + ":item/tea";
@@ -155,7 +155,10 @@ final class TeaBaker {
     private static String write(PackApi packApi, File stage, String stem, JsonObject model) throws IOException {
         File file = new File(stage, stem + ".json");
         Files.writeString(file.toPath(), model.toString(), StandardCharsets.UTF_8);
-        packApi.registerRawAsset(TeaKeys.NAMESPACE, PACK_ROOT + "/" + stem, file);
+        // Raw asset paths are output paths under assets/<ns>/ and must keep the
+        // .json extension — the model reference "fun:item/tea/<stem>" only
+        // resolves when the file lands at models/item/tea/<stem>.json.
+        packApi.registerRawAsset(TeaKeys.NAMESPACE, PACK_ROOT + "/" + stem + ".json", file);
         return stem;
     }
 }
