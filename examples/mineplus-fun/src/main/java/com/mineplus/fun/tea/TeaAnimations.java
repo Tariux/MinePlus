@@ -114,7 +114,11 @@ public final class TeaAnimations implements Listener {
             return null;
         }
         Location origin = placement.location().clone();
-        if (blocks.getModelMeta(model.name()).originMode() == ModelMeta.OriginMode.CENTER) {
+        // Ask the Core for the origin mode it actually resolved (meta → settings
+        // → geometry heuristic) so the pack display lands on the same anchor the
+        // collision lattice uses; a raw-meta AUTO here would drift the cup off
+        // the block center.
+        if (blocks.effectiveOriginMode(model) == ModelMeta.OriginMode.CENTER) {
             origin.add(0.5, 0, 0.5);
         }
         ItemDisplay display = origin.getWorld().spawn(origin, ItemDisplay.class, spawned -> {

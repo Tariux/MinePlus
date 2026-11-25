@@ -787,7 +787,8 @@ public class VirtualBlockManager implements Listener {
         return display.getUniqueId();
     }
 
-    private ModelMeta.OriginMode effectiveOriginMode(VirtualModel model) {
+    /** The origin mode actually used for spawns: explicit meta wins, then settings, then the geometry heuristic. */
+    public ModelMeta.OriginMode effectiveOriginMode(VirtualModel model) {
         ModelMeta meta = getModelMeta(model.name());
         ModelMeta.OriginMode originMode = meta.originMode() != null ? meta.originMode() : settings.originMode();
         if (originMode == null || originMode == ModelMeta.OriginMode.AUTO) {
