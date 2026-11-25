@@ -16,6 +16,7 @@ Thumbs.db
 
 # Local AI/tooling session state
 .kilo/
+.mlai/
 .notes/
 
 # Local scratch folders (incoming models, throwaway assets)
@@ -49,3 +50,6 @@ skills-lock.json
 
 javacc_args_**.txt
 .bbweb/
+
+dist
+.github/
