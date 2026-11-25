@@ -31,7 +31,7 @@ import java.util.logging.Logger;
  * ({@code tea_drink_0, tea_drink_1, …}); {@link ItemFrames} wires the
  * sequences into named clips the runtime animator walks through, so the cup
  * animates through the resource pack itself — the same look in hand, in a
- * display and in an inventory, with no virtual-engine texel bake involved.
+ * display and in an inventory, with no virtual-engine texel bake.
  */
 final class TeaBaker {
 
@@ -55,10 +55,10 @@ final class TeaBaker {
     private static final int STEAM_REPEATS = 6;
 
     /**
-     * Authored hand poses for slots the bbmodel does not carry. The source
-     * authors ground/gui/head/fixed; the held slots are filled from here so the
-     * cup never falls back to the vanilla display transform (which swallows the
-     * model in first person).
+     * Hand poses for slots the bbmodel may not author. Authored slots always
+     * win ({@link #displayWithHands}); only missing hand slots come from here
+     * so the cup never falls back to the vanilla display transform (which
+     * swallows the model in first person).
      */
     private static final String HAND_DISPLAY_DEFAULTS = """
             {
@@ -128,42 +128,12 @@ final class TeaBaker {
             ItemFrames.Builder builder = ItemFrames.builder(reference(restStem));
             int clips = 0;
             for (String clip : BbClipBaker.clips(model)) {
-                float seconds = BbClipBaker.lengthSeconds(model, clip);
-                int poses = Math.max(MIN_POSES, Math.min(MAX_POSES,
-                        Math.round(seconds * POSES_PER_SECOND) + 1));
-                List<JsonObject> frames = distinct(
-                        BbClipBaker.poses(model, style, clip, poses).models(), rest);
-                if (frames.isEmpty()) {
-                    log.warning("[Tea] clip '" + clip + "' produced no distinct poses; skipped.");
+                BakedClip baked = bakeClip(context.packApi(), stage, model, style, clip, rest, log);
+                if (baked == null) {
                     continue;
                 }
-                List<String> references = new ArrayList<>();
-                for (int i = 0; i < frames.size(); i++) {
-                    references.add(reference(write(context.packApi(), stage, stem(clip, i), frames.get(i))));
-                }
-                // Map authored clip names onto the client-clock vocabulary and
-                // drop anything the frame format cannot express.
-                String name = CLIP_NAME_MAPPING.getOrDefault(
-                        clip.toLowerCase(Locale.ROOT), clip.toLowerCase(Locale.ROOT));
-                // steam_idle is authored as a loop; every other clip plays once.
-                boolean loop = clip.toLowerCase(Locale.ROOT).contains("steam");
-                // Real durations: the client walks a pack sequence across
-                // exactly these ticks on the cooldown clock. Falling back to
-                // frame counts would compress a 3-second steam loop into under
-                // a second and re-arm the cooldown four times per cycle.
-                int ticks = Math.max(1, Math.round(seconds * POSES_PER_SECOND));
-                // Looping clips replay STEAM_REPEATS times inside one sequence
-                // so the runtime re-arms the item cooldown rarely (each re-arm
-                // flashes the cooldown overlay on every potion in the inventory).
-                List<String> timed = references;
-                if (loop) {
-                    timed = new ArrayList<>();
-                    for (int repeat = 0; repeat < STEAM_REPEATS; repeat++) {
-                        timed.addAll(references);
-                    }
-                    ticks *= STEAM_REPEATS;
-                }
-                builder.clip(name, timed, ticks, loop);
+                builder.clip(baked.registeredName(), baked.references(),
+                        baked.ticks(), baked.loop());
                 clips++;
             }
             log.info("[Tea] Baked " + (clips + 1) + " pack frame model group(s) from tea.bbmodel.");
@@ -172,6 +142,49 @@ final class TeaBaker {
             log.warning("[Tea] Failed to bake tea frames: " + e.getMessage());
             return null;
         }
+    }
+
+    /** One clip compiled into pack frame references plus its client clock. */
+    private record BakedClip(String registeredName, List<String> references, int ticks, boolean loop) {
+    }
+
+    /**
+     * Compiles one authored clip: samples poses at {@link #POSES_PER_SECOND},
+     * drops frames identical to the resting model, writes each distinct frame,
+     * maps the clip onto the client-clock vocabulary and stretches looping
+     * clips over {@link #STEAM_REPEATS} repeats.
+     */
+    private static BakedClip bakeClip(PackApi packApi, File stage, ModelData model,
+                                      BbClipBaker.Style style, String clip,
+                                      JsonObject rest, Logger log) throws IOException {
+        String lower = clip.toLowerCase(Locale.ROOT);
+        float seconds = BbClipBaker.lengthSeconds(model, clip);
+        int poses = Math.max(MIN_POSES, Math.min(MAX_POSES,
+                Math.round(seconds * POSES_PER_SECOND) + 1));
+        List<JsonObject> frames = distinct(
+                BbClipBaker.poses(model, style, clip, poses).models(), rest);
+        if (frames.isEmpty()) {
+            log.warning("[Tea] clip '" + clip + "' produced no distinct poses; skipped.");
+            return null;
+        }
+        List<String> references = new ArrayList<>();
+        for (int i = 0; i < frames.size(); i++) {
+            references.add(reference(write(packApi, stage, stem(clip, i), frames.get(i))));
+        }
+        boolean loop = lower.contains("steam");
+        int ticks = Math.max(1, Math.round(seconds * POSES_PER_SECOND));
+        if (loop) {
+            // Looping clips replay STEAM_REPEATS times inside one sequence so
+            // the runtime re-arms the item cooldown rarely (each re-arm
+            // flashes the cooldown overlay on every potion in the inventory).
+            List<String> timed = new ArrayList<>();
+            for (int repeat = 0; repeat < STEAM_REPEATS; repeat++) {
+                timed.addAll(references);
+            }
+            references = timed;
+            ticks *= STEAM_REPEATS;
+        }
+        return new BakedClip(CLIP_NAME_MAPPING.getOrDefault(lower, lower), references, ticks, loop);
     }
 
     private static String stem(String clip, int index) {

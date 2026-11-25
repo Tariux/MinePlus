@@ -102,11 +102,14 @@ public final class AssetPipelineTest {
     }
 
     /**
-     * Regression: the tea module's bbmodel must be authored in the vanilla
-     * 0..16 box (the pack-item render anchors the box center on the display).
-     * A center-authored model (-8..8) rendered half a block diagonally off,
-     * placing the cup between four blocks. The baked rest model must land
-     * inside 0..16 on x/z so the display sits centered in its 1x1x1 block.
+     * Regression: the tea module's bbmodel is CENTER-origin, so the Core
+     * expects it authored around (0,0) on x/z (-8..8) — the pack writer
+     * applies the vanilla (-8, 0, -8) element shift itself. A model
+     * re-authored into 0..16 was shifted twice and rendered half a block
+     * diagonally off, placing the cup between four blocks. The baked rest
+     * model must straddle the origin on x/z, and the drink clip must move
+     * the cup toward +z (toward the first-person face — the earlier -z
+     * authoring read as tipping away in game) and lift it.
      */
     private static void teaModelBakesInsideVanillaWindow() {
         java.io.File source = new java.io.File(
@@ -137,14 +140,34 @@ public final class AssetPipelineTest {
                 minZ = Math.min(minZ, e.getAsJsonArray("from").get(2).getAsFloat());
                 maxZ = Math.max(maxZ, e.getAsJsonArray("to").get(2).getAsFloat());
             }
-            check("tea rest model inside 0..16 on x (got " + minX + ".." + maxX + ")",
-                    minX >= 0.0f && maxX <= 16.0f);
-            check("tea rest model inside 0..16 on z (got " + minZ + ".." + maxZ + ")",
-                    minZ >= 0.0f && maxZ <= 16.0f);
-            check("tea rest model spans the box center on x",
-                    minX < 8.0f && maxX > 8.0f);
-            check("tea rest model spans the box center on z",
-                    minZ < 8.0f && maxZ > 8.0f);
+            check("tea rest model centered on origin x (got " + minX + ".." + maxX + ")",
+                    minX >= -8.0f && maxX <= 8.0f && minX < 0.0f && maxX > 0.0f);
+            check("tea rest model centered on origin z (got " + minZ + ".." + maxZ + ")",
+                    minZ >= -8.0f && maxZ <= 8.0f && minZ < 0.0f && maxZ > 0.0f);
+            boolean drinkApproachesFace = false;
+            for (var animation : model.animations().values()) {
+                if (!animation.name().toLowerCase().contains("drink")) {
+                    continue;
+                }
+                for (var track : animation.trackEntries().values()) {
+                    var position = track.position();
+                    if (position == null || position.keyCount() == 0) {
+                        continue;
+                    }
+                    float[] out = new float[3];
+                    for (int i = 0; i < position.keyCount(); i++) {
+                        position.sample(position.firstTime() + i, out);
+                        if (out[2] > 0) {
+                            drinkApproachesFace = true;
+                        }
+                    }
+                }
+            }
+            check("drink clip moves the cup toward the face (+z)", drinkApproachesFace);
+            boolean steamLooping = model.animations().values().stream()
+                    .filter(a -> a.name().toLowerCase().contains("steam"))
+                    .allMatch(a -> a.lengthSeconds() > 0);
+            check("steam clip has a real duration", steamLooping);
         } catch (Exception e) {
             failures.add("tea bake probe: " + e);
         }

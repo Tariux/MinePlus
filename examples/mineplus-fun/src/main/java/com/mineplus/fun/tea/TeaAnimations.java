@@ -1,7 +1,6 @@
 package com.mineplus.fun.tea;
 
 import com.mineplus.infrastructure.PluginContext;
-import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
@@ -121,6 +120,10 @@ public final class TeaAnimations implements Listener {
         if (ticker != null) {
             ticker.cancel();
             ticker = null;
+        }
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            // Drop any armed cooldown so the overlay does not outlive the feature.
+            player.setCooldown(definition.backingMaterial(), 0);
         }
         held.clear();
         for (PlacedCup cup : placedCups.values()) {
