@@ -108,7 +108,7 @@ public final class TeaAnimations implements Listener {
             return fallback;
         }
         ItemFrames.Clip clip = frames.clip(name);
-        return clip == null || clip.frameCount() < 2 ? fallback : clip.frameCount();
+        return clip == null || clip.ticks() <= 0 ? fallback : clip.ticks();
     }
 
     /** Registers the interaction listener and starts the animation ticker. */
@@ -146,21 +146,20 @@ public final class TeaAnimations implements Listener {
         if (instanceId == null) {
             return null;
         }
-        Location origin = placement.location().clone();
-        // Ask the Core for the origin mode it actually resolved (meta → settings
-        // → geometry heuristic) so the pack display lands on the same anchor the
-        // collision lattice uses; a raw-meta AUTO here would drift the cup off
-        // the block center.
-        if (blocks.effectiveOriginMode(model) == ModelMeta.OriginMode.CENTER) {
-            origin.add(0.5, 0, 0.5);
-        }
+        // Ask the Core for the anchor it actually resolved (meta origin mode,
+        // rotation snapping) so the pack display lands exactly where the
+        // collision lattice did instead of recomputing either by hand.
+        VirtualBlockManager.DisplayAnchor anchor = blocks.displayAnchorFor(model, placement);
+        // An ItemDisplay renders the 16px item-model box centered on the
+        // entity: shift up half a block so the cup sits on the cell floor,
+        // fully inside its 1x1x1 barrier cell.
+        Location origin = anchor.origin().clone().add(0.5, 0.5, 0.5);
         ItemDisplay display = origin.getWorld().spawn(origin, ItemDisplay.class, spawned -> {
             spawned.setItemStack(definition.createItem());
             spawned.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
-            Quaternionf rotation = placement.globalRotation();
             spawned.setTransformation(new Transformation(
                     new org.joml.Vector3f(),
-                    rotation == null ? new Quaternionf() : new Quaternionf(rotation),
+                    new Quaternionf(anchor.rotation()),
                     new org.joml.Vector3f(1, 1, 1),
                     new Quaternionf()));
             spawned.setPersistent(false);
@@ -249,7 +248,12 @@ public final class TeaAnimations implements Listener {
             if (isTea(heldStack)) {
                 tickHeld(player, heldStack);
             } else {
-                held.remove(player.getUniqueId());
+                // Stopped holding the tea: drop the held session and cancel the
+                // cooldown clock, otherwise the overlay keeps sweeping over
+                // every potion left in the inventory.
+                if (held.remove(player.getUniqueId()) != null) {
+                    player.setCooldown(definition.backingMaterial(), 0);
+                }
             }
         }
         Iterator<Map.Entry<UUID, PlacedCup>> cups = placedCups.entrySet().iterator();

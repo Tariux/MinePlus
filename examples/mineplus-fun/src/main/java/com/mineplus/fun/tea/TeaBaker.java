@@ -45,6 +45,14 @@ final class TeaBaker {
     private static final int POSES_PER_SECOND = 20;
     private static final int MIN_POSES = 3;
     private static final int MAX_POSES = 16;
+    /**
+     * How many authored steam cycles one baked sequence replays. The pack plays
+     * a sequence on the item cooldown's clock, and a cooldown is per material —
+     * every re-arm sweeps the vanilla cooldown overlay over every potion in the
+     * player's inventory. Repeating the loop inside one long sequence makes that
+     * flash rare instead of constant.
+     */
+    private static final int STEAM_REPEATS = 6;
 
     /**
      * Authored hand poses for slots the bbmodel does not carry. The source
@@ -139,7 +147,23 @@ final class TeaBaker {
                         clip.toLowerCase(Locale.ROOT), clip.toLowerCase(Locale.ROOT));
                 // steam_idle is authored as a loop; every other clip plays once.
                 boolean loop = clip.toLowerCase(Locale.ROOT).contains("steam");
-                builder.clip(name, references, 0, loop);
+                // Real durations: the client walks a pack sequence across
+                // exactly these ticks on the cooldown clock. Falling back to
+                // frame counts would compress a 3-second steam loop into under
+                // a second and re-arm the cooldown four times per cycle.
+                int ticks = Math.max(1, Math.round(seconds * POSES_PER_SECOND));
+                // Looping clips replay STEAM_REPEATS times inside one sequence
+                // so the runtime re-arms the item cooldown rarely (each re-arm
+                // flashes the cooldown overlay on every potion in the inventory).
+                List<String> timed = references;
+                if (loop) {
+                    timed = new ArrayList<>();
+                    for (int repeat = 0; repeat < STEAM_REPEATS; repeat++) {
+                        timed.addAll(references);
+                    }
+                    ticks *= STEAM_REPEATS;
+                }
+                builder.clip(name, timed, ticks, loop);
                 clips++;
             }
             log.info("[Tea] Baked " + (clips + 1) + " pack frame model group(s) from tea.bbmodel.");

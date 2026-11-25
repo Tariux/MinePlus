@@ -605,6 +605,24 @@ public class VirtualBlockManager implements Listener {
         return spawnInternal(model, placement, UUID.randomUUID(), false);
     }
 
+    /** Where a pack-rendered visual for this placement should sit: the anchor origin and the resolved rotation. */
+    public record DisplayAnchor(Location origin, Quaternionf rotation) {}
+
+    /**
+     * Resolves the display anchor exactly the way {@link #spawnModel} does for
+     * its own display entities — meta origin mode (anchor block corner for
+     * GRID, block center for CENTER) and rotation snapping included — so an
+     * external rendering backend lands on the same spot as its collision
+     * lattice instead of recomputing the anchor by hand.
+     */
+    public DisplayAnchor displayAnchorFor(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
+        SpawnContext context = resolveSpawnContext(model, placement);
+        Location displayOrigin = context.originMode() == ModelMeta.OriginMode.GRID
+                ? context.origin().clone()
+                : context.origin().clone().add(0.5, 0.0, 0.5);
+        return new DisplayAnchor(displayOrigin, new Quaternionf(context.globalRotation()));
+    }
+
     private UUID spawnInternal(
             VirtualModel model,
             VirtualBlockPlacementHelper.PlacementData placement,
