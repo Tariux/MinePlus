@@ -8,7 +8,10 @@ public final class TeaKeys {
     /** Model key of the tea cup (installed as {@code models/tea.bbmodel}). */
     public static final String MODEL_KEY = "tea";
 
-    /** Registry key of the tea cup item handed out by {@code /tea give}. */
+    /** Pack namespace of the tea cup item. */
+    public static final String NAMESPACE = "fun";
+
+    /** Pack item id of the tea cup handed out by {@code /tea give}. */
     public static final String TEA_ITEM = "tea_cup";
 
     /** Animation clips authored in {@code tea.bbmodel}. */

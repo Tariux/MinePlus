@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.virtual.VirtualBlockManager;
 import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.infrastructure.virtual.animation.AnimationPlayback;
 import com.mineplus.infrastructure.virtual.animation.LoopMode;
+import com.mineplus.pack.PackApi;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -29,10 +30,12 @@ public final class TeaSubCommand implements SubCommand {
     private static final long DEBUG_STEP_DELAY_TICKS = 40L;
 
     private final PluginContext context;
+    private final PackApi packApi;
     private final Map<UUID, UUID> spawnedByPlayer = new HashMap<>();
 
-    public TeaSubCommand(PluginContext context) {
+    public TeaSubCommand(PluginContext context, PackApi packApi) {
         this.context = context;
+        this.packApi = packApi;
     }
 
     @Override
@@ -59,7 +62,9 @@ public final class TeaSubCommand implements SubCommand {
         String action = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "help";
         switch (action) {
             case "give" -> {
-                ItemStack item = context.itemRegistry().createItem(TeaKeys.TEA_ITEM);
+                // Pack item (fun:tea_cup): the generated resource pack renders
+                // the full 3D tea model instead of the vanilla potion texture.
+                ItemStack item = packApi.createItem(TeaKeys.NAMESPACE, TeaKeys.TEA_ITEM);
                 if (item == null) {
                     sender.sendMessage(ChatColor.RED + "Tea item is not registered.");
                     return true;
