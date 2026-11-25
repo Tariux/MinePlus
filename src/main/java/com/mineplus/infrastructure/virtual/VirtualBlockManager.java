@@ -606,7 +606,7 @@ public class VirtualBlockManager implements Listener {
     }
 
     /** Where a pack-rendered visual for this placement should sit: the anchor origin and the resolved rotation. */
-    public record DisplayAnchor(Location origin, Quaternionf rotation) {}
+    public record DisplayAnchor(Location origin, Quaternionf rotation, ModelMeta.OriginMode originMode) {}
 
     /**
      * Resolves the display anchor exactly the way {@link #spawnModel} does for
@@ -620,7 +620,7 @@ public class VirtualBlockManager implements Listener {
         Location displayOrigin = context.originMode() == ModelMeta.OriginMode.GRID
                 ? context.origin().clone()
                 : context.origin().clone().add(0.5, 0.0, 0.5);
-        return new DisplayAnchor(displayOrigin, new Quaternionf(context.globalRotation()));
+        return new DisplayAnchor(displayOrigin, new Quaternionf(context.globalRotation()), context.originMode());
     }
 
     private UUID spawnInternal(

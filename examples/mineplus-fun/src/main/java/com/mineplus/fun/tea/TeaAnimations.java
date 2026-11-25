@@ -150,10 +150,11 @@ public final class TeaAnimations implements Listener {
         // rotation snapping) so the pack display lands exactly where the
         // collision lattice did instead of recomputing either by hand.
         VirtualBlockManager.DisplayAnchor anchor = blocks.displayAnchorFor(model, placement);
-        // An ItemDisplay renders the 16px item-model box centered on the
-        // entity: shift up half a block so the cup sits on the cell floor,
-        // fully inside its 1x1x1 barrier cell.
-        Location origin = anchor.origin().clone().add(0.5, 0.5, 0.5);
+        // The anchor is the display origin the Core's own renderer uses. An
+        // ItemDisplay still centers the 16px item-model box on the entity, so
+        // lift by half a block only — never add a center offset here, the Core
+        // already resolved it (adding one again put the cup a block ahead).
+        Location origin = anchor.origin().clone().add(0, 0.5, 0);
         ItemDisplay display = origin.getWorld().spawn(origin, ItemDisplay.class, spawned -> {
             spawned.setItemStack(definition.createItem());
             spawned.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
