@@ -26,7 +26,7 @@ public class VirtualBlockClearAreaEvent extends Event implements Cancellable {
     private boolean cancelled;
 
     public VirtualBlockClearAreaEvent(UUID modelId, Location origin, List<Location> cells) {
-        super(true); // async=true: safe to fire from any thread; Bukkit syncs dispatch
+        super(!org.bukkit.Bukkit.isPrimaryThread()); // async only when actually off-thread
         this.modelId = modelId;
         this.origin = origin;
         this.cells = cells;

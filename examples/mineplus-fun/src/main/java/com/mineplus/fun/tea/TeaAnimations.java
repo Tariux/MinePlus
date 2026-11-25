@@ -141,8 +141,11 @@ public final class TeaAnimations implements Listener {
      * at all — just one invisible {@code Interaction} entity sized from the
      * model's bounding box — and registers the instance in its books, so
      * breaks, clears and the remove event all flow through Core code. The pack
-     * {@link ItemDisplay} is mounted as a passenger of that interaction entity,
-     * so the visual can never drift from its anchor and dies with it.
+     * {@link ItemDisplay} stays an independent entity (mounting it as a
+     * passenger lets Minecraft override its position with the vehicle's ride
+     * offset, which sank the cup half into the ground); its lifecycle is bound
+     * to the instance by the {@code VirtualBlockInstanceRemoveEvent} handler,
+     * so it still cannot outlive its anchor.
      *
      * @return the placed cup id, or {@code null} when the model is unknown
      */
@@ -172,9 +175,6 @@ public final class TeaAnimations implements Listener {
                     new Quaternionf()));
             spawned.setPersistent(false);
         });
-        if (anchored.interaction() != null) {
-            anchored.interaction().addPassenger(display);
-        }
         placedCups.put(instanceId, new PlacedCup(instanceId, display,
                 definition.createItem(),
                 frames == null ? null : new ItemFrameAnimator(frames)));

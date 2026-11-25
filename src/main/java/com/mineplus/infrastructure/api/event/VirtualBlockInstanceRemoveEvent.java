@@ -39,7 +39,7 @@ public class VirtualBlockInstanceRemoveEvent extends Event {
     private final Reason reason;
 
     public VirtualBlockInstanceRemoveEvent(UUID instanceId, String modelKey, Location origin, Reason reason) {
-        super(true); // async=true: safe to fire from any thread; Bukkit syncs dispatch
+        super(!org.bukkit.Bukkit.isPrimaryThread()); // async only when actually off-thread
         this.instanceId = instanceId;
         this.modelKey = modelKey;
         this.origin = origin;
