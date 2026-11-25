@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added: Mineplus plugin v2 and the .mpmodel format
 
-- `devtools/studio/generic-display-plugin/mineplus_generic_display.js` v2:
+- `devtools/mineplus-blockbench-plugin/mineplus_generic_display.js` v2:
   all actions are registered into the **Tools** menu via
   `MenuBar.addAction(action, 'tools')` (v1 relied on the action category,
   which never shows there — the "duplicate ID" error and the missing entry
@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field cannot make the client reject the whole model.
 - Migration: models that relied on the old auto-pose must author their
   display block. The `mineplus_generic_display` Blockbench plugin
-  (`devtools/studio/generic-display-plugin/`) edits it directly; the mapping
+  (`devtools/mineplus-blockbench-plugin/`) edits it directly; the mapping
   table and value rules are in `docs/display-slot-mapping.md`.
 - The `pack.held-yaw` / `pack.held-y-lift` / `pack.held-yaw-overrides` keys
   are gone from the config reference; they had no code behind them.

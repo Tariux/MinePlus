@@ -10,7 +10,7 @@ auto-fits a pose anymore. This page is the complete mapping table.
 1. **In the `.bbmodel` itself** — a top-level `"display"` object whose keys are
    the vanilla context names below. This is what the
    `mineplus_generic_display` Blockbench plugin edits (see
-   `devtools/studio/generic-display-plugin/`).
+   `devtools/mineplus-blockbench-plugin/`).
 2. **In the model's meta file** — a `"display"` object with the same shape.
    A meta `display` overrides the bbmodel's per context; contexts the meta
    does not mention fall back to the bbmodel's.

@@ -2,7 +2,7 @@
 
 The experimental MCP server (`devtools/mcp/mineplus-mcp-server.js`) was removed
 in November 2026 to keep all tooling effort on the Blockbench plugin
-(`devtools/studio/generic-display-plugin/`).
+(`devtools/mineplus-blockbench-plugin/`).
 
 What it did, for when this is revived:
 

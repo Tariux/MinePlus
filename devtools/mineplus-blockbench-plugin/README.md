@@ -1,4 +1,4 @@
-# mineplus_generic_display (Blockbench plugin) — v5.0
+# Mineplus Generic Display (Blockbench plugin) — v5.0
 
 Author, animate and validate Mine Plus models: edit a model's `display`
 block, animate it in Blockbench's Animate tab, and save in the Mineplus-native
