@@ -89,12 +89,13 @@ export class Viewer {
         this.content = this.groups.reference;
 
         this.factory = new MaterialFactory();
+        // Initialized before setLighting: refreshLights iterates it.
+        this.litMeshes = new Set();
         this.lighting = null;
         this.setLighting(new Lighting());
 
         // Every mesh whose appearance depends on the light state, so a lighting
         // change rewrites its materials without rebuilding the scene.
-        this.litMeshes = new Set();
 
         this.unitGeo = new THREE.BoxGeometry(1, 1, 1);
         this.unitGeo.translate(0.5, 0.5, 0.5);

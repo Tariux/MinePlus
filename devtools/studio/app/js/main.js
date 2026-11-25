@@ -38,9 +38,22 @@ let inventory = {
 let currentTab = 'mobs';
 let liveSettings = null;
 
+// Boot trace: every init step is logged, so "starting…" forever in the status
+// bar can always be matched against the browser console's last step.
+const bootStep = (name) => console.info(`[studio-boot] ${name}`);
+window.addEventListener('error', e => {
+    const why = e.target?.src ? `failed to load ${e.target.src}` : e.message;
+    console.error('[studio-boot] failed after last step:', why);
+    el.statusText.textContent = `startup error: ${why}`;
+}, true);
+window.addEventListener('unhandledrejection', e =>
+    console.error('[studio-boot] unhandled rejection:', e.reason));
+
+bootStep('creating viewer');
 const viewer = new Viewer(el.viewport);
 const lighting = new Lighting();
 viewer.setLighting(lighting);
+bootStep('viewer ready');
 
 const ctx = {
     viewer,
@@ -99,7 +112,9 @@ function guessTab(file) {
 
 async function loadInventory() {
     try {
+        bootStep('loading inventory');
         inventory = await getJson('/api/inventory');
+        bootStep('init panels (mobs, items, blocks, bake, pack, textures, audit)');
         initMobs(ctx);
         initItems(ctx);
         initBlocks(ctx);
@@ -110,7 +125,9 @@ async function loadInventory() {
         initBrowser(ctx);
         updateCounts();
         ctx.browser?.refresh();
+        bootStep('resolving deep link');
         await resolveDeepLink();
+        bootStep('ready');
     } catch (e) {
         setStatus(null, null, 'inventory failed: ' + e.message);
         console.error('inventory failed:', e);
@@ -286,3 +303,4 @@ initStage(ctx);
 loadSettings();
 loadInventory();
 showHelp();
+bootStep('app bootstrap complete — waiting for inventory');

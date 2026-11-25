@@ -61,6 +61,7 @@ public final class CustomMobPipelineTest {
         bbmodelFixture();
         bbmodelFormat5Fixture();
         mineplusTemplateStamp();
+        bbmodelDisplayOverrides();
         emitterWindowFitting();
         mobAnimatorBaseLayer();
         mobAnimatorSlots();
@@ -285,6 +286,73 @@ public final class CustomMobPipelineTest {
         track.rotation().sample(0.75f, out);
         check("catmullrom segment", near(out[0], 5.625f));
         check("walk wrap", near(walk.wrap(1.25f), 0.25f));
+    }
+
+    /**
+     * Blockbench writes display-mode edits (first-person pose, GUI, ground...)
+     * on the selected cube or group, not only at the model root. The importer
+     * must fold them into the model-level display, element beating group
+     * beating root, so the pack emits exactly the pose authored in Blockbench.
+     */
+    private static void bbmodelDisplayOverrides() {
+        String pngBase64 = Base64.getEncoder().encodeToString(PngUtil.neutralPlaceholder(16, 16));
+        String rootDisplay = "\"display\": {\"firstperson_righthand\":"
+                + " {\"rotation\": [0, 90, 0], \"translation\": [0, 0, 2]}},";
+        String json = "{"
+                + "\"meta\": {\"format_version\": \"4.10\", \"box_uv\": false},"
+                + "\"resolution\": {\"width\": 16, \"height\": 16},"
+                + rootDisplay
+                + "\"elements\": ["
+                + "  {\"name\": \"grip\", \"uuid\": \"e_grip\", \"type\": \"cube\","
+                + "   \"from\": [-1, 0, -1], \"to\": [1, 4, 1], \"origin\": [0, 0, 0], \"texture\": 0,"
+                + "   \"display\": {\"firstperson_righthand\":"
+                + "     {\"rotation\": [15, 90, 0], \"translation\": [0, 0, 2]}},"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 0, 8, 8]}}},"
+                + "  {\"name\": \"barrel\", \"uuid\": \"e_barrel\", \"type\": \"cube\","
+                + "   \"from\": [-1, 4, -1], \"to\": [1, 8, 1], \"origin\": [0, 4, 0], \"texture\": 0,"
+                + "   \"faces\": {\"north\": {\"uv\": [0, 0, 8, 8]}}}"
+                + "],"
+                + "\"outliner\": ["
+                + "  {\"name\": \"gun\", \"uuid\": \"g_gun\", \"origin\": [0, 0, 0],"
+                + "   \"display\": {\"thirdperson_righthand\":"
+                + "     {\"rotation\": [0, 0, 45], \"translation\": [0, 3, 1]}},"
+                + "   \"children\": [\"e_grip\", \"e_barrel\"]}"
+                + "],"
+                + "\"textures\": ["
+                + "  {\"name\": \"skin\", \"width\": 16, \"height\": 16,"
+                + "   \"source\": \"data:image/png;base64," + pngBase64 + "\"}"
+                + "]"
+                + "}";
+
+        VirtualModel model = com.mineplus.infrastructure.virtual.BbModelImporter.parse(
+                "display.bbmodel", new java.io.StringReader(json), null);
+        check("display fixture parses", model != null);
+        ModelDisplay display = model.display();
+        check("display imported", display != null && !display.isEmpty());
+
+        ModelDisplay.Transform firstPerson = display.context("firstperson_righthand");
+        check("cube-level first-person pose wins over root", firstPerson != null
+                && near(firstPerson.rotation().x(), 15.0f) && near(firstPerson.rotation().y(), 90.0f));
+        check("first-person translation kept", firstPerson != null
+                && near(firstPerson.translation().z(), 2.0f));
+
+        ModelDisplay.Transform thirdPerson = display.context("thirdperson_righthand");
+        check("group-level third-person pose imported", thirdPerson != null
+                && near(thirdPerson.rotation().z(), 45.0f) && near(thirdPerson.translation().y(), 3.0f));
+
+        // A root-only display must still come through untouched.
+        String rootOnly = json.replace(
+                "\"display\": {\"firstperson_righthand\":"
+                        + " {\"rotation\": [15, 90, 0], \"translation\": [0, 0, 2]}},", "")
+                .replace(rootDisplay + ",", "");
+        VirtualModel plain = com.mineplus.infrastructure.virtual.BbModelImporter.parse(
+                "display-root.bbmodel", new java.io.StringReader(rootOnly), null);
+        ModelDisplay.Transform plainFirst = plain.display().context("firstperson_righthand");
+        check("root-only display preserved", plainFirst != null
+                && near(plainFirst.rotation().y(), 90.0f));
+        ModelDisplay.Transform plainThird = plain.display().context("thirdperson_righthand");
+        check("root + group contexts merge", plainThird != null
+                && near(plainThird.rotation().z(), 45.0f));
     }
 
     /**

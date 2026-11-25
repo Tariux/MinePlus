@@ -327,6 +327,22 @@ public class BbModelImporter {
 
         List<AnimationClip> animations = buildClips(rawAnimations, bones, boneIndexByUuid);
 
+        // Blockbench authors display-mode transforms on the selected cubes or
+        // groups (each element/group carries its own `display` object), not
+        // only at the model root. Fold them into the model-level display so
+        // the pack emits exactly the pose authored in Blockbench: root <
+        // group (closer to the element wins) < element.
+        Map<String, ModelDisplay> groupDisplayByElement = new HashMap<>();
+        for (RawGroup group : rootOutliner) {
+            collectGroupDisplays(group, ModelDisplay.EMPTY, groupDisplayByElement, new HashSet<>());
+        }
+        for (RawElement element : rawElements) {
+            String uuid = element.uuid == null ? "" : element.uuid;
+            ModelDisplay specific = groupDisplayByElement.getOrDefault(uuid, ModelDisplay.EMPTY)
+                    .merge(element.display);
+            display = display.merge(specific);
+        }
+
         return new VirtualModel(
                 name,
                 bakedCubes,
@@ -458,6 +474,7 @@ public class BbModelImporter {
                     case "export" -> element.export = nextBoolean(json, true);
                     case "light_emission" -> element.lightEmission = (int) nextDouble(json, 0.0);
                     case "faces" -> parseFaces(json, element.faces);
+                    case "display" -> element.display = ModelDisplay.fromJson(json);
                     default -> json.skipValue(); // locked, color, autouv, render_order, ...
                 }
             }
@@ -525,6 +542,7 @@ public class BbModelImporter {
                         case "origin" -> group.origin = nextVector3(json);
                         case "rotation" -> group.rotation = nextVector3(json);
                         case "visibility" -> group.visibility = nextBoolean(json, true);
+                        case "display" -> group.display = ModelDisplay.fromJson(json);
                         case "children" -> parseOutliner(json, group, group.children, null);
                         default -> json.skipValue();
                     }
@@ -1076,6 +1094,7 @@ public class BbModelImporter {
         Vector3f origin;
         Vector3f rotation;
         boolean visibility = true;
+        ModelDisplay display = ModelDisplay.EMPTY;
         final List<String> childElementUuids = new ArrayList<>();
         final List<RawGroup> children = new ArrayList<>();
     }
@@ -1094,6 +1113,27 @@ public class BbModelImporter {
         }
     }
 
+    /**
+     * Folds the group-chain display overrides into a per-element lookup: each
+     * element inherits the merged {@code display} of its ancestor groups,
+     * with the group closest to the element winning a context conflict.
+     */
+    private static void collectGroupDisplays(RawGroup group, ModelDisplay inherited,
+                                             Map<String, ModelDisplay> out, Set<RawGroup> visited) {
+        if (group == null || !visited.add(group)) {
+            return;
+        }
+        ModelDisplay effective = inherited.merge(group.display);
+        for (String childUuid : group.childElementUuids) {
+            if (childUuid != null && !childUuid.isBlank()) {
+                out.putIfAbsent(childUuid, effective);
+            }
+        }
+        for (RawGroup child : group.children) {
+            collectGroupDisplays(child, effective, out, visited);
+        }
+    }
+
     /** Copies missing metadata from the 5.0 {@code groups} definitions into the outliner shells. */
     private static void joinGroupDefinitions(List<RawGroup> groups, Map<String, RawGroup> definitions) {
         for (RawGroup group : groups) {
@@ -1108,6 +1148,9 @@ public class BbModelImporter {
                     }
                     if (group.rotation == null) {
                         group.rotation = definition.rotation;
+                    }
+                    if (group.display.isEmpty() && definition.display != null) {
+                        group.display = definition.display;
                     }
                 }
             }
@@ -1128,6 +1171,7 @@ public class BbModelImporter {
         boolean rescale = false;
         boolean export = true;
         int lightEmission = 0;
+        ModelDisplay display = ModelDisplay.EMPTY;
         final Map<CubeFace, RawFace> faces = new EnumMap<>(CubeFace.class);
     }
 

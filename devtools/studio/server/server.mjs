@@ -1100,17 +1100,24 @@ async function serveVendor(res, pathname) {
     res.end(data);
     return;
   } catch {
+    log(`vendor miss: ${rel} not cached — downloading from ${THREE_CDN}/${cdnRel}`);
     // not cached yet — fall through to the download
   }
   try {
     const reply = await fetch(`${THREE_CDN}/${cdnRel}`);
-    if (!reply.ok) { sendError(res, 502, `three.js download failed: ${reply.status}`); return; }
+    if (!reply.ok) {
+      log(`vendor download FAILED: ${cdnRel} -> HTTP ${reply.status}`);
+      sendError(res, 502, `three.js download failed: ${reply.status}`);
+      return;
+    }
     const data = Buffer.from(await reply.arrayBuffer());
     await fsp.mkdir(path.dirname(file), { recursive: true });
     await fsp.writeFile(file, data);
+    log(`vendor cached: ${rel} (${(data.length / 1024).toFixed(0)} KB) -> ${file}`);
     res.writeHead(200, { ...headers, 'Content-Length': data.length });
     res.end(data);
   } catch (e) {
+    log(`vendor download FAILED: ${cdnRel}: ${e.cause?.code ?? e.message}`);
     sendError(res, 502, `three.js download failed: ${e.cause?.code ?? e.message}`,
       { hint: 'the UI needs three.js once; restore internet or copy three.module.js + OrbitControls.js into devtools/studio/app/vendor/three/' });
   }
@@ -1133,6 +1140,7 @@ async function serveStatic(res, pathname) {
     });
     res.end(data);
   } catch {
+    log(`static 404: ${rel} (no file at ${file}) — a page asset failing to load here breaks UI startup`);
     res.writeHead(404, { 'Cache-Control': 'no-store' });
     res.end('not found');
   }
