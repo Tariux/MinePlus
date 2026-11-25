@@ -30,6 +30,7 @@ public final class MineplusPlugin extends JavaPlugin {
     private VirtualBlockManager virtualBlockManager;
     private ConfigManager configManager;
     private com.mineplus.infrastructure.virtual.display.DisplayTransport displayTransport;
+    private com.mineplus.infrastructure.minigame.MinigameBukkitWiring minigameWiring;
     private com.mineplus.infrastructure.mob.custom.MobYamlLoader yamlMobs;
 
     @Override
@@ -63,6 +64,9 @@ public final class MineplusPlugin extends JavaPlugin {
         context.applyInputSettings(configManager.getConfig().getInput());
         context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());
         context.finalizeSetup();
+
+        // API v1 (P5): publish the stable facades in ServicesManager for addons.
+        com.mineplus.infrastructure.api.MineplusServices.registerAll(this, context);
 
         yamlMobs = loadYamlMobs();
 
@@ -102,6 +106,7 @@ public final class MineplusPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (context != null) {
+            com.mineplus.infrastructure.api.MineplusServices.unregisterAll(this);
             context.shutdownServices();
             context.infrastructureEngine().shutdown();
         }
@@ -153,6 +158,8 @@ public final class MineplusPlugin extends JavaPlugin {
                 new InfrastructureGuiListener(context.infrastructureEngine().guiManager()),
                 this
         );
+        minigameWiring = new com.mineplus.infrastructure.minigame.MinigameBukkitWiring(
+                this, new com.mineplus.infrastructure.core.minigame.InstanceManager());
         getServer().getPluginManager().registerEvents(virtualBlockManager, this);
         if (displayTransport != null) {
             getServer().getPluginManager().registerEvents(new DisplayTransportListener(displayTransport), this);

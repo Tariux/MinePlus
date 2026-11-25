@@ -25,6 +25,7 @@ import com.mineplus.infrastructure.mob.navigation.MobAiIsolation;
 import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.pack.PackApi;
 import com.mineplus.util.DebugLogger;
+import com.mineplus.util.SchedulerCompat;
 import com.mineplus.util.ServerVersion;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -146,8 +147,8 @@ public final class MobRenderEngine {
     /** Parallel to {@link #passViewers}: whether that viewer can present the pack. */
     private final List<Boolean> passViewerPack = new ArrayList<>();
 
-    private BukkitTask tickTask;
-    private BukkitTask reconcileTask;
+    private SchedulerCompat.Handle tickTask;
+    private SchedulerCompat.Handle reconcileTask;
     /** The cadence the pose loop is actually scheduled at (mirrors the setting). */
     private int poseIntervalTicks = 1;
     /** Pose passes since the engine started; drives the per-rig LOD cadence. */
@@ -201,8 +202,7 @@ public final class MobRenderEngine {
         if (tickTask != null && settings.renderIntervalTicks() != previousInterval) {
             tickTask.cancel();
             poseIntervalTicks = settings.renderIntervalTicks();
-            tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick,
-                    poseIntervalTicks, poseIntervalTicks);
+            tickTask = SchedulerCompat.repeat(plugin, poseIntervalTicks, poseIntervalTicks, this::tick);
         }
     }
 
@@ -219,10 +219,9 @@ public final class MobRenderEngine {
                     + " waiting for the pack to compile; they register automatically.");
         }
         poseIntervalTicks = settings.renderIntervalTicks();
-        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick,
-                poseIntervalTicks, poseIntervalTicks);
-        reconcileTask = Bukkit.getScheduler().runTaskTimer(plugin, this::reconcileViewers,
-                VIEWER_RECONCILE_TICKS, VIEWER_RECONCILE_TICKS);
+        tickTask = SchedulerCompat.repeat(plugin, poseIntervalTicks, poseIntervalTicks, this::tick);
+        reconcileTask = SchedulerCompat.repeat(plugin, VIEWER_RECONCILE_TICKS, VIEWER_RECONCILE_TICKS,
+                this::reconcileViewers);
         active = this;
         int ghosts = entityBackend.sweepGhosts(id -> sessions.containsKey(id));
         if (ghosts > 0) {
@@ -1394,7 +1393,7 @@ public final class MobRenderEngine {
 
         @EventHandler(priority = EventPriority.MONITOR)
         public void onJoin(PlayerJoinEvent event) {
-            Bukkit.getScheduler().runTask(plugin, MobRenderEngine.this::reconcileViewers);
+            SchedulerCompat.runNow(plugin, MobRenderEngine.this::reconcileViewers);
         }
     }
 

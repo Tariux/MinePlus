@@ -1,5 +1,8 @@
 package com.mineplus.infrastructure.core.multiblock.progress;
 
+import com.mineplus.infrastructure.api.event.ApiEvents;
+import com.mineplus.infrastructure.api.event.MachineProcessFinishEvent;
+import com.mineplus.infrastructure.api.event.MachineProcessStartEvent;
 import com.mineplus.infrastructure.core.events.HookBus;
 import com.mineplus.infrastructure.core.multiblock.EntityStatus;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
@@ -84,6 +87,10 @@ public final class MachineProcessManager {
             return false;
         }
         if (recipe.minLevel() > instance.level()) {
+            return false;
+        }
+
+        if (ApiEvents.dispatch(new MachineProcessStartEvent(instance, recipe.id())).isCancelled()) {
             return false;
         }
 
@@ -205,6 +212,7 @@ public final class MachineProcessManager {
         }
 
         for (MachineProcessCompletion completion : finished) {
+            ApiEvents.dispatch(new MachineProcessFinishEvent(completion.instance(), completion.recipe().id()));
             hookBus.publish(new MultiBlockLifecycleEvent(
                     MultiBlockLifecycleEventType.PROCESS_COMPLETE,
                     completion.type(), completion.instance(), null, null));

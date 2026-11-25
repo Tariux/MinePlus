@@ -93,7 +93,7 @@ public final class MobBehaviorEngine {
 
     private volatile MobBehaviorSettings settings = MobBehaviorSettings.defaults();
     private volatile com.mineplus.infrastructure.perf.PerfRegistry perf;
-    private volatile BukkitTask runTask;
+    private volatile com.mineplus.util.SchedulerCompat.Handle runTask;
     private volatile boolean running;
     private int runCounter;
     /** Entities advanced by this run's sustained sweep, so the proximity sweep skips them. */
@@ -437,7 +437,7 @@ public final class MobBehaviorEngine {
     void updateSettings(MobBehaviorSettings newSettings) {
         MobBehaviorSettings previous = this.settings;
         this.settings = newSettings == null ? MobBehaviorSettings.defaults() : newSettings;
-        BukkitTask task = runTask;
+        com.mineplus.util.SchedulerCompat.Handle task = runTask;
         if (task != null && previous.intervalTicks() != this.settings.intervalTicks()) {
             // The cadence is a schedule property, not a loop property: re-arm,
             // otherwise a reload leaves the engine on the old interval forever.
@@ -567,7 +567,7 @@ public final class MobBehaviorEngine {
     /** Cancels the run task. Idempotent; called from the Core's disable path. */
     void shutdown() {
         running = false;
-        BukkitTask task = runTask;
+        com.mineplus.util.SchedulerCompat.Handle task = runTask;
         runTask = null;
         pipelines.cancelAll();
         activities.clear();
@@ -583,7 +583,7 @@ public final class MobBehaviorEngine {
         }
         running = true;
         int interval = Math.max(1, settings.intervalTicks());
-        runTask = plugin.getServer().getScheduler().runTaskTimer(plugin, this::run, interval, interval);
+        runTask = com.mineplus.util.SchedulerCompat.repeat(plugin, interval, interval, this::run);
         DebugLogger.info("[mob-behavior] Engine started (interval " + interval + " ticks).");
     }
 

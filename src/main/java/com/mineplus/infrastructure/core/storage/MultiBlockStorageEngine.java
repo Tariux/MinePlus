@@ -70,7 +70,7 @@ public final class MultiBlockStorageEngine {
             return;
         }
         saveQueued = true;
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> saveNow(instances), 20L);
+        com.mineplus.util.SchedulerCompat.runLater(plugin, 20L, () -> saveNow(instances));
     }
 
     public void saveNow(Iterable<MultiBlockInstance> instances) {

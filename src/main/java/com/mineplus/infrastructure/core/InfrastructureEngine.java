@@ -119,6 +119,7 @@ public final class InfrastructureEngine {
                 linkingSystem,
                 processManager
         );
+        lifecycleManager.setPerfRegistry(perf);
         virtualBlockManager.setLifecycleManager(lifecycleManager);
         this.animationManager.bindBridge(lifecycleManager);
         this.api = new MineplusInfrastructureApi(
@@ -217,6 +218,11 @@ public final class InfrastructureEngine {
 
     public MultiBlockRegistry registry() {
         return registry;
+    }
+
+    /** Lifecycle hook bus: place/remove/tick listeners for engine services. */
+    public HookBus hookBus() {
+        return hookBus;
     }
 
     public MultiBlockLifecycleManager lifecycleManager() {

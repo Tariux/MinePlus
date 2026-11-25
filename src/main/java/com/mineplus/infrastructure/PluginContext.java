@@ -58,6 +58,7 @@ public final class PluginContext {
     private final DeferredEditQueue deferredEdits;
     private final com.mineplus.infrastructure.world.HitTestApi hitTest;
     private final DeveloperApi2 dev;
+    private final com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -108,6 +109,8 @@ public final class PluginContext {
         this.deferredEdits = deferredEdits;
         this.hitTest = hitTest;
         this.dev = new DeveloperApi2(this);
+        this.energyNetworks = new com.mineplus.infrastructure.core.network.EnergyNetworkService(
+                infrastructureEngine.registry());
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -318,6 +321,17 @@ public final class PluginContext {
 
     public void finalizeSetup() {
         infrastructureEngine.initialize();
+        // P6 Phase C: every already-registered machine type gets an energy
+        // profile derived from its config; types registered later are picked
+        // up by the registry hook below. Then keep the grid in sync with
+        // placed machines and balance dirty components on the lifecycle tick.
+        for (var type : infrastructureEngine.registry().getTypes()) {
+            energyNetworks.registerFromType(type);
+        }
+        infrastructureEngine.registry().addTypeRegistrationListener(energyNetworks::registerFromType);
+        energyNetworks.attachToLifecycle(infrastructureEngine.hookBus());
+        infrastructureEngine.lifecycleManager().addPostTickPass(energyNetworks::balanceTick);
+        infrastructureEngine.lifecycleManager().setEnergyNetworkService(energyNetworks);
         perf.start(plugin);
         deferredEdits.start(plugin);
     }
@@ -471,6 +485,11 @@ public final class PluginContext {
      */
     public PerfRegistry perf() {
         return perf;
+    }
+
+    /** P6 Phase C: energy network membership and per-tick balancing. */
+    public com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks() {
+        return energyNetworks;
     }
 
     /**

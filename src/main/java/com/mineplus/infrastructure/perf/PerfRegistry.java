@@ -71,6 +71,9 @@ public final class PerfRegistry {
     private final AtomicLongArray gauges = new AtomicLongArray(Gauge.values().length);
 
     private final LongAdder rowPoseNanos = new LongAdder();
+    private final LongAdder rowHeartbeatNanos = new LongAdder();
+    private final java.util.concurrent.atomic.AtomicLong heartbeatCount = new java.util.concurrent.atomic.AtomicLong();
+    private final LongAdder heartbeatRunningNanos = new LongAdder();
     private final LongAdder rowEvaluations = new LongAdder();
     private final LongAdder rowApplied = new LongAdder();
     private final LongAdder rowDropped = new LongAdder();
@@ -161,8 +164,21 @@ public final class PerfRegistry {
      * many bindings were pushed and how many frames were dropped by the apply
      * cap. Also feeds the adaptive valve.
      */
-    public void recordPoseSlice(long nanos, int evaluations, int applied, int dropped) {
+    /** Records one machine-heartbeat pass duration (nanoseconds). */
+    public void recordHeartbeatSlice(long nanos) {
         if (nanos < 0) {
+            nanos = 0;
+        }
+        rowHeartbeatNanos.add(nanos);
+        long count = heartbeatCount.incrementAndGet();
+        heartbeatRunningNanos.add(nanos);
+        if (count % 200 == 0) {
+            double avgMicros = (heartbeatRunningNanos.sumThenReset() / (double) 200) / 1000.0;
+            DebugLogger.info("perf: machine heartbeat avg " + String.format("%.1f", avgMicros) + " µs over 200 passes");
+        }
+    }
+
+    public void recordPoseSlice(long nanos, int evaluations, int applied, int dropped) {        if (nanos < 0) {
             nanos = 0;
         }
         if (telemetry) {

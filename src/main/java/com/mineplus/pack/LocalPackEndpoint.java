@@ -10,6 +10,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,6 +37,9 @@ final class LocalPackEndpoint {
     private final PackCache cache;
     private final String host;
     private final int configuredPort;
+    /** Per-remote-address download budget (tokens, refilled every second). */
+    private static final int RATE_TOKENS = 60;
+    private final Map<String, long[]> rateBuckets = new ConcurrentHashMap<>();
     private final ExecutorService workers = Executors.newFixedThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "mineplus-pack-http");
         thread.setDaemon(true);
@@ -102,8 +107,39 @@ final class LocalPackEndpoint {
         return running.get() && boundPort != configuredPort;
     }
 
+    /**
+     * Token bucket per remote address: {@code RATE_TOKENS} requests per
+     * second, burst capped at the same number. Buckets for addresses that
+     * have not been seen for 60s are pruned lazily. Returns false and sends
+     * 429 when the budget is exhausted.
+     */
+    private boolean rateLimit(HttpExchange exchange) throws IOException {
+        String address = exchange.getRemoteAddress().getAddress().getHostAddress();
+        long now = System.currentTimeMillis();
+        long[] bucket = rateBuckets.computeIfAbsent(address, key -> new long[]{now, RATE_TOKENS});
+        synchronized (bucket) {
+            long elapsed = now - bucket[0];
+            if (elapsed >= 1000L) {
+                bucket[0] = now;
+                bucket[1] = RATE_TOKENS;
+            }
+            if (bucket[1] <= 0) {
+                respond(exchange, 429, "Too many requests");
+                return false;
+            }
+            bucket[1]--;
+        }
+        if (rateBuckets.size() > 4096) {
+            rateBuckets.values().removeIf(state -> now - state[0] > 60_000L);
+        }
+        return true;
+    }
+
     private void serve(HttpExchange exchange) throws IOException {
         try {
+            if (!rateLimit(exchange)) {
+                return;
+            }
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                 respond(exchange, 405, "Method not allowed");
                 return;

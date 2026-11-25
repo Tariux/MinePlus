@@ -133,6 +133,30 @@ public final class SchedulerCompat {
     }
 
     /**
+     * Runs a server-scoped action after {@code delayTicks} on the main thread
+     * (or the global region on Folia).
+     */
+    public static void runLater(Plugin plugin, long delayTicks, Runnable action) {
+        if (FOLIA) {
+            FoliaBridge bridge = FOLIA_BRIDGE;
+            if (bridge == null) {
+                return;
+            }
+            try {
+                bridge.globalRunDelayed.invoke(null, plugin, consumer(action), delayTicks);
+            } catch (Throwable ignored) {
+                // Shutdown race; a missed delayed run is safe.
+            }
+            return;
+        }
+        try {
+            Bukkit.getScheduler().runTaskLater(plugin, action, delayTicks);
+        } catch (RuntimeException shutdownRace) {
+            // Plugin disabling while the delay elapses.
+        }
+    }
+
+    /**
      * The scheduler hands the task object to a {@code Consumer}; the parameter
      * type is erased, so a plain {@link Consumer} lambda is accepted.
      */
@@ -159,14 +183,16 @@ public final class SchedulerCompat {
 
         private final Method globalRunAtFixedRate;
         private final Method globalRun;
+        private final Method globalRunDelayed;
         private final Method entityGetScheduler;
         private final Method entityRunDelayed;
         private final Method taskCancel;
 
-        private FoliaBridge(Method globalRunAtFixedRate, Method globalRun,
+        private FoliaBridge(Method globalRunAtFixedRate, Method globalRun, Method globalRunDelayed,
                 Method entityGetScheduler, Method entityRunDelayed, Method taskCancel) {
             this.globalRunAtFixedRate = globalRunAtFixedRate;
             this.globalRun = globalRun;
+            this.globalRunDelayed = globalRunDelayed;
             this.entityGetScheduler = entityGetScheduler;
             this.entityRunDelayed = entityRunDelayed;
             this.taskCancel = taskCancel;
@@ -192,12 +218,14 @@ public final class SchedulerCompat {
                 Method runAtFixedRate = globalScheduler.getMethod("runAtFixedRate",
                         Plugin.class, Consumer.class, long.class, long.class);
                 Method run = globalScheduler.getMethod("run", Plugin.class, Consumer.class);
+                Method globalRunDelayedMethod = globalScheduler.getMethod("runDelayed",
+                        Plugin.class, Consumer.class, long.class);
                 Method getScheduler = Entity.class.getMethod("getScheduler");
                 Method runDelayed = entityScheduler.getMethod("runDelayed",
                         Plugin.class, Consumer.class, Runnable.class, long.class);
                 Method cancel = scheduledTask.getMethod("cancel");
 
-                return new FoliaBridge(runAtFixedRate, run, getScheduler, runDelayed, cancel);
+                return new FoliaBridge(runAtFixedRate, run, globalRunDelayedMethod, getScheduler, runDelayed, cancel);
             } catch (Throwable unsupported) {
                 return null;
             }

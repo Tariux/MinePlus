@@ -33,6 +33,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
+import com.mineplus.infrastructure.api.event.VirtualBlockClearAreaEvent;
+
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -252,24 +254,32 @@ public class VirtualBlockManager implements Listener {
 
     public SpawnAreaResult prepareSpawnArea(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement, boolean clear) {
         SpawnContext context = resolveSpawnContext(model, placement);
-        boolean cleared = false;
+        List<Location> clearCandidates = new ArrayList<>();
         for (int i = 0; i + 2 < context.cells().length; i += 3) {
             Location location = context.origin().clone().add(context.cells()[i], context.cells()[i + 1], context.cells()[i + 2]);
             Block block = location.getBlock();
             if (block.getType().isAir()) continue;
             if (!clear) return SpawnAreaResult.BLOCKED;
-            // Another live virtual block's barrier: never break its collision
-            // lattice (that would strand a stale blockToModelMap entry and leave
-            // the owner model without collision). Skip the cell — the spawn
-            // itself tolerates occupied cells in the lenient policy.
             UUID owner = blockToModelMap.get(BlockCoordinate.from(location));
             if (owner != null && activeBlocks.containsKey(owner)) {
                 continue;
             }
-            block.setType(Material.AIR);
-            cleared = true;
+            clearCandidates.add(location);
         }
-        return cleared ? SpawnAreaResult.CLEARED : SpawnAreaResult.CLEAR;
+        if (!clearCandidates.isEmpty()) {
+            VirtualBlockClearAreaEvent event = new VirtualBlockClearAreaEvent(
+                    UUID.nameUUIDFromBytes(model.name().getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                    context.origin().clone(), clearCandidates);
+            Bukkit.getPluginManager().callEvent(event);
+            if (event.isCancelled()) {
+                return SpawnAreaResult.BLOCKED;
+            }
+            for (Location location : event.getCells()) {
+                location.getBlock().setType(Material.AIR);
+            }
+            return SpawnAreaResult.CLEARED;
+        }
+        return SpawnAreaResult.CLEAR;
     }
 
     public void removeModel(UUID instanceId) {

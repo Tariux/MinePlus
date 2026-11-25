@@ -1,6 +1,11 @@
 package com.mineplus.infrastructure.core.multiblock.lifecycle;
 
 import com.mineplus.MineplusPlugin;
+import com.mineplus.infrastructure.api.event.ApiEvents;
+import com.mineplus.infrastructure.api.event.MultiBlockBreakEvent;
+import com.mineplus.infrastructure.api.event.MultiBlockInteractEvent;
+import com.mineplus.infrastructure.api.event.MultiBlockPlaceEvent;
+import com.mineplus.infrastructure.perf.PerfRegistry;
 import com.mineplus.infrastructure.core.events.HookBus;
 import com.mineplus.infrastructure.core.events.MultiBlockSignal;
 import com.mineplus.infrastructure.core.gui.InfrastructureGuiManager;
@@ -45,7 +50,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
     private final HookBus hookBus;
     private final MultiBlockLinkingSystem linkingSystem;
     private MachineProcessManager processManager;
+    private PerfRegistry perfRegistry;
     private int heartbeatTaskId;
+    private int heartbeatCursor;
+
+    /** Per-pass wall-clock budget for the heartbeat sweep (2 ms). */
+    private static final long HEARTBEAT_BUDGET_NANOS = 2_000_000L;
 
     public MultiBlockLifecycleManager(
             MineplusPlugin plugin,
@@ -67,6 +77,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         this.linkingSystem = linkingSystem;
         this.processManager = null;
         this.heartbeatTaskId = -1;
+        this.perfRegistry = null;
+    }
+
+    /** Optional metrics sink; {@code null} disables heartbeat timing. */
+    public void setPerfRegistry(PerfRegistry registry) {
+        this.perfRegistry = registry;
     }
 
     /**
@@ -113,6 +129,18 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         return processManager;
     }
 
+    /** Optional energy service hook (P6): set by PluginContext during wiring. */
+    private final java.util.concurrent.atomic.AtomicReference<com.mineplus.infrastructure.core.network.EnergyNetworkService> energyService =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    public void setEnergyNetworkService(com.mineplus.infrastructure.core.network.EnergyNetworkService service) {
+        energyService.set(service);
+    }
+
+    private java.util.Optional<com.mineplus.infrastructure.core.network.EnergyNetworkService> energyNetworks() {
+        return java.util.Optional.ofNullable(energyService.get());
+    }
+
     public int restorePersistedInstances() {
         DebugLogger.info("MultiBlockLifecycleManager: Loading instances from persistence...");
         registry.clearInstances();
@@ -127,6 +155,9 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
                 corrupted++;
             }
             registry.addInstance(instance);
+            // Rebuild derived network membership (energy grid) after restarts
+            // without persisting it: the grid is a pure function of instances.
+            energyNetworks().ifPresent(service -> service.onPlaced(instance));
             loaded++;
         }
         DebugLogger.info("MultiBlockLifecycleManager: Loaded " + loaded + " instances (" + corrupted + " corrupted, type missing).");
@@ -267,12 +298,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
             return false;
         }
 
-        // Spawn-area policy: creative/admin placements clear the target area first;
-        // standard players require it to be empty (no spawning inside cactus, grass,
-        // or other existing blocks).
+        // Spawn-area policy: clearing the target area requires the explicit
+        // permission (op by default) instead of an implicit op/creative bypass —
+        // creative builds inside a protected region must still fail the empty-area
+        // check like any other placement.
         boolean fullAccess = actor == null
-                || actor.isOp()
-                || actor.getGameMode() == org.bukkit.GameMode.CREATIVE;
+                || actor.hasPermission("mineplus.multiblock.clearspawn");
         VirtualBlockManager.SpawnAreaResult area = renderingManager.prepareArea(
                 type, instance, plugin.getDataFolder(), fullAccess);
         if (area == null) {
@@ -294,6 +325,11 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         }
         if (area == VirtualBlockManager.SpawnAreaResult.CLEARED) {
             DebugLogger.info("place: Cleared spawn area for instance " + id + " (full-access placement).");
+        }
+
+        if (ApiEvents.dispatch(new MultiBlockPlaceEvent(instance, type, actor)).isCancelled()) {
+            DebugLogger.info("place: Cancelled by listener for instance " + id + ".");
+            return false;
         }
 
         if (!EntityStateMachine.transition(instance, EntityStatus.PLACED)) {
@@ -340,6 +376,10 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
 
         MultiBlockType type = registry.getType(instance.typeId());
         if (type == null) {
+            return false;
+        }
+
+        if (ApiEvents.dispatch(new MultiBlockInteractEvent(instance, type, player)).isCancelled()) {
             return false;
         }
 
@@ -401,6 +441,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
             return false;
         }
 
+        MultiBlockType breakType = registry.getType(instance.typeId());
+        if (ApiEvents.dispatch(new MultiBlockBreakEvent(instance, breakType, actor, destroy)).isCancelled()) {
+            DebugLogger.info("remove: Cancelled by listener for instance " + instanceId + ".");
+            return false;
+        }
+
         if (destroy) {
             if (!EntityStateMachine.transition(instance, EntityStatus.BROKEN)) {
                 if (!EntityStateMachine.transition(instance, EntityStatus.REMOVED)) {
@@ -437,6 +483,14 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
         return true;
     }
 
+    /** Extra passes appended after the per-instance heartbeat loop (e.g. energy balancing). */
+    private final java.util.List<Runnable> postTickPasses = new java.util.ArrayList<>();
+
+    /** Registers a pass that runs once per heartbeat after instance processing. */
+    public void addPostTickPass(Runnable pass) {
+        postTickPasses.add(pass);
+    }
+
     /**
      * Repeating lifecycle tick (runs every {@link #TICK_INTERVAL_TICKS} ticks).
      *
@@ -448,6 +502,7 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
      * chunks.
      */
     public void tick() {
+        long tickStartNanos = System.nanoTime();
         long now = System.currentTimeMillis();
         if (processManager != null) {
             processManager.advanceAll(TICK_INTERVAL_TICKS, this::markDirty);
@@ -481,6 +536,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
 
             fire(MultiBlockLifecycleEventType.TICK, type, instance, null, null);
             safeHook(instance, "onTick", () -> type.hook().onTick(instance));
+        }
+        for (Runnable pass : postTickPasses) {
+            pass.run();
+        }
+        if (perfRegistry != null) {
+            perfRegistry.recordHeartbeatSlice(System.nanoTime() - tickStartNanos);
         }
     }
 
@@ -567,11 +628,34 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
      */
     public void flushHeartbeats() {
         long now = System.currentTimeMillis();
-        for (MultiBlockInstance instance : registry.getInstances()) {
+        // Time-sliced: with 100k instances a full sweep exceeds the tick budget,
+        // so each pass processes until HEARTBEAT_BUDGET_NANOS is spent or the
+        // collection is exhausted, then resumes at the cursor on the next pass.
+        Object[] snapshot = registry.getInstances().toArray();
+        if (snapshot.length == 0) {
+            heartbeatCursor = 0;
+            return;
+        }
+        if (heartbeatCursor >= snapshot.length) {
+            heartbeatCursor = 0;
+        }
+        long deadline = System.nanoTime() + HEARTBEAT_BUDGET_NANOS;
+        int processed = 0;
+        for (int i = 0; i < snapshot.length; i++) {
+            int idx = (heartbeatCursor + i) % snapshot.length;
+            MultiBlockInstance instance = (MultiBlockInstance) snapshot[idx];
             if (instance.status() == EntityStatus.ACTIVE
                     && EntityStateMachine.validateChunkLoaded(instance)) {
                 instance.setLastHeartbeat(now);
             }
+            processed++;
+            heartbeatCursor = (idx + 1) % snapshot.length;
+            if (System.nanoTime() >= deadline) {
+                break;
+            }
+        }
+        if (perfRegistry != null) {
+            perfRegistry.recordHeartbeatSlice(System.nanoTime() - (deadline - HEARTBEAT_BUDGET_NANOS));
         }
     }
 

@@ -43,6 +43,8 @@ public final class DisplayTransport {
         private final List<PooledDisplay> displays = new ArrayList<>();
         private final Map<UUID, RenderViewState> viewerStates = new HashMap<>();
         private boolean animated;
+        /** Chunk key this instance was indexed under; -1 until {@code indexChunk} runs. */
+        private volatile long chunkKey = -1L;
 
         RenderedInstance(UUID id) {
             this.id = id;
@@ -90,7 +92,7 @@ public final class DisplayTransport {
     /** Viewers whose client has no usable resource pack; pack-based content hides from them. */
     private final Set<UUID> packHiddenViewers = new HashSet<>();
 
-    private BukkitTask tickTask;
+    private com.mineplus.util.SchedulerCompat.Handle tickTask;
     private boolean running;
     private long tickCounter;
 
@@ -134,7 +136,7 @@ public final class DisplayTransport {
 
     private void startTicking() {
         running = true;
-        tickTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+        tickTask = com.mineplus.util.SchedulerCompat.repeat(plugin, 1L, 1L, this::tick);
     }
 
     public void shutdown() {
@@ -514,6 +516,7 @@ public final class DisplayTransport {
     private void indexChunk(RenderedInstance instance, Location origin) {
         long key = chunkKey(origin.getBlockX() >> 4, origin.getBlockZ() >> 4);
         byChunk.computeIfAbsent(key, k -> new HashSet<>()).add(instance);
+        instance.chunkKey = key;
     }
 
     /**
@@ -526,6 +529,19 @@ public final class DisplayTransport {
     }
 
     private void removeFromChunkIndex(RenderedInstance instance) {
+        long key = instance.chunkKey;
+        if (key >= 0) {
+            Set<RenderedInstance> set = byChunk.get(key);
+            if (set != null) {
+                set.remove(instance);
+                if (set.isEmpty()) {
+                    byChunk.remove(key, set);
+                }
+            }
+            instance.chunkKey = -1L;
+            return;
+        }
+        // Defensive fallback for instances indexed before the key was recorded.
         for (Set<RenderedInstance> set : byChunk.values()) {
             set.remove(instance);
         }

@@ -78,7 +78,7 @@ public final class Ballistics {
     private volatile Settings settings = Settings.defaults();
     private volatile boolean enabled = true;
     private volatile com.mineplus.infrastructure.fx.unit.VisualUnitService visualUnits;
-    private BukkitTask task;
+    private com.mineplus.util.SchedulerCompat.Handle task;
 
     private long totalRounds;
     private long totalHits;
@@ -117,13 +117,13 @@ public final class Ballistics {
             return;
         }
         idleTicks = 0;
-        task = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick,
-                settings.intervalTicks(), settings.intervalTicks());
+        task = com.mineplus.util.SchedulerCompat.repeat(plugin, settings.intervalTicks(),
+                settings.intervalTicks(), this::tick);
     }
 
     /** Cancels the run task and drops every in-flight round. Idempotent. */
     public void shutdown() {
-        BukkitTask current = task;
+        com.mineplus.util.SchedulerCompat.Handle current = task;
         task = null;
         if (current != null) {
             current.cancel();
@@ -135,7 +135,7 @@ public final class Ballistics {
     public void configure(Settings newSettings) {
         Settings previous = this.settings;
         this.settings = newSettings == null ? Settings.defaults() : newSettings;
-        BukkitTask current = task;
+        com.mineplus.util.SchedulerCompat.Handle current = task;
         if (current != null && previous.intervalTicks() != this.settings.intervalTicks()) {
             // The cadence is a schedule property, not a loop property: re-arm.
             current.cancel();
@@ -250,7 +250,7 @@ public final class Ballistics {
             // Nothing in flight: retire the task so an idle server pays nothing
             // for the engine. The next shot re-arms it.
             if (++idleTicks >= IDLE_TASK_RETIRE_TICKS) {
-                BukkitTask current = task;
+                com.mineplus.util.SchedulerCompat.Handle current = task;
                 task = null;
                 if (current != null) {
                     current.cancel();

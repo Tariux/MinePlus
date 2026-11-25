@@ -57,6 +57,8 @@ function argValue(name) {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 const port = Number(argValue('--port') ?? process.env.ASSET_LAB_PORT ?? 5167);
+// Dev server: bind loopback by default; opt into LAN exposure with --host 0.0.0.0.
+const host = argValue('--host') ?? process.env.ASSET_LAB_HOST ?? '127.0.0.1';
 const skipCompile = argv.includes('--no-compile') || process.env.ASSET_LAB_SKIP_JAVAC === '1';
 // --settings <path>: point the live settings bridge at one specific settings.mp.yml.
 const settingsOverride = argValue('--settings') ? path.resolve(argValue('--settings')) : null;
@@ -1254,7 +1256,7 @@ server.on('error', e => {
   log('server error:', e.message);
 });
 
-server.listen(port, () => {
+server.listen(port, host, () => {
   // One-line banner: port, roots, live settings file, pack artifact count, daemon.
   const s = settingsBridge.current();
   log(`READY http://localhost:${port} | roots: blocks=${blockRoots.length} mobs=${mobRoots.length} `

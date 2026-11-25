@@ -7,7 +7,7 @@
 [![](https://img.shields.io/badge/Minecraft-1.21%2B-green)](https://www.minecraft.net/)
 [![](https://img.shields.io/badge/Server-Paper%20%7C%20Spigot-orange)](https://papermc.io/)
 [![](https://img.shields.io/badge/Java-21-blue)](https://adoptium.net/)
-[![](https://img.shields.io/badge/version-1.0.0-red)](https://github.com/Tariux/MinePlus/releases)
+[![](https://img.shields.io/badge/version-1.3.0-red)](https://github.com/Tariux/MinePlus/releases)
 [![](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![](https://img.shields.io/badge/Modrinth-minepluscore-1bd96a)](https://modrinth.com/plugin/minepluscore)
 [![](https://img.shields.io/badge/Hangar-MinePlusCore-blue)](https://hangar.papermc.io/Tariux/MinePlusCore)

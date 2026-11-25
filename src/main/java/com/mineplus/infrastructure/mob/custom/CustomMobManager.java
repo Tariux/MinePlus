@@ -93,7 +93,7 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
     /** Entity -> how its vanilla AI was last actually cleared, for status output. */
     private final Map<UUID, MobAiIsolation.Result> isolationResults = new ConcurrentHashMap<>();
     /** Re-asserts isolation on live custom mobs. */
-    private org.bukkit.scheduler.BukkitTask reassertTask;
+    private com.mineplus.util.SchedulerCompat.Handle reassertTask;
     /** One full warning per session about an unreachable isolation surface. */
     private boolean hasWarnedUnreachable;
 
@@ -152,8 +152,8 @@ public final class CustomMobManager implements CustomMobApi, MobIdentityResolver
         if (reassertTask != null) {
             return;
         }
-        reassertTask = Bukkit.getScheduler().runTaskTimer(plugin, this::reassertIsolation,
-                REASSERT_INTERVAL_TICKS, REASSERT_INTERVAL_TICKS);
+        reassertTask = com.mineplus.util.SchedulerCompat.repeat(plugin, REASSERT_INTERVAL_TICKS,
+                REASSERT_INTERVAL_TICKS, this::reassertIsolation);
     }
 
     private void reassertIsolation() {

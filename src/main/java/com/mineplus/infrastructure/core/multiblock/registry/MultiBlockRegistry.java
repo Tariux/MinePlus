@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Type registry for MultiBlock definitions and live instance indexing by UUID and location.
@@ -49,6 +50,16 @@ public final class MultiBlockRegistry {
             );
         }
         types.put(id, type);
+        for (Consumer<MultiBlockType> listener : typeListeners) {
+            listener.accept(type);
+        }
+    }
+
+    private final java.util.List<Consumer<MultiBlockType>> typeListeners = new java.util.ArrayList<>();
+
+    /** Fires for every type registration (including after a listener attaches). */
+    public synchronized void addTypeRegistrationListener(Consumer<MultiBlockType> listener) {
+        typeListeners.add(listener);
     }
 
     public void registerHookOverride(String typeId, MultiBlockHook hook) {

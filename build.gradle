@@ -34,6 +34,8 @@ dependencies {
             "libs/guava.jar",
             "libs/item-nbt-api-plugin-2.15.6.jar",
             "libs/sqlite-jdbc-3.45.1.0.jar",
+            "libs/slf4j-api-2.0.13.jar",
+            "libs/slf4j-simple-2.0.13.jar",
             "libs/HikariCP-5.1.0.jar",
             "libs/fastutil-8.5.14.jar"
     )
@@ -56,6 +58,17 @@ def testRunnerMains = [
         'com.mineplus.test.MolangEvaluatorTest',
         'com.mineplus.test.FormationTest',
         'com.mineplus.test.AiTargetingTest',
+        'com.mineplus.test.EnergyGridTest',
+        'com.mineplus.test.KineticGridTest',
+        'com.mineplus.test.NetworkRoutingTest',
+        'com.mineplus.test.MinigameStateTest',
+        'com.mineplus.test.GameMapTest',
+        'com.mineplus.test.MegaPlanSlicesTest',
+        'com.mineplus.test.PersistenceTransportTest',
+        'com.mineplus.test.RedisTransportTest',
+        'com.mineplus.test.AdapterPersistenceTest',
+        'com.mineplus.test.BossReloadTest',
+        'com.mineplus.test.AssetPipelineTest',
 ]
 
 tasks.register('testRunners') {

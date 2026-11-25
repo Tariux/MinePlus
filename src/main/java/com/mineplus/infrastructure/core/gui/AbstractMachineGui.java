@@ -12,6 +12,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryAction;
+import org.bukkit.event.inventory.ClickType;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -31,7 +34,9 @@ import org.bukkit.plugin.java.JavaPlugin;
  *       ({@code event.getCursor()}), hotbar-number swaps
  *       ({@code event.getHotbarButton() >= 0}; the off-hand swap arrives as
  *       button 40), and drags ({@code event.getOldCursor()}) are all routed
- *       through {@link #accepts(int, ItemStack)};</li>
+ *       through {@link #accepts(int, ItemStack)}; double-click collection
+ *       from the player inventory is cancelled so it cannot pull items out
+ *       of protected top slots;</li>
  *   <li>take-only slots (outputs) reject every insertion path;</li>
  *   <li>capture scheduling: the result of a click is not final when the event
  *       fires, so accepted interactions are captured on the next tick via
@@ -99,7 +104,7 @@ public abstract class AbstractMachineGui implements InteractiveInfrastructureGui
         Inventory top = event.getView().getTopInventory();
         int rawSlot = event.getRawSlot();
         if (rawSlot >= top.getSize()) {
-            if (event.isShiftClick()) {
+            if (event.isShiftClick() || event.getAction() == InventoryAction.COLLECT_TO_CURSOR) {
                 event.setCancelled(true);
             }
             return;
@@ -113,7 +118,8 @@ public abstract class AbstractMachineGui implements InteractiveInfrastructureGui
 
         if (takeOnlySlots().contains(rawSlot)) {
             boolean placing = (event.getCursor() != null && !event.getCursor().getType().isAir())
-                    || event.getHotbarButton() >= 0;
+                    || event.getHotbarButton() >= 0
+                    || event.getClick() == ClickType.SWAP_OFFHAND;
             if (placing) {
                 event.setCancelled(true);
                 return;
@@ -127,9 +133,12 @@ public abstract class AbstractMachineGui implements InteractiveInfrastructureGui
             return;
         }
 
-        ItemStack swapCandidate = event.getHotbarButton() >= 0
-                ? event.getWhoClicked().getInventory().getItem(event.getHotbarButton())
-                : null;
+        ItemStack swapCandidate = null;
+        if (event.getClick() == ClickType.SWAP_OFFHAND) {
+            swapCandidate = player.getInventory().getItem(EquipmentSlot.OFF_HAND);
+        } else if (event.getHotbarButton() >= 0) {
+            swapCandidate = player.getInventory().getItem(event.getHotbarButton());
+        }
         if (swapCandidate != null && !accepts(rawSlot, swapCandidate)) {
             event.setCancelled(true);
             return;
@@ -199,7 +208,7 @@ public abstract class AbstractMachineGui implements InteractiveInfrastructureGui
      * has been applied to the inventory.
      */
     protected final void captureLater(Player player, UUID instanceId, Inventory inventory) {
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        com.mineplus.util.SchedulerCompat.runNow(plugin, () -> {
             MultiBlockInstance instance = instance(instanceId);
             if (instance != null) {
                 capture(player, instance, inventory);
