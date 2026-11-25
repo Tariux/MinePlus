@@ -1,0 +1,45 @@
+# Web-build plugin loader
+
+The Blockbench web build the user opens is `.bbweb/index.html` (git-ignored via
+`.gitignore:51`). That page loads no plugins by default — a fix to the plugin file
+alone is invisible in the app. The same loader exists in `.bbweb/index_debug.html`
+(and now in `.bbweb/index.html`).
+
+If you re-extract a fresh Blockbench web build, re-add this block to
+`.bbweb/index.html`, right before `</body>`:
+
+```html
+	<script type="module">
+		// Load the Mineplus Generic Display plugin in the web build.
+		(function poll() {
+			try {
+				if (window.Blockbench && Blockbench.setup_successful && window.Interface && Interface.Panels && Interface.Panels.display) {
+					fetch('/mineplus_generic_display.js').then(r => r.text()).then(src => {
+						const plugin = new Plugin('mineplus_generic_display', {name: 'Mineplus Generic Display', version: '6.0.0', id: 'mineplus_generic_display'});
+						// loadFromFile(.., true) asks for confirmation; accept only that prompt.
+						const origConfirm = window.confirm;
+						window.confirm = () => true;
+						try {
+							plugin.loadFromFile({path: '/mineplus_generic_display.js', name: 'mineplus_generic_display.js', content: src}, true);
+						} finally {
+							window.confirm = origConfirm;
+						}
+					});
+					return;
+				}
+			} catch (e) {}
+			setTimeout(poll, 200);
+		})();
+	</script>
+```
+
+Notes:
+- The `window.confirm` override must wrap only the `loadFromFile` call: headless
+  browsers auto-dismiss `confirm()`, so with `first=true` the plugin silently never
+  installs. Do not set it globally — index.html's own factory-reset confirm (search
+  "reset Blockbench to factory settings") must keep working.
+- Also copy the current plugin to `.bbweb/mineplus_generic_display.js`; the web build
+  fetches it from that folder (a stale copy there is what previously showed only one
+  display slot).
+- Verified working markers in the app: start-screen New list shows "Mineplus Model";
+  Tools menu shows "Mineplus: Convert to Mineplus Model".
