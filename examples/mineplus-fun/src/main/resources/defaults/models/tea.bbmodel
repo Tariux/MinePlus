@@ -32,21 +32,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -6,
+    2,
     0,
-    -6
+    2
    ],
    "to": [
-    6,
+    14,
     1,
-    6
+    14
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    0,
+    8,
     0.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -116,21 +116,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -4,
+    4,
     1,
-    -4
+    4
    ],
    "to": [
-    4,
+    12,
     2,
-    4
+    12
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    0,
+    8,
     1.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -200,21 +200,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -4,
+    4,
     2,
-    -4
+    4
    ],
    "to": [
-    4,
+    12,
     7,
-    -3
+    5
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    0,
+    8,
     4.5,
-    -3.5
+    4.5
    ],
    "faces": {
     "north": {
@@ -284,21 +284,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -4,
+    4,
     2,
-    3
+    11
    ],
    "to": [
-    4,
+    12,
     7,
-    4
+    12
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    0,
+    8,
     4.5,
-    3.5
+    11.5
    ],
    "faces": {
     "north": {
@@ -368,21 +368,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -4,
+    4,
     2,
-    -3
+    5
    ],
    "to": [
-    -3,
+    5,
     7,
-    3
+    11
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    -3.5,
     4.5,
-    0
+    4.5,
+    8
    ],
    "faces": {
     "north": {
@@ -452,21 +452,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    3,
+    11,
     2,
-    -3
+    5
    ],
    "to": [
-    4,
+    12,
     7,
-    3
+    11
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    3.5,
+    11.5,
     4.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -536,21 +536,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -3,
+    5,
     2,
-    -3
+    5
    ],
    "to": [
-    3,
+    11,
     6,
-    3
+    11
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    0,
+    8,
     2,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -620,21 +620,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    4,
+    12,
     5,
-    -1
+    7
    ],
    "to": [
+    14,
     6,
-    6,
-    1
+    9
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    5,
+    13,
     5.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -704,21 +704,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    5,
+    13,
     3,
-    -1
+    7
    ],
    "to": [
+    14,
     6,
-    6,
-    1
+    9
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    5.5,
+    13.5,
     4.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -788,21 +788,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    4,
+    12,
     3,
-    -1
+    7
    ],
    "to": [
-    5,
+    13,
     4,
-    1
+    9
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    4.5,
+    12.5,
     3.5,
-    0
+    8
    ],
    "faces": {
     "north": {
@@ -872,21 +872,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    -2,
+    6,
     8,
-    -2
+    6
    ],
    "to": [
-    -1,
+    7,
     11,
-    -1
+    7
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    -1.5,
+    6.5,
     9.5,
-    -1.5
+    6.5
    ],
    "faces": {
     "north": {
@@ -956,21 +956,21 @@
    "scope": 0,
    "allow_mirror_modeling": true,
    "from": [
-    1,
     9,
-    0
+    9,
+    8
    ],
    "to": [
-    2,
+    10,
     12,
-    1
+    9
    ],
    "autouv": 0,
    "color": 0,
    "origin": [
-    1.5,
+    9.5,
     10.5,
-    0.5
+    8.5
    ],
    "faces": {
     "north": {
@@ -1522,7 +1522,7 @@
         {
          "x": "0",
          "y": "5",
-         "z": "2"
+         "z": "-2.0"
         }
        ],
        "uuid": "78fa8ce0-ebc9-5eac-0bef-08770364b09a",
@@ -1557,7 +1557,7 @@
         {
          "x": "0",
          "y": "5",
-         "z": "2"
+         "z": "-2.0"
         }
        ],
        "uuid": "9f139fd9-75cd-591c-6c70-ad61df94fd7f",

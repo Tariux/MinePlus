@@ -18,6 +18,7 @@ public final class AssetPipelineTest {
         dependencyOrdering();
         cycleAndUnknownDetection();
         incrementalRebuilds();
+        teaModelBakesInsideVanillaWindow();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -98,6 +99,55 @@ public final class AssetPipelineTest {
         pipeline.buildIncremental(n -> n.equals("base") ? "v2" : "v1");
         check("changed dependency cascades", builds.get() == 4);
         check("outputs refreshed", pipeline.output("derived").equals("derived-out"));
+    }
+
+    /**
+     * Regression: the tea module's bbmodel must be authored in the vanilla
+     * 0..16 box (the pack-item render anchors the box center on the display).
+     * A center-authored model (-8..8) rendered half a block diagonally off,
+     * placing the cup between four blocks. The baked rest model must land
+     * inside 0..16 on x/z so the display sits centered in its 1x1x1 block.
+     */
+    private static void teaModelBakesInsideVanillaWindow() {
+        java.io.File source = new java.io.File(
+                "examples/mineplus-fun/src/main/resources/defaults/models/tea.bbmodel");
+        if (!source.isFile()) {
+            check("tea bbmodel installed", false);
+            return;
+        }
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(source.toPath());
+            var model = com.mineplus.infrastructure.mob.custom.model.BbModelParser.parse(
+                    "tea", bytes, reference -> null);
+            var rest = com.mineplus.pack.item.BbClipBaker.rest(model,
+                    new com.mineplus.pack.item.BbClipBaker.Style(
+                            new com.google.gson.JsonObject(), "fun:item/tea", true)).models();
+            check("tea rest model baked", !rest.isEmpty());
+            if (rest.isEmpty()) {
+                return;
+            }
+            var elements = rest.get(0).getAsJsonObject().getAsJsonArray("elements");
+            check("tea rest model has cubes", elements.size() > 0);
+            float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+            float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+            for (var entry : elements) {
+                var e = entry.getAsJsonObject();
+                minX = Math.min(minX, e.getAsJsonArray("from").get(0).getAsFloat());
+                maxX = Math.max(maxX, e.getAsJsonArray("to").get(0).getAsFloat());
+                minZ = Math.min(minZ, e.getAsJsonArray("from").get(2).getAsFloat());
+                maxZ = Math.max(maxZ, e.getAsJsonArray("to").get(2).getAsFloat());
+            }
+            check("tea rest model inside 0..16 on x (got " + minX + ".." + maxX + ")",
+                    minX >= 0.0f && maxX <= 16.0f);
+            check("tea rest model inside 0..16 on z (got " + minZ + ".." + maxZ + ")",
+                    minZ >= 0.0f && maxZ <= 16.0f);
+            check("tea rest model spans the box center on x",
+                    minX < 8.0f && maxX > 8.0f);
+            check("tea rest model spans the box center on z",
+                    minZ < 8.0f && maxZ > 8.0f);
+        } catch (Exception e) {
+            failures.add("tea bake probe: " + e);
+        }
     }
 
     private static void check(String name, boolean condition) {
