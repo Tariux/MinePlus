@@ -7,6 +7,7 @@ import com.mineplus.fun.cannon.CannonFeature;
 import com.mineplus.fun.gear.GearFeature;
 import com.mineplus.fun.juicer.JuicerFeature;
 import com.mineplus.fun.packshowcase.PackShowcaseFeature;
+import com.mineplus.fun.tea.TeaFeature;
 import com.mineplus.fun.wine.WineFeature;
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.module.ModuleFeature;
@@ -71,6 +72,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         // Pack block axis: an alchemy table multiblock whose level renders as a
         // pack BlockDisplay (renderMode: pack_block) instead of an item display.
         features.add(new AlchemyFeature(this, context));
+        features.add(new TeaFeature(this, context));
 
         for (ModuleFeature feature : features) {
             feature.start();
@@ -85,7 +87,7 @@ public final class MineplusFunPlugin extends JavaPlugin {
         }
 
         getLogger().info("[MineplusFun] " + features.size()
-                + " features (Juicer, Cannon, Gear, Wine, Cabinet, PackShowcase, Alchemy)"
+                + " features (Juicer, Cannon, Gear, Wine, Cabinet, PackShowcase, Alchemy, Tea)"
                 + " enabled on top of Mineplus Core.");
     }
 
