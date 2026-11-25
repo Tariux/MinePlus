@@ -1042,6 +1042,46 @@ Forming: the core's block listener calls `checkFormed` on every block place, so 
 
 ---
 
+## Toolkit Subsystems (pure Java)
+
+The Phases C/D toolkit is a set of **plain-Java building blocks** under `com.mineplus.infrastructure.core.*`. They deliberately hold no Bukkit handles: construct them from your module, unit-test them off-thread, and wire the server side through the small adapter seams (scoreboard renderers, teleporters, post-tick passes). See [`ToolkitExample`](../examples/code-based/ToolkitExample.java) for a complete, working call pattern for each.
+
+| Subsystem | Classes | What it gives you |
+|---|---|---|
+| Research | `research.ResearchTree` | Prerequisite graph with definition-time cycle/typo detection, `int[]`-budget-gated `unlock`, `availableFor` for GUIs, `snapshot()`/`restore` for persistence |
+| Minigames | `minigame.GameStateMachine`, `GameMap`, `MinigameAdapter`, `InstanceManager` | Legal-transition lifecycle (LOBBY → STARTING → RUNNING → ENDING → CLOSED), teams/scores/elimination, cuboid regions, round-robin spawn markers, priority-ordered scoreboard lines, spectators, definition → instance management with snapshot/restore |
+| Messaging | `network.MessageBus` (+ `RedisTransport`, `FileSpoolTransport`) | Channel pub/sub with message ids, source/target servers and payload; pluggable transport seam — in-memory ships with the core, Redis pub/sub over plain sockets (no client jar) and a file-spool transport cover cross-server and multi-server-on-one-host setups; delivery is at-least-once with dedupe in the bus |
+| Grids | `network.EnergyGrid` (+ `EnergyNetworkService`), `KineticGrid`, `LogisticsGrid`, `CommandRelay` | Node-graph energy networks (SOURCE / CONSUMER / CONDUIT) with post-tick supply/demand balancing, kinetic stress slow-down, item logistics and redstone-style command routing; the service wrapper syncs network lifecycle with machine create/remove and rebuilds networks after a restart |
+| Boss fights | `boss.BossFight` | Health-threshold phases (strictly decreasing thresholds enforced), entry abilities fire once on phase change, repeat abilities under a shared tick cooldown, `onPhaseChange` for boss-bar updates; host supplies live health via a supplier |
+| Hot reload | `reload.HotReloader` | Register named steps (settings supplier + applier) in order; `reloadAll()` re-applies config to live subsystems with failures isolated — a broken step is logged, previous settings keep running, the `ReloadReport` names it |
+| Asset pipeline | `pipeline.AssetPipeline` | Dependency-ordered pack builds (topological sort, each builder runs once with dependency outputs forwarded), cycle/unknown-dependency detection before any build, `buildIncremental` rebuilding only assets whose hash — or a dependency's — changed |
+
+```java
+// Research: define once, unlock against a budget box
+ResearchTree tree = new ResearchTree();
+tree.define("press", 25, "roots");
+tree.unlock(playerId, "press", budget);          // budget[0] -= 25, or throws
+
+// Minigame: bind the pure machine to the server through the adapter
+MinigameAdapter adapter = new MinigameAdapter(state, map,
+        (player, lines) -> renderSidebar(player, lines),   // your renderer
+        (player, marker) -> teleport(player, marker));     // your teleporter
+lifecycle.addPostTickPass(adapter.tickPass());   // refresh on state changes
+
+// Cross-server messaging: swap one constructor argument
+MessageBus bus = new MessageBus(new RedisTransport("127.0.0.1", 6379, logger), "lobby-1");
+Runnable unsubscribe = bus.on("trade", message -> handle(message.payload()));
+bus.send("trade", null, payload);                // null target = broadcast
+```
+
+Notes worth knowing before you build on these:
+
+- **Persistence:** the SQLite repositories (`SqliteResearchRepository`, `SqliteMinigameInstanceRepository`) store research progress per owner and minigame snapshots per instance with transactional replace-all saves; `fileFallback(...)` shares the same seam for setups without a datasource. See ADR [0009](adr/0009-minigame-persistence-and-redis-transport.md).
+- **Minigame wiring:** `MinigameBukkitWiring` shows the reference Bukkit glue (join/quit binding, sidebar renderer, marker teleporter); the adapter stays no-op until it is attached to the lifecycle manager.
+- **Hot reload ordering:** steps run in registration order; register low-level settings (grid limits) before high-level ones (GUI titles) so a partial reload leaves a coherent state.
+
+---
+
 ## Zero-Content Policy
 
 Mineplus registers no gameplay content by default:

@@ -59,6 +59,7 @@ What does that mean for your server?
 - 🔫 **Shared combat services** — a Core-side projectile simulation (spread, drop, drag, falloff, penetration, ricochet, headshots) with budgeted particles and sound resolution, a held-item input seam that routes presses and freezes vanilla interactions for the items a module owns, and a deferred magazine model so a gun never rewrites the held stack mid-fire. Modules ship weapon definitions, not physics loops.
 - 🐄 **Budgeted mob behavior engine** — per-entity-type profiles of interval-gated actions, arbitrated by anchored activity claims so scenarios can't fight over one mob or wander outside their area; ground-probed navigation, leg-by-leg journeys with stall recovery, crew cohesion, and hard per-run caps on time, block edits and spawns. Lazy: it costs nothing until a module registers a profile.
 - 🖥️ **Built-in admin CLI** — inspect, respawn, reload, and diagnose every instance live.
+- 🧰 **Pure-Java toolkit subsystems** — research trees with budget-gated unlocks, a minigame state machine + map/instance toolkit with a Bukkit adapter, a cross-server message bus (Redis pub/sub over plain sockets or a file spool — no client jar), energy/kinetic grid networks with post-tick balancing, health-threshold boss-fight phases, isolated hot-reload steps and a dependency-ordered asset pipeline. See the [toolkit docs](docs/developer-api.md#toolkit-subsystems-pure-java).
 
 ---
 
@@ -159,7 +160,7 @@ ADDITIONAL_DEBUG_LOGS: false
 | Doc | What's inside |
 |---|---|
 | [**Configuration Reference**](docs/config-reference.md) | Multiblock & recipe JSON schemas, `settings.mp.yml`, model meta overrides, the complete texture-name catalog, Blockbench authoring guide |
-| [**Developer API**](docs/developer-api.md) | The three API tiers, hooks, timed processes, auto-linking, runtime internals |
+| [**Developer API**](docs/developer-api.md) | The three API tiers, hooks, timed processes, auto-linking, runtime internals, plus the toolkit subsystems (research, minigames, messaging, grids, bosses, hot reload, asset pipeline) |
 | [**Extension Workflows**](docs/extension-workflows.md) | Step-by-step paths for JSON-only servers, basic add-ons, and full framework modules |
 | [**Examples**](examples/README.md) | Ready-to-copy JSON machines, Java snippets, and hybrid patterns |
 | [**MineplusFun Module**](examples/mineplus-fun/README.md) | Complete reference plugin: Juicer + Cannon, built fully outside the core |

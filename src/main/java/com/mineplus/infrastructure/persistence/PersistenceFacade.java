@@ -272,7 +272,7 @@ public final class PersistenceFacade {
             }
 
             if (fullPayload == null && upserts == null && deletes == null) {
-                DebugLogger.info("PersistenceFacade.flushNow: no payload queued, skipping flush.");
+                DebugLogger.debug("PersistenceFacade.flushNow: no payload queued, skipping flush.");
                 return;
             }
 

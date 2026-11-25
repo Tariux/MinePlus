@@ -19,6 +19,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | Add **pack-based custom content** | [Resource Pack System](pack-system.md) |
 | Give weapons **real ballistics** | [Developer API → Combat Services](developer-api.md#combat-services) |
 | Make mobs **do things** | [Developer API → Mob Behavior API](developer-api.md#mob-behavior-api) |
+| Build **research trees, minigames, cross-server messaging or boss fights** | [Developer API → Toolkit Subsystems](developer-api.md#toolkit-subsystems-pure-java) |
 | Add a **fully custom mob** | [Custom Mobs](custom-mobs.md) |
 | **Upgrade** from an older release | [Migration Guide](migration-guide.md) |
 | Just **administer a server** | [Command Reference](config-reference.md#admin-command-reference) |
@@ -31,7 +32,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 The complete data-format encyclopedia: multiblock JSON schema, machine recipe JSON schema, `.bbmodel` model handling, per-model `.meta.json` overrides, the `settings.mp.yml` rendering-engine keys, the full texture-name catalog, and the Blockbench designer guidelines.
 
 ### [Developer API](developer-api.md)
-The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, the shared combat services (ballistics, held-item input, magazines, particle budgets), the mob behavior engine (profiles, conditions, journeys, crews, world-edit grants), custom mobs (identity, the two-mind contract — a Core profile or the base type's own engine AI — and per-part display rigs), and how the core runtime behaves under your feature code.
+The programmatic surface: the three API tiers, hook & lifecycle mechanics, timed crafting processes, auto-linking pipe networks, spatial lookups, the shared combat services (ballistics, held-item input, magazines, particle budgets), the mob behavior engine (profiles, conditions, journeys, crews, world-edit grants), custom mobs (identity, the two-mind contract — a Core profile or the base type's own engine AI — and per-part display rigs), how the core runtime behaves under your feature code, and the **pure-Java toolkit subsystems** (research trees, minigames, cross-server message bus, energy/kinetic grids, boss fights, hot reload, asset pipeline).
 
 ### [Custom Mobs](custom-mobs.md)
 Adding new mobs without touching vanilla ones: the definition/model/attributes contract, the texture-extended phase (Evil Pig) and the fully custom model phase, **whose mind runs the mob** (a Core behavior profile or the base type's own engine AI), why a rigged mob is still a real entity (hitbox, damage, push, shadow, death), identity across restarts, the cost controls behind a crowd, and the bundled `AttackNearestAction`.
@@ -57,7 +58,8 @@ The [`examples/`](../examples/README.md) folder is part of the documentation —
 | [`config-based/furnace_machine_recipes.json`](../examples/config-based/furnace_machine_recipes.json) | JSON | Timed machine recipes |
 | [`lightweight/charcoal_mini_furnace.json`](../examples/lightweight/charcoal_mini_furnace.json) | JSON | Minimal single-file machine |
 | [`code-based/BasicPlacementExample.java`](../examples/code-based/BasicPlacementExample.java) | Basic | Create / place / query / remove via API |
-| [`code-based/AdvancedHookedMachineExample.java`](../examples/code-based/AdvancedHookedMachineExample.java) | Advanced | Hooks, lifecycle, signals |
+| [`code-based/DeveloperApi2Example.java`](../examples/code-based/DeveloperApi2Example.java) | 2.0 | Placement options, virtual models, custom-mob clips, render census, Multiblock 2.0 |
+| [`code-based/ToolkitExample.java`](../examples/code-based/ToolkitExample.java) | Toolkit | Research trees, minigame machine/map/adapter, message bus + Redis transport, energy grids, boss fights, hot reload, asset pipeline |
 | [`hybrid/furnace_hybrid_notes.md`](../examples/hybrid/furnace_hybrid_notes.md) | Hybrid | JSON data + code behavior combined |
 | [`mineplus-fun/`](../examples/mineplus-fun/README.md) | Module | Complete reference plugin (Juicer + Cannon + Gear + Wine + Cabinet + pack showcases) |
 | [`mineplus-gun/`](../examples/mineplus-gun/README.md) | Module | Combat module: additive firearms with file-discovered frame animations, right-click shooting, left-click scopes, ammunition economy and a Vault shop on the Core's ballistics, held-item input and magazine services |

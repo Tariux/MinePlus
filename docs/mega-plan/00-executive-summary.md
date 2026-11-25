@@ -1,5 +1,13 @@
 # 00 Executive summary
 
+> **Status (2026-11-25):** the implementation plan below has been carried out —
+> all Phases A–E (including the energy/logistics grids, the minigame/network
+> layer, the toolkit subsystems and the asset pipeline v2) are implemented and
+> green under `./gradlew check`. This document is kept as the original plan;
+> for what actually shipped, see the
+> [Toolkit Subsystems](../developer-api.md#toolkit-subsystems-pure-java)
+> section of the developer API and the CHANGELOG.
+
 Mineplus is a 65k-line Java plugin that already delivers the hardest part of the vision — custom blocks, items, mobs and furniture on completely vanilla clients, with an automatic resource pack, machine GUIs and multiblock persistence. What it does not yet have is the two product layers the vision names (machines with energy/logistics, and a network/minigame layer), a stable API for other developers, and any proof that it works outside one developer's machine. Evidence for every claim is in `02-audit-findings.md` (findings F1–F17) and `03-research-benchmark.md`.
 
 ## Top 10 risks (highest first)

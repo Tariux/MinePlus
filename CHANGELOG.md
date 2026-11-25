@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: toolkit subsystems (mega-plan Phases C/D)
+
+- **Research** (`core/research`): `ResearchTree` — prerequisite graph with
+  definition-time cycle/typo detection, `int[]`-budget-gated `unlock`,
+  `availableFor` for GUIs, snapshot/restore; `ResearchProgressStore` and
+  `SqliteResearchRepository` (transactional replace-all) persist per-owner
+  progress, with a `fileFallback` for setups without a datasource.
+- **Minigames** (`core/minigame`): `GameStateMachine` (legal-transition
+  lifecycle, teams, scores, elimination, rounds, snapshot/restore),
+  `GameMap` (cuboid regions, round-robin spawn markers, priority-ordered
+  scoreboard lines, spectators), `MinigameAdapter` (Bukkit seams: player
+  binding, marker teleporter, pluggable sidebar renderer, lifecycle
+  post-tick pass) with `MinigameBukkitWiring` reference glue,
+  `InstanceManager` (definitions → instances, force-close via legal
+  transitions) and `SqliteMinigameInstanceRepository` for instance
+  snapshots.
+- **Messaging** (`core/network`): `MessageBus` — channel pub/sub with
+  message ids, source/target servers, dedupe and echo suppression, over a
+  pluggable transport: in-memory (single server), `RedisTransport`
+  (RESP pub/sub over plain sockets, reconnect with backoff, no client
+  jar) and `FileSpoolTransport` (multi-server-on-one-host, atomic
+  temp-then-move files, at-least-once delivery). See ADR 0009.
+- **Grids** (`core/network`): `EnergyGrid` + `EnergyNetworkService`
+  (config-driven profiles, lifecycle sync, post-tick balancing,
+  restart-safe rebuild), `KineticGrid` (stress slow-down, flip-edge
+  direction), `LogisticsGrid`, `CommandRelay`.
+- **Boss fights** (`core/boss`): `BossFight` — strictly decreasing
+  health-threshold phases, one-time entry abilities, repeat abilities
+  under a shared tick cooldown, `onPhaseChange` for boss-bar updates;
+  host supplies health via a supplier.
+- **Hot reload** (`core/reload`): `HotReloader` — ordered re-application
+  of config to live subsystems with per-step failure isolation and a
+  `ReloadReport`.
+- **Asset pipeline** (`core/pipeline`): `AssetPipeline` —
+  dependency-ordered pack builds (topological sort, builders run once
+  with dependency outputs forwarded), pre-build cycle/unknown-dependency
+  detection, `buildIncremental` for hash-changed assets only.
+- **Docs & examples:** new
+  [Toolkit Subsystems](docs/developer-api.md#toolkit-subsystems-pure-java)
+  section in the developer API, and
+  [`examples/code-based/ToolkitExample.java`](examples/code-based/ToolkitExample.java)
+  with a working call pattern for every subsystem.
+
 ### Added: Mineplus plugin v2 and the .mpmodel format
 
 - `devtools/mineplus-blockbench-plugin/mineplus_generic_display.js` v2:
