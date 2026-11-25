@@ -2,11 +2,9 @@ package com.mineplus.fun.tea;
 
 import com.mineplus.infrastructure.PluginContext;
 import com.mineplus.infrastructure.command.SubCommand;
-import com.mineplus.infrastructure.core.api.AnimationApi;
 import com.mineplus.infrastructure.virtual.VirtualBlockManager;
+import com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper;
 import com.mineplus.infrastructure.virtual.VirtualModel;
-import com.mineplus.infrastructure.virtual.animation.AnimationPlayback;
-import com.mineplus.infrastructure.virtual.animation.LoopMode;
 import com.mineplus.pack.PackApi;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
@@ -22,8 +20,13 @@ import java.util.UUID;
 
 /**
  * {@code /tea <give|spawn|play|list|debug|stop|remove>} — hands out the tea
- * cup item and drives the tea cup model's four authored clips. {@code debug}
- * plays every clip in sequence so all animations can be checked in one go.
+ * cup item and drives the tea cup's four baked clips. {@code debug} plays
+ * every clip in sequence so all animations can be checked in one go.
+ *
+ * <p>Placed cups render through the pack axis ({@link TeaAnimations#place}):
+ * collision-only virtual spawn plus a pack {@code ItemDisplay}, so the cup
+ * shows the resource-pack texture instead of the texel bake, and its clips
+ * play through the frame animator.
  */
 public final class TeaSubCommand implements SubCommand {
 
@@ -31,11 +34,13 @@ public final class TeaSubCommand implements SubCommand {
 
     private final PluginContext context;
     private final PackApi packApi;
+    private final TeaAnimations animations;
     private final Map<UUID, UUID> spawnedByPlayer = new HashMap<>();
 
-    public TeaSubCommand(PluginContext context, PackApi packApi) {
+    public TeaSubCommand(PluginContext context, PackApi packApi, TeaAnimations animations) {
         this.context = context;
         this.packApi = packApi;
+        this.animations = animations;
     }
 
     @Override
@@ -70,7 +75,7 @@ public final class TeaSubCommand implements SubCommand {
                     return true;
                 }
                 player.getInventory().addItem(item);
-                player.sendMessage(ChatColor.GREEN + "You received a cup of tea.");
+                player.sendMessage(ChatColor.GREEN + "You received a cup of tea. Right click to drink!");
                 return true;
             }
             case "spawn" -> {
@@ -94,14 +99,11 @@ public final class TeaSubCommand implements SubCommand {
                     return true;
                 }
                 String animation = args[1].toLowerCase(Locale.ROOT);
-                AnimationApi animationApi = context.animationApi();
-                if (!animationApi.getAnimations(cupId).contains(animation)) {
+                if (!TeaKeys.ANIMATIONS.contains(animation)) {
                     player.sendMessage(ChatColor.RED + "Unknown animation '" + animation + "'. Try /tea list.");
                     return true;
                 }
-                // steam_idle is authored as a loop; everything else plays once.
-                LoopMode loop = TeaKeys.ANIM_STEAM.equals(animation) ? LoopMode.LOOP : LoopMode.ONCE;
-                boolean played = animationApi.playAnimation(cupId, animation, new AnimationPlayback(1.0f, loop, 0.0f));
+                boolean played = animations.playOnCup(cupId, animation);
                 player.sendMessage(played
                         ? ChatColor.GREEN + "Playing " + animation
                         : ChatColor.RED + "Failed to play " + animation);
@@ -116,10 +118,7 @@ public final class TeaSubCommand implements SubCommand {
                     player.sendMessage(ChatColor.RED + "No tea cup spawned.");
                     return true;
                 }
-                AnimationApi animationApi = context.animationApi();
-                for (String animation : animationApi.getAnimations(cupId)) {
-                    animationApi.stopAnimation(cupId, animation);
-                }
+                animations.stopCup(cupId);
                 player.sendMessage(ChatColor.GREEN + "Stopped all tea animations.");
                 return true;
             }
@@ -129,7 +128,7 @@ public final class TeaSubCommand implements SubCommand {
                     player.sendMessage(ChatColor.RED + "No tea cup spawned.");
                     return true;
                 }
-                context.virtualBlockManager().removeModel(cupId);
+                animations.remove(cupId);
                 player.sendMessage(ChatColor.GREEN + "Removed your tea cup.");
                 return true;
             }
@@ -148,7 +147,7 @@ public final class TeaSubCommand implements SubCommand {
             player.sendMessage(ChatColor.RED + "Tea model not loaded. Is models/tea.bbmodel installed?");
             return true;
         }
-        var placement = com.mineplus.infrastructure.virtual.VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
+        var placement = VirtualBlockPlacementHelper.getPlacementData(player, 6.0);
         if (placement == null) {
             player.sendMessage(ChatColor.RED + "Look at a nearby block face to place the tea cup.");
             return true;
@@ -156,12 +155,16 @@ public final class TeaSubCommand implements SubCommand {
         // Remove the previous cup first so /tea spawn stays one-per-player.
         UUID previous = spawnedByPlayer.remove(player.getUniqueId());
         if (previous != null) {
-            blocks.removeModel(previous);
+            animations.remove(previous);
         }
         blocks.prepareSpawnArea(model, placement, true);
-        UUID cupId = blocks.spawnModel(model, placement);
+        UUID cupId = animations.place(model, placement);
+        if (cupId == null) {
+            player.sendMessage(ChatColor.RED + "Failed to spawn the tea cup here.");
+            return true;
+        }
         spawnedByPlayer.put(player.getUniqueId(), cupId);
-        player.sendMessage(ChatColor.GREEN + "Spawned tea cup " + cupId + ". Try /tea play steam_idle");
+        player.sendMessage(ChatColor.GREEN + "Spawned tea cup. Try /tea play steam_idle");
         return true;
     }
 
@@ -171,31 +174,15 @@ public final class TeaSubCommand implements SubCommand {
             player.sendMessage(ChatColor.RED + "No tea cup spawned. Use /tea spawn first.");
             return true;
         }
-        AnimationApi animationApi = context.animationApi();
-        List<String> animations = animationApi.getAnimations(cupId);
-        if (animations.isEmpty()) {
-            player.sendMessage(ChatColor.RED + "Tea model has no animations loaded.");
-            return true;
-        }
-        player.sendMessage(ChatColor.GOLD + "Tea debug: playing " + animations.size() + " animations in sequence.");
-        for (int i = 0; i < animations.size(); i++) {
-            String animation = animations.get(i);
-            // steam_idle is authored as a loop; stop it after the step so the
-            // sequence always advances.
-            boolean looping = TeaKeys.ANIM_STEAM.equals(animation);
-            // Force ONCE so the looping steam clip also ends and the sequence advances.
-            LoopMode loop = LoopMode.ONCE;
+        player.sendMessage(ChatColor.GOLD + "Tea debug: playing " + TeaKeys.ANIMATIONS.size() + " animations in sequence.");
+        for (int i = 0; i < TeaKeys.ANIMATIONS.size(); i++) {
+            String animation = TeaKeys.ANIMATIONS.get(i);
             context.plugin().getServer().getScheduler().runTaskLater(
                     context.plugin(),
                     () -> {
-                        animationApi.playAnimation(cupId, animation, new AnimationPlayback(1.0f, loop, 0.0f));
-                        player.sendMessage(ChatColor.YELLOW + "[tea debug] " + animation);
-                        if (looping) {
-                            context.plugin().getServer().getScheduler().runTaskLater(
-                                    context.plugin(),
-                                    () -> animationApi.stopAnimation(cupId, animation),
-                                    DEBUG_STEP_DELAY_TICKS);
-                        }
+                        boolean played = animations.playOnCup(cupId, animation);
+                        player.sendMessage(ChatColor.YELLOW + "[tea debug] " + animation
+                                + (played ? "" : ChatColor.RED + " (failed)"));
                     },
                     i * DEBUG_STEP_DELAY_TICKS);
         }
