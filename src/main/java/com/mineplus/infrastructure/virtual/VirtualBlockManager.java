@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import com.mineplus.infrastructure.api.event.VirtualBlockClearAreaEvent;
+import com.mineplus.infrastructure.api.event.VirtualBlockInstanceRemoveEvent;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -283,12 +284,12 @@ public class VirtualBlockManager implements Listener {
     }
 
     public void removeModel(UUID instanceId) {
-        removeModelInternal(instanceId);
+        removeModelInternal(instanceId, VirtualBlockInstanceRemoveEvent.Reason.EXPLICIT);
     }
 
     public void removeAllModels() {
         for (UUID id : new ArrayList<>(activeBlocks.keySet())) {
-            removeModelInternal(id);
+            removeModelInternal(id, VirtualBlockInstanceRemoveEvent.Reason.CLEAR);
         }
     }
 
@@ -329,7 +330,7 @@ public class VirtualBlockManager implements Listener {
         UUID instanceId = blockToModelMap.get(BlockCoordinate.from(block.getLocation()));
         if (instanceId != null) {
             event.setDropItems(false);
-            removeModelInternal(instanceId);
+            removeModelInternal(instanceId, VirtualBlockInstanceRemoveEvent.Reason.BLOCK_BREAK);
             if (lifecycleManager != null) {
                 MultiBlockInstance instance = lifecycleManager.findByRenderedModelId(instanceId);
                 if (instance != null) {
@@ -603,6 +604,102 @@ public class VirtualBlockManager implements Listener {
      */
     public UUID spawnCollisionModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
         return spawnInternal(model, placement, UUID.randomUUID(), false);
+    }
+
+    /** An anchored model instance: the Core instance id plus the Interaction entity that hooks clicks. */
+    public record AnchoredModel(UUID instanceId, org.bukkit.entity.Interaction interaction) {}
+
+    /**
+     * Spawns a model anchored per its meta {@code anchorMode}:
+     *
+     * <ul>
+     *   <li>{@link AnchorMode#LATTICE} — identical to {@link #spawnModel}.</li>
+     *   <li>{@link AnchorMode#FRAME} — no barrier blocks; one invisible
+     *       {@code Interaction} entity sized from the model's bounding box
+     *       (clamped inside the anchor block) provides the click hooks.</li>
+     *   <li>{@link AnchorMode#INTERACTION_ONLY} — like FRAME but with a
+     *       full-block hitbox for easier clicking.</li>
+     * </ul>
+     *
+     * <p>The instance is registered in the same books as any other spawn, so
+     * {@link #removeModel}, area clears, chunk restore and
+     * {@link com.mineplus.infrastructure.api.event.VirtualBlockInstanceRemoveEvent}
+     * all work unchanged. Mount an external visual (a pack ItemDisplay) as a
+     * passenger of the returned interaction entity and it can never drift from
+     * the anchor — removing the instance removes the anchor, the passenger and
+     * the hooks together.
+     *
+     * @return null when the anchor block is occupied (mirrors the lattice
+     *         STRICT policy), otherwise the instance ids.
+     */
+    public AnchoredModel spawnAnchoredModel(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
+        ModelMeta meta = getModelMeta(model.name());
+        AnchorMode mode = meta == null ? AnchorMode.LATTICE : meta.resolvedAnchorMode();
+        if (mode == AnchorMode.LATTICE) {
+            UUID id = spawnModel(model, placement);
+            return id == null ? null : new AnchoredModel(id, null);
+        }
+
+        SpawnContext context = resolveSpawnContext(model, placement);
+        Location origin = context.origin();
+        Block anchorBlock = origin.getBlock();
+        if (!anchorBlock.getType().isAir()
+                && settings.collisionNonAirPolicy() == VirtualRenderingSettings.NonAirPolicy.STRICT) {
+            DebugLogger.warning("spawnAnchoredModel: anchor " + origin + " is not air; STRICT policy aborted spawn of '" + model.name() + "'.");
+            return null;
+        }
+
+        UUID instanceId = UUID.randomUUID();
+        org.bukkit.entity.Interaction interaction = (org.bukkit.entity.Interaction)
+                origin.getWorld().spawnEntity(origin.clone().add(0.5, 0.0, 0.5), org.bukkit.entity.EntityType.INTERACTION);
+        interaction.setResponsive(true);
+
+        if (mode == AnchorMode.FRAME) {
+            float[] half = modelHalfExtents(model);
+            // Clamp inside the anchor block so a frame-anchored item never
+            // claims more than its 1x1x1 cell, even for slightly loose models.
+            float width = Math.min(2f * Math.max(half[0], half[2]), 1.0f);
+            float height = Math.min(2f * half[1], 1.0f);
+            interaction.setInteractionWidth(Math.max(width, 0.1f));
+            interaction.setInteractionHeight(Math.max(height, 0.1f));
+        } else {
+            interaction.setInteractionWidth(1.0f);
+            interaction.setInteractionHeight(1.0f);
+        }
+
+        // Register with empty barrier/display sets: chunk load, clear and
+        // remove paths all behave, and the remove event fires for backends.
+        activeBlocks.put(instanceId, new ActiveVirtualBlock(
+                model.name(),
+                origin,
+                new Quaternionf(context.globalRotation()),
+                List.of(),
+                Set.of(),
+                List.of(),
+                null
+        ));
+        anchorToInstance.put(BlockCoordinate.from(origin), instanceId);
+        return new AnchoredModel(instanceId, interaction);
+    }
+
+    /** Half extents (x, y, z) of the model's raw cube geometry, in blocks. */
+    private float[] modelHalfExtents(VirtualModel model) {
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+        for (BakedCube cube : model.cubes()) {
+            ElementGeometry g = cube.geometry();
+            if (g == null) {
+                continue;
+            }
+            Vector3f from = g.from();
+            Vector3f to = g.to();
+            minX = Math.min(minX, from.x); minY = Math.min(minY, from.y); minZ = Math.min(minZ, from.z);
+            maxX = Math.max(maxX, to.x); maxY = Math.max(maxY, to.y); maxZ = Math.max(maxZ, to.z);
+        }
+        if (minX > maxX) {
+            return new float[]{0.5f, 0.5f, 0.5f};
+        }
+        return new float[]{(maxX - minX) / 2f, (maxY - minY) / 2f, (maxZ - minZ) / 2f};
     }
 
     /** Where a pack-rendered visual for this placement should sit: the anchor origin and the resolved rotation. */
@@ -909,7 +1006,7 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
-    private void removeModelInternal(UUID instanceId) {
+    private void removeModelInternal(UUID instanceId, VirtualBlockInstanceRemoveEvent.Reason reason) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
         if (activeBlock == null) return;
 
@@ -926,15 +1023,21 @@ public class VirtualBlockManager implements Listener {
 
         if (displayTransport != null && displayTransport.isRunning()) {
             displayTransport.removeInstance(instanceId);
-            return;
-        }
-
-        for (UUID displayId : activeBlock.displayEntities()) {
-            Entity display = Bukkit.getEntity(displayId);
-            if (display != null) {
-                display.remove();
+        } else {
+            for (UUID displayId : activeBlock.displayEntities()) {
+                Entity display = Bukkit.getEntity(displayId);
+                if (display != null) {
+                    display.remove();
+                }
             }
         }
+
+        // Notify external backends after the instance is fully torn down, so a
+        // listener that respawns sees a clean slate and one that only cleans up
+        // (a pack display mounted via spawnAnchoredModel) can never orphan.
+        VirtualBlockInstanceRemoveEvent removeEvent =
+                new VirtualBlockInstanceRemoveEvent(instanceId, activeBlock.modelName(), activeBlock.origin(), reason);
+        Bukkit.getPluginManager().callEvent(removeEvent);
     }
 
     public UUID restoreForState(BlockCoordinate anchor, String modelKey, Quaternionf rotation) {

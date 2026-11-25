@@ -1,3 +1,4 @@
 {
-  "originMode": "CENTER"
+  "originMode": "CENTER",
+  "anchorMode": "FRAME"
 }

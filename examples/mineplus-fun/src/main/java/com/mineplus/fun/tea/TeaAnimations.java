@@ -136,22 +136,26 @@ public final class TeaAnimations implements Listener {
     /* Placement                                                           */
 
     /**
-     * Places the cup through the pack axis: collision-only virtual spawn (the
-     * Core owns barriers and break behaviour) plus an {@link ItemDisplay}
-     * holding the tea pack item, so the cup renders with the resource-pack
-     * texture instead of the virtual engine's texel bake.
+     * Places the cup through the Core's anchored-model API. The cup's meta
+     * declares {@code anchorMode: FRAME}, so the Core spawns no barrier blocks
+     * at all — just one invisible {@code Interaction} entity sized from the
+     * model's bounding box — and registers the instance in its books, so
+     * breaks, clears and the remove event all flow through Core code. The pack
+     * {@link ItemDisplay} is mounted as a passenger of that interaction entity,
+     * so the visual can never drift from its anchor and dies with it.
      *
      * @return the placed cup id, or {@code null} when the model is unknown
      */
     public UUID place(VirtualModel model, VirtualBlockPlacementHelper.PlacementData placement) {
         VirtualBlockManager blocks = context.virtualBlockManager();
-        UUID instanceId = blocks.spawnCollisionModel(model, placement);
-        if (instanceId == null) {
+        VirtualBlockManager.AnchoredModel anchored = blocks.spawnAnchoredModel(model, placement);
+        if (anchored == null) {
             return null;
         }
+        UUID instanceId = anchored.instanceId();
         // Ask the Core for the anchor it actually resolved (meta origin mode,
         // rotation snapping) so the pack display lands exactly where the
-        // collision lattice did instead of recomputing either by hand.
+        // interaction entity sits instead of recomputing either by hand.
         VirtualBlockManager.DisplayAnchor anchor = blocks.displayAnchorFor(model, placement);
         // The anchor is the display origin the Core's own renderer uses. An
         // ItemDisplay still centers the 16px item-model box on the entity, so
@@ -168,13 +172,16 @@ public final class TeaAnimations implements Listener {
                     new Quaternionf()));
             spawned.setPersistent(false);
         });
+        if (anchored.interaction() != null) {
+            anchored.interaction().addPassenger(display);
+        }
         placedCups.put(instanceId, new PlacedCup(instanceId, display,
                 definition.createItem(),
                 frames == null ? null : new ItemFrameAnimator(frames)));
         return instanceId;
     }
 
-    /** Removes a placed cup (its pack display and its collision lattice). */
+    /** Removes a placed cup (its pack display and its Core instance). */
     public boolean remove(UUID cupId) {
         PlacedCup cup = placedCups.remove(cupId);
         if (cup == null) {
@@ -183,6 +190,19 @@ public final class TeaAnimations implements Listener {
         cup.display().remove();
         context.virtualBlockManager().removeModel(cup.instanceId());
         return true;
+    }
+
+    /**
+     * Core hook: any removal path (player breaks a lattice cell in legacy
+     * worlds, area clear, explicit remove) tears the pack display down with the
+     * instance, so a placed cup can never outlive its anchor.
+     */
+    @EventHandler
+    public void onInstanceRemove(com.mineplus.infrastructure.api.event.VirtualBlockInstanceRemoveEvent event) {
+        PlacedCup cup = placedCups.remove(event.getInstanceId());
+        if (cup != null) {
+            cup.display().remove();
+        }
     }
 
     public boolean isPlaced(UUID cupId) {

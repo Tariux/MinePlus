@@ -19,6 +19,7 @@ public final class AssetPipelineTest {
         cycleAndUnknownDetection();
         incrementalRebuilds();
         teaModelBakesInsideVanillaWindow();
+        anchorModeParsing();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -170,6 +171,37 @@ public final class AssetPipelineTest {
             check("steam clip has a real duration", steamLooping);
         } catch (Exception e) {
             failures.add("tea bake probe: " + e);
+        }
+    }
+
+    /**
+     * The tea meta declares {@code anchorMode: FRAME}: small items anchor on
+     * one invisible Interaction entity with no barrier blocks, sized from the
+     * model's bounding box and clamped inside the 1x1x1 anchor cell. Machines
+     * without the field keep the LATTICE default.
+     */
+    private static void anchorModeParsing() {
+        check("FRAME meta parsed",
+                loadAnchorMeta("{\"originMode\": \"CENTER\", \"anchorMode\": \"FRAME\"}")
+                        == com.mineplus.infrastructure.virtual.AnchorMode.FRAME);
+        check("missing anchorMode defaults to LATTICE",
+                loadAnchorMeta("{\"originMode\": \"CENTER\"}")
+                        == com.mineplus.infrastructure.virtual.AnchorMode.LATTICE);
+        check("unknown anchorMode falls back to LATTICE",
+                loadAnchorMeta("{\"anchorMode\": \"not-a-mode\"}")
+                        == com.mineplus.infrastructure.virtual.AnchorMode.LATTICE);
+    }
+
+    private static com.mineplus.infrastructure.virtual.AnchorMode loadAnchorMeta(String json) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("anchor-meta");
+            java.nio.file.Path model = dir.resolve("probe.bbmodel");
+            java.nio.file.Files.writeString(model, "{}");
+            java.nio.file.Files.writeString(dir.resolve("probe.meta.json"), json);
+            return com.mineplus.infrastructure.virtual.ModelMeta.load(model.toFile()).resolvedAnchorMode();
+        } catch (Exception e) {
+            failures.add("anchor meta parse: " + e);
+            return com.mineplus.infrastructure.virtual.AnchorMode.LATTICE;
         }
     }
 

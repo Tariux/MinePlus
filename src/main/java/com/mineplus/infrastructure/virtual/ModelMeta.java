@@ -14,6 +14,7 @@ import java.util.Map;
  * <pre>{@code
  * {
  *   "originMode": "GRID",
+ *   "anchorMode": "LATTICE",
  *   "collisionMode": "SURFACE",
  *   "collisionMaterial": "SLIME",
  *   "light": "normal",
@@ -32,6 +33,7 @@ import java.util.Map;
  */
 public record ModelMeta(
         OriginMode originMode,
+        AnchorMode anchorMode,
         CollisionMode collisionMode,
         CollisionMaterial collisionMaterial,
         LightTier light,
@@ -60,6 +62,12 @@ public record ModelMeta(
         animationFile = animationFile == null || animationFile.isBlank() ? null : animationFile.trim();
         displayFile = displayFile == null || displayFile.isBlank() ? null : displayFile.trim();
         triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
+        anchorMode = anchorMode == null ? null : anchorMode;
+    }
+
+    /** Resolved anchor strategy: explicit meta value, else {@link AnchorMode#LATTICE}. */
+    public AnchorMode resolvedAnchorMode() {
+        return anchorMode == null ? AnchorMode.LATTICE : anchorMode;
     }
 
     /**
@@ -273,7 +281,7 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
@@ -301,6 +309,7 @@ public record ModelMeta(
         try (com.google.gson.stream.JsonReader json =
                      new com.google.gson.stream.JsonReader(new java.io.BufferedReader(new java.io.FileReader(metaFile)))) {
             OriginMode originMode = null;
+            AnchorMode anchorMode = null;
             CollisionMode collisionMode = null;
             CollisionMaterial collisionMaterial = null;
             LightTier light = LightTier.OFF;
@@ -321,6 +330,7 @@ public record ModelMeta(
                 String field = json.nextName();
                 switch (field) {
                     case "originMode" -> originMode = OriginMode.fromKey(readString(json), null);
+                    case "anchorMode" -> anchorMode = AnchorMode.fromKey(readString(json), null);
                     case "collisionMode" -> collisionMode = CollisionMode.fromKey(readString(json), null);
                     case "collisionMaterial" -> collisionMaterial = CollisionMaterial.fromKey(readString(json), null);
                     case "light" -> light = LightTier.fromKey(readString(json));
@@ -340,7 +350,7 @@ public record ModelMeta(
             }
             json.endObject();
 
-            return new ModelMeta(originMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
+            return new ModelMeta(originMode, anchorMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
                     maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
                     animationFile, displayFile, triggers);
         } catch (Exception exception) {
