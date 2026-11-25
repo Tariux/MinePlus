@@ -14,14 +14,19 @@ public final class TeaKeys {
     /** Pack item id of the tea cup handed out by {@code /tea give}. */
     public static final String TEA_ITEM = "tea_cup";
 
-    /** Animation clips authored in {@code tea.bbmodel}. */
-    public static final String ANIM_DRINK = "drink_firstperson";
-    public static final String ANIM_FILL = "fill";
-    public static final String ANIM_EMPTY = "empty";
-    public static final String ANIM_STEAM = "steam_idle";
+    /**
+     * Animation clips authored in {@code tea.bbmodel}, mapped onto the Core's
+     * client-clock vocabulary at bake time ({@code drink_firstperson} →
+     * {@code reload}, {@code steam_idle} → {@code fire}; see
+     * {@link TeaBaker}). {@code fill}/{@code empty} animate only the tea
+     * surface's scale, which an item frame cannot express, so they never bake
+     * and are not listed.
+     */
+    public static final String ANIM_DRINK = "reload";
+    public static final String ANIM_STEAM = "fire";
 
-    /** Clips played by {@code /tea debug}, steam last (it is the looping one). */
-    public static final List<String> ANIMATIONS = List.of(ANIM_DRINK, ANIM_FILL, ANIM_EMPTY, ANIM_STEAM);
+    /** Authored names, shown to the player by {@code /tea}. */
+    public static final List<String> ANIMATIONS = List.of("drink_firstperson", "steam_idle");
 
     private TeaKeys() {
     }

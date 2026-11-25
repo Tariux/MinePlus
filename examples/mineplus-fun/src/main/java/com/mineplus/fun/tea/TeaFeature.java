@@ -13,9 +13,9 @@ import org.bukkit.plugin.java.JavaPlugin;
  * Wires the tea cup showcase into the Mineplus Core engine.
  *
  * <p>The {@code tea.bbmodel} (a cup, saucer, handle and steam rig animated with
- * four clips: {@code drink_firstperson}, {@code fill}, {@code empty} and the
- * looping {@code steam_idle}) and its {@code tea.png} texture ship inside this
- * module's jar and are installed into the Core's data folder through the Core's
+ * four clips; only {@code drink_firstperson} and the looping {@code
+ * steam_idle} express pose changes an item frame can bake) and its {@code
+ * tea.png} texture ship inside this module's jar and are installed into the Core's data folder through the Core's
  * module toolkit. The PNG sits next to the bbmodel under the model's texture
  * name so the Core's load-time baker picks it up.
  *

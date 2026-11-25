@@ -8,13 +8,16 @@ import com.mineplus.infrastructure.virtual.VirtualModel;
 import com.mineplus.pack.asset.ItemModelAsset;
 import com.mineplus.pack.item.ItemFrameAnimator;
 import com.mineplus.pack.item.ItemFrameWriter;
+import com.mineplus.pack.item.ItemFrames;
+import com.mineplus.pack.item.ItemFrames.ClipPlan;
+import com.mineplus.pack.item.ItemFrames.Sequence;
 import com.mineplus.pack.item.PackItemDefinition;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import org.bukkit.Location;
-import org.bukkit.entity.Display;
+import org.bukkit.Material;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -32,39 +35,59 @@ import org.joml.Quaternionf;
 /**
  * Drives the tea cup's animations through the resource pack itself.
  *
- * <p>The tea item is a framed pack item ({@link PackItemDefinition#isFramed()}):
- * its clips are baked frame models the client renders straight from the pack,
- * so the cup looks identical held, placed or in an inventory — no texel bake.
- * The animator walks the frames server-side and writes the matching custom
- * model data onto the held stack or the placed {@link ItemDisplay}'s stack.
+ * <p>Held item — client clock only. A held stack cannot be rewritten every
+ * tick without the client flickering or dropping the model (the same limit the
+ * gun module documents), so every held clip is a cooldown-driven pack
+ * sequence:
  *
- * <p>Default behavior: {@code steam_idle} loops whenever the cup is held or
- * placed. A right click while holding the cup plays {@code drink_firstperson}
- * (the vanilla potion-drink use is cancelled so the model never disappears);
- * {@code /tea play <clip>} plays any clip on the placed cup.
+ * <ul>
+ *   <li>{@code steam_idle} (registered as the {@code fire} clip) is gated on
+ *       the resting state: the stack sits at rest forever and the runtime only
+ *       re-arms the item cooldown once per cycle — the steam loop plays
+ *       client-side with zero stack writes.</li>
+ *   <li>{@code drink_firstperson} (registered as the {@code reload} clip) is
+ *       gated on its own first frame: a right click writes that state once,
+ *       arms the cooldown, and the client plays the drink. The vanilla potion
+ *       use is cancelled so the model never disappears into the drinking
+ *       pose.</li>
+ * </ul>
+ *
+ * <p>Placed cup — server clock. An {@link ItemDisplay} is not a player hand,
+ * so its stack may be rewritten per tick: an {@link ItemFrameAnimator} loops
+ * {@code steam_idle} and {@code /tea play <clip>} plays any baked clip on it.
  */
 public final class TeaAnimations implements Listener {
-
-    private static final long TICK_PERIOD = 1L;
 
     private final JavaPlugin plugin;
     private final PluginContext context;
     private final PackItemDefinition definition;
-    private final ItemFramesHandle frames;
-    private final Map<UUID, ItemFrameAnimator> heldSessions = new HashMap<>();
+    private final ItemFrames frames;
+    private final int steamTicks;
+    private final int drinkTicks;
+    private final Map<UUID, Held> held = new HashMap<>();
     private final Map<UUID, PlacedCup> placedCups = new HashMap<>();
     private BukkitTask ticker;
 
     /** Null when the frame bake failed — the runtime then stays idle. */
-    public record ItemFramesHandle(com.mineplus.pack.item.ItemFrames spec) {
+    public record ItemFramesHandle(ItemFrames spec) {
 
         public boolean available() {
             return spec != null;
         }
+    }
 
-        public boolean hasClip(String name) {
-            return spec != null && spec.clip(name) != null;
-        }
+    private static final class Held {
+        Mode mode = Mode.NONE;
+        int remaining;
+    }
+
+    private enum Mode {
+        /** Not holding yet: seat the stack at rest and arm the steam loop. */
+        NONE,
+        /** Steam loop: cooldown re-arms once per cycle, no stack writes. */
+        STEAM,
+        /** Drink playing: when the countdown ends, hand back to the loop. */
+        DRINK
     }
 
     private record PlacedCup(UUID instanceId, ItemDisplay display, ItemStack stack, ItemFrameAnimator animator) {
@@ -75,13 +98,23 @@ public final class TeaAnimations implements Listener {
         this.plugin = plugin;
         this.context = context;
         this.definition = definition;
-        this.frames = frames;
+        this.frames = frames == null ? null : frames.spec();
+        this.steamTicks = clipTicks("fire", 60);
+        this.drinkTicks = clipTicks("reload", 32);
     }
 
-    /** Registers the interaction listener and starts the frame ticker. */
+    private int clipTicks(String name, int fallback) {
+        if (frames == null) {
+            return fallback;
+        }
+        ItemFrames.Clip clip = frames.clip(name);
+        return clip == null || clip.frameCount() < 2 ? fallback : clip.frameCount();
+    }
+
+    /** Registers the interaction listener and starts the animation ticker. */
     public void start() {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        ticker = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 1L, TICK_PERIOD);
+        ticker = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
     public void stop() {
@@ -89,7 +122,7 @@ public final class TeaAnimations implements Listener {
             ticker.cancel();
             ticker = null;
         }
-        heldSessions.clear();
+        held.clear();
         for (PlacedCup cup : placedCups.values()) {
             cup.display().remove();
         }
@@ -134,7 +167,7 @@ public final class TeaAnimations implements Listener {
         });
         placedCups.put(instanceId, new PlacedCup(instanceId, display,
                 definition.createItem(),
-                frames.available() ? new ItemFrameAnimator(frames.spec()) : null));
+                frames == null ? null : new ItemFrameAnimator(frames)));
         return instanceId;
     }
 
@@ -156,12 +189,21 @@ public final class TeaAnimations implements Listener {
     /** Starts a clip on the placed cup; steam clips loop, others play once. */
     public boolean playOnCup(UUID cupId, String clip) {
         PlacedCup cup = placedCups.get(cupId);
-        return cup != null && cup.animator() != null && cup.animator().start(clip);
+        if (cup == null || cup.animator() == null) {
+            return false;
+        }
+        String registered = clip;
+        if (clip.equalsIgnoreCase("steam_idle")) {
+            registered = TeaKeys.ANIM_STEAM;
+        } else if (clip.equalsIgnoreCase("drink_firstperson")) {
+            registered = TeaKeys.ANIM_DRINK;
+        }
+        return cup.animator().start(registered);
     }
 
     public void stopCup(UUID cupId) {
         PlacedCup cup = placedCups.get(cupId);
-        if (cup != null) {
+        if (cup != null && cup.animator() != null) {
             cup.animator().stop();
         }
     }
@@ -176,18 +218,14 @@ public final class TeaAnimations implements Listener {
                 && event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK)) {
             return;
         }
-        ItemStack stack = event.getItem();
-        if (!isTea(stack)) {
+        if (!isTea(event.getItem())) {
             return;
         }
         // The backing material is a potion: without this the client starts the
         // vanilla drink animation and the model disappears into the drinking
         // pose, and on a block the cup would try to place it.
         event.setCancelled(true);
-        ItemFrameAnimator session = session(event.getPlayer());
-        if (session != null && !session.active()) {
-            session.start(TeaKeys.ANIM_DRINK);
-        }
+        startDrink(event.getPlayer());
     }
 
     @EventHandler
@@ -199,7 +237,7 @@ public final class TeaAnimations implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        heldSessions.remove(event.getPlayer().getUniqueId());
+        held.remove(event.getPlayer().getUniqueId());
     }
 
     /* ------------------------------------------------------------------ */
@@ -207,11 +245,11 @@ public final class TeaAnimations implements Listener {
 
     private void tick() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            ItemStack held = player.getInventory().getItemInMainHand();
-            if (isTea(held)) {
-                tickHeld(player, held);
+            ItemStack heldStack = player.getInventory().getItemInMainHand();
+            if (isTea(heldStack)) {
+                tickHeld(player, heldStack);
             } else {
-                heldSessions.remove(player.getUniqueId());
+                held.remove(player.getUniqueId());
             }
         }
         Iterator<Map.Entry<UUID, PlacedCup>> cups = placedCups.entrySet().iterator();
@@ -232,39 +270,86 @@ public final class TeaAnimations implements Listener {
                     state = cup.animator().tick();
                 }
             }
-            cup.display().setItemStack(stackAt(cup.stack(), state));
+            ItemStack frame = stackAt(cup.stack(), state);
+            if (frame != cup.stack()) {
+                cup.display().setItemStack(frame);
+            }
         }
     }
 
-    private void tickHeld(Player player, ItemStack held) {
-        ItemFrameAnimator session = session(player);
-        if (session == null) {
+    private void tickHeld(Player player, ItemStack stack) {
+        if (frames == null || definition.plan().isEmpty()) {
             return;
         }
-        int state = session.tick();
-        if (state < 0) {
-            // One-shot clip finished: hand control back to the default loop.
-            session.start(TeaKeys.ANIM_STEAM);
-            state = session.tick();
-        }
-        int value = definition.frameStackValue(state);
-        if (ItemFrameWriter.read(held) != value) {
-            ItemFrameWriter.apply(held, value);
-            player.getInventory().setItemInMainHand(held);
+        Held session = held.computeIfAbsent(player.getUniqueId(), id -> new Held());
+        Material material = definition.backingMaterial();
+        switch (session.mode) {
+            case NONE -> {
+                // Seat the stack at rest once; the steam sequence is gated on
+                // rest, so the client walks it on the cooldown's clock.
+                writeFrame(player, stack, restState());
+                player.setCooldown(material, 0);
+                player.setCooldown(material, steamTicks);
+                session.mode = Mode.STEAM;
+                session.remaining = steamTicks;
+            }
+            case STEAM -> {
+                session.remaining--;
+                if (session.remaining <= 0 && player.getCooldown(material) <= 1) {
+                    player.setCooldown(material, steamTicks);
+                    session.remaining = steamTicks;
+                }
+            }
+            case DRINK -> {
+                session.remaining--;
+                if (session.remaining <= 0) {
+                    writeFrame(player, stack, restState());
+                    player.setCooldown(material, steamTicks);
+                    session.mode = Mode.STEAM;
+                    session.remaining = steamTicks;
+                }
+            }
         }
     }
 
-    private ItemFrameAnimator session(Player player) {
-        if (!frames.available()) {
-            return null;
+    /** Plays the drink clip on the held cup, client-side. */
+    private void startDrink(Player player) {
+        if (frames == null || definition.plan().isEmpty()) {
+            return;
         }
-        // steam_idle loops by default whenever the cup is held and no one-shot
-        // clip is running.
-        return heldSessions.computeIfAbsent(player.getUniqueId(), id -> {
-            ItemFrameAnimator animator = new ItemFrameAnimator(frames.spec());
-            animator.start(TeaKeys.ANIM_STEAM);
-            return animator;
-        });
+        Held session = held.get(player.getUniqueId());
+        if (session != null && session.mode == Mode.DRINK) {
+            return; // already drinking
+        }
+        ClipPlan plan = definition.plan();
+        Sequence drink = plan == null ? null : plan.sequence("reload");
+        if (drink == null) {
+            return;
+        }
+        ItemStack stack = player.getInventory().getItemInMainHand();
+        Material material = definition.backingMaterial();
+        // Drop any running steam cooldown first so the client is back on the
+        // stack state, then move that state onto the drink's gate and arm it.
+        player.setCooldown(material, 0);
+        writeFrame(player, stack, definition.frameStackValue(drink.gateState()));
+        player.setCooldown(material, drinkTicks);
+        if (session == null) {
+            session = new Held();
+            held.put(player.getUniqueId(), session);
+        }
+        session.mode = Mode.DRINK;
+        session.remaining = drinkTicks;
+    }
+
+    private int restState() {
+        return definition.frameStackValue(0);
+    }
+
+    private void writeFrame(Player player, ItemStack stack, int value) {
+        if (ItemFrameWriter.read(stack) != value) {
+            ItemFrameWriter.apply(stack, value);
+            player.getInventory().setItemInMainHand(stack);
+        }
     }
 
     private ItemStack stackAt(ItemStack base, int state) {

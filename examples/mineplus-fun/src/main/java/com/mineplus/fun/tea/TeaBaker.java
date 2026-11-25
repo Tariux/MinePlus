@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -45,6 +46,41 @@ final class TeaBaker {
     private static final int MIN_POSES = 3;
     private static final int MAX_POSES = 16;
 
+    /**
+     * Authored hand poses for slots the bbmodel does not carry. The source
+     * authors ground/gui/head/fixed; the held slots are filled from here so the
+     * cup never falls back to the vanilla display transform (which swallows the
+     * model in first person).
+     */
+    private static final String HAND_DISPLAY_DEFAULTS = """
+            {
+             "firstperson_righthand":{"rotation":[0,0,0],"translation":[0,2,0.5],"scale":[0.6,0.6,0.6]},
+             "firstperson_lefthand":{"rotation":[0,0,0],"translation":[0,2,0.5],"scale":[0.6,0.6,0.6]},
+             "thirdperson_righthand":{"rotation":[0,0,0],"translation":[0,2,0.5],"scale":[0.65,0.65,0.65]},
+             "thirdperson_lefthand":{"rotation":[0,0,0],"translation":[0,2,0.5],"scale":[0.65,0.65,0.65]}
+            }
+            """;
+
+    /**
+     * Maps authored clip names onto the Core's client-clock clip vocabulary
+     * ({@code reload}/{@code fire}/{@code equip}/{@code cycle}). Only these
+     * names get a cooldown-driven sequence in the pack, so an unmapped name
+     * leaves the clip server-writable only — which a held stack cannot do
+     * without flickering (the gun module's bake doc spells this out).
+     *
+     * <ul>
+     *   <li>{@code drink_firstperson} → {@code reload}: gated on its own first
+     *       frame, so the right-click handler writes that state once and starts
+     *       the cooldown; the drink then plays entirely on the client's clock.</li>
+     *   <li>{@code steam_idle} → {@code fire}: gated on the resting state, so
+     *       the stack can sit at rest forever and the runtime just re-arms the
+     *       cooldown each cycle — zero stack rewrites while held.</li>
+     * </ul>
+     */
+    private static final Map<String, String> CLIP_NAME_MAPPING = Map.of(
+            "drink_firstperson", "reload",
+            "steam_idle", "fire");
+
     private TeaBaker() {
     }
 
@@ -66,7 +102,7 @@ final class TeaBaker {
         try {
             byte[] bytes = Files.readAllBytes(source.toPath());
             ModelData model = BbModelParser.parse("tea", bytes, reference -> null);
-            BbClipBaker.Style style = new BbClipBaker.Style(displayOf(bytes),
+            BbClipBaker.Style style = new BbClipBaker.Style(displayWithHands(bytes),
                     TEXTURE_REFERENCE, true);
             JsonObject rest = first(BbClipBaker.rest(model, style));
             if (rest == null) {
@@ -97,9 +133,13 @@ final class TeaBaker {
                 for (int i = 0; i < frames.size(); i++) {
                     references.add(reference(write(context.packApi(), stage, stem(clip, i), frames.get(i))));
                 }
+                // Map authored clip names onto the client-clock vocabulary and
+                // drop anything the frame format cannot express.
+                String name = CLIP_NAME_MAPPING.getOrDefault(
+                        clip.toLowerCase(Locale.ROOT), clip.toLowerCase(Locale.ROOT));
                 // steam_idle is authored as a loop; every other clip plays once.
                 boolean loop = clip.toLowerCase(Locale.ROOT).contains("steam");
-                builder.clip(clip.toLowerCase(Locale.ROOT), references, 0, loop);
+                builder.clip(name, references, 0, loop);
                 clips++;
             }
             log.info("[Tea] Baked " + (clips + 1) + " pack frame model group(s) from tea.bbmodel.");
@@ -132,6 +172,23 @@ final class TeaBaker {
             // fall through to vanilla defaults
         }
         return new JsonObject();
+    }
+
+    /**
+     * The authored display block plus the hand slots the bbmodel omits. Authored
+     * slots always win; only missing hand slots come from {@link
+     * #HAND_DISPLAY_DEFAULTS} so the cup holds like a cup instead of collapsing
+     * onto the vanilla first-person transform.
+     */
+    private static JsonObject displayWithHands(byte[] bytes) {
+        JsonObject display = displayOf(bytes);
+        JsonObject defaults = JsonParser.parseString(HAND_DISPLAY_DEFAULTS).getAsJsonObject();
+        for (Map.Entry<String, JsonElement> slot : defaults.entrySet()) {
+            if (!display.has(slot.getKey())) {
+                display.add(slot.getKey(), slot.getValue().deepCopy());
+            }
+        }
+        return display;
     }
 
     private static JsonObject first(BbClipBaker.Result result) {
