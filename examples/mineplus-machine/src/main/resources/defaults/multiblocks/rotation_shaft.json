@@ -1,0 +1,16 @@
+{
+  "id": "rotation_shaft",
+  "name": "Rotation Shaft",
+  "levels": {
+    "1": {
+      "model": "models/shaft.bbmodel",
+      "speed": 1.0,
+      "durability": 40.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Rotation Shaft",
+        "rotation.kind": "shaft"
+      }
+    }
+  }
+}

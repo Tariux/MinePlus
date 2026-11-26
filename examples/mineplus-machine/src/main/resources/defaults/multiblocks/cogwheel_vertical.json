@@ -1,0 +1,17 @@
+{
+  "id": "cogwheel_vertical",
+  "name": "Cogwheel (Vertical)",
+  "levels": {
+    "1": {
+      "model": "models/gear_vertical.bbmodel",
+      "speed": 1.0,
+      "durability": 60.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Cogwheel (Vertical)",
+        "rotation.kind": "shaft",
+        "rotation.cogwheel": "true"
+      }
+    }
+  }
+}

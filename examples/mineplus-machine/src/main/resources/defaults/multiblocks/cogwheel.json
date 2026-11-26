@@ -1,0 +1,17 @@
+{
+  "id": "cogwheel",
+  "name": "Cogwheel",
+  "levels": {
+    "1": {
+      "model": "models/gear.bbmodel",
+      "speed": 1.0,
+      "durability": 60.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Cogwheel",
+        "rotation.kind": "shaft",
+        "rotation.cogwheel": "true"
+      }
+    }
+  }
+}

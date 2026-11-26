@@ -47,6 +47,7 @@ Copy these into your server's `plugins/Mineplus/` data folders and run `/mineplu
 | Folder | Shows |
 |---|---|
 | [`mineplus-mobfun/`](mineplus-mobfun/) | A **complete, buildable plugin** built on the Core's mob behavior engine: nine vanilla mobs (grazers, reforesting pig, lamplighter villager, florist bee, block-by-block golem guardians, necromancer witch with synced horseman raids, pilgrim villagers journeying to villages with night camps) driven by interval-gated, budget-capped, condition-gated world actions, with live status/toggles plus a spawn-and-force test bench via `/mobfun` |
+| [`mineplus-machine/`](mineplus-machine/README.md) | A **complete, buildable plugin** on the Core's rotation networks (Create-style kinetic power): water wheels in three strengths (weak/regular/strong SU), shafts, three cogwheel orientations that visibly counter-rotate when meshed, and a brake lever that stalls its whole network — all config-driven via `rotation.*` guiOptions, rendered resourcepack-side with spin driven per tick, test bench via `/machine` |
 
 ## 🗺️ Where to go next
 

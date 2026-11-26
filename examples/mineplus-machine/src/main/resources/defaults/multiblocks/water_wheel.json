@@ -1,0 +1,18 @@
+{
+  "id": "water_wheel",
+  "name": "Water Wheel",
+  "levels": {
+    "1": {
+      "model": "models/water_wheel.bbmodel",
+      "speed": 1.0,
+      "durability": 100.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Water Wheel",
+        "rotation.kind": "source",
+        "rotation.su": "512",
+        "rotation.speed": "6.0"
+      }
+    }
+  }
+}

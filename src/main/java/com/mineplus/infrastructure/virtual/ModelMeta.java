@@ -26,9 +26,16 @@ import java.util.Map;
  *   "texelBrightness": 15,
  *   "animationFile": "alchemy-animations.bbmodel",
  *   "displayFile": "alchemy-display.bbmodel",
- *   "triggers": { "reload": "reload_clip", "fire": "fire_clip" }
+ *   "triggers": { "reload": "reload_clip", "fire": "fire_clip" },
+ *   "fillBox": [0, 0, 0, 0, 0, 0]
  * }
  * }</pre>
+ * {@code fillBox} (optional) declares the model's own filling space: inclusive
+ * min/max cell coordinates {@code [minX,minY,minZ,maxX,maxY,maxZ]} relative to
+ * the anchor block. Only cells inside it may receive invisible collision
+ * blocks; geometry elsewhere (a water wheel's ring over a river, for example)
+ * never becomes solid, so water and other world content beside the model keeps
+ * flowing. Omitted or malformed means fill the whole geometry-occupied volume.
  * Any omitted field falls back to the global settings default.
  */
 public record ModelMeta(
@@ -47,7 +54,8 @@ public record ModelMeta(
         String itemParent,
         String animationFile,
         String displayFile,
-        Map<String, String> triggers
+        Map<String, String> triggers,
+        int[] fillBox
 ) {
 
     public ModelMeta {
@@ -63,6 +71,58 @@ public record ModelMeta(
         displayFile = displayFile == null || displayFile.isBlank() ? null : displayFile.trim();
         triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
         anchorMode = anchorMode == null ? null : anchorMode;
+        fillBox = normalizeFillBox(fillBox);
+    }
+
+    /**
+     * Normalizes a declared filling space to {@code [minX,minY,minZ,maxX,maxY,maxZ]}
+     * (min <= max per axis, defensive copy). Anything other than exactly six
+     * entries becomes {@code null} (fill the whole geometry-occupied volume).
+     */
+    private static int[] normalizeFillBox(int[] box) {
+        if (box == null || box.length != 6) {
+            return null;
+        }
+        return new int[] {
+                Math.min(box[0], box[3]), Math.min(box[1], box[4]), Math.min(box[2], box[5]),
+                Math.max(box[0], box[3]), Math.max(box[1], box[4]), Math.max(box[2], box[5])
+        };
+    }
+
+    /** True when the anchor-relative cell sits inside the declared filling space. */
+    public static boolean fillBoxContains(int[] fillBox, int x, int y, int z) {
+        return fillBox != null
+                && x >= fillBox[0] && x <= fillBox[3]
+                && y >= fillBox[1] && y <= fillBox[4]
+                && z >= fillBox[2] && z <= fillBox[5];
+    }
+
+    /** This model's declared filling space, or {@code null} for the full geometry volume. */
+    public int[] fillBox() {
+        return fillBox;
+    }
+
+    /** Restricts occupied cells ({@code x,y,z} triples) to the declared filling space. */
+    public int[] restrictCells(int[] cells) {
+        if (fillBox == null || cells == null || cells.length == 0) {
+            return cells;
+        }
+        int kept = 0;
+        for (int i = 0; i + 2 < cells.length; i += 3) {
+            if (fillBoxContains(fillBox, cells[i], cells[i + 1], cells[i + 2])) {
+                kept++;
+            }
+        }
+        int[] restricted = new int[kept * 3];
+        int o = 0;
+        for (int i = 0; i + 2 < cells.length; i += 3) {
+            if (fillBoxContains(fillBox, cells[i], cells[i + 1], cells[i + 2])) {
+                restricted[o++] = cells[i];
+                restricted[o++] = cells[i + 1];
+                restricted[o++] = cells[i + 2];
+            }
+        }
+        return restricted;
     }
 
     /** Resolved anchor strategy: explicit meta value, else {@link AnchorMode#LATTICE}. */
@@ -281,7 +341,7 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public boolean isEmpty() {
@@ -289,7 +349,8 @@ public record ModelMeta(
                 && light == LightTier.OFF && autoplay.isEmpty()
                 && texelMode == null && texelDetail == null
                 && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
-                && texelBrightness == null && display.isEmpty() && itemParent == null;
+                && texelBrightness == null && display.isEmpty() && itemParent == null
+                && fillBox == null;
     }
 
     public static ModelMeta load(File modelFile) {
@@ -324,6 +385,7 @@ public record ModelMeta(
             String animationFile = null;
             String displayFile = null;
             Map<String, String> triggers = new LinkedHashMap<>();
+            int[] fillBox = null;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -344,6 +406,7 @@ public record ModelMeta(
                     case "itemParent" -> itemParent = readString(json);
                     case "animationFile" -> animationFile = readString(json);
                     case "displayFile" -> displayFile = readString(json);
+                    case "fillBox" -> fillBox = readFillBox(json);
                     case "triggers" -> readTriggerMap(json, triggers);
                     default -> json.skipValue();
                 }
@@ -352,7 +415,7 @@ public record ModelMeta(
 
             return new ModelMeta(originMode, anchorMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
                     maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
-                    animationFile, displayFile, triggers);
+                    animationFile, displayFile, triggers, fillBox);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());
@@ -395,6 +458,29 @@ public record ModelMeta(
             json.skipValue();
             return null;
         }
+    }
+
+    /** Reads an optional 6-int filling space: inclusive min/max cells relative to the anchor. */
+    private static int[] readFillBox(com.google.gson.stream.JsonReader json) throws Exception {
+        if (json.peek() != com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+            json.skipValue();
+            return null;
+        }
+        int[] box = new int[6];
+        json.beginArray();
+        int read = 0;
+        while (json.hasNext() && read < 6) {
+            if (json.peek() != com.google.gson.stream.JsonToken.NUMBER) {
+                json.skipValue();
+                return null;
+            }
+            box[read++] = json.nextInt();
+        }
+        while (json.hasNext()) {
+            json.skipValue();
+        }
+        json.endArray();
+        return read == 6 ? box : null;
     }
 
     private static void readStringArray(com.google.gson.stream.JsonReader json, List<String> output) throws Exception {

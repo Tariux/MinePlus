@@ -1,0 +1,17 @@
+{
+  "id": "rotation_brake",
+  "name": "Rotation Brake Lever",
+  "levels": {
+    "1": {
+      "model": "models/lever_handle.bbmodel",
+      "speed": 1.0,
+      "durability": 30.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Rotation Brake Lever",
+        "rotation.kind": "consumer",
+        "rotation.stress": "1"
+      }
+    }
+  }
+}

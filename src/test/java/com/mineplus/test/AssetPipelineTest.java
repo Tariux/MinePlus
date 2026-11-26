@@ -20,6 +20,7 @@ public final class AssetPipelineTest {
         incrementalRebuilds();
         teaModelBakesInsideVanillaWindow();
         anchorModeParsing();
+        fillBoxParsing();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -202,6 +203,48 @@ public final class AssetPipelineTest {
         } catch (Exception e) {
             failures.add("anchor meta parse: " + e);
             return com.mineplus.infrastructure.virtual.AnchorMode.LATTICE;
+        }
+    }
+
+    /**
+     * Per-model filling space: {@code fillBox} limits which anchor-relative
+     * cells may become invisible collision blocks, so water (and anything
+     * else in the world) beside the model keeps flowing.
+     */
+    private static void fillBoxParsing() {
+        int[] single = loadFillMeta("{\"fillBox\": [0, 0, 0, 0, 0, 0]}");
+        check("fillBox single cell parsed", single != null && single.length == 6
+                && single[0] == 0 && single[5] == 0);
+        int[] box = loadFillMeta("{\"fillBox\": [-1, -2, 1, 2, 3, 1]}");
+        check("fillBox wide box parsed min<=max", box != null && box[0] == -1 && box[3] == 2
+                && box[1] == -2 && box[4] == 3 && box[2] == 1 && box[5] == 1);
+        check("fillBox contains inside cell",
+                com.mineplus.infrastructure.virtual.ModelMeta.fillBoxContains(box, 0, 0, 1));
+        check("fillBox rejects outside cell",
+                !com.mineplus.infrastructure.virtual.ModelMeta.fillBoxContains(box, 0, 0, 2));
+        check("missing fillBox means full volume", loadFillMeta("{}") == null);
+        check("malformed fillBox means full volume", loadFillMeta("{\"fillBox\": [1, 2, 3]}") == null);
+        check("non-numeric fillBox means full volume",
+                loadFillMeta("{\"fillBox\": [\"a\", 0, 0, 0, 0, 0]}") == null);
+
+        com.mineplus.infrastructure.virtual.ModelMeta meta =
+                com.mineplus.infrastructure.virtual.ModelMeta.empty();
+        // restrictCells keeps only cells inside the declared space.
+        int[] all = {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2};
+        int[] restricted = meta.restrictCells(all);
+        check("null fillBox restricts nothing", restricted == all);
+    }
+
+    private static int[] loadFillMeta(String json) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("fill-meta");
+            java.nio.file.Path model = dir.resolve("probe.bbmodel");
+            java.nio.file.Files.writeString(model, "{}");
+            java.nio.file.Files.writeString(dir.resolve("probe.meta.json"), json);
+            return com.mineplus.infrastructure.virtual.ModelMeta.load(model.toFile()).fillBox();
+        } catch (Exception e) {
+            failures.add("fill meta parse: " + e);
+            return null;
         }
     }
 

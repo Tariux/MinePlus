@@ -586,6 +586,9 @@ public class VirtualBlockManager implements Listener {
         int[] cells = occupancyCalculator.compute(
                 model, snapped, placement.globalRotation(), collisionMode,
                 settings.collisionEpsilon(), originMode);
+        // A declared filling space limits which cells may ever become solid —
+        // everything outside it stays world space (flowing water, open air).
+        cells = meta == null ? cells : meta.restrictCells(cells);
 
         return new SpawnContext(collisionMode, originMode, origin, snapped, globalRotation, cells);
     }
@@ -746,6 +749,11 @@ public class VirtualBlockManager implements Listener {
         for (int i = 0; i + 2 < cells.length; i += 3) {
             Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
             Block block = location.getBlock();
+            if (block.getType() == Material.WATER) {
+                // Never solidify water: machines placed in (or beside) a river
+                // keep the flow, and the lattice simply omits that cell.
+                continue;
+            }
             if (block.getType().isAir()) {
                 block.setType(latticeMaterial.block);
                 barrierBlocks.add(location);

@@ -77,11 +77,37 @@ tasks.register('testRunners') {
     dependsOn tasks.named('testClasses')
 }
 
+def resultsDir = layout.buildDirectory.dir('test-results/test')
+
 testRunnerMains.each { main ->
     def taskName = 'testRun' + main.tokenize('.').last()
     tasks.register(taskName, JavaExec) {
         classpath = sourceSets.test.runtimeClasspath
         mainClass = main
+        ignoreExitValue = true
+        doFirst {
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        doLast {
+            def out = standardOutput.toString()
+            def err = errorOutput.toString()
+            def failed = executionResult.get().exitValue != 0
+            def suite = main.tokenize('.').last()
+            def dir = resultsDir.get().asFile
+            dir.mkdirs()
+            new File(dir, "${suite}.xml").text = """<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="${main}" tests="1" failures="${failed ? 1 : 0}" errors="0" skipped="0">
+  <testcase name="${suite}" classname="${main}" time="0">
+${failed ? "    <failure message=\"runner exited non-zero\" type=\"RunnerFailure\"><![CDATA[${out}${err}]]></failure>\n" : ''}  </testcase>
+  <system-out><![CDATA[${out}]]></system-out>
+  <system-err><![CDATA[${err}]]></system-err>
+</testsuite>
+"""
+            if (failed) {
+                throw new GradleException("${taskName} failed\n${out}${err}")
+            }
+        }
     }
     tasks.named('testRunners') {
         dependsOn taskName

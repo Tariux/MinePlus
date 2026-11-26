@@ -1,0 +1,14 @@
+name: MineplusMachine
+version: ${version}
+main: com.mineplus.machine.MineplusMachinePlugin
+api-version: '1.21'
+author: Tariux
+description: Create-style mechanical power showcase for Mineplus - water wheels (weak/regular/strong SU), shafts and cogwheels (counter-rotating meshes), and a brake lever, all rendered resourcepack-side with spin driven per tick by the Core rotation networks.
+website: https://github.com/Tariux/MinePlus
+
+depend: [Mineplus]
+
+permissions:
+  mineplusmachine.admin:
+    description: Allows using /machine test bench controls
+    default: op

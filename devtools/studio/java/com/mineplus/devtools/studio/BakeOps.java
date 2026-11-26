@@ -3,6 +3,7 @@ package com.mineplus.devtools.studio;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mineplus.infrastructure.virtual.AnchorMode;
 import com.mineplus.infrastructure.virtual.BakedCube;
 import com.mineplus.infrastructure.virtual.BakedFace;
 import com.mineplus.infrastructure.virtual.BbModelImporter;
@@ -966,6 +967,9 @@ final class BakeOps {
                 str(overrides, "originMode", null) != null
                         ? ModelMeta.OriginMode.fromKey(str(overrides, "originMode", null), null)
                         : base.originMode(),
+                str(overrides, "anchorMode", null) != null
+                        ? AnchorMode.fromKey(str(overrides, "anchorMode", null), null)
+                        : base.anchorMode(),
                 str(overrides, "collisionMode", null) != null
                         ? ModelMeta.CollisionMode.fromKey(str(overrides, "collisionMode", null), null)
                         : base.collisionMode(),
@@ -989,7 +993,27 @@ final class BakeOps {
                 str(overrides, "itemParent", base.itemParent()),
                 base.animationFile(),
                 base.displayFile(),
-                base.triggers());
+                base.triggers(),
+                fillBox(overrides, base.fillBox()));
+    }
+
+    /** Parses an optional {@code fillBox: [minX..maxZ]} array from the overrides. */
+    private static int[] fillBox(JsonObject overrides, int[] fallback) {
+        if (overrides == null || !overrides.has("fillBox") || !overrides.get("fillBox").isJsonArray()) {
+            return fallback;
+        }
+        JsonArray array = overrides.getAsJsonArray("fillBox");
+        if (array.size() != 6) {
+            return null;
+        }
+        int[] box = new int[6];
+        for (int i = 0; i < 6; i++) {
+            if (!array.get(i).isJsonPrimitive() || !array.get(i).getAsJsonPrimitive().isNumber()) {
+                return null;
+            }
+            box[i] = array.get(i).getAsInt();
+        }
+        return box;
     }
 
     /**

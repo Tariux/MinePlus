@@ -1,0 +1,18 @@
+{
+  "id": "water_wheel_strong",
+  "name": "Water Wheel (Strong)",
+  "levels": {
+    "1": {
+      "model": "models/water_wheel_strong.bbmodel",
+      "speed": 1.0,
+      "durability": 150.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Water Wheel (Strong)",
+        "rotation.kind": "source",
+        "rotation.su": "1024",
+        "rotation.speed": "10.0"
+      }
+    }
+  }
+}

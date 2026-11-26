@@ -1,0 +1,144 @@
+package com.mineplus.machine;
+
+import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.core.network.rotation.RotationNetworkService;
+import com.mineplus.infrastructure.module.ModuleFeature;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Machine — Create-style mechanical power showcase for Mineplus Core.
+ *
+ * <p>Everything kinetic is config: each {@code defaults/multiblocks/*.json}
+ * declares its behaviour through {@code rotation.*} guiOptions
+ * ({@code kind}, {@code su}, {@code stress}, {@code speed}, {@code cogwheel}),
+ * and the Core's {@link RotationNetworkService} picks those up at type
+ * registration. This plugin only wires the render side: each solved member
+ * gets its model's {@code spin} (wheels, shafts, gears) or {@code swing}
+ * (lever) clip replayed at the network's live speed, with sign preserved so
+ * meshed cogwheels visibly counter-rotate. Interacting with a brake lever
+ * toggles it between engaged and released.
+ */
+public final class MineplusMachinePlugin extends ModuleFeature {
+
+    private static final String SPIN_CLIP = "spin";
+    private static final String SWING_CLIP = "swing";
+    private static final String BRAKE_TYPE_ID = "rotation_brake";
+
+    private final Map<UUID, Float> lastSpeeds = new HashMap<>();
+    private final Map<UUID, Boolean> braked = new HashMap<>();
+
+    public MineplusMachinePlugin(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
+        super(plugin, context);
+    }
+
+    @Override
+    public String id() {
+        return "machine";
+    }
+
+    @Override
+    protected void onEnable() {
+        var support = context.moduleSupport();
+        installModel("water_wheel");
+        installModel("water_wheel_weak");
+        installModel("water_wheel_strong");
+        installModel("rotation_shaft", "shaft");
+        installModel("cogwheel", "gear");
+        installModel("cogwheel_vertical", "gear_vertical");
+        installModel("cogwheel_horizontal", "gear_horizontal");
+        installModel("rotation_brake", "lever_handle");
+        for (String typeId : new String[]{
+                "water_wheel", "water_wheel_weak", "water_wheel_strong",
+                "rotation_shaft", "cogwheel", "cogwheel_vertical", "cogwheel_horizontal",
+                "rotation_brake"}) {
+            support.installDefault(plugin, "defaults/multiblocks/" + typeId + ".json",
+                    "multiblocks/" + typeId + ".json", false);
+        }
+
+        context.rotationNetworks().setStateSink((instance, state) -> render(instance, state));
+        Bukkit.getPluginManager().registerEvents(new BrakeListener(this), plugin);
+        new WaterFlowTask(this).runTaskTimer(plugin, 20L, 20L);
+    }
+
+    @Override
+    protected com.mineplus.infrastructure.command.SubCommand command() {
+        return new MachineSubCommand(context, this);
+    }
+
+    private void installModel(String typeId) {
+        installModel(typeId, typeId);
+    }
+
+    private void installModel(String typeId, String modelName) {
+        context.moduleSupport().installDefault(plugin,
+                "defaults/models/" + modelName + ".bbmodel",
+                "models/" + modelName + ".bbmodel", true);
+        // Ships the per-model filling space (water wheels: only the center
+        // axle cell becomes solid, the ring over the river stays open).
+        context.moduleSupport().installDefault(plugin,
+                "defaults/models/" + modelName + ".bbmodel.meta.json",
+                "models/" + modelName + ".bbmodel.meta.json", true);
+    }
+
+    private void render(MultiBlockInstance instance, RotationNetworkService.MemberState state) {
+        float previous = lastSpeeds.getOrDefault(instance.id(), Float.NaN);
+        if (previous == state.speed() && !Float.isNaN(previous)) {
+            return;
+        }
+        lastSpeeds.put(instance.id(), state.speed());
+        var animation = context.animationApi();
+        if (state.speed() == 0f) {
+            animation.stopAnimation(instance.id(), SPIN_CLIP);
+            return;
+        }
+        // The clips are authored so 1x playback means the model's own loop
+        // (8 s for wheels/shafts/gears): replaying at |speed|/45 maps the
+        // solved deg/tick onto that loop, negative speeds reverse it.
+        float rate = Math.abs(state.speed()) / 45f;
+        if (state.direction() < 0) {
+            rate = -rate;
+        }
+        animation.playAnimation(instance.id(), SPIN_CLIP,
+                com.mineplus.infrastructure.virtual.animation.AnimationPlayback.speed(rate));
+    }
+
+    /** Handles brake lever interaction; returns true when consumed. */
+    boolean toggleBrake(MultiBlockInstance instance) {
+        if (!BRAKE_TYPE_ID.equals(instance.typeId())) {
+            return false;
+        }
+        boolean engage = !Boolean.TRUE.equals(braked.get(instance.id()));
+        braked.put(instance.id(), engage);
+        context.rotationNetworks().setBraked(instance, engage);
+        var animation = context.animationApi();
+        if (engage) {
+            animation.playAnimation(instance.id(), SWING_CLIP);
+        } else {
+            animation.stopAnimation(instance.id(), SWING_CLIP);
+        }
+        return true;
+    }
+
+    /** Diagnostic for {@code /machine status}. */
+    public String describe(MultiBlockInstance instance) {
+        Float speed = lastSpeeds.get(instance.id());
+        boolean brakedNow = Boolean.TRUE.equals(braked.get(instance.id()));
+        return (brakedNow ? "braked" : "free")
+                + (speed == null ? ", never solved" : String.format(", speed %.2f deg/tick", speed));
+    }
+
+    /** Resolves the machine the player is looking at (listener + command). */
+    MultiBlockInstance resolveLookedAt(org.bukkit.entity.Player player) {
+        return context.moduleSupport().resolveLooked(player, 6.0, null);
+    }
+
+    /** Exposes the rotation service to package helpers (WaterFlowTask). */
+    com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks() {
+        return context.rotationNetworks();
+    }
+}

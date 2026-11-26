@@ -1,0 +1,17 @@
+{
+  "id": "cogwheel_horizontal",
+  "name": "Cogwheel (Horizontal)",
+  "levels": {
+    "1": {
+      "model": "models/gear_horizontal.bbmodel",
+      "speed": 1.0,
+      "durability": 60.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Cogwheel (Horizontal)",
+        "rotation.kind": "shaft",
+        "rotation.cogwheel": "true"
+      }
+    }
+  }
+}

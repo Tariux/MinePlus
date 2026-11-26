@@ -1,0 +1,18 @@
+{
+  "id": "water_wheel_weak",
+  "name": "Water Wheel (Weak)",
+  "levels": {
+    "1": {
+      "model": "models/water_wheel_weak.bbmodel",
+      "speed": 1.0,
+      "durability": 80.0,
+      "upgradeCost": {},
+      "guiOptions": {
+        "title": "Water Wheel (Weak)",
+        "rotation.kind": "source",
+        "rotation.su": "256",
+        "rotation.speed": "3.0"
+      }
+    }
+  }
+}
