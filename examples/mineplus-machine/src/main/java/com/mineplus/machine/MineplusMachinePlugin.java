@@ -68,6 +68,39 @@ public final class MineplusMachinePlugin extends ModuleFeature {
         Bukkit.getPluginManager().registerEvents(machineItems, plugin);
         waterFlow = new WaterFlowTask(this);
         Bukkit.getPluginManager().registerEvents(waterFlow, plugin);
+        registerPackItems();
+    }
+
+    /**
+     * Registers every machine level's model as a resourcepack item so the
+     * router picks {@code PACK_ITEM} instead of degrading to the texel/virtual
+     * path. The bbmodel-embedded textures flow through the ordinary
+     * {@code ensureModelAssets} pipeline ({@code registerModelTextures} reads
+     * them from the model source file), so no separate texture files are
+     * needed. The model key must match
+     * {@code ModelRenderingManager.buildModelKey}: {@code <type>_lvl_<level>}.
+     */
+    private void registerPackItems() {
+        var pack = context.packApi();
+        if (pack == null || !pack.isAvailable()) {
+            return;
+        }
+        for (String typeId : MACHINE_TYPE_IDS) {
+            var type = typeById(typeId);
+            if (type == null) {
+                continue;
+            }
+            for (int level = type.minLevel(); level <= type.maxLevel(); level++) {
+                String modelKey = (typeId + "_lvl_" + level).toLowerCase(java.util.Locale.ROOT);
+                var definition = new com.mineplus.pack.item.PackItemDefinition(
+                        NAMESPACE, modelKey, org.bukkit.Material.CLOCK, modelKey,
+                        "minecraft:item/clock", java.util.List.of(),
+                        type.displayName(),
+                        com.mineplus.infrastructure.definition.ItemCategory.MACHINE_COMPONENT,
+                        null, null, java.util.List.of());
+                pack.registerItem(definition);
+            }
+        }
     }
 
     @Override
@@ -170,6 +203,9 @@ public final class MineplusMachinePlugin extends ModuleFeature {
             "water_wheel", "water_wheel_weak", "water_wheel_strong",
             "rotation_shaft", "cogwheel", "cogwheel_vertical", "cogwheel_horizontal",
             "rotation_brake"};
+
+    /** The pack namespace every machine item and raw asset lives under. */
+    static final String NAMESPACE = "mineplusmachine";
 
     /** Resolves a registered machine type by id, or null. */
     com.mineplus.infrastructure.core.multiblock.MultiBlockType typeById(String typeId) {

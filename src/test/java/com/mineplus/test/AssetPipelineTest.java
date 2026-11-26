@@ -21,6 +21,7 @@ public final class AssetPipelineTest {
         teaModelBakesInsideVanillaWindow();
         anchorModeParsing();
         fillBoxParsing();
+        machineModelsBakeWithEmbeddedTextures();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -245,6 +246,65 @@ public final class AssetPipelineTest {
         } catch (Exception e) {
             failures.add("fill meta parse: " + e);
             return null;
+        }
+    }
+
+    /**
+     * Regression: every machine model must bake into a resourcepack model whose
+     * texture map points at the bbmodel's embedded PNG (not a vanilla/texel
+     * reference). Covers "models load with their textures from the pack".
+     */
+    private static void machineModelsBakeWithEmbeddedTextures() {
+        String[] models = {"water_wheel", "water_wheel_weak", "water_wheel_strong",
+                "shaft", "gear", "gear_vertical", "gear_horizontal", "lever_handle"};
+        var gson = new com.google.gson.Gson();
+        for (String name : models) {
+            java.io.File source = new java.io.File(
+                    "examples/mineplus-machine/src/main/resources/defaults/models/" + name + ".bbmodel");
+            if (!source.isFile()) {
+                check("machine model present: " + name, false);
+                continue;
+            }
+            try {
+                com.google.gson.JsonObject json = gson.fromJson(
+                        java.nio.file.Files.readString(source.toPath()), com.google.gson.JsonObject.class);
+                var textures = json.getAsJsonArray("textures");
+                check(name + ": textures declared", textures != null && !textures.isEmpty());
+                if (textures == null) {
+                    continue;
+                }
+                boolean allEmbedded = true;
+                for (var entry : textures) {
+                    var sourceValue = entry.getAsJsonObject().get("source");
+                    allEmbedded &= sourceValue != null
+                            && sourceValue.getAsString().startsWith("data:image/png;base64,");
+                }
+                check(name + ": every texture embeds a PNG", allEmbedded);
+
+                var parsed = com.mineplus.infrastructure.mob.custom.model.BbModelParser.parse(
+                        name, java.nio.file.Files.readAllBytes(source.toPath()), reference -> null);
+                var baked = com.mineplus.pack.item.BbClipBaker.rest(parsed,
+                        new com.mineplus.pack.item.BbClipBaker.Style(
+                                new com.google.gson.JsonObject(),
+                                "mineplusmachine:item/" + name, true)).models();
+                check(name + ": bakes a pack model", !baked.isEmpty());
+                if (baked.isEmpty()) {
+                    continue;
+                }
+                var model = baked.get(0).getAsJsonObject();
+                check(name + ": baked model has cubes",
+                        model.has("elements") && model.getAsJsonArray("elements").size() > 0);
+                var textureMap = model.getAsJsonObject("textures");
+                check(name + ": baked model has texture map",
+                        textureMap != null && textureMap.has("0"));
+                if (textureMap != null && textureMap.has("0")) {
+                    String reference = textureMap.get("0").getAsString();
+                    check(name + ": texture routed to the pack namespace (got " + reference + ")",
+                            reference.startsWith("mineplusmachine:"));
+                }
+            } catch (Exception exception) {
+                failures.add(name + ": bake failed: " + exception);
+            }
         }
     }
 

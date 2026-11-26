@@ -105,20 +105,9 @@ public final class MachineSubCommand implements SubCommand {
         return true;
     }
 
-    /** {@code /machine shop} — clickable list of every machine type. */
+    /** {@code /machine shop} — chest GUI with every machine type. */
     private boolean shop(Player player) {
-        player.sendMessage(ChatColor.AQUA + "" + ChatColor.BOLD + "Machine Shop"
-                + ChatColor.GRAY + " — click an entry to receive it");
-        for (String typeId : TYPE_IDS) {
-            var type = feature.typeById(typeId);
-            String label = type == null ? typeId : type.displayName();
-            player.sendMessage(net.md_5.bungee.api.ChatColor.AQUA + " • " + label
-                    + ChatColor.GRAY + " (" + typeId + ")"
-                    + net.md_5.bungee.api.ChatColor.DARK_GRAY + " [get]"
-                    + net.md_5.bungee.api.ChatColor.RESET
-                    + net.md_5.bungee.api.ChatColor.GRAY
-                    + " — " + "click to receive");
-        }
+        new MachineShopGui(feature).open(player);
         return true;
     }
 

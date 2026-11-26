@@ -583,6 +583,13 @@ public class VirtualBlockManager implements Listener {
                 : null;
         Quaternionf globalRotation = snapped != null ? snapped.quaternion() : new Quaternionf(placement.globalRotation());
 
+        if (collisionMode == ModelMeta.CollisionMode.SINGLE) {
+            // Exactly one solid block at the anchor (the axle cell): the model's
+            // whole filling space. Nothing else in the world is ever touched.
+            return new SpawnContext(collisionMode, originMode, origin, snapped,
+                    globalRotation, new int[] {0, 0, 0});
+        }
+
         int[] cells = occupancyCalculator.compute(
                 model, snapped, placement.globalRotation(), collisionMode,
                 settings.collisionEpsilon(), originMode);

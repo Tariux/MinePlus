@@ -24,11 +24,9 @@ import java.util.UUID;
  */
 final class WaterFlowTask implements Listener {
 
-    private static final int BASE_SU = 8;
+    private static final int BASE_SU = 0;
 
     private final MineplusMachinePlugin feature;
-    /** Wheels whose SU is already correct for the current water count — skipped on redundant events. */
-    private final Set<UUID> settled = new HashSet<>();
 
     WaterFlowTask(MineplusMachinePlugin feature) {
         this.feature = feature;
@@ -61,11 +59,7 @@ final class WaterFlowTask implements Listener {
     /** Recomputes SU for every wheel whose shell touches the changed block. */
     private void markDirty(Block changed) {
         var rotation = feature.rotationNetworks();
-        Collection<MultiBlockInstance> instances = rotation.placedSources();
-        for (MultiBlockInstance wheel : instances) {
-            if (!settled.add(wheel.id())) {
-                continue;
-            }
+        for (MultiBlockInstance wheel : rotation.placedSources()) {
             var at = wheel.coordinate();
             if (!at.worldName().equals(changed.getWorld().getName())) {
                 continue;
@@ -75,18 +69,20 @@ final class WaterFlowTask implements Listener {
             int dz = changed.getZ() - at.z();
             if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && Math.abs(dz) <= 1
                     && (dx != 0 || dy != 0 || dz != 0)) {
-                int water = countWater(wheel);
-                rotation.setSourceSu(wheel, BASE_SU + water * suPerWater(wheel.typeId()));
+                rescan(wheel);
             }
         }
     }
 
-    /** Initial (re)scan for one wheel — used on place and after server restart. */
+    /**
+     * Recomputes one wheel's SU from the water around it. No base output:
+     * a wheel with no adjacent water gets SU 0 and stops completely.
+     */
     void rescan(MultiBlockInstance wheel) {
-        settled.remove(wheel.id());
         var rotation = feature.rotationNetworks();
         int water = countWater(wheel);
-        rotation.setSourceSu(wheel, BASE_SU + water * suPerWater(wheel.typeId()));
+        int perWater = suPerWater(wheel.typeId());
+        rotation.setSourceSu(wheel, perWater == 0 ? 0 : BASE_SU + water * perWater);
     }
 
     private int suPerWater(String typeId) {

@@ -196,7 +196,19 @@ public final class RotationNetworkService {
      * cogwheel adjacency meshes (sign flip), all else is coaxial.
      */
     public void onPlaced(MultiBlockInstance instance) {
-        RotationProfile profile = profiles.get(instance.typeId().toLowerCase());
+        String typeId = instance.typeId().toLowerCase();
+        RotationProfile profile = profiles.get(typeId);
+        if (profile == null) {
+            // Types registered by a module after context construction never saw
+            // registerFromType(); derive the profile on first placement so the
+            // machine still joins its kinetic network.
+            var type = registry.getType(typeId);
+            if (type == null) {
+                return;
+            }
+            registerFromType(type);
+            profile = profiles.get(typeId);
+        }
         if (profile == null) {
             return;
         }

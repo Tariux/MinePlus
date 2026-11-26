@@ -97,6 +97,13 @@ final class MachineItemListener implements Listener {
         }
     }
 
+    @EventHandler
+    public void onShopClick(org.bukkit.event.inventory.InventoryClickEvent event) {
+        if (event.getView().getTopInventory().getHolder() instanceof MachineShopGui gui) {
+            gui.handleClick(event);
+        }
+    }
+
     /** Places one machine of {@code typeId} anchored at {@code target}; returns false when refused. */
     private boolean placeMachine(Player player, Block target, String typeId) {
         var api = feature.context().infrastructureApi();

@@ -1,3 +1,3 @@
 {
-  "fillBox": [0, 0, 0, 0, 0, 0]
+  "collisionMode": "SINGLE"
 }

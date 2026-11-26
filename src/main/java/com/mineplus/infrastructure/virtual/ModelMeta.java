@@ -274,7 +274,9 @@ public record ModelMeta(
         /** Per-cube geometry-aware collision: solid parts solid, voids open. */
         GEOMETRY,
         /** GEOMETRY plus interior hollowing: walk-in structures. */
-        SURFACE;
+        SURFACE,
+        /** Exactly one solid block at the placement anchor — the axle cell. */
+        SINGLE;
 
         public static CollisionMode fromKey(String key, CollisionMode fallback) {
             if (key == null || key.isBlank()) {
