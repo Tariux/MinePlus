@@ -48,7 +48,7 @@ final class MachineItemListener implements Listener {
         if (type == null) {
             return null;
         }
-        ItemStack item = new ItemStack(Material.CLOCK);
+        ItemStack item = packItem(typeId, type.minLevel());
         ItemMeta meta = item.getItemMeta();
         meta.setDisplayName(ChatColor.AQUA + type.displayName());
         meta.setLore(List.of(
@@ -57,6 +57,26 @@ final class MachineItemListener implements Listener {
         meta.getPersistentDataContainer().set(typeKey, PersistentDataType.STRING, typeId);
         item.setItemMeta(meta);
         return item;
+    }
+
+    /**
+     * The registered resourcepack item for one machine level, so the item in
+     * hand and in the shop renders as the machine itself instead of a clock.
+     * Falls back to the vanilla clock when the pack pipeline is unavailable or
+     * the item was never registered.
+     */
+    private ItemStack packItem(String typeId, int level) {
+        var pack = feature.context().packApi();
+        if (pack == null || !pack.isAvailable()) {
+            return new ItemStack(Material.CLOCK);
+        }
+        try {
+            ItemStack item = pack.createItem(MineplusMachinePlugin.NAMESPACE,
+                    MineplusMachinePlugin.packItemKey(typeId, level));
+            return item == null ? new ItemStack(Material.CLOCK) : item;
+        } catch (RuntimeException unavailable) {
+            return new ItemStack(Material.CLOCK);
+        }
     }
 
     /** Reads the machine type id from an item, or null. */

@@ -595,7 +595,12 @@ public class VirtualBlockManager implements Listener {
                 settings.collisionEpsilon(), originMode);
         // A declared filling space limits which cells may ever become solid —
         // everything outside it stays world space (flowing water, open air).
+        // When the geometry has no cell inside the declared space, the space
+        // itself is the collision volume: the model declares what it fills.
         cells = meta == null ? cells : meta.restrictCells(cells);
+        if (meta != null && meta.fillBox() != null && cells.length == 0) {
+            cells = ModelMeta.fillBoxCells(meta.fillBox());
+        }
 
         return new SpawnContext(collisionMode, originMode, origin, snapped, globalRotation, cells);
     }

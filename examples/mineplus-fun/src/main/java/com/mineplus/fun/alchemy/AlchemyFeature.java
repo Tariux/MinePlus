@@ -21,11 +21,12 @@ import org.bukkit.plugin.java.JavaPlugin;
  * display. The multiblock lifecycle still owns placement, barriers, break
  * handling and persistence â€” the pack subsystem only draws.</p>
  *
- * <p>With the pack subsystem disabled, the level's {@code pack}+{@code block}
- * backend degrades to the virtual engine in one place
- * ({@code MultiBlockLevel.effectiveBackend}), so the table still renders â€”
- * through the texel/virtual pipeline â€” exactly like every other Mineplus
- * machine.</p>
+ * <p>A level only declares what it wants; availability is applied once, in
+ * {@code RenderRouter}, when a level's {@link com.mineplus.infrastructure.render.RenderPlan}
+ * is routed. The pack backend is only left behind when the pack subsystem
+ * cannot render the model at all, and the manager retries the pack asset
+ * ensure before that point — a pack level is never demoted here in the
+ * multiblock model.</p>
  */
 public final class AlchemyFeature extends ModuleFeature {
 

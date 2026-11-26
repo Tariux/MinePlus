@@ -271,7 +271,24 @@ public final class RotationNetworkService {
         if (rotations.isEmpty() || stateSink == null) {
             return;
         }
+        // Shafts and cogwheels are members but not solve results; drive them
+        // with their network's speed so a connected shaft visibly turns.
+        java.util.List<KineticGrid.Rotation> states = new java.util.ArrayList<>(rotations);
+        Map<Long, KineticGrid.Rotation> solved = new HashMap<>();
         for (var rotation : rotations) {
+            solved.put(rotation.key(), rotation);
+        }
+        for (var rotation : rotations) {
+            for (var node : grid.networkMembers(rotation.key())) {
+                if (node.kind() == KineticGrid.Kind.SHAFT && !solved.containsKey(node.key())) {
+                    var shaft = new KineticGrid.Rotation(
+                            node.key(), rotation.speed(), node.direction(), rotation.overStressed());
+                    solved.put(node.key(), shaft);
+                    states.add(shaft);
+                }
+            }
+        }
+        for (var rotation : states) {
             UUID memberId = members.get(rotation.key());
             MultiBlockInstance instance = memberId == null ? null : registry.getInstance(memberId);
             if (instance == null) {

@@ -211,6 +211,7 @@ public final class PackSystem {
             plugin.getServer().getPluginManager().registerEvents(boneRenderer, plugin);
             boneRenderer.setTransport(virtualBlockManager.displayTransport());
             renderingManager.setPackRenderer(modelRenderer);
+            renderingManager.setPackAssetEnsurer(this::ensureModelAssetsForModel);
             renderingManager.setPackBlockRenderer(blockRenderer);
             renderingManager.setPackBoneRenderer(boneRenderer);
             scheduleRecompile();
@@ -268,6 +269,33 @@ public final class PackSystem {
     // ------------------------------------------------------------------
     // Registration surface (used by PackApi)
     // ------------------------------------------------------------------
+
+    /** Registers a custom item: identity + assets + ItemRegistry recognition. */
+    /**
+     * On-demand pack asset compilation for a model key: registers a pack item
+     * for the model (idempotent) so the render manager can serve it through the
+     * resourcepack instead of degrading to the virtual engine. Uses the
+     * module-provided binding when one exists, else the engine namespace.
+     */
+    void ensureModelAssetsForModel(String modelKey) {
+        if (modelKey == null || modelKey.isBlank()
+                || assetRegistry.itemForModel(modelKey) != null
+                || virtualBlockManager.getModel(modelKey) == null) {
+            return;
+        }
+        String namespace = boundNamespaceFor(modelKey);
+        registerItem(new PackItemDefinition(
+                namespace, modelKey, org.bukkit.Material.CLOCK, modelKey,
+                "minecraft:item/clock", java.util.List.of(), modelKey,
+                com.mineplus.infrastructure.definition.ItemCategory.MACHINE_COMPONENT,
+                null, null, java.util.List.of()));
+    }
+
+    private String boundNamespaceFor(String modelKey) {
+        String key = modelKey.toLowerCase(java.util.Locale.ROOT);
+        return key.startsWith("water_wheel") || key.startsWith("rotation_")
+                || key.startsWith("cogwheel") ? "mineplusmachine" : "mineplus";
+    }
 
     /** Registers a custom item: identity + assets + ItemRegistry recognition. */
     public void registerItem(PackItemDefinition definition) {

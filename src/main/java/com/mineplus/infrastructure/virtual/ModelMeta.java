@@ -125,6 +125,26 @@ public record ModelMeta(
         return restricted;
     }
 
+    /** Every anchor-relative cell of the declared filling space, as {@code x,y,z} triples. */
+    public static int[] fillBoxCells(int[] fillBox) {
+        if (fillBox == null) {
+            return new int[0];
+        }
+        int size = (fillBox[3] - fillBox[0] + 1) * (fillBox[4] - fillBox[1] + 1) * (fillBox[5] - fillBox[2] + 1);
+        int[] cells = new int[Math.max(0, size) * 3];
+        int o = 0;
+        for (int x = fillBox[0]; x <= fillBox[3]; x++) {
+            for (int y = fillBox[1]; y <= fillBox[4]; y++) {
+                for (int z = fillBox[2]; z <= fillBox[5]; z++) {
+                    cells[o++] = x;
+                    cells[o++] = y;
+                    cells[o++] = z;
+                }
+            }
+        }
+        return cells;
+    }
+
     /** Resolved anchor strategy: explicit meta value, else {@link AnchorMode#LATTICE}. */
     public AnchorMode resolvedAnchorMode() {
         return anchorMode == null ? AnchorMode.LATTICE : anchorMode;
@@ -364,9 +384,17 @@ public record ModelMeta(
         if (dot <= 0) {
             return empty();
         }
+        // Two naming conventions ship in the wild: "wheel.meta.json" beside the
+        // model and the BBModel-style "wheel.bbmodel.meta.json" the examples
+        // install. Both must resolve, or the meta (collision space, light,
+        // origin) silently never applies and the model fills its whole volume.
         File metaFile = new File(modelFile.getParentFile(), name.substring(0, dot) + ".meta.json");
-        if (!metaFile.exists() || !metaFile.isFile()) {
-            return empty();
+        if (!metaFile.isFile()) {
+            File fullNameMeta = new File(modelFile.getParentFile(), name + ".meta.json");
+            if (!fullNameMeta.isFile()) {
+                return empty();
+            }
+            metaFile = fullNameMeta;
         }
 
         try (com.google.gson.stream.JsonReader json =

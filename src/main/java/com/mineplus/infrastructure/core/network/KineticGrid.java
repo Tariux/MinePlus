@@ -94,9 +94,14 @@ public final class KineticGrid {
 
     public KineticNode put(long key, Kind kind, float speed, float capacity, float stress) {
         KineticNode previous = nodes.put(key, new KineticNode(key, kind, speed, capacity, stress));
-        parent.put(key, key);
-        rank.putIfAbsent(key, 0);
-        adjacency.computeIfAbsent(key, k -> new ArrayList<>());
+        if (previous == null) {
+            // Only a brand-new node starts as its own component. Re-putting an
+            // existing node (dynamic SU, brake state) must keep its union-find
+            // root, or the node silently splits off its network.
+            parent.put(key, key);
+            rank.putIfAbsent(key, 0);
+            adjacency.computeIfAbsent(key, k -> new ArrayList<>());
+        }
         dirty.add(key);
         return previous;
     }
@@ -201,6 +206,26 @@ public final class KineticGrid {
         return results;
     }
 
+    /**
+     * The whole connected component containing {@code key}, including shafts
+     * (which {@link #solve()} intentionally leaves out of its rotations).
+     * Empty when the key is not in the grid.
+     */
+    public List<KineticNode> networkMembers(long key) {
+        KineticNode node = nodes.get(key);
+        if (node == null) {
+            return List.of();
+        }
+        long root = find(key);
+        List<KineticNode> members = new ArrayList<>();
+        for (long k : nodes.keySet()) {
+            if (find(k) == root) {
+                members.add(nodes.get(k));
+            }
+        }
+        return members;
+    }
+
     private void solveComponent(long root, List<Rotation> results) {
         float speed = 0;
         float capacity = 0;
@@ -212,7 +237,9 @@ public final class KineticGrid {
             }
             members.add(key);
             KineticNode node = nodes.get(key);
-            if (node.kind == Kind.SOURCE) {
+            if (node.kind == Kind.SOURCE && node.capacity > 0) {
+                // A source with no capacity (a dry water wheel) must not turn
+                // the network: it contributes neither speed nor direction.
                 speed = Math.max(speed, node.speed);
                 capacity += node.capacity;
             } else if (node.kind == Kind.CONSUMER) {
@@ -228,7 +255,7 @@ public final class KineticGrid {
         ArrayDeque<long[]> queue = new ArrayDeque<>();
         for (long key : members) {
             KineticNode node = nodes.get(key);
-            if (node.kind == Kind.SOURCE) {
+            if (node.kind == Kind.SOURCE && node.capacity > 0) {
                 direction.put(key, node.direction);
                 queue.add(new long[]{key, node.direction});
             }

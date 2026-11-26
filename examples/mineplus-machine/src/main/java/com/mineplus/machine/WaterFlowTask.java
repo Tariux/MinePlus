@@ -1,6 +1,7 @@
 package com.mineplus.machine;
 
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
+import com.mineplus.infrastructure.world.WaterFlow;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -21,10 +22,10 @@ import java.util.UUID;
  * Derives each water wheel's SU from the flowing water around it
  * (Create-style) — event-driven: the scan re-runs for a wheel only when a
  * water block near it changes (flow, drain, bucket use), not on a timer.
+ * Only water that is actually moving counts, so a wheel in a still pool
+ * never turns and a newly placed wheel starts dry.
  */
 final class WaterFlowTask implements Listener {
-
-    private static final int BASE_SU = 0;
 
     private final MineplusMachinePlugin feature;
 
@@ -67,22 +68,35 @@ final class WaterFlowTask implements Listener {
             int dx = changed.getX() - at.x();
             int dy = changed.getY() - at.y();
             int dz = changed.getZ() - at.z();
-            if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && Math.abs(dz) <= 1
-                    && (dx != 0 || dy != 0 || dz != 0)) {
+            if (Math.abs(dx) <= 1 && dy == 0 && Math.abs(dz) <= 1
+                    && (dx != 0 || dz != 0)) {
+                rescan(wheel);
+            }
+        }
+    }
+
+    /** Recomputes SU for every placed water wheel (reconcile + initial scan). */
+    void rescanAll() {
+        var rotation = feature.rotationNetworks();
+        for (MultiBlockInstance wheel : rotation.placedSources()) {
+            if (wheel.typeId().startsWith("water_wheel")) {
                 rescan(wheel);
             }
         }
     }
 
     /**
-     * Recomputes one wheel's SU from the water around it. No base output:
-     * a wheel with no adjacent water gets SU 0 and stops completely.
+     * Recomputes one wheel's SU from the flowing water beside it. Only the
+     * eight horizontal cells at the wheel's own Y count (the 3x3x1 wheel
+     * plane): water above or below does not turn a wheel, and still water is
+     * ignored. No base output, so a wheel with no moving water beside it gets
+     * SU 0 and stops completely.
      */
     void rescan(MultiBlockInstance wheel) {
         var rotation = feature.rotationNetworks();
-        int water = countWater(wheel);
+        int water = countFlowingWater(wheel);
         int perWater = suPerWater(wheel.typeId());
-        rotation.setSourceSu(wheel, perWater == 0 ? 0 : BASE_SU + water * perWater);
+        rotation.setSourceSu(wheel, water * perWater);
     }
 
     private int suPerWater(String typeId) {
@@ -94,7 +108,7 @@ final class WaterFlowTask implements Listener {
         };
     }
 
-    private int countWater(MultiBlockInstance wheel) {
+    private int countFlowingWater(MultiBlockInstance wheel) {
         var at = wheel.coordinate();
         World world = org.bukkit.Bukkit.getWorld(at.worldName());
         if (world == null) {
@@ -102,18 +116,37 @@ final class WaterFlowTask implements Listener {
         }
         int count = 0;
         for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) {
-                        continue;
-                    }
-                    Block block = world.getBlockAt(at.x() + dx, at.y() + dy, at.z() + dz);
-                    if (block.getType() == Material.WATER) {
-                        count++;
-                    }
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                Block block = world.getBlockAt(at.x() + dx, at.y(), at.z() + dz);
+                if (block.getType() != Material.WATER) {
+                    continue;
+                }
+                int level = WaterFlow.level(block.getBlockData().getAsString());
+                int[] neighbours = level == 0 ? horizontalLevels(world, block) : null;
+                if (WaterFlow.isFlowing(level, neighbours)) {
+                    count++;
                 }
             }
         }
         return count;
+    }
+
+    private int[] horizontalLevels(World world, Block block) {
+        return new int[] {
+                levelAt(world, block.getX() + 1, block.getY(), block.getZ()),
+                levelAt(world, block.getX() - 1, block.getY(), block.getZ()),
+                levelAt(world, block.getX(), block.getY(), block.getZ() + 1),
+                levelAt(world, block.getX(), block.getY(), block.getZ() - 1)
+        };
+    }
+
+    private int levelAt(World world, int x, int y, int z) {
+        Block block = world.getBlockAt(x, y, z);
+        return block.getType() == Material.WATER
+                ? WaterFlow.level(block.getBlockData().getAsString())
+                : -1;
     }
 }

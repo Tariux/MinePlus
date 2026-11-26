@@ -22,6 +22,9 @@ public final class KineticGridTest {
         healthyNetworkFullSpeed();
         shaftsCarryConsumersOnlyInResults();
         threeAxisAdjacencyMeshing();
+        reputKeepsNetworkIntact();
+        drySourceDoesNotDrive();
+        networkMembersIncludeShafts();
 
         if (failures.isEmpty()) {
             System.out.println("KineticGridTest: all checks passed");
@@ -134,6 +137,58 @@ public final class KineticGridTest {
         check("shafts excluded from results", rotations.size() == 2);
         check("consumer reached through shaft",
                 rotations.stream().anyMatch(r -> r.key() == at(2) && r.speed() == 32f));
+    }
+
+    /**
+     * Regression: water wheels update their own SU every few seconds, which
+     * re-puts the source node. Re-putting must not reset the union-find root —
+     * that used to split the wheel off its shaft network, so a connected shaft
+     * stopped turning as soon as the first water rescan ran.
+     */
+    private static void reputKeepsNetworkIntact() {
+        KineticGrid grid = new KineticGrid();
+        grid.put(at(0), Kind.SOURCE, 32f, 50f, 0f);
+        grid.put(at(1), Kind.SHAFT, 0, 0, 0);
+        grid.put(at(2), Kind.CONSUMER, 0, 0, 10f);
+        grid.link(at(0), at(1), false);
+        grid.link(at(1), at(2), false);
+
+        // The dynamic-SU path (RotationNetworkService.setSourceSu).
+        grid.put(at(0), Kind.SOURCE, 32f, 40f, 0f);
+
+        check("re-put keeps network connected", grid.connected(at(0), at(2)));
+        List<Rotation> rotations = grid.solve();
+        check("re-put still reaches consumer",
+                rotations.stream().anyMatch(r -> r.key() == at(2) && r.speed() == 32f));
+    }
+
+    /** Regression: a dry wheel (capacity 0) must not spin its network. */
+    private static void drySourceDoesNotDrive() {
+        KineticGrid grid = new KineticGrid();
+        grid.put(at(0), Kind.SOURCE, 32f, 0f, 0f);
+        grid.put(at(1), Kind.SHAFT, 0, 0, 0);
+        grid.put(at(2), Kind.CONSUMER, 0, 0, 10f);
+        grid.link(at(0), at(1), false);
+        grid.link(at(1), at(2), false);
+
+        List<Rotation> rotations = grid.solve();
+        check("dry source drives nothing",
+                rotations.stream().allMatch(r -> r.speed() == 0f));
+    }
+
+    /** Regression: solve omits shafts, so the service needs the full component. */
+    private static void networkMembersIncludeShafts() {
+        KineticGrid grid = new KineticGrid();
+        grid.put(at(0), Kind.SOURCE, 32f, 50f, 0f);
+        grid.put(at(1), Kind.SHAFT, 0, 0, 0);
+        grid.put(at(2), Kind.CONSUMER, 0, 0, 10f);
+        grid.link(at(0), at(1), false);
+        grid.link(at(1), at(2), false);
+
+        List<KineticNode> members = grid.networkMembers(at(0));
+        check("members include shaft", members.stream().anyMatch(n -> n.key() == at(1)));
+        check("members include consumer", members.stream().anyMatch(n -> n.key() == at(2)));
+        check("members size", members.size() == 3);
     }
 
     private static void check(String name, boolean condition) {

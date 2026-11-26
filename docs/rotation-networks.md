@@ -64,10 +64,19 @@ rotation.setSourceSu(wheelInstance, su);   // dynamic capacity (water flow, wind
 ```
 
 The `machine` example shows the dynamic pattern: `WaterFlowTask` listens
-to water-change events (`BlockFromToEvent`, bucket use, water physics)
-and recomputes `SU = 8 + water × tier-rate` through `setSourceSu` only
-for wheels whose shell a changed block touches — output follows how hard
-the wheel is actually driven, with no polling while water is still.
+to water-change events (`BlockFromToEvent`, bucket use, water physics),
+recounts only the **flowing** water in the wheel's 3x3x1 plane and applies
+`SU = flowing water × tier-rate` through `setSourceSu` — with no base
+output, so a wheel with no moving water beside it sits at SU 0 and stops.
+Still pools never turn a wheel; a still source counts only when it is
+draining into a moving neighbour. A wheel also starts at SU 0 the moment
+it is placed and is rescanned in the same place event, so it never spins
+before its water has been counted.
+
+The flow rule itself is a plain helper, `com.mineplus.infrastructure.world
+.WaterFlow` (`level(String)`, `isFlowing(level, neighbours)`), so the same
+"is this water moving?" test can be reused by other water-driven sources
+and is covered by `MachineWiringTest`.
 
 The sink fires per solved member each tick; drive your model animation
 from it (see the `machine` example).

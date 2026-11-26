@@ -68,6 +68,20 @@ public final class MineplusMachinePlugin extends ModuleFeature {
         Bukkit.getPluginManager().registerEvents(machineItems, plugin);
         waterFlow = new WaterFlowTask(this);
         Bukkit.getPluginManager().registerEvents(waterFlow, plugin);
+        // Continuous reconcile: wheels must follow water even when no block
+        // event reaches us (chunk load, neighbouring schematics, missed events).
+        Bukkit.getScheduler().runTaskTimer(plugin, waterFlow::rescanAll, 40L, 40L);
+        // A freshly placed wheel starts dry. Its profile carries static SU, so
+        // zero that output and count the water around it in the same place
+        // event instead of leaving it spinning until the first reconcile.
+        context.infrastructureEngine().hookBus().registerLifecycleListener(event -> {
+            MultiBlockInstance instance = event.instance();
+            if (instance == null || !instance.typeId().startsWith("water_wheel")) {
+                return;
+            }
+            context.rotationNetworks().setSourceSu(instance, 0);
+            waterFlow.rescan(instance);
+        }, com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleEventType.PLACE);
         registerPackItems();
     }
 
@@ -91,7 +105,7 @@ public final class MineplusMachinePlugin extends ModuleFeature {
                 continue;
             }
             for (int level = type.minLevel(); level <= type.maxLevel(); level++) {
-                String modelKey = (typeId + "_lvl_" + level).toLowerCase(java.util.Locale.ROOT);
+                String modelKey = packItemKey(typeId, level);
                 var definition = new com.mineplus.pack.item.PackItemDefinition(
                         NAMESPACE, modelKey, org.bukkit.Material.CLOCK, modelKey,
                         "minecraft:item/clock", java.util.List.of(),
@@ -206,6 +220,14 @@ public final class MineplusMachinePlugin extends ModuleFeature {
 
     /** The pack namespace every machine item and raw asset lives under. */
     static final String NAMESPACE = "mineplusmachine";
+
+    /**
+     * Pack item/model id for one machine level. Must match
+     * {@code ModelRenderingManager.buildModelKey}: {@code <type>_lvl_<level>}.
+     */
+    static String packItemKey(String typeId, int level) {
+        return (typeId + "_lvl_" + level).toLowerCase(java.util.Locale.ROOT);
+    }
 
     /** Resolves a registered machine type by id, or null. */
     com.mineplus.infrastructure.core.multiblock.MultiBlockType typeById(String typeId) {

@@ -67,20 +67,6 @@ public record MultiBlockLevel(
     }
 
     /**
-     * Rendering backend for this level, with subsystem availability applied:
-     * when the pack subsystem is not running, pack backends degrade to the
-     * virtual engine in this one place.
-     *
-     * @param packRendererActive whether the pack renderer is available
-     */
-    public RenderBackend effectiveBackend(boolean packRendererActive) {
-        if (!renderBackend.includesPack() || packRendererActive) {
-            return renderBackend;
-        }
-        return RenderBackend.VIRTUAL;
-    }
-
-    /**
      * The canonical unified {@link RenderMode} this level declares. Derived from
      * the legacy {@code renderBackend}/{@code renderKind} pair so existing
      * definitions keep working unchanged.

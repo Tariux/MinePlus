@@ -350,7 +350,7 @@ Rendering selection is a single declarative vocabulary, `RenderMode`. One value 
 
 | `RenderMode` | Config key | Backend + kind | Meaning |
 |---|---|---|---|
-| `VIRTUAL` | `virtual` | `VIRTUAL` + `MODEL` | Packless virtual engine (default) |
+| `VIRTUAL` | `virtual` | `VIRTUAL` + `MODEL` | Packless virtual engine (opt-in; the default is `PACK_ITEM`) |
 | `PACK_ITEM` | `pack_item` (`pack`/`item`) | `PACK` + `MODEL` | Pack item model (`ItemDisplay`) |
 | `PACK_BLOCK` | `pack_block` (`block`) | `PACK` + `BLOCK` | Pack block display (`BlockDisplay` + carrier state) |
 | `PACK_BONES` | `pack_bones` (`bones`) | `PACK` + `BONES` | Pack bone rig (one `ItemDisplay` per bone) |
@@ -1051,7 +1051,7 @@ The Phases C/D toolkit is a set of **plain-Java building blocks** under `com.min
 | Research | `research.ResearchTree` | Prerequisite graph with definition-time cycle/typo detection, `int[]`-budget-gated `unlock`, `availableFor` for GUIs, `snapshot()`/`restore` for persistence |
 | Minigames | `minigame.GameStateMachine`, `GameMap`, `MinigameAdapter`, `InstanceManager` | Legal-transition lifecycle (LOBBY → STARTING → RUNNING → ENDING → CLOSED), teams/scores/elimination, cuboid regions, round-robin spawn markers, priority-ordered scoreboard lines, spectators, definition → instance management with snapshot/restore |
 | Messaging | `network.MessageBus` (+ `RedisTransport`, `FileSpoolTransport`) | Channel pub/sub with message ids, source/target servers and payload; pluggable transport seam — in-memory ships with the core, Redis pub/sub over plain sockets (no client jar) and a file-spool transport cover cross-server and multi-server-on-one-host setups; delivery is at-least-once with dedupe in the bus |
-| Grids | `network.EnergyGrid` (+ `EnergyNetworkService`), `KineticGrid`, `LogisticsGrid`, `CommandRelay` | Node-graph energy networks (SOURCE / CONSUMER / CONDUIT) with post-tick supply/demand balancing, kinetic stress slow-down, item logistics and redstone-style command routing; the service wrapper syncs network lifecycle with machine create/remove and rebuilds networks after a restart |
+| Grids | `network.EnergyGrid` (+ `EnergyNetworkService`), `KineticGrid`, `LogisticsGrid`, `CommandRelay`, `world.WaterFlow` | Node-graph energy networks (SOURCE / CONSUMER / CONDUIT) with post-tick supply/demand balancing, kinetic stress slow-down, item logistics and redstone-style command routing; the service wrapper syncs network lifecycle with machine create/remove and rebuilds networks after a restart. `KineticGrid` carries rotation (sources supply SU, shafts/cogwheels transmit, consumers add stress), and `world.WaterFlow` is the shared "is this water moving?" rule (`level`, `isFlowing`) for water-driven sources |
 | Boss fights | `boss.BossFight` | Health-threshold phases (strictly decreasing thresholds enforced), entry abilities fire once on phase change, repeat abilities under a shared tick cooldown, `onPhaseChange` for boss-bar updates; host supplies live health via a supplier |
 | Hot reload | `reload.HotReloader` | Register named steps (settings supplier + applier) in order; `reloadAll()` re-applies config to live subsystems with failures isolated — a broken step is logged, previous settings keep running, the `ReloadReport` names it |
 | Asset pipeline | `pipeline.AssetPipeline` | Dependency-ordered pack builds (topological sort, each builder runs once with dependency outputs forwarded), cycle/unknown-dependency detection before any build, `buildIncremental` rebuilding only assets whose hash — or a dependency's — changed |

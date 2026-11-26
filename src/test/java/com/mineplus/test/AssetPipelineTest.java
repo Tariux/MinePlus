@@ -21,7 +21,9 @@ public final class AssetPipelineTest {
         teaModelBakesInsideVanillaWindow();
         anchorModeParsing();
         fillBoxParsing();
+        bbmodelMetaFileNameLoads();
         machineModelsBakeWithEmbeddedTextures();
+        machineLevelsDefaultToResourcePack();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -304,6 +306,71 @@ public final class AssetPipelineTest {
                 }
             } catch (Exception exception) {
                 failures.add(name + ": bake failed: " + exception);
+            }
+        }
+    }
+
+    /**
+     * Regression: the examples install metas as {@code <model>.bbmodel.meta.json}.
+     * Load used to look only for {@code <stem>.meta.json}, so the wheel's
+     * filling space never applied and the whole 3x3 volume became solid.
+     */
+    private static void bbmodelMetaFileNameLoads() {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("bbmodel-meta");
+            java.nio.file.Path model = dir.resolve("wheel.bbmodel");
+            java.nio.file.Files.writeString(model, "{}");
+            java.nio.file.Files.writeString(dir.resolve("wheel.bbmodel.meta.json"),
+                    "{\"fillBox\": [0, 0, 0, 0, 0, 0]}");
+            var meta = com.mineplus.infrastructure.virtual.ModelMeta.load(model.toFile());
+            check("bbmodel-style meta loads its fillBox", meta.fillBox() != null);
+        } catch (Exception e) {
+            failures.add("bbmodel-style meta: " + e);
+        }
+    }
+
+    /**
+     * Regression: machine multiblock levels must resolve to a resourcepack
+     * mode, both when a level omits {@code renderMode} (engine default) and
+     * when it declares one. Covers "machines render pack-based, not texel".
+     */
+    private static void machineLevelsDefaultToResourcePack() {
+        check("engine default backend is PACK",
+                com.mineplus.infrastructure.render.RenderBackend.fromKey(null)
+                        == com.mineplus.infrastructure.render.RenderBackend.PACK);
+        check("engine default render mode is pack_item",
+                com.mineplus.infrastructure.render.RenderMode.fromKey(null)
+                        == com.mineplus.infrastructure.render.RenderMode.PACK_ITEM);
+
+        java.io.File dir = new java.io.File(
+                "examples/mineplus-machine/src/main/resources/defaults/multiblocks");
+        java.io.File[] files = dir.listFiles((d, n) -> n.endsWith(".json"));
+        check("machine multiblock configs present", files != null && files.length > 0);
+        if (files == null) {
+            return;
+        }
+        var gson = new com.google.gson.Gson();
+        for (java.io.File file : files) {
+            try {
+                com.google.gson.JsonObject root = gson.fromJson(
+                        java.nio.file.Files.readString(file.toPath()), com.google.gson.JsonObject.class);
+                com.google.gson.JsonObject levels = root.getAsJsonObject("levels");
+                if (levels == null) {
+                    check(file.getName() + ": has levels", false);
+                    continue;
+                }
+                for (String levelKey : levels.keySet()) {
+                    com.google.gson.JsonObject level = levels.getAsJsonObject(levelKey);
+                    String raw = level.has("renderMode")
+                            ? level.get("renderMode").getAsString()
+                            : level.has("renderBackend") ? level.get("renderBackend").getAsString() : null;
+                    var mode = com.mineplus.infrastructure.render.RenderMode.fromKey(raw);
+                    check(file.getName() + " level " + levelKey + ": resolves to a pack mode (got "
+                                    + mode + " from " + raw + ")",
+                            mode.backend().includesPack());
+                }
+            } catch (Exception exception) {
+                failures.add(file.getName() + ": parse failed: " + exception);
             }
         }
     }

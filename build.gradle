@@ -60,6 +60,7 @@ def testRunnerMains = [
         'com.mineplus.test.AiTargetingTest',
         'com.mineplus.test.EnergyGridTest',
         'com.mineplus.test.KineticGridTest',
+        'com.mineplus.test.MachineWiringTest',
         'com.mineplus.test.NetworkRoutingTest',
         'com.mineplus.test.MinigameStateTest',
         'com.mineplus.test.GameMapTest',

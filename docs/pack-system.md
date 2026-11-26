@@ -45,8 +45,8 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
   public collision-only spawn API — barriers, break handling, occupancy and
   restore dedupe behave identically for both backends.
 - Backend selection lives in multiblock level definitions, as a single
-  `"renderMode"` (`virtual` | `pack_item` | `pack_block` | `pack_bones` |
-  `hybrid_item` | `hybrid_block` | `hybrid_bones`, default `virtual`). The legacy pair
+  `"renderMode"` (`pack_item` | `pack_block` | `pack_bones` | `virtual` |
+  `hybrid_item` | `hybrid_block` | `hybrid_bones`, default `pack_item`). The legacy pair
   (`"renderBackend": "virtual" | "pack" | "virtual+pack"` +
   `"renderKind": "model" | "block"`) still parses and maps onto the same modes.
   The `RenderRouter` is the single place a level's mode becomes an effective
@@ -56,8 +56,8 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 
 | Backend | Collision | Visual (pack player) | Visual (packless player) |
 |---|---|---|---|
-| `virtual` (default) | virtual engine | virtual render (texel/block displays) | virtual render — identical |
-| `pack` + `model` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
+| `virtual` | virtual engine | virtual render (texel/block displays) | virtual render — identical |
+| `pack_item` (**default**) + `model` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
 | `pack` + `block` | virtual engine (collision-only) | pack block model (one BlockDisplay) | the carrier block (a note block) |
 | `virtual+pack` | virtual engine | virtual render **+** pack display | virtual render |
 

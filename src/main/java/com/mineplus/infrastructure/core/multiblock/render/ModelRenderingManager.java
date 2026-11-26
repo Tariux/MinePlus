@@ -27,19 +27,38 @@ import org.joml.Quaternionf;
 
 /**
  * Rendering choke point for multiblock instances — the single place a render
- * decision becomes a backend call. The virtual engine renders levels with
- * backend {@code VIRTUAL} (the default, and the automatic fallback whenever
- * the pack subsystem is unavailable or a model has no pack item); the pack
- * renderer renders {@code PACK} levels (collision through the virtual
- * manager's collision-only spawn, visuals through a pack item display);
- * {@code VIRTUAL_PLUS_PACK} renders the virtual model and layers the pack
- * display on top.
+ * decision becomes a backend call. The pack renderer renders {@code PACK}
+ * levels (the default; collision through the virtual manager's collision-only
+ * spawn, visuals through a pack item/block display), retrying the pack asset
+ * ensure before any fallback. The virtual engine renders levels that ask for it
+ * with {@code VIRTUAL} (texel/block displays) and backs
+ * {@code VIRTUAL_PLUS_PACK}, which layers the pack display on top of the
+ * virtual model.
  */
 public final class ModelRenderingManager {
 
     private final VirtualBlockManager virtualBlockManager;
     private final RenderRouter renderRouter = new RenderRouter();
     private volatile PackModelRenderer packRenderer;
+    /** Compiles pack assets for a model key on demand (set by the pack subsystem). */
+    private volatile java.util.function.Consumer<String> packAssetEnsurer;
+
+    /** Install the pack subsystem's on-demand asset compiler. */
+    public void setPackAssetEnsurer(java.util.function.Consumer<String> ensurer) {
+        this.packAssetEnsurer = ensurer;
+    }
+
+    private void ensurePackAssets(String modelKey) {
+        var ensurer = packAssetEnsurer;
+        if (ensurer == null || modelKey == null) {
+            return;
+        }
+        try {
+            ensurer.accept(modelKey);
+        } catch (Throwable failure) {
+            DebugLogger.warning("Pack asset ensure failed for '" + modelKey + "': " + failure.getMessage());
+        }
+    }
     private volatile PackBlockRenderer packBlockRenderer;
     private volatile BoneRigRenderer packBoneRenderer;
 
@@ -149,8 +168,18 @@ public final class ModelRenderingManager {
      */
     private UUID renderPack(Resolved resolved) {
         PackModelRenderer renderer = packRenderer;
-        if (renderer == null || !renderer.hasItemForModel(resolved.model().name())) {
+        if (renderer == null) {
             return null;
+        }
+        if (!renderer.hasItemForModel(resolved.model().name())) {
+            // Models load lazily, after module registration: ask the pack to
+            // compile this model's assets now and retry once. Without this the
+            // router silently degrades to the virtual (texel) engine.
+            ensurePackAssets(resolved.model().name());
+            renderer = packRenderer;
+            if (renderer == null || !renderer.hasItemForModel(resolved.model().name())) {
+                return null;
+            }
         }
         UUID instanceId = virtualBlockManager.spawnCollisionModel(resolved.model(), resolved.placement());
         if (instanceId == null) {
