@@ -82,6 +82,7 @@ public final class MineplusMachinePlugin extends ModuleFeature {
             context.rotationNetworks().setSourceSu(instance, 0);
             waterFlow.rescan(instance);
         }, com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleEventType.PLACE);
+        preloadModels();
         registerPackItems();
     }
 
@@ -120,6 +121,31 @@ public final class MineplusMachinePlugin extends ModuleFeature {
     @Override
     protected com.mineplus.infrastructure.command.SubCommand command() {
         return new MachineSubCommand(context, this);
+    }
+
+    /**
+     * Parses the models this module just installed, before their pack items
+     * are registered. Models otherwise load lazily on first render, which
+     * left the item assets without geometry (a clock in hand) and made the
+     * first block render fall back to texel.
+     */
+    private void preloadModels() {
+        var virtual = context.virtualBlockManager();
+        var support = context.moduleSupport();
+        for (String typeId : MACHINE_TYPE_IDS) {
+            var type = typeById(typeId);
+            if (type == null) {
+                continue;
+            }
+            for (int level = type.minLevel(); level <= type.maxLevel(); level++) {
+                var definition = type.level(level);
+                if (definition == null || definition.modelPath().isBlank()) {
+                    continue;
+                }
+                virtual.preloadModel(packItemKey(typeId, level),
+                        support.dataFile(definition.modelPath()));
+            }
+        }
     }
 
     private void installModel(String typeId) {

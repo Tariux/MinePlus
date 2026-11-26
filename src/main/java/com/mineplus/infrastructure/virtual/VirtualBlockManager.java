@@ -173,6 +173,35 @@ public class VirtualBlockManager implements Listener {
         return Set.copyOf(loadedModels.keySet());
     }
 
+    /**
+     * Parses and registers one installed model file now, under the given key.
+     *
+     * <p>Models otherwise load lazily on first render. Modules install their
+     * models — and register the pack items that reference them — during
+     * enable, after the startup folder scan, so without this the item assets
+     * would have no geometry until something was placed in the world.</p>
+     *
+     * @return the registered model, or {@code null} when the file is missing
+     *         or has no geometry
+     */
+    public VirtualModel preloadModel(String modelKey, File modelFile) {
+        if (modelKey == null || modelKey.isBlank() || modelFile == null || !modelFile.isFile()) {
+            return null;
+        }
+        String key = modelKey.toLowerCase(Locale.ROOT);
+        VirtualModel existing = getModel(key);
+        if (existing != null) {
+            return existing;
+        }
+        VirtualModel model = BbModelImporter.parse(key, modelFile);
+        if (model == null || model.cubes().isEmpty()) {
+            return null;
+        }
+        registerModel(key, model, ModelMeta.load(modelFile), modelFile);
+        textureReports.put(key, resolveTextureReport(model));
+        return model;
+    }
+
     public VirtualModel getModel(String name) {
         if (name == null || name.isBlank()) return null;
         return loadedModels.get(name.toLowerCase(Locale.ROOT));

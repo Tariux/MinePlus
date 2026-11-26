@@ -45,9 +45,9 @@ public final class MachineWiringTest {
     public static void main(String[] args) {
         stillWaterNeverDrives();
         flowingWaterDrives();
-        axleShaftTurnsWithWheel();
-        dryWheelStopsAxleShaft();
+        axleShaftTurnsWithWheel();        dryWheelStopsAxleShaft();
         offAxleShaftDoesNotJoin();
+        preloadModelRegistersInstalledModel();
         everyMachineHasModelAndCollisionMeta();
 
         if (failures.isEmpty()) {
@@ -185,6 +185,26 @@ public final class MachineWiringTest {
         } catch (Exception broken) {
             return false;
         }
+    }
+
+    /**
+     * Regression: modules install models at enable, after the startup scan, so
+     * their pack items were registered without geometry and the first render
+     * fell back to texel. preloadModel must register the model (with its
+     * embedded animation) under the pack item key, and be idempotent.
+     */
+    private static void preloadModelRegistersInstalledModel() {
+        var virtual = new com.mineplus.infrastructure.virtual.VirtualBlockManager();
+        File shaft = new File(MODELS, "shaft.bbmodel");
+        var model = virtual.preloadModel("rotation_shaft_lvl_1", shaft);
+        check("preload registers the installed model",
+                model != null && virtual.getModel("rotation_shaft_lvl_1") == model);
+        check("preload keeps the model animations",
+                model != null && !model.animations().isEmpty());
+        check("preload is idempotent",
+                virtual.preloadModel("rotation_shaft_lvl_1", shaft) == model);
+        check("preload ignores a missing file",
+                virtual.preloadModel("missing_lvl_1", new File(MODELS, "absent.bbmodel")) == null);
     }
 
     private static void check(String what, boolean ok) {
