@@ -45,7 +45,7 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
   public collision-only spawn API — barriers, break handling, occupancy and
   restore dedupe behave identically for both backends.
 - Backend selection lives in multiblock level definitions, as a single
-  `"renderMode"` (`pack_item` | `pack_block` | `pack_bones` | `virtual` |
+  `"renderMode"` (`virtual` | `pack_item` | `pack_block` | `pack_bones` |
   `hybrid_item` | `hybrid_block` | `hybrid_bones`, default `pack_item`). The legacy pair
   (`"renderBackend": "virtual" | "pack" | "virtual+pack"` +
   `"renderKind": "model" | "block"`) still parses and maps onto the same modes.
@@ -56,8 +56,9 @@ Vanilla client + Paper + Mineplus + (optional) generated pack  →  custom conte
 
 | Backend | Collision | Visual (pack player) | Visual (packless player) |
 |---|---|---|---|
+| `pack_item` (default) | pack item model | pack render (delivered resource pack) | virtual render (texel/block displays, degrade) |
 | `virtual` | virtual engine | virtual render (texel/block displays) | virtual render — identical |
-| `pack_item` (**default**) + `model` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
+| `pack` + `model` | virtual engine (collision-only) | pack item model (full fidelity) | backing vanilla item |
 | `pack` + `block` | virtual engine (collision-only) | pack block model (one BlockDisplay) | the carrier block (a note block) |
 | `virtual+pack` | virtual engine | virtual render **+** pack display | virtual render |
 
@@ -65,9 +66,7 @@ Fallbacks, in one place (`RenderRouter`, honoring `RENDERING.POLICY`): when the
 pack subsystem is disabled, pack/hybrid modes degrade to `virtual`
 (`ALLOW_DEGRADE_TO_VIRTUAL: true`, the default). When a model has no registered
 pack item/block, or a pack display fails to attach, the pack render falls back to
-a full virtual render, and `PackFallbackNotice` writes one WARNING per model
-naming it and the reason (always on, independent of debug logging; cleared on
-reload so a repeat failure warns again). A player without the pack always sees a valid mesh through
+a full virtual render. A player without the pack always sees a valid mesh through
 `hybrid`, or the carrier block through a pack mode.
 
 ### Lighting

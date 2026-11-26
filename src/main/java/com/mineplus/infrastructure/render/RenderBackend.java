@@ -12,13 +12,13 @@ import java.util.Locale;
  * branches on the choice.</p>
  *
  * <ul>
- *   <li>{@link #VIRTUAL} — the packless virtual rendering engine: bbmodel
- *       geometry reconstructed out of vanilla block displays; works on
+ *   <li>{@link #VIRTUAL} — the packless virtual rendering engine (default):
+ *       bbmodel geometry reconstructed out of vanilla block displays; works on
  *       completely vanilla clients.</li>
  *   <li>{@link #PACK} — client-assisted rendering through the generated
- *       resource pack (the engine default): the content's registered item model
- *       renders at full client fidelity for players with the pack; players
- *       without the pack see the backing vanilla item.</li>
+ *       resource pack: the content's registered item model renders at full
+ *       client fidelity for players with the pack; players without the pack
+ *       see the backing vanilla item.</li>
  *   <li>{@link #VIRTUAL_PLUS_PACK} — the virtual render always (collision and
  *       packless visuals), plus the pack representation layered on top for
  *       players with the pack.</li>
@@ -34,20 +34,16 @@ public enum RenderBackend {
     PACK,
     VIRTUAL_PLUS_PACK;
 
-    /** The engine-wide default backend: resourcepack-first, degrading to virtual when the pack subsystem is off. */
-    public static final RenderBackend DEFAULT = PACK;
-
-    /** Parses a definition/config value; unknown or blank values fall back to the {@link #DEFAULT} backend. */
+    /** Parses a definition/config value; unknown or blank values fall back to {@link #PACK} (the primary backend). */
     public static RenderBackend fromKey(String key) {
         if (key == null || key.isBlank()) {
-            return DEFAULT;
+            return PACK;
         }
         String normalized = key.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace('+', '_');
         return switch (normalized) {
-            case "pack", "pack_only", "resource_pack" -> PACK;
+            case "virtual", "virtual_only", "texel" -> VIRTUAL;
             case "virtual_pack", "virtual_plus_pack", "both", "hybrid" -> VIRTUAL_PLUS_PACK;
-            case "virtual", "vanilla" -> VIRTUAL;
-            default -> DEFAULT;
+            default -> PACK;
         };
     }
 

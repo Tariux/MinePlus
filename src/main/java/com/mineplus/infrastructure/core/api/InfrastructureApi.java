@@ -20,12 +20,6 @@ public interface InfrastructureApi {
 
     void registerMultiBlock(MultiBlockType type);
 
-    /** Resolves a registered multiblock type by id (case-insensitive), or {@code null}. */
-    MultiBlockType getType(String typeId);
-
-    /** All registered multiblock types, in registration order. */
-    java.util.Collection<MultiBlockType> getTypes();
-
     MultiBlockInstance createMultiBlock(String typeId, Location location, UUID owner, UUID creator, Quaternionf rotation);
 
     boolean placeMultiBlock(UUID id, Player actor);

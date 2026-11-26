@@ -88,23 +88,9 @@ public final class PackModelRenderer implements Listener {
         }
     }
 
-    /**
-     * True when a registered pack item can actually render this model key on the
-     * pack backend: the item exists AND its geometry model was compiled into the
-     * pack. Without the second half the bound item points at a model file the
-     * client never receives, so the renderer must retry the asset ensure rather
-     * than degrade to the virtual (textureless) engine.
-     */
+    /** True when a registered pack item renders this model key (render feasibility check). */
     public boolean hasItemForModel(String modelKey) {
-        ItemModelAsset item = registry.itemForModel(modelKey);
-        if (item == null || itemFactory.create(item) == null) {
-            return false;
-        }
-        if (!item.isGeometryBound()) {
-            return true;
-        }
-        String modelPath = "assets/" + item.namespace() + "/models/item/" + item.itemId() + ".json";
-        return registry.get(modelPath) != null;
+        return stackForModel(modelKey) != null;
     }
 
     /**

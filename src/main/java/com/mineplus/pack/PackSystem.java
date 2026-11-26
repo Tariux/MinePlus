@@ -211,7 +211,6 @@ public final class PackSystem {
             plugin.getServer().getPluginManager().registerEvents(boneRenderer, plugin);
             boneRenderer.setTransport(virtualBlockManager.displayTransport());
             renderingManager.setPackRenderer(modelRenderer);
-            renderingManager.setPackAssetEnsurer(this::ensureModelAssetsForModel);
             renderingManager.setPackBlockRenderer(blockRenderer);
             renderingManager.setPackBoneRenderer(boneRenderer);
             scheduleRecompile();
@@ -269,49 +268,6 @@ public final class PackSystem {
     // ------------------------------------------------------------------
     // Registration surface (used by PackApi)
     // ------------------------------------------------------------------
-
-    /** Registers a custom item: identity + assets + ItemRegistry recognition. */
-    /**
-     * On-demand pack asset compilation for a model key: registers a pack item
-     * for the model (idempotent) so the render manager can serve it through the
-     * resourcepack instead of degrading to the virtual engine. Uses the
-     * module-provided binding when one exists, else the engine namespace.
-     */
-    void ensureModelAssetsForModel(String modelKey) {
-        if (modelKey == null || modelKey.isBlank()
-                || virtualBlockManager.getModel(modelKey) == null) {
-            return;
-        }
-        ItemModelAsset bound = assetRegistry.itemForModel(modelKey);
-        if (bound == null) {
-            String namespace = boundNamespaceFor(modelKey);
-            registerItem(new PackItemDefinition(
-                    namespace, modelKey, org.bukkit.Material.CLOCK, modelKey,
-                    "minecraft:item/clock", java.util.List.of(), modelKey,
-                    com.mineplus.infrastructure.definition.ItemCategory.MACHINE_COMPONENT,
-                    null, null, java.util.List.of()));
-            return;
-        }
-        // The item was registered before its model was loaded (modules
-        // register their pack items at enable; models parse on first use), so
-        // its geometry and textures were skipped and the client would render
-        // the fallback model — which makes the renderer degrade to texel.
-        // Compile them now that the model is here, once, and republish.
-        for (PackItemDefinition definition : registeredItems) {
-            if (definition.modelKey() != null
-                    && definition.modelKey().equalsIgnoreCase(modelKey)
-                    && ensureModelAssets(definition)) {
-                scheduleRecompile();
-                return;
-            }
-        }
-    }
-
-    private String boundNamespaceFor(String modelKey) {
-        String key = modelKey.toLowerCase(java.util.Locale.ROOT);
-        return key.startsWith("water_wheel") || key.startsWith("rotation_")
-                || key.startsWith("cogwheel") ? "mineplusmachine" : "mineplus";
-    }
 
     /** Registers a custom item: identity + assets + ItemRegistry recognition. */
     public void registerItem(PackItemDefinition definition) {
@@ -579,42 +535,33 @@ public final class PackSystem {
      * references (last-segment normalization shared with
      * {@code TextureAsset.normalizePath}).
      */
-    /**
-     * Compiles one item's assets, once. Returns {@code true} only when this
-     * call actually registered geometry and textures (so a late compile can
-     * ask for a pack republish); repeated calls after that are no-ops.
-     */
-    private boolean ensureModelAssets(PackItemDefinition definition) {
+    private void ensureModelAssets(PackItemDefinition definition) {
         // An inherited item compiles to a one-line parent/layer0 model — no
         // bbmodel, one texture, everything else inherited from the parent.
         // (parent()/texture() combined with a modelKey is a misconfiguration:
         // the explicit model wins.)
         if (definition.isInherited() && definition.modelKey() == null) {
             registerInheritedItemAssets(definition);
-            return true;
+            return;
         }
         // Framed items carry no virtual geometry: their models are registered
         // raw by the owning module and referenced directly by the definition.
         if (definition.modelKey() == null) {
-            return false;
+            return;
         }
         VirtualModel model = virtualBlockManager.getModel(definition.modelKey());
         if (model == null) {
-            return false;
+            return;
         }
         String namespace = definition.namespace();
-        if (assetRegistry.get("assets/" + namespace + "/models/item/" + definition.id() + ".json") != null) {
-            return false;
-        }
         try {
             assetRegistry.register(new ModelAsset(namespace, "item/" + definition.id(), namespace,
                     definition.modelKey(), virtualBlockManager.getModelSourceFile(definition.modelKey()), model));
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
-            return false;
+            return;
         }
         registerModelTextures(namespace, definition.modelKey(), model, "item");
-        return true;
     }
 
     /**

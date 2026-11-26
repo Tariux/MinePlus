@@ -80,7 +80,7 @@ What does that mean for your server?
    ```
 
 4. **Reload & spawn** — `/mineplus reload all`, then place it via the API, a module, or `/mineplus model debugspawn <modelKey>`.
-5. **That's it** — every player sees and touches it: the default render needs no pack at all, and pack-rendered content arrives as one automatic, server-sent pack prompt.
+5. **That's it** — every player sees and touches it: pack-rendered content arrives as one automatic, server-sent pack prompt, and players who decline the pack fall back to the built-in virtual render.
 
 > 📖 **Full walkthroughs:** [`docs/extension-workflows.md`](docs/extension-workflows.md) • **Sample files:** [`examples/README.md`](examples/README.md)
 

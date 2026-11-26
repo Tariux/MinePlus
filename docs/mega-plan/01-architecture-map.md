@@ -71,4 +71,4 @@ What a third-party dev can reach: `InfrastructureApi` / `BasicInfrastructureApi`
 - Per-tick frequency of the `getNearbyEntities`/`getOnlinePlayers` call sites (F11) — need a profiler run.
 - Whether the GUI exploit (F3) actually reproduces — needs a server.
 - Whether `ReflectionNmsAdapter` caches its `ServerPlayer` handle (F12).
-- The Blockbench plugin's feature claims are from its own README, not exercised here. (The former Mineplus Studio devtool, `devtools/studio`, has been removed.)
+- Blockbench plugin feature claims are from their own README, not exercised here.

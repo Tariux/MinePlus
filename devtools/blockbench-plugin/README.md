@@ -21,8 +21,8 @@ Settings).
 | Mineplus: Paste Display Settings | apply the copied settings to the open model slot by slot through the built-in `DisplaySlot.extend()` path — values land exactly as copied, with undo (Ctrl+Z) |
 
 (The simplified v6 plugin has only the four tools above; the v5.x extras —
-Display Editor, validators, template tools, reports, exports, log panel,
-Studio — were removed on purpose.)
+Display Editor, validators, template tools, reports, exports, log panel —
+were removed on purpose.)
 
 ## Opening old models / animations
 

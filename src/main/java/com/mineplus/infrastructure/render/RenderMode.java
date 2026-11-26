@@ -66,7 +66,7 @@ public enum RenderMode {
 
     /** Maps the legacy backend/kind pair onto its canonical mode. */
     public static RenderMode of(RenderBackend backend, RenderKind kind) {
-        RenderBackend resolvedBackend = backend == null ? RenderBackend.DEFAULT : backend;
+        RenderBackend resolvedBackend = backend == null ? RenderBackend.PACK : backend;
         RenderKind resolvedKind = kind == null ? RenderKind.MODEL : kind;
         for (RenderMode mode : values()) {
             if (mode.backend == resolvedBackend && mode.kind == resolvedKind) {
@@ -80,7 +80,7 @@ public enum RenderMode {
      * Parses a {@code renderMode} config/JSON value. New keys map directly;
      * legacy {@code renderBackend}/{@code renderKind} keys are also accepted so
      * a single field can carry either vocabulary. Unknown or blank values fall
-     * back to the engine default, {@code PACK_ITEM} (resourcepack-first).
+     * back to {@link #VIRTUAL}.
      */
     public static RenderMode fromKey(String key) {
         if (key == null || key.isBlank()) {
@@ -89,13 +89,12 @@ public enum RenderMode {
         String normalized = key.trim().toLowerCase(Locale.ROOT)
                 .replace('-', '_').replace('+', '_').replace(' ', '_');
         return switch (normalized) {
-            case "pack", "pack_item", "pack_item_model", "resource_pack", "pack_only", "item" -> PACK_ITEM;
+            case "virtual", "virtual_model", "texel" -> VIRTUAL;
             case "pack_block", "block", "block_display", "display" -> PACK_BLOCK;
             case "pack_bones", "bones", "bone_rig", "bones_rig", "rig" -> PACK_BONES;
             case "hybrid", "hybrid_item", "virtual_pack", "virtual_plus_pack", "both" -> HYBRID_ITEM;
             case "hybrid_block", "virtual_pack_block", "virtual_plus_pack_block" -> HYBRID_BLOCK;
             case "hybrid_bones", "virtual_pack_bones", "virtual_plus_pack_bones" -> HYBRID_BONES;
-            case "virtual", "vanilla" -> VIRTUAL;
             default -> PACK_ITEM;
         };
     }

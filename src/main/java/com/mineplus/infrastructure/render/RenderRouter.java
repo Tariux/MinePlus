@@ -92,6 +92,7 @@ public final class RenderRouter {
                     degradedRoutes.increment();
                 }
                 log("degraded " + mode + " -> VIRTUAL (pack unavailable)");
+                PackFallbackNotice.report(mode.name(), "pack subsystem unavailable");
                 return new ResolvedRoute(RenderBackend.VIRTUAL, RenderKind.MODEL, true);
             }
             if (effectivePolicy.trackTelemetry()) {

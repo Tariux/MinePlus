@@ -47,11 +47,11 @@ Reload everything from game with `/mineplus reload all`.
 | `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
 | `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
 | `animations` | `[]` | Clip names to auto-play on this level's rendered model (see [Animation Engine](developer-api.md#animation-engine)) |
-| `renderMode` | `pack_item` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item` (`pack`), `pack_block`, `pack_bones`, `hybrid_item` (`hybrid`), `hybrid_block`, `hybrid_bones`. Takes precedence over `renderBackend`/`renderKind`. |
-| `renderBackend` | `pack` | Legacy backend axis: `pack` \| `virtual` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
+| `renderMode` | `pack_item` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item` (default), `pack_block`, `pack_bones`, `hybrid_item` (`hybrid`), `hybrid_block`, `hybrid_bones`. Takes precedence over `renderBackend`/`renderKind`. |
+| `renderBackend` | `pack` | Legacy backend axis: `virtual` \| `pack` (default) \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
 | `renderKind` | `model` | Legacy primitive axis: `model` \| `block` \| `bones`. Still fully supported; prefer `renderMode`. |
 
-> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. The engine default is resourcepack-first (`pack_item`): models render natively through the generated pack; set `renderMode: "virtual"` per level to opt a model back into packless virtual rendering. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
+> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
 
 ### Example
 
@@ -389,8 +389,8 @@ ANIMATION:
   AUTOPLAY: true
 
 TEXEL_BAKING:
-  # Global enable (false = rendering pipeline identical to before).
-  ENABLED: true
+  # Global enable (false by default — texel baking is opt-in).
+  ENABLED: false
   # AUTO | ON | OFF (per-model .meta.json overrides)
   MODE: AUTO
   # FACE | SUPERSAMPLE_2X2 | SUPERSAMPLE_4X4
@@ -556,7 +556,7 @@ WORLD_EDITS:
 | `ANIMATION.AUTO_STATE` | `true` / `false` | Derive `attack` > `airborne` > `swim` > `walk` > `idle` clips from the model's owning entity at automatic priority; explicit `AnimationApi` calls always win. Off by default (default `false`) |
 | `ANIMATION.TRANSITION` | `IMMEDIATE` / `AFTER_CURRENT` | Automatic state switch timing: cut at once, or let the current automatic clip finish its pass first (default `AFTER_CURRENT`) |
 | `ANIMATION.TRANSITION_TICKS` | ticks ≥ 0 | Crossfade length used when an automatic state starts or ends (default `5`) |
-| `TEXEL_BAKING.ENABLED` | `true` / `false` | Global texel baking switch; `false` restores the pre-texel pipeline entirely |
+| `TEXEL_BAKING.ENABLED` | `true` / `false` | Global texel baking switch (`false` by default — texel baking is opt-in); `true` re-enables the per-pixel bake layer |
 | `TEXEL_BAKING.MODE` | `AUTO` / `ON` / `OFF` | `AUTO` (default) bakes only faces that would use the FULL strategy and have a resolvable PNG; `ON` bakes every face with a resolvable PNG; `OFF` never bakes |
 | `TEXEL_BAKING.DETAIL` | `FACE` / `SUPERSAMPLE_2X2` / `SUPERSAMPLE_4X4` | Samples per texel: one center sample, or 4/16 area-averaged samples for close-up models |
 | `TEXEL_BAKING.MAX_PLATES_PER_FACE` | plates ≥ 1 | Merged-plate ceiling per face (default 96); above it the face falls back to the single-material plate |

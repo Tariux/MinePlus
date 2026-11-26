@@ -1,47 +1,54 @@
 package com.mineplus.infrastructure.render;
 
+import com.mineplus.util.DebugLogger;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
- * Loud, once-per-model record of every render that fell back from the
- * resourcepack to the texel/virtual engine. Unlike {@code DebugLogger}, the
- * warning is always written, so a model that fails to compile or bind is named
- * in the server log instead of silently rendering as texels.
+ * One-loud-warning bridge for pack-to-virtual fallbacks (machine root rule:
+ * pack-first always — when a model falls back to the texel engine, that must
+ * be logged loudly with the model named).
+ *
+ * <p>The first fallback for a model warns; repeats for the same model stay
+ * silent so a broken model cannot flood the log. {@link #clear} resets the
+ * state (reload path) so a repeat failure warns again.</p>
  */
 public final class PackFallbackNotice {
 
-    private static final Logger LOGGER = Logger.getLogger("MinePlus");
+    private static final String PLACEHOLDER = "<unknown>";
     private static final Map<String, String> REPORTED = new ConcurrentHashMap<>();
 
     private PackFallbackNotice() {
     }
 
     /**
-     * Records a pack-to-virtual fallback for {@code modelKey}; warns the first
-     * time each model falls back.
+     * Reports a fallback. Returns true the first time a model is seen (a
+     * warning is emitted); repeats for the same model return false and stay
+     * silent.
      *
-     * @return true when this call wrote the warning
+     * @param model  the model or level id; blank/null collapses to {@code <unknown>}
+     * @param reason why the pack render was not used
+     * @return true if this is the first report for the model
      */
-    public static boolean report(String modelKey, String reason) {
-        String key = modelKey == null || modelKey.isBlank() ? "<unknown>" : modelKey;
-        String why = reason == null || reason.isBlank() ? "unknown reason" : reason;
-        if (REPORTED.putIfAbsent(key, why) != null) {
+    public static boolean report(String model, String reason) {
+        String key = model == null || model.isBlank() ? PLACEHOLDER : model.trim();
+        String resolvedReason = reason == null || reason.isBlank() ? "unknown reason" : reason;
+        String previous = REPORTED.putIfAbsent(key, resolvedReason);
+        if (previous != null) {
             return false;
         }
-        LOGGER.log(Level.WARNING, "[MinePlus] Model '" + key + "' is rendering with the texel/virtual"
-                + " fallback instead of the resourcepack: " + why + ".");
+        DebugLogger.warning("[PackFallback] " + key
+                + " is rendering on the virtual axis (pack-first rule): " + resolvedReason);
         return true;
     }
 
-    /** Models that fell back since the last {@link #clear()}, with the first reason seen. */
+    /** Reasons for the fallbacks reported so far, keyed by model id. */
     public static Map<String, String> reported() {
         return Map.copyOf(REPORTED);
     }
 
-    /** Forgets reported models (reload path) so a repeat failure warns again. */
+    /** Forgets all reported fallbacks (reload path). */
     public static void clear() {
         REPORTED.clear();
     }

@@ -59,7 +59,6 @@ public final class PluginContext {
     private final com.mineplus.infrastructure.world.HitTestApi hitTest;
     private final DeveloperApi2 dev;
     private final com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks;
-    private final com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -111,8 +110,6 @@ public final class PluginContext {
         this.hitTest = hitTest;
         this.dev = new DeveloperApi2(this);
         this.energyNetworks = new com.mineplus.infrastructure.core.network.EnergyNetworkService(
-                infrastructureEngine.registry());
-        this.rotationNetworks = new com.mineplus.infrastructure.core.network.rotation.RotationNetworkService(
                 infrastructureEngine.registry());
     }
 
@@ -330,20 +327,10 @@ public final class PluginContext {
         // placed machines and balance dirty components on the lifecycle tick.
         for (var type : infrastructureEngine.registry().getTypes()) {
             energyNetworks.registerFromType(type);
-            rotationNetworks.registerFromType(type);
         }
-        infrastructureEngine.registry().addTypeRegistrationListener(type -> {
-            energyNetworks.registerFromType(type);
-            rotationNetworks.registerFromType(type);
-            energyNetworks.rebuildFromRegistry(type.id());
-            rotationNetworks.rebuildFromRegistry(type.id());
-        });
+        infrastructureEngine.registry().addTypeRegistrationListener(energyNetworks::registerFromType);
         energyNetworks.attachToLifecycle(infrastructureEngine.hookBus());
-        rotationNetworks.attachToLifecycle(infrastructureEngine.hookBus());
-        energyNetworks.rebuildFromRegistry(null);
-        rotationNetworks.rebuildFromRegistry();
         infrastructureEngine.lifecycleManager().addPostTickPass(energyNetworks::balanceTick);
-        infrastructureEngine.lifecycleManager().addPostTickPass(rotationNetworks::rotationTick);
         infrastructureEngine.lifecycleManager().setEnergyNetworkService(energyNetworks);
         perf.start(plugin);
         deferredEdits.start(plugin);
@@ -503,11 +490,6 @@ public final class PluginContext {
     /** P6 Phase C: energy network membership and per-tick balancing. */
     public com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks() {
         return energyNetworks;
-    }
-
-    /** Create-style kinetic rotation networks over the multiblock registry. */
-    public com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks() {
-        return rotationNetworks;
     }
 
     /**

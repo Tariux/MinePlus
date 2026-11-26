@@ -57,7 +57,7 @@ public record TexelBakingSettings(
 
     public static TexelBakingSettings defaults() {
         return new TexelBakingSettings(
-                true,
+                false,
                 ModelMeta.TexelMode.AUTO,
                 ModelMeta.TexelDetail.FACE,
                 96,
