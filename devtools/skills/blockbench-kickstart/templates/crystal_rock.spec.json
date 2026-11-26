@@ -1,0 +1,47 @@
+{
+  "name": "crystal_rock",
+  "format": "free",
+  "target": "virtual",
+  "out": "E:/Vesktop/blockbench-mcp-project/art/rocks",
+  "uv": "full",
+  "textures": [
+    { "name": "stone", "width": 16, "height": 16, "fill": "#8a8a8a" },
+    { "name": "amethyst_block", "width": 16, "height": 16, "fill": "#8f6fbf" }
+  ],
+  "groups": [{ "name": "rock", "origin": [0, 0, 0] }],
+  "cubes": [
+    { "name": "core", "group": "rock", "texture": "stone", "from": [-5, 0, -5], "to": [4, 6, 4], "origin": [-0.5, 3, -0.5], "rotation": [0, 12, 0] },
+    { "name": "crown", "group": "rock", "texture": "stone", "from": [-4, 4, -4], "to": [3, 9, 3], "origin": [-0.5, 6.5, -0.5], "rotation": [0, -16, 0] },
+    { "name": "lump_left", "group": "rock", "texture": "stone", "from": [-7.5, 0, -2], "to": [-4, 4, 3], "origin": [-5.75, 2, 0.5], "rotation": [0, 5, 0] },
+    { "name": "lump_right", "group": "rock", "texture": "stone", "from": [3, 0, -3], "to": [7, 5, 2], "origin": [5, 2.5, -0.5], "rotation": [0, -10, 0] },
+    { "name": "lump_back", "group": "rock", "texture": "stone", "from": [-2, 0, 3], "to": [3, 4, 7], "origin": [0.5, 2, 5], "rotation": [0, 14, 0] },
+    { "name": "pebble", "group": "rock", "texture": "stone", "from": [3, 0, 3], "to": [7, 4, 7], "origin": [5, 2, 5], "rotation": [0, 25, 0] },
+    { "name": "crystal", "group": "rock", "texture": "amethyst_block", "from": [-1.5, 7, -1.5], "to": [1.5, 13, 1.5], "origin": [0, 9, 0], "rotation": [0, 30, 0] }
+  ],
+  "animations": [
+    {
+      "name": "idle",
+      "loop": true,
+      "length": 2.0,
+      "bones": {
+        "rock": [
+          { "time": 0, "position": [0, 0, 0] },
+          { "time": 1.0, "position": [0, 0.4, 0] },
+          { "time": 2.0, "position": [0, 0, 0] }
+        ]
+      }
+    },
+    {
+      "name": "spin",
+      "loop": true,
+      "length": 4.0,
+      "bones": {
+        "rock": [
+          { "time": 0, "rotation": [0, 0, 0] },
+          { "time": 4.0, "rotation": [0, 360, 0] }
+        ]
+      }
+    }
+  ],
+  "preview": { "position": [26, 20, -30], "target": [0, 6, 0], "fov": 40 }
+}
