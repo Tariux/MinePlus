@@ -82,7 +82,6 @@ Sorted by severity. Java paths are relative to `src/main/java/com/mineplus/`. Li
 | F13 | Docs and version drift | `README.md:10` badge says 1.0.0 against `build.gradle:6` 1.3.0; Blockbench `README.md:1` says v5.0 against plugin v6.1.0 (`mineplus_generic_display.js:412`); `CHANGELOG.md:8-10` describes plugin v2 | Sync all three | 0.5 day |
 | F14 | Legacy text API | 259 `ChatColor` uses in 12 files; Adventure jars are in `libs/` | Move to Adventure components | 5 days |
 | F15 | Metrics and update check run unconditionally | `MineplusPlugin.java:42-43` | Config switch for the update check; bStats has its own opt-out | 0.5 day |
-| F16 | Studio dev server listens on all interfaces | `devtools/studio/server/server.mjs:1257` | Bind to 127.0.0.1 by default | 0.5 day |
 | F17 | Two `.bbmodel` parsers | `infrastructure/virtual/BbModelImporter.java` (1,255 lines) and `infrastructure/mob/custom/model/BbModelParser.java` (912) | Merge behind one reader | 5 days |
 
 ## Checked and found sound

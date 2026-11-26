@@ -49,12 +49,8 @@ Follow `mineplus-model-authoring`; for rotating machines add:
   network's solved rate, so loop duration = one revolution at base speed.
 - Verify through the real pipeline, never by eye:
   ```bash
-  # parse with the core importer (VirtualModel: cubes/bones/animations)
-  # then full audit:
-  node devtools/studio/agent.mjs audit --json
+  ./gradlew compileJava testRunners   # includes the pipeline regression runners
   ```
-  Models outside watched roots are not audited by path — import-check them
-  explicitly.
 
 ## 3. Declare machines config-first
 
@@ -96,7 +92,6 @@ plain-Java test under `src/test/java/com/mineplus/test/` following
 ```bash
 ./gradlew compileJava testRunners            # core green
 ./gradlew -p examples/mineplus-<name> build  # plugin jar builds
-node devtools/studio/agent.mjs audit --json  # pack audit
 ```
 
 Baseline rule: if a suite fails, check whether it failed before your

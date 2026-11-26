@@ -17,7 +17,6 @@ Facts re-checked against the tree on 2026-11-25. 353 Java files, 64,967 lines (`
 | `util` | `SchedulerCompat`, `ServerVersion`, debug, update check | `SchedulerCompat` |
 | `bstats` | Vendored metrics | — |
 | `devtools/blockbench-plugin` | Blockbench plugin (JS), `mineplus_generic_display.js` v6.1.0, own node test | — |
-| `devtools/studio` | Node dev server + web app, Java stubs for syntax checks | `server/server.mjs` |
 
 ## Startup order (`MineplusPlugin.onEnable`, :36-71)
 
@@ -72,4 +71,4 @@ What a third-party dev can reach: `InfrastructureApi` / `BasicInfrastructureApi`
 - Per-tick frequency of the `getNearbyEntities`/`getOnlinePlayers` call sites (F11) — need a profiler run.
 - Whether the GUI exploit (F3) actually reproduces — needs a server.
 - Whether `ReflectionNmsAdapter` caches its `ServerPlayer` handle (F12).
-- Studio and Blockbench plugin feature claims are from their own READMEs, not exercised here.
+- The Blockbench plugin's feature claims are from its own README, not exercised here. (The former Mineplus Studio devtool, `devtools/studio`, has been removed.)

@@ -294,7 +294,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Design doc: `docs/design/blockbench-item-animation-design.md` (baking,
   cooldown-frame playback, both pack generations, the ViaVersion trap).
 
-### Mineplus Studio — one merged devtool (asset-lab + texel)
+### Mineplus Studio — one merged devtool (asset-lab + texel) [later removed]
+
+> Removed in a later change: the whole `devtools/studio` tree (server, daemon,
+> web app and `agent.mjs` CLI) was deleted; `testRunners` replaces it for
+> asset verification. History below kept as written.
 
 - `devtools/asset-lab` and `devtools/texel` are merged into **`devtools/studio`**:
   one server (port 5167), one daemon (`StudioDaemon`, package
