@@ -18,7 +18,7 @@ package com.mineplus.infrastructure.render;
 public record RenderPlan(RenderMode mode, RenderPolicy policy, String source) {
 
     public RenderPlan {
-        mode = mode == null ? RenderMode.VIRTUAL : mode;
+        mode = mode == null ? RenderMode.PACK_ITEM : mode;
         source = source == null || source.isBlank() ? "default" : source.trim();
     }
 

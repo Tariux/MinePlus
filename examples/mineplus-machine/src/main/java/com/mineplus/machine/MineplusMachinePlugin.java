@@ -31,6 +31,8 @@ public final class MineplusMachinePlugin extends ModuleFeature {
 
     private final Map<UUID, Float> lastSpeeds = new HashMap<>();
     private final Map<UUID, Boolean> braked = new HashMap<>();
+    private MachineItemListener machineItems;
+    private WaterFlowTask waterFlow;
 
     public MineplusMachinePlugin(JavaPlugin plugin, com.mineplus.infrastructure.PluginContext context) {
         super(plugin, context);
@@ -62,7 +64,10 @@ public final class MineplusMachinePlugin extends ModuleFeature {
 
         context.rotationNetworks().setStateSink((instance, state) -> render(instance, state));
         Bukkit.getPluginManager().registerEvents(new BrakeListener(this), plugin);
-        new WaterFlowTask(this).runTaskTimer(plugin, 20L, 20L);
+        machineItems = new MachineItemListener(this);
+        Bukkit.getPluginManager().registerEvents(machineItems, plugin);
+        waterFlow = new WaterFlowTask(this);
+        Bukkit.getPluginManager().registerEvents(waterFlow, plugin);
     }
 
     @Override
@@ -94,6 +99,9 @@ public final class MineplusMachinePlugin extends ModuleFeature {
         var animation = context.animationApi();
         if (state.speed() == 0f) {
             animation.stopAnimation(instance.id(), SPIN_CLIP);
+            if (waterFlow != null && instance.typeId().startsWith("water_wheel")) {
+                waterFlow.rescan(instance);
+            }
             return;
         }
         // The clips are authored so 1x playback means the model's own loop
@@ -140,5 +148,39 @@ public final class MineplusMachinePlugin extends ModuleFeature {
     /** Exposes the rotation service to package helpers (WaterFlowTask). */
     com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks() {
         return context.rotationNetworks();
+    }
+
+    /** The plugin bootstrap (for namespaced keys). */
+    JavaPlugin plugin() {
+        return plugin;
+    }
+
+    /** The core plugin context (package helpers). */
+    com.mineplus.infrastructure.PluginContext context() {
+        return context;
+    }
+
+    /** Module item listener (give/shop wiring). */
+    MachineItemListener itemListener() {
+        return machineItems;
+    }
+
+    /** All machine type ids this module ships, in shop order. */
+    static final String[] MACHINE_TYPE_IDS = {
+            "water_wheel", "water_wheel_weak", "water_wheel_strong",
+            "rotation_shaft", "cogwheel", "cogwheel_vertical", "cogwheel_horizontal",
+            "rotation_brake"};
+
+    /** Resolves a registered machine type by id, or null. */
+    com.mineplus.infrastructure.core.multiblock.MultiBlockType typeById(String typeId) {
+        return context.infrastructureApi() == null ? null
+                : context.infrastructureApi().getType(typeId);
+    }
+
+    /** All registered machine types (shop order not guaranteed; see {@link #MACHINE_TYPE_IDS}). */
+    java.util.Collection<com.mineplus.infrastructure.core.multiblock.MultiBlockType> machineTypes() {
+        return context.infrastructureApi() == null
+                ? java.util.List.of()
+                : context.infrastructureApi().getTypes();
     }
 }

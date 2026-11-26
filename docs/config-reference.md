@@ -47,11 +47,11 @@ Reload everything from game with `/mineplus reload all`.
 | `upgradeCost` | `{}` | Object of `itemKey -> amount`, charged on `upgradeBlock` |
 | `guiOptions` | `{}` | Free-form string map for custom GUI data (e.g. `title`) |
 | `animations` | `[]` | Clip names to auto-play on this level's rendered model (see [Animation Engine](developer-api.md#animation-engine)) |
-| `renderMode` | `virtual` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item`, `pack_block`, `pack_bones`, `hybrid_item` (`hybrid`), `hybrid_block`, `hybrid_bones`. Takes precedence over `renderBackend`/`renderKind`. |
-| `renderBackend` | `virtual` | Legacy backend axis: `virtual` \| `pack` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
+| `renderMode` | `pack_item` | Unified render mode (preferred). One value selects both the subsystem and the primitive: `virtual`, `pack_item` (`pack`), `pack_block`, `pack_bones`, `hybrid_item` (`hybrid`), `hybrid_block`, `hybrid_bones`. Takes precedence over `renderBackend`/`renderKind`. |
+| `renderBackend` | `pack` | Legacy backend axis: `pack` \| `virtual` \| `virtual+pack` (`hybrid`). Still fully supported; prefer `renderMode`. |
 | `renderKind` | `model` | Legacy primitive axis: `model` \| `block` \| `bones`. Still fully supported; prefer `renderMode`. |
 
-> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
+> **Render mode vs. the legacy pair.** `renderMode` is the single declarative choice; the loader maps the legacy `renderBackend`/`renderKind` pair onto the same mode when `renderMode` is absent, so existing definitions keep working unchanged. The engine default is resourcepack-first (`pack_item`): models render natively through the generated pack; set `renderMode: "virtual"` per level to opt a model back into packless virtual rendering. Routing (subsystem availability, fallback) is applied centrally by the render router — see [`RENDERING.POLICY`](#settingsmpyml-engine--runtime-services) and [Render Modes](developer-api.md#render-modes).
 
 ### Example
 

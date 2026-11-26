@@ -4,7 +4,13 @@ import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockFromToEvent;
+import org.bukkit.event.block.BlockPhysicsEvent;
+import org.bukkit.event.player.PlayerBucketEmptyEvent;
+import org.bukkit.event.player.PlayerBucketFillEvent;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -13,29 +19,74 @@ import java.util.UUID;
 
 /**
  * Derives each water wheel's SU from the flowing water around it
- * (Create-style): every second, each placed source wheel scans its
- * 3x3 shell for water blocks and pushes the count through the core
- * service's dynamic-SU hook, so a dry wheel barely turns and a wheel
- * in a river runs at full strength.
+ * (Create-style) — event-driven: the scan re-runs for a wheel only when a
+ * water block near it changes (flow, drain, bucket use), not on a timer.
  */
-final class WaterFlowTask extends BukkitRunnable {
+final class WaterFlowTask implements Listener {
 
     private static final int BASE_SU = 8;
 
     private final MineplusMachinePlugin feature;
+    /** Wheels whose SU is already correct for the current water count — skipped on redundant events. */
+    private final Set<UUID> settled = new HashSet<>();
 
     WaterFlowTask(MineplusMachinePlugin feature) {
         this.feature = feature;
     }
 
-    @Override
-    public void run() {
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onWaterFlow(BlockFromToEvent event) {
+        if (event.getBlock().getType() == Material.WATER || event.getToBlock().getType() == Material.WATER) {
+            markDirty(event.getBlock());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBucketEmpty(PlayerBucketEmptyEvent event) {
+        markDirty(event.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBucketFill(PlayerBucketFillEvent event) {
+        markDirty(event.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPhysics(BlockPhysicsEvent event) {
+        if (event.getSourceBlock().getType() == Material.WATER) {
+            markDirty(event.getBlock());
+        }
+    }
+
+    /** Recomputes SU for every wheel whose shell touches the changed block. */
+    private void markDirty(Block changed) {
         var rotation = feature.rotationNetworks();
         Collection<MultiBlockInstance> instances = rotation.placedSources();
         for (MultiBlockInstance wheel : instances) {
-            int water = countWater(wheel);
-            rotation.setSourceSu(wheel, BASE_SU + water * suPerWater(wheel.typeId()));
+            if (!settled.add(wheel.id())) {
+                continue;
+            }
+            var at = wheel.coordinate();
+            if (!at.worldName().equals(changed.getWorld().getName())) {
+                continue;
+            }
+            int dx = changed.getX() - at.x();
+            int dy = changed.getY() - at.y();
+            int dz = changed.getZ() - at.z();
+            if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && Math.abs(dz) <= 1
+                    && (dx != 0 || dy != 0 || dz != 0)) {
+                int water = countWater(wheel);
+                rotation.setSourceSu(wheel, BASE_SU + water * suPerWater(wheel.typeId()));
+            }
         }
+    }
+
+    /** Initial (re)scan for one wheel — used on place and after server restart. */
+    void rescan(MultiBlockInstance wheel) {
+        settled.remove(wheel.id());
+        var rotation = feature.rotationNetworks();
+        int water = countWater(wheel);
+        rotation.setSourceSu(wheel, BASE_SU + water * suPerWater(wheel.typeId()));
     }
 
     private int suPerWater(String typeId) {

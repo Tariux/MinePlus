@@ -25,7 +25,7 @@ public record MultiBlockLevel(
         upgradeCost = Collections.unmodifiableMap(new LinkedHashMap<>(upgradeCost));
         guiOptions = Collections.unmodifiableMap(new LinkedHashMap<>(guiOptions));
         animations = animations == null ? List.of() : List.copyOf(animations);
-        renderBackend = renderBackend == null ? RenderBackend.VIRTUAL : renderBackend;
+        renderBackend = renderBackend == null ? RenderBackend.DEFAULT : renderBackend;
         renderKind = renderKind == null ? RenderKind.MODEL : renderKind;
     }
 
@@ -49,7 +49,7 @@ public record MultiBlockLevel(
             Map<String, String> guiOptions,
             List<String> animations
     ) {
-        this(level, modelPath, speedMultiplier, durability, upgradeCost, guiOptions, animations, RenderBackend.VIRTUAL);
+        this(level, modelPath, speedMultiplier, durability, upgradeCost, guiOptions, animations, RenderBackend.DEFAULT);
     }
 
     public MultiBlockLevel(

@@ -79,7 +79,7 @@ public final class RenderRouter {
      *         plan wants the pack and the policy forbids degrading to virtual
      */
     public ResolvedRoute route(RenderPlan plan, boolean packAvailable) {
-        RenderPlan resolvedPlan = plan == null ? RenderPlan.of(RenderMode.VIRTUAL) : plan;
+        RenderPlan resolvedPlan = plan == null ? RenderPlan.of(RenderMode.PACK_ITEM) : plan;
         RenderPolicy effectivePolicy = effectivePolicy(resolvedPlan);
         RenderMode mode = resolvedPlan.mode();
         RenderBackend backend = mode.backend();

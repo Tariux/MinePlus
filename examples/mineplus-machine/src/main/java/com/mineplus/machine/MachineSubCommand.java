@@ -46,7 +46,7 @@ public final class MachineSubCommand implements SubCommand {
 
     @Override
     public String usage() {
-        return "/machine <place <type>|status|remove>";
+        return "/machine <place <type>|give <type>|shop|status|remove>";
     }
 
     @Override
@@ -64,6 +64,17 @@ public final class MachineSubCommand implements SubCommand {
                 }
                 return place(player, args[1].toLowerCase(Locale.ROOT));
             }
+            case "give" -> {
+                if (args.length < 2) {
+                    player.sendMessage(ChatColor.YELLOW + "Usage: /machine give <type>. Types: "
+                            + String.join(", ", TYPE_IDS));
+                    return true;
+                }
+                return give(player, args[1].toLowerCase(Locale.ROOT));
+            }
+            case "shop" -> {
+                return shop(player);
+            }
             case "status" -> {
                 return status(player);
             }
@@ -75,6 +86,40 @@ public final class MachineSubCommand implements SubCommand {
                 return true;
             }
         }
+    }
+
+    /** {@code /machine give <type>} — puts a placeable machine item in hand. */
+    private boolean give(Player player, String typeId) {
+        var item = feature.itemListener().itemFor(typeId);
+        if (item == null) {
+            player.sendMessage(ChatColor.RED + "Unknown type '" + typeId
+                    + "'. Types: " + String.join(", ", TYPE_IDS));
+            return true;
+        }
+        var leftover = player.getInventory().addItem(item);
+        if (!leftover.isEmpty()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), leftover.get(0));
+        }
+        player.sendMessage(ChatColor.GREEN + "Given " + typeId
+                + ChatColor.GRAY + " — right-click a block face to place it.");
+        return true;
+    }
+
+    /** {@code /machine shop} — clickable list of every machine type. */
+    private boolean shop(Player player) {
+        player.sendMessage(ChatColor.AQUA + "" + ChatColor.BOLD + "Machine Shop"
+                + ChatColor.GRAY + " — click an entry to receive it");
+        for (String typeId : TYPE_IDS) {
+            var type = feature.typeById(typeId);
+            String label = type == null ? typeId : type.displayName();
+            player.sendMessage(net.md_5.bungee.api.ChatColor.AQUA + " • " + label
+                    + ChatColor.GRAY + " (" + typeId + ")"
+                    + net.md_5.bungee.api.ChatColor.DARK_GRAY + " [get]"
+                    + net.md_5.bungee.api.ChatColor.RESET
+                    + net.md_5.bungee.api.ChatColor.GRAY
+                    + " — " + "click to receive");
+        }
+        return true;
     }
 
     private boolean place(Player player, String typeId) {

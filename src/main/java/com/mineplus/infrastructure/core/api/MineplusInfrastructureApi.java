@@ -58,6 +58,16 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     }
 
     @Override
+    public com.mineplus.infrastructure.core.multiblock.MultiBlockType getType(String typeId) {
+        return registry.getType(typeId);
+    }
+
+    @Override
+    public java.util.Collection<com.mineplus.infrastructure.core.multiblock.MultiBlockType> getTypes() {
+        return registry.getTypes();
+    }
+
+    @Override
     public MultiBlockInstance createMultiBlock(String typeId, Location location, UUID owner, UUID creator, Quaternionf rotation) {
         return lifecycleManager.create(typeId, location, owner, creator, rotation);
     }

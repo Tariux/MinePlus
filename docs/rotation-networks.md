@@ -63,10 +63,11 @@ rotation.connected(idA, idB);              // same network?
 rotation.setSourceSu(wheelInstance, su);   // dynamic capacity (water flow, wind, ...)
 ```
 
-The `machine` example shows the dynamic pattern: `WaterFlowTask` counts
-the water blocks around each wheel every second and pushes
-`SU = 8 + water × tier-rate` through `setSourceSu`, so output follows
-how hard the wheel is actually driven.
+The `machine` example shows the dynamic pattern: `WaterFlowTask` listens
+to water-change events (`BlockFromToEvent`, bucket use, water physics)
+and recomputes `SU = 8 + water × tier-rate` through `setSourceSu` only
+for wheels whose shell a changed block touches — output follows how hard
+the wheel is actually driven, with no polling while water is still.
 
 The sink fires per solved member each tick; drive your model animation
 from it (see the `machine` example).
@@ -117,6 +118,9 @@ server-side invisible blocks in it. Two protocol limits to know:
 `examples/mineplus-machine` — water wheels (weak 256 SU @ 3.0, regular
 512 SU @ 6.0, strong 1024 SU @ 10.0), shaft, three cogwheel orientations
 (vertical/horizontal/side meshes), a brake lever and a `/machine` test
-bench. All machine behaviour lives in `defaults/multiblocks/*.json`; the
-plugin code only renders `spin`/`swing` from the solved states and toggles
-the brake on interact.
+bench (`/machine place|give <type>|shop|status|remove`; `give` hands a
+placeable machine item — right-click a block face to place, the machine
+shop lists every type clickable). All machine behaviour lives in
+`defaults/multiblocks/*.json`; the plugin code only renders `spin`/`swing`
+from the solved states and toggles the brake on interact. Models render
+through the resource pack by default (`renderMode: "pack_item"`).
