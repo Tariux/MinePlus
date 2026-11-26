@@ -16,7 +16,7 @@ Facts re-checked against the tree on 2026-11-25. 353 Java files, 64,967 lines (`
 | `infrastructure.command`, `input`, `fx`, `hud`, `combat`, `content`, `definition`, `listener`, `model`, `module`, `perf`, `registry`, `render`, `world` | Command routing, input probes, effects, HUD, stance/combat, definitions, perf registry, module SPI, registries | — |
 | `util` | `SchedulerCompat`, `ServerVersion`, debug, update check | `SchedulerCompat` |
 | `bstats` | Vendored metrics | — |
-| `devtools/mineplus-blockbench-plugin` | Blockbench plugin (JS), `mineplus_generic_display.js` v6.1.0, own node test | — |
+| `devtools/blockbench-plugin` | Blockbench plugin (JS), `mineplus_generic_display.js` v6.1.0, own node test | — |
 | `devtools/studio` | Node dev server + web app, Java stubs for syntax checks | `server/server.mjs` |
 
 ## Startup order (`MineplusPlugin.onEnable`, :36-71)
@@ -65,7 +65,7 @@ What a third-party dev can reach: `InfrastructureApi` / `BasicInfrastructureApi`
 
 ## Blockbench plugin inventory
 
-`mineplus_generic_display.js` v6.1.0: bones, cube meshes, per-bone textures, animations export, hitbox metadata, generic-display format consumed by both `BbModelImporter` (blocks/furniture) and `BbModelParser` (mobs). Duplicated parsers are finding F17. Node test at `devtools/mineplus-blockbench-plugin/test/`.
+`mineplus_generic_display.js` v6.1.0: bones, cube meshes, per-bone textures, animations export, hitbox metadata, generic-display format consumed by both `BbModelImporter` (blocks/furniture) and `BbModelParser` (mobs). Duplicated parsers are finding F17. Node test at `devtools/blockbench-plugin/test/`.
 
 ## Assumptions not verified
 

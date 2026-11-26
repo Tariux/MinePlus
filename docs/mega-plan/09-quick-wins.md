@@ -5,7 +5,7 @@ Each under one developer-day, each independently shippable. Ordered by value. Ev
 | # | Change | Benefit | Where |
 | --- | --- | --- | --- |
 | 1 | Cancel `COLLECT_TO_CURSOR`, number-key and off-hand swaps into protected GUI slots; listener priority HIGH + `ignoreCancelled` | Closes the only known exploitable class of bug (F3) — even if the repro fails, the hardening is 2h | `infrastructure/core/gui/AbstractMachineGui.java:101-106`, `InfrastructureGuiListener.java:18-34` |
-| 2 | Fix version drift: README badge → 1.3.0, Blockbench README → plugin v6.1.0, rewrite CHANGELOG plugin entry | Stops users from trusting a wrong version (F13) | `README.md:10`, `devtools/mineplus-blockbench-plugin/README.md:1`, `CHANGELOG.md:8-10` |
+| 2 | Fix version drift: README badge → 1.3.0, Blockbench README → plugin v6.1.0, rewrite CHANGELOG plugin entry | Stops users from trusting a wrong version (F13) | `README.md:10`, `devtools/blockbench-plugin/README.md:1`, `CHANGELOG.md:8-10` |
 | 3 | Make the update check conditional on config (default off for new installs) | One less unconditional network call per boot (F15) | `MineplusPlugin.java:42` |
 | 4 | Bind studio dev server and pack endpoint to `127.0.0.1` unless explicitly overridden; document `PUBLIC_URL` for production | Removes an accidental public HTTP listener (F8, F16) | `devtools/studio/server/server.mjs:1257`, `config/ConfigManager.java:299` |
 | 5 | Add `folia-supported` documentation guard: a startup log warning listing the raw Bukkit-scheduler count when Folia is detected | Converts "README says Folia" (F1) into an honest runtime signal before the real port | new check in `MineplusPlugin.onEnable` |

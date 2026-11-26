@@ -3,7 +3,7 @@
 End-to-end workflow: design a model in Blockbench, export it, install it into
 the Mine Plus pack, and verify it matches in game. Written for designers
 (Blockbench work) and developers (pack + API work). For the plugin's own tool
-reference see `devtools/mineplus-blockbench-plugin/README.md`; for the
+reference see `devtools/blockbench-plugin/README.md`; for the
 display-context slot mapping see `docs/display-slot-mapping.md`.
 
 ## 1. Plan the model
@@ -20,7 +20,7 @@ display-context slot mapping see `docs/display-slot-mapping.md`.
 ## 2. Set up Blockbench
 
 1. Install the Mineplus plugin: copy
-   `devtools/mineplus-blockbench-plugin/` into your Blockbench plugins
+   `devtools/blockbench-plugin/` into your Blockbench plugins
    folder, restart, enable it under File > Plugins.
 2. Recommended starting points (Tools menu):
    - **Mineplus: Open Generic / Java Item Model** — start from a vanilla item
