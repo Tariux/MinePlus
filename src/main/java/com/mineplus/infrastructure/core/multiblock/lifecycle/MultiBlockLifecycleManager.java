@@ -298,14 +298,12 @@ public final class MultiBlockLifecycleManager implements AnimationInstanceBridge
             return false;
         }
 
-        // Spawn-area policy: clearing the target area requires the explicit
-        // permission (op by default) instead of an implicit op/creative bypass —
-        // creative builds inside a protected region must still fail the empty-area
-        // check like any other placement.
-        boolean fullAccess = actor == null
-                || actor.hasPermission("mineplus.multiblock.clearspawn");
+        // Placement never destroys blocks: occupied cells in the footprint
+        // always refuse the placement (Create-style), regardless of
+        // permissions. The only occupant tolerated is a cell this multiblock
+        // system itself already owns (a re-render of the same machine).
         VirtualBlockManager.SpawnAreaResult area = renderingManager.prepareArea(
-                type, instance, plugin.getDataFolder(), fullAccess);
+                type, instance, plugin.getDataFolder(), false);
         if (area == null) {
             if (actor != null) {
                 actor.sendMessage(org.bukkit.ChatColor.RED

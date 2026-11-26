@@ -157,10 +157,13 @@ public final class MineplusMachinePlugin extends ModuleFeature {
                 "defaults/models/" + modelName + ".bbmodel",
                 "models/" + modelName + ".bbmodel", true);
         // Ships the per-model filling space (water wheels: only the center
-        // axle cell becomes solid, the ring over the river stays open).
-        context.moduleSupport().installDefault(plugin,
-                "defaults/models/" + modelName + ".bbmodel.meta.json",
-                "models/" + modelName + ".bbmodel.meta.json", true);
+        // axle cell becomes solid, the ring over the river stays open). The
+        // meta file is optional — models without one must not warn.
+        if (plugin.getResource("defaults/models/" + modelName + ".bbmodel.meta.json") != null) {
+            context.moduleSupport().installDefault(plugin,
+                    "defaults/models/" + modelName + ".bbmodel.meta.json",
+                    "models/" + modelName + ".bbmodel.meta.json", true);
+        }
     }
 
     private void render(MultiBlockInstance instance, RotationNetworkService.MemberState state) {
