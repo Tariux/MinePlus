@@ -163,6 +163,27 @@ public final class EnergyNetworkService {
         }
     }
 
+    /**
+     * Re-adds instances already in the registry (null {@code typeId} = all
+     * types). Persisted machines are restored before this service is wired,
+     * so without this a restart leaves saved machines out of their network.
+     *
+     * @return number of matching instances that are network members afterwards
+     */
+    public int rebuildFromRegistry(String typeId) {
+        int joined = 0;
+        for (MultiBlockInstance instance : registry.getInstances()) {
+            if (typeId != null && !typeId.equalsIgnoreCase(instance.typeId())) {
+                continue;
+            }
+            onPlaced(instance);
+            if (members.containsKey(keyOf(instance.coordinate()))) {
+                joined++;
+            }
+        }
+        return joined;
+    }
+
     /** Removes one instance's node from the grid; no-op when absent. */
     public void onRemoved(MultiBlockInstance instance) {
         members.remove(keyOf(instance.coordinate()));

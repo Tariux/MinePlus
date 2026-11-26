@@ -47,6 +47,7 @@ public final class MachineWiringTest {
         flowingWaterDrives();
         axleShaftTurnsWithWheel();        dryWheelStopsAxleShaft();
         offAxleShaftDoesNotJoin();
+        restoredMachinesRejoinAfterRestart();
         preloadModelRegistersInstalledModel();
         everyMachineHasModelAndCollisionMeta();
 
@@ -108,6 +109,36 @@ public final class MachineWiringTest {
         check("dry wheel stops", speeds.getOrDefault(wheel.id(), -1f) == 0f);
         check("dry wheel stops its axle shaft",
                 speeds.getOrDefault(shaft.id(), -1f) == 0f);
+    }
+
+    /**
+     * Restart order: saved instances land in the registry before the network
+     * service is wired. Rebuilding from the registry must restore the same
+     * wheel + axle network, and repeating it must not change membership.
+     */
+    private static void restoredMachinesRejoinAfterRestart() {
+        MultiBlockRegistry registry = new MultiBlockRegistry();
+        Fixture template = new Fixture();
+        MultiBlockInstance wheel = template.instance("water_wheel", 0, 64, 0);
+        MultiBlockInstance shaft = template.instance("rotation_shaft", 0, 64, 1);
+        registry.addInstance(wheel);
+        registry.addInstance(shaft);
+
+        RotationNetworkService rotation = new RotationNetworkService(registry);
+        Map<UUID, Float> speeds = new HashMap<>();
+        rotation.setStateSink((instance, state) -> speeds.put(instance.id(), state.speed()));
+        check("no profiles yet: nothing joins", rotation.rebuildFromRegistry() == 0);
+        rotation.registerProfile("water_wheel",
+                new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false));
+        check("late type registration rejoins the wheel", rotation.rebuildFromRegistry("WATER_WHEEL") == 1);
+        rotation.registerProfile("rotation_shaft",
+                new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false));
+        check("full rebuild restores both members", rotation.rebuildFromRegistry() == 2);
+        check("rebuild is idempotent", rotation.rebuildFromRegistry() == 2);
+
+        rotation.rotationTick();
+        check("restored wheel spins", speeds.getOrDefault(wheel.id(), -1f) == 6f);
+        check("restored axle shaft turns with the wheel", speeds.getOrDefault(shaft.id(), -1f) == 6f);
     }
 
     /** Axle-only linking: a shaft off the axle does not join the wheel. */

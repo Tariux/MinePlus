@@ -8,7 +8,13 @@ energy grid (`EnergyNetworkService`) and is consumed through the same
 ## What it does
 
 Machines placed as multiblock instances join rotation networks by
-6-adjacency. Each solved network computes, Create-style:
+6-adjacency of their anchor (centre) cell: only a machine whose anchor
+touches another machine's anchor face-on links. A water wheel's ring cells
+never link, so a shaft has to sit on the wheel's centre line; diagonal or
+ring-edge touches stay out of the network. The service does not yet read
+the wheel's facing, so any of the six face neighbours of the centre cell
+links. Links are rebuilt from placed instances, so break/re-place and
+reload restore the same network. Each solved network computes, Create-style:
 
 - **Stress balance** — sources (water wheels) contribute SU, consumers
   contribute stress demand. Saturation `min(1, SU/stress)` fairly scales
@@ -80,6 +86,27 @@ and is covered by `MachineWiringTest`.
 
 The sink fires per solved member each tick; drive your model animation
 from it (see the `machine` example).
+
+## Rendering and items (pack-first)
+
+Every machine renders as its resourcepack model by default (`PACK_ITEM`).
+Pack assets are compiled for each model when it loads, from the texture
+embedded as base64 in the `.bbmodel`; an external PNG beside the model only
+overrides it. The texel/virtual engine is only a fallback: when a pack
+render returns nothing, `PackFallbackNotice` logs one WARNING per model
+naming it and the reason (see `docs/pack-system.md`).
+
+`/machine give <type>` and the `/machine shop` GUI hand out the registered
+pack item (`<type>_lvl_<level>`), so the item in hand is the machine model
+and places on right-click. Breaking a machine in survival removes its
+displays and its invisible collision blocks together.
+
+## Water wheel output
+
+A wheel produces SU only from **flowing** water in its 3x3x1 plane,
+counted by the shared `WaterFlow` rule (`SU = flowing cells x tier rate`).
+Still water counts 0, there is no configured base output, and a freshly
+placed wheel starts at SU 0 and is rescanned in its place event.
 
 ## Filling space and water flow (per-model `fillBox`)
 

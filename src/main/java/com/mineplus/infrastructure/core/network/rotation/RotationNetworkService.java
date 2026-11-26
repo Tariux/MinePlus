@@ -252,6 +252,37 @@ public final class RotationNetworkService {
         return sources;
     }
 
+    /**
+     * Re-adds every instance already in the registry. Persisted machines are
+     * restored before this service is wired to the lifecycle, so without this
+     * a server restart would leave every saved machine out of its network.
+     * Idempotent: re-adding a member replaces its node and keeps its links.
+     *
+     * @return number of instances that are network members afterwards
+     */
+    public int rebuildFromRegistry() {
+        return rebuildFromRegistry(null);
+    }
+
+    /**
+     * Like {@link #rebuildFromRegistry()} but only for instances of
+     * {@code typeId} (case-insensitive); null means every type. Called when a
+     * type registers after its saved instances were already restored.
+     */
+    public int rebuildFromRegistry(String typeId) {
+        int joined = 0;
+        for (MultiBlockInstance instance : registry.getInstances()) {
+            if (typeId != null && !typeId.equalsIgnoreCase(instance.typeId())) {
+                continue;
+            }
+            onPlaced(instance);
+            if (members.containsKey(keyOf(instance.coordinate()))) {
+                joined++;
+            }
+        }
+        return joined;
+    }
+
     /** Removes one instance's node from the grid; no-op when absent. */
     public void onRemoved(MultiBlockInstance instance) {
         long key = keyOf(instance.coordinate());

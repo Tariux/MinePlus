@@ -65,7 +65,9 @@ Fallbacks, in one place (`RenderRouter`, honoring `RENDERING.POLICY`): when the
 pack subsystem is disabled, pack/hybrid modes degrade to `virtual`
 (`ALLOW_DEGRADE_TO_VIRTUAL: true`, the default). When a model has no registered
 pack item/block, or a pack display fails to attach, the pack render falls back to
-a full virtual render. A player without the pack always sees a valid mesh through
+a full virtual render, and `PackFallbackNotice` writes one WARNING per model
+naming it and the reason (always on, independent of debug logging; cleared on
+reload so a repeat failure warns again). A player without the pack always sees a valid mesh through
 `hybrid`, or the carrier block through a pack mode.
 
 ### Lighting

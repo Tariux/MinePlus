@@ -35,6 +35,15 @@ Machines are pack items as well as blocks: `/machine give <type>` and the
 model (`<type>_lvl_<level>`), so the item in hand renders as the machine
 itself and places on right-click.
 
+Rendering is pack-first: every machine uses its resourcepack model, built
+from the texture embedded in the `.bbmodel`. If a model ever falls back to
+the texel engine, the server log names it in a WARNING.
+
+Each water wheel ships `models/<name>.bbmodel.meta.json` with
+`"fillBox": [0,0,0,0,0,0]`: only the centre cell is solid, so river water
+flows through the ring. Shafts and cogwheels omit it and fill their whole
+model.
+
 ## Build
 
 ```bash

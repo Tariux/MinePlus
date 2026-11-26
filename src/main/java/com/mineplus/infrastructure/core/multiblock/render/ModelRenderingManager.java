@@ -3,6 +3,7 @@ package com.mineplus.infrastructure.core.multiblock.render;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockLevel;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockType;
+import com.mineplus.infrastructure.render.PackFallbackNotice;
 import com.mineplus.infrastructure.render.RenderBackend;
 import com.mineplus.infrastructure.render.RenderKind;
 import com.mineplus.infrastructure.render.RenderPlan;
@@ -98,6 +99,7 @@ public final class ModelRenderingManager {
      * attach and the pack recompiles.
      */
     public void onModelsReloaded() {
+        PackFallbackNotice.clear();
         PackModelRenderer renderer = packRenderer;
         if (renderer != null) {
             renderer.onModelsReloaded();
@@ -141,7 +143,10 @@ public final class ModelRenderingManager {
                 }
                 // Pack render unavailable (model without a pack item/block,
                 // spawn failure): the virtual engine is the declared fallback.
-                return virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
+                UUID degradedId = virtualBlockManager.spawnModel(resolved.model(), resolved.placement());
+                PackFallbackNotice.report(resolved.model().name(),
+                        "pack render returned no display for mode " + plan.mode());
+                return degradedId;
             }
             case VIRTUAL_PLUS_PACK -> {
                 UUID id = virtualBlockManager.spawnModel(resolved.model(), resolved.placement());

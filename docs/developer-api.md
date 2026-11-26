@@ -369,6 +369,10 @@ RenderPolicy policy = router.policy();                  // the active routing po
 
 `/mineplus render stats` prints the same snapshot; `/mineplus render reset` zeroes the counters.
 
+**Pack-first, loud fallback.** The default for every level is `PACK_ITEM`. When a pack render returns no display and the level falls back to the virtual engine, `PackFallbackNotice.report(modelKey, reason)` writes one WARNING per model (always on, independent of debug logging); `PackFallbackNotice.reported()` lists the models that fell back, and model reloads clear it.
+
+**Collision and water (`fillBox`).** A model's `models/<name>.bbmodel.meta.json` may declare `"fillBox": [minX,minY,minZ,maxX,maxY,maxZ]` (inclusive cells relative to the anchor). Only those cells become invisible collision blocks, so a water wheel that declares its centre cell leaves its ring open for flowing water; omit it to fill the whole geometry. Cells holding water are never replaced. Flowing-versus-still water is decided by the shared `WaterFlow` rule (see [rotation networks](rotation-networks.md)).
+
 > **Migrating from the legacy pair:** replace `"renderBackend": "pack", "renderKind": "block"` with `"renderMode": "pack_block"`. Both forms parse today, but new content should use `renderMode`. See the [migration guide](migration-guide.md).
 
 **Per-observer state.** `DisplayTransport.viewerState(instanceId, viewerId)` returns the observer's `RenderViewState` (`lodTier`, `forcedVisible`, `brightnessOverride`, `equipmentOverride`, `stanceId`, `animationOverride`; `forcedVisible` keeps a model spawned instead of hiding it), and `context.stances()` exposes the observer-only `StanceService` — `apply(observer, target, stanceId, Map<EquipmentSlot, ItemStack>)`, `clear`, `clearAll`, `resend`, `registerStance`/`availableStances` — which sends equipment packets to that observer alone through the transport's packet optimizer and never mutates the target's inventory (inert when `DISPLAY_TRANSPORT.STANCES.ENABLED: false` or the packet transport is not running).

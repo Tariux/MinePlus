@@ -335,9 +335,13 @@ public final class PluginContext {
         infrastructureEngine.registry().addTypeRegistrationListener(type -> {
             energyNetworks.registerFromType(type);
             rotationNetworks.registerFromType(type);
+            energyNetworks.rebuildFromRegistry(type.id());
+            rotationNetworks.rebuildFromRegistry(type.id());
         });
         energyNetworks.attachToLifecycle(infrastructureEngine.hookBus());
         rotationNetworks.attachToLifecycle(infrastructureEngine.hookBus());
+        energyNetworks.rebuildFromRegistry(null);
+        rotationNetworks.rebuildFromRegistry();
         infrastructureEngine.lifecycleManager().addPostTickPass(energyNetworks::balanceTick);
         infrastructureEngine.lifecycleManager().addPostTickPass(rotationNetworks::rotationTick);
         infrastructureEngine.lifecycleManager().setEnergyNetworkService(energyNetworks);
