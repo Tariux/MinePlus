@@ -59,6 +59,7 @@ public final class PluginContext {
     private final com.mineplus.infrastructure.world.HitTestApi hitTest;
     private final DeveloperApi2 dev;
     private final com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks;
+    private final com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -111,6 +112,9 @@ public final class PluginContext {
         this.dev = new DeveloperApi2(this);
         this.energyNetworks = new com.mineplus.infrastructure.core.network.EnergyNetworkService(
                 infrastructureEngine.registry());
+        this.rotationNetworks =
+                new com.mineplus.infrastructure.core.network.rotation.RotationNetworkService(
+                        infrastructureEngine.registry());
     }
 
     public static PluginContext bootstrap(MineplusPlugin plugin, VirtualBlockManager virtualBlockManager) {
@@ -332,6 +336,16 @@ public final class PluginContext {
         energyNetworks.attachToLifecycle(infrastructureEngine.hookBus());
         infrastructureEngine.lifecycleManager().addPostTickPass(energyNetworks::balanceTick);
         infrastructureEngine.lifecycleManager().setEnergyNetworkService(energyNetworks);
+        // Kinetic rotation (shafts, cogwheels, wheels, brakes): same pattern as
+        // energy above. Profiles come from each type's rotation.* guiOptions,
+        // membership follows place/remove events, and the P6 KineticGrid is
+        // solved once per lifecycle tick.
+        for (var type : infrastructureEngine.registry().getTypes()) {
+            rotationNetworks.registerFromType(type);
+        }
+        infrastructureEngine.registry().addTypeRegistrationListener(rotationNetworks::registerFromType);
+        rotationNetworks.attachToLifecycle(infrastructureEngine.hookBus());
+        infrastructureEngine.lifecycleManager().addPostTickPass(rotationNetworks::rotationTick);
         perf.start(plugin);
         deferredEdits.start(plugin);
     }
@@ -490,6 +504,14 @@ public final class PluginContext {
     /** P6 Phase C: energy network membership and per-tick balancing. */
     public com.mineplus.infrastructure.core.network.EnergyNetworkService energyNetworks() {
         return energyNetworks;
+    }
+
+    /**
+     * P6: kinetic rotation networks. Profiles come from each type's
+     * {@code rotation.*} guiOptions; membership follows place/remove events.
+     */
+    public com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks() {
+        return rotationNetworks;
     }
 
     /**

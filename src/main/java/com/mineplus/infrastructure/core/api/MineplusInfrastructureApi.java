@@ -78,6 +78,16 @@ public final class MineplusInfrastructureApi implements InfrastructureApi {
     }
 
     @Override
+    public MultiBlockType getType(String typeId) {
+        return registry.getType(typeId);
+    }
+
+    @Override
+    public java.util.Collection<MultiBlockType> getTypes() {
+        return registry.getTypes();
+    }
+
+    @Override
     public void registerHook(String typeId, MultiBlockHook hook) {
         registry.registerHookOverride(typeId, hook);
     }

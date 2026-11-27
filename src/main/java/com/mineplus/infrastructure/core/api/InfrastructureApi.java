@@ -28,6 +28,12 @@ public interface InfrastructureApi {
 
     boolean removeBlock(UUID id, Player actor, boolean destroy);
 
+    /** Registered machine type by id (case-insensitive), or null when unknown. */
+    MultiBlockType getType(String typeId);
+
+    /** Snapshot of every registered machine type. */
+    java.util.Collection<MultiBlockType> getTypes();
+
     void registerHook(String typeId, MultiBlockHook hook);
 
     void registerLifecycleListener(Consumer<MultiBlockLifecycleEvent> listener);
