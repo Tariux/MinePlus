@@ -18,8 +18,12 @@ const file = process.argv[2];
 const asJson = process.argv.includes("--json");
 const targetIndex = process.argv.indexOf("--target");
 const explicitTarget = targetIndex >= 0 ? process.argv[targetIndex + 1] : null;
-if (!file || file === "--json") {
-  console.error("Usage: node check-bbmodel.mjs <model.bbmodel> [--json] [--target virtual|pack-item|pack-block|mob]");
+const definitionIndex = process.argv.indexOf("--definition");
+const definitionFile = definitionIndex >= 0 ? process.argv[definitionIndex + 1] : null;
+if (!file || file.startsWith("--")) {
+  console.error(
+    "Usage: node check-bbmodel.mjs <model.bbmodel> [--json] [--target virtual|pack-item|pack-block|mob] [--definition blocks/<ns>/<id>.json]",
+  );
   process.exit(2);
 }
 
@@ -344,14 +348,41 @@ if (originMode === "AUTO") {
   }
 }
 
+let cellsX = null;
+let cellsY = null;
+let cellsZ = null;
+let rawCellsX = null;
+let rawCellsY = null;
+let rawCellsZ = null;
+const SUBPIXEL_PX = 1;
 if (Number.isFinite(minX)) {
   const anchorX = originMode === "CENTER" ? -8 : 0;
   const anchorZ = originMode === "CENTER" ? -8 : 0;
-  const cellsX = Math.floor((maxX - anchorX - 1e-6) / 16) - Math.floor((minX - anchorX) / 16) + 1;
-  const cellsY = Math.floor((maxY - 1e-6) / 16) - Math.floor(Math.min(minY, 0) / 16) + 1;
-  const cellsZ = Math.floor((maxZ - anchorZ - 1e-6) / 16) - Math.floor((minZ - anchorZ) / 16) + 1;
+  const spanCells = (lo, hi, anchor, shrink) => {
+    const from = lo + shrink;
+    const to = hi - shrink;
+    return Math.floor((to - anchor - 1e-6) / 16) - Math.floor((from - anchor) / 16) + 1;
+  };
+  const spanCellsY = (lo, hi, shrink) => {
+    const from = Math.min(lo + shrink, 0);
+    const to = hi - shrink;
+    return Math.floor((to - 1e-6) / 16) - Math.floor(from / 16) + 1;
+  };
+  rawCellsX = spanCells(minX, maxX, anchorX, 0);
+  rawCellsY = spanCellsY(minY, maxY, 0);
+  rawCellsZ = spanCells(minZ, maxZ, anchorZ, 0);
+  // Sub-pixel art overhang (< 1 px per side) is rounding noise, not a filled
+  // block: the Core filters those sliver cells out through the declared box,
+  // so the footprint compared against a definition uses the shrunken bounds.
+  const shrink = (lo, hi) => Math.min(SUBPIXEL_PX, Math.max(0, (hi - lo) / 4));
+  cellsX = spanCells(minX, maxX, anchorX, shrink(minX, maxX));
+  cellsY = spanCellsY(minY, maxY, shrink(minY, maxY));
+  cellsZ = spanCells(minZ, maxZ, anchorZ, shrink(minZ, maxZ));
   if (cellsX > 1 || cellsY > 1 || cellsZ > 1) {
     note(`Footprint spans ${cellsX}×${cellsY}×${cellsZ} block cells (${Math.round(minX)}..${Math.round(maxX)} x, ${Math.round(minY)}..${Math.round(maxY)} y, ${Math.round(minZ)}..${Math.round(maxZ)} z). Every occupied cell becomes a collision barrier.`);
+  }
+  if (rawCellsX !== cellsX || rawCellsY !== cellsY || rawCellsZ !== cellsZ) {
+    note(`Sub-pixel overhang adds sliver cells (raw ${rawCellsX}×${rawCellsY}×${rawCellsZ}); the declared occupancy box filters them, so they never become barriers.`);
   }
   if (minY < -0.001) warn(`Geometry reaches y=${Math.round(minY)}. Virtual models should sit on y=0 (CENTER) or y=0..16 (GRID).`);
 }
@@ -428,6 +459,113 @@ for (const animation of animations) {
   }
 }
 
+// --- block definition gate --------------------------------------------------
+const DEFINITION_COLLISION_MODES = ["geometry", "surface", "single", "box", "none"];
+let definition = null;
+if (definitionFile) {
+  const definitionPath = path.resolve(definitionFile);
+  try {
+    definition = JSON.parse(fs.readFileSync(definitionPath, "utf8").replace(/^\uFEFF/, ""));
+  } catch (definitionError) {
+    error(`Cannot read definition ${definitionPath}: ${definitionError.message}`);
+  }
+  if (definition) {
+    const modelStem = path.basename(absolute).replace(/\.bbmodel$/i, "").toLowerCase();
+    const normalizeModel = (value) =>
+      String(value ?? "")
+        .replace(/^[a-z0-9_]+:/i, "")
+        .replace(/\.bbmodel$/i, "")
+        .split("/")
+        .filter(Boolean)
+        .pop()
+        ?.toLowerCase() ?? "";
+    const visuals = definition.visuals ?? {};
+    const declaredModel = visuals.model;
+    if (!declaredModel) {
+      error("Definition has no visuals.model; the loader rejects it.");
+    } else if (normalizeModel(declaredModel) !== modelStem) {
+      error(
+        `Definition visuals.model "${declaredModel}" does not match the model file "${path.basename(absolute)}". The loader looks the name up under models/, so a mismatch is a load error.`,
+      );
+    }
+    const itemModel = definition.item?.model;
+    if (itemModel && normalizeModel(itemModel) !== modelStem) {
+      note(`Definition item.model "${itemModel}" is a different model from the one being checked; only the visual model is gated here.`);
+    }
+
+    const occupancy = definition.occupancy ?? {};
+    const declaredCells = {
+      width: Number(occupancy.width ?? 1),
+      height: Number(occupancy.height ?? 1),
+      depth: Number(occupancy.depth ?? 1),
+    };
+    if (cellsX !== null) {
+      const measured = { width: cellsX, height: cellsY, depth: cellsZ };
+      for (const axis of ["width", "height", "depth"]) {
+        if (!Number.isFinite(declaredCells[axis]) || declaredCells[axis] < 1 || declaredCells[axis] > 32) {
+          error(`Definition occupancy.${axis} must be 1..32; got ${occupancy[axis]}.`);
+        } else if (declaredCells[axis] !== measured[axis]) {
+          error(
+            `Definition occupancy.${axis}=${declaredCells[axis]} but the geometry spans ${measured[axis]} cell(s) on that axis (${cellsX}x${cellsY}x${cellsZ}). Every occupied cell becomes a barrier, so the declared box must match or placement leaves blocking cells out.`,
+          );
+        }
+      }
+    }
+
+    const metaFile = `${absolute}.meta.json`;
+    if (fs.existsSync(metaFile)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8').replace(/^\uFEFF/, ''));
+        const box = Array.isArray(meta.fillBox) ? meta.fillBox : null;
+        if (box) {
+          if (box.length !== 6 || box.some((n) => !Number.isInteger(n))) {
+            error(`meta.json fillBox must be six integers [x0,y0,z0,x1,y1,z1]; got ${JSON.stringify(box)}.`);
+          } else {
+            const boxCells = { width: box[3] - box[0] + 1, height: box[4] - box[1] + 1, depth: box[5] - box[2] + 1 };
+            for (const axis of ["width", "height", "depth"]) {
+              if (boxCells[axis] < 1) {
+                error(`meta.json fillBox has an inverted ${axis} range; the Engine rejects the box.`);
+              } else if (boxCells[axis] !== declaredCells[axis]) {
+                error(
+                  `meta.json fillBox spans ${boxCells.width}x${boxCells.height}x${boxCells.depth} cells but occupancy declares ${declaredCells.width}x${declaredCells.height}x${declaredCells.depth}. The fillBox is what the Engine turns into barriers, so the two must agree.`,
+                );
+              }
+            }
+            note(`meta.json fillBox pins the barrier lattice to ${boxCells.width}x${boxCells.height}x${boxCells.depth} cells.`);
+          }
+        }
+      } catch (metaError) {
+        error(`Cannot read ${path.basename(metaFile)}: ${metaError.message}`);
+      }
+    } else if (rawCellsX !== null && (rawCellsX !== cellsX || rawCellsY !== cellsY || rawCellsZ !== cellsZ)) {
+      note(`No ${path.basename(metaFile)} to pin the lattice: sub-pixel slivers become barriers (raw ${rawCellsX}×${rawCellsY}×${rawCellsZ}).`);
+    }
+
+    const collisionMode = definition.collision?.mode ?? "geometry";
+    if (!DEFINITION_COLLISION_MODES.includes(String(collisionMode).toLowerCase())) {
+      error(`Definition collision.mode "${collisionMode}" is not one of ${DEFINITION_COLLISION_MODES.join(", ")}; the loader rejects it.`);
+    }
+
+    const hardness = Number(definition.breaking?.hardness ?? 1.0);
+    if (!Number.isFinite(hardness) || hardness < 0 || hardness > 3600) {
+      error(`Definition breaking.hardness must be a finite number 0..3600 seconds; got ${definition.breaking?.hardness}.`);
+    }
+
+    const autoplay = Array.isArray(visuals.animations?.autoplay) ? visuals.animations.autoplay : [];
+    const clipNames = new Set(animationReport.map((clip) => clip.name));
+    for (const clip of autoplay) {
+      if (!clipNames.has(clip)) {
+        error(
+          `Definition autoplay clip "${clip}" is not in the model (clips: ${[...clipNames].join(", ") || "none"}). The clip never plays.`,
+        );
+      }
+    }
+    if (autoplay.length === 0 && animationReport.length > 0) {
+      note(`Model has ${animationReport.length} clip(s) but the definition autoplays none; add visuals.animations.autoplay to see them move.`);
+    }
+  }
+}
+
 // --- target-specific checks -------------------------------------------------
 const isMobTarget = target === "mob";
 if (isMobTarget) {
@@ -497,6 +635,15 @@ const report = {
     pngBesideModel: fs.existsSync(path.join(modelDir, `${name}.png`)),
   })),
   animations: animationReport,
+  definition: definition
+    ? {
+        file: path.resolve(definitionFile),
+        id: definition.id ?? null,
+        model: definition.visuals?.model ?? null,
+        occupancy: definition.occupancy ?? null,
+        measuredCells: cellsX === null ? null : [cellsX, cellsY, cellsZ],
+      }
+    : null,
   errors,
   warnings,
   notes,
@@ -514,6 +661,9 @@ if (asJson) {
     console.log(`  bounds      ${report.anchor.bounds.min.join(", ")} .. ${report.anchor.bounds.max.join(", ")} px`);
   }
   console.log(`  textures    ${textures.length}${missingPngs ? `, ${missingPngs} without a local PNG` : ""}`);
+  if (definitionFile) {
+    console.log(`  definition  ${path.basename(path.resolve(definitionFile))}${definition?.id ? `  (${definition.id})` : ""}${cellsX === null ? "" : `  cells ${cellsX}x${cellsY}x${cellsZ}`}`);
+  }
   if (animationReport.length) {
     for (const clip of animationReport) {
       console.log(`    - ${clip.name}: ${clip.length ?? "?"}s ${clip.loop ?? "once"}, ${clip.bones} bones${clip.effects ? `, ${clip.effects} effects ignored` : ""}`);

@@ -17,6 +17,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | See a **complete working module** | [MineplusFun (Juicer, Cannon, Wine, Cabinet, Alchemy)](../examples/mineplus-fun/README.md) · [MineplusGun (firearms)](../examples/mineplus-gun/README.md) |
 | Tune the **rendering engine** | [Configuration Reference → settings.mp.yml](config-reference.md#settingsmpyml-engine--runtime-services) |
 | Add **pack-based custom content** | [Resource Pack System](pack-system.md) |
+| Add **custom blocks** (`blocks/*.json`) | [Custom block system plan](design/2026-11-26-custom-block-system-design.md) · live check: `devtools/live-test/run.sh` |
 | Give weapons **real ballistics** | [Developer API → Combat Services](developer-api.md#combat-services) |
 | Make mobs **do things** | [Developer API → Mob Behavior API](developer-api.md#mob-behavior-api) |
 | Build **research trees, minigames, cross-server messaging or boss fights** | [Developer API → Toolkit Subsystems](developer-api.md#toolkit-subsystems-pure-java) |
@@ -42,6 +43,9 @@ The recipes: three step-by-step workflows (JSON-only, basic add-on, advanced fra
 
 ### [Resource Pack System](pack-system.md)
 The **primary rendering axis**: custom items, models, textures and baked item animations through a resource pack the plugin compiles, hosts and delivers itself — architecture, render-mode selection (`virtual` / `pack_item` / `pack_block` / `pack_bones` / `hybrid_item` / `hybrid_block` / `hybrid_bones`), lighting, the `PackApi`, compilation/delivery model, configuration, inherited items (vanilla-parent re-skins from a single PNG), uniform fitting of any-size pack blocks, and the current limitations. The virtual/texel engine (below) is the built-in option and the automatic fallback.
+
+### [Custom block system](design/2026-11-26-custom-block-system-design.md)
+The `blocks/*.json` definition layer on today's pack/lattice/multiblock primitives — phases 1–5 are live (loader, registry, `/mineplus blocks`, item placement, JSON persistence, chunk restore, break progress with tool gating, `events` actions, autoplay on place/restore, and a `--definition` authoring gate); animation signals and carrier-pool fallback reuse the existing engine. `devtools/live-test/run.sh` replays the acceptance flow on a real Paper server (recorded: 1.21.1). Covers why exact mesh collision is impossible without a client mod, the 1/16-cell collision contract, the water-wheel + shaft acceptance test, and the phased delivery order.
 
 ### [Migration Guide](migration-guide.md)
 Upgrading across a major release: renamed/added configuration keys, the unified `renderMode` vocabulary (and the legacy `renderBackend`/`renderKind` mapping), and how to update custom modules. The change list lives in the [changelog](../CHANGELOG.md).

@@ -13,8 +13,8 @@ minecraft.wiki, the Spigot BuildTools version list and the Paper downloads API.
 | --- | --- |
 | Bytecode link check of the core, gun, fun and mobfun jars against every Spigot API (18 lines) and Paper API (15 lines) from 1.21 to 26.3 | 0 unresolved classes, methods or fields; 0 class/interface call mismatches |
 | Pack format and data pack format tables in code against the release data | match for all 17 releases |
-| Plugin enabled on a running server of each version | **not done** |
-| Models and animations seen in a real client of each version | **not done** |
+| Plugin enabled on a running server of each version | **1.21.1 done** (Paper 1.21.1 build 133, headless); 1.21.11 and 26.3 pending |
+| Models and animations seen in a real client of each version | **not done**; the 1.21.1 run used a protocol bot, which sees collision cells and item flow but not the rendered model |
 
 The link check proves the jar's API calls resolve. It does not prove runtime
 behaviour: reflection (the NMS display adapter), commands, pack delivery and

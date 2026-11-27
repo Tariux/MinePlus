@@ -79,3 +79,33 @@ Module layer (features live outside the Core): `examples/mineplus-fun` is the ca
 User documentation lives in `docs/` (`README.md` hub, `config-reference.md`, `developer-api.md`, `extension-workflows.md`) with assets in `docs/assets/`; the root `README.md` is the GitHub presentation. Keep these in sync when behavior changes.
 
 Publishing identity: author `Tariux` (tariux@protonmail.com), repo `github.com/Tariux/MinePlus`, Modrinth project `modrinth.com/plugin/minepluscore` (slug `minepluscore`), Hangar project `hangar.papermc.io/Tariux/MinePlusCore`, bStats plugin id 33702. The Core jar ships as the primary download; MineplusFun is the separate reference module.
+
+## Custom blocks (planned layer)
+
+`docs/design/2026-11-26-custom-block-system-design.md` is the contract for the
+`blocks/<namespace>/<id>.json` layer. Read it before touching placement,
+collision or breaking, because it fixes what the engine may and may not claim:
+
+- Collision is the existing barrier lattice from `GeometryOccupancyCalculator`,
+  at 1/16-block cell resolution, mirrored from the model's own cubes. Exact
+  mesh collision and moving collision are impossible on a vanilla server; never
+  promise them.
+- Breaking is server-authoritative with real destroy stages
+  (`Player#sendBlockDamage` over the carrier cells). A custom block has no hit
+  points; `hardness` is seconds at bare hand.
+- The definition references a model; geometry, `fillBox` and clips stay in the
+  `.bbmodel` / `.bbmodel.meta.json` pair. Do not duplicate them in the JSON.
+- The `note_block` carrier exposes 175 slots. `renderMode: virtual` costs none;
+  a note-block carrier cannot emit light (`light` clamps to 0).
+- A block delivery is model + external PNG (embedded Base64 is ignored) +
+  definition, validated by
+  `node devtools/skills/mineplus-model-authoring/scripts/check-bbmodel.mjs <model> --target pack-block --definition <blocks/ns/id>.json`.
+
+Status: phases 1–5 are live — `blocks/*.json` loader, registry,
+`/mineplus blocks validate|list|info|give|place|remove`, item placement,
+`blocks_state.json` persistence, chunk restore, breaking with hardness, tool
+gating and destroy stages, `events` actions on place, break and right-click,
+autoplay clips on place and restore, and the `--definition` authoring gate.
+`devtools/live-test/run.sh` drives the acceptance flow on a real Paper server;
+recorded on Paper 1.21.1 build 133 (place, barrier cells, tool refusal, break,
+drop, restart restore all pass). 1.21.11 and 26.3 are still unrecorded.

@@ -71,6 +71,9 @@ def testRunnerMains = [
         'com.mineplus.test.AssetPipelineTest',
         'com.mineplus.test.MachineWiringTest',
         'com.mineplus.test.PackFallbackNoticeTest',
+        'com.mineplus.test.BlockDefinitionTest',
+        'com.mineplus.test.BlockStoreTest',
+        'com.mineplus.test.BlockBreakingTest',
 ]
 
 tasks.register('testRunners') {

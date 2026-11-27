@@ -34,3 +34,14 @@ Scored by (Impact × Confidence) / Effort, 1–10 (impact 1–5, confidence 0.2�
 | 28 | Custom world structures/dimensions | med | low | hard | 2 | 0.4 | 60 | **0.01** |
 
 Read with `04-gap-analysis.md`: items 1–10 are Phase A/B work; 11–14 Phase C; 15–18 Phase C/E; 19–20 Phase D; the rest opportunistic. The scoring confirms the ordering: the cheap safety/correctness items (2, 5, 8, 9, 16) dominate, and the two headline ambitions (kinetics, minigames) only score well once the infrastructure under them exists.
+
+## Added 2026-11-26: custom block definition layer (B1)
+
+Plan: `docs/design/2026-11-26-custom-block-system-design.md`. Same scoring
+formula as the table above.
+
+| # | Feature | Player value | Dev value | Vanilla feasibility | Impact | Conf | Effort (d) | Score |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 25 | Block definitions + placement + persistence (`blocks/*.json`) | high (server owners build blocks) | high | certain (on existing lattice) | 5 | 0.9 | 12 | **0.38** |
+| 26 | Break progress, hardness, tool tiers, block events | high (parity feel) | high | certain (`sendBlockDamage`) | 5 | 0.8 | 6 | **0.67** |
+| 27 | Block authoring gate for AI/Blockbench deliveries | high (quality floor) | high | certain (docs + validator) | 4 | 0.9 | 3 | **1.20** |

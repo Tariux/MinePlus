@@ -661,3 +661,55 @@ the 1.21.9 era, e.g. 26.3 = 97.1). The override stays an integer and still
 wins over the table. The `pack.mcmeta` key shape also follows the server:
 `pack_format` + `supported_formats` up to 1.21.8, `min_format`/`max_format`
 from 1.21.9 on. See the pack system doc's format table for the full range.
+
+## Custom blocks (`blocks/*.json`)
+
+**Status:** definitions load, blocks place and persist, breaking is
+server-driven with hardness, tool tiers and destroy stages, and right-clicks and
+placement/break run definition actions
+(`/mineplus blocks validate|list|info|give|place|remove`). Clips autoplay
+through the model `.meta.json`; the definition's `autoplay` list only feeds
+render-mode selection. The contract is in
+[the custom block system design](design/2026-11-26-custom-block-system-design.md).
+
+**Path:** `plugins/Mineplus/blocks/<namespace>/<id>.json`, scanned recursively;
+the folder is the namespace. `id` is optional — the file stem plus the folder
+namespace is used — and must be `lower_snake:path`. An explicit `id` must use
+the folder's namespace.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `displayName` | pretty file stem | Shown in the item and `/mineplus blocks info` |
+| `visuals.model` | required | Model key under `models/`, `.bbmodel` optional |
+| `visuals.renderMode` | `auto` | Any `RenderMode` key; `auto` = `pack_block` when static, `virtual` when a clip autoplays |
+| `visuals.animations.autoplay` | none | Clip names started on place |
+| `visuals.rotation.snap` | `90` | Must divide 360; keep 90 for collidable blocks |
+| `visuals.light` | `0` | Clamped to 0 with a warning: the note-block carrier cannot emit light |
+| `collision.mode` | `geometry` | `geometry`, `surface`, `single`, `box`, `none` |
+| `collision.material` | `barrier` | `barrier`, `slime`, `honey`, `cobweb`, `none` |
+| `collision.box` | none | Min/max pairs per axis (`[x1,y1,z1,x2,y2,z2]` for a 3D box) when `mode: box` |
+| `occupancy` | `1×1×1` | `width`/`height`/`depth` in whole cells, 1..32 |
+| `breaking.hardness` | `1.0` | Seconds at bare hand, 0..3600 (not hit points) |
+| `breaking.tool` | `any/any` | `type`: any, pickaxe, axe, shovel, hoe, shears, sword; `tier`: any, wooden, stone, copper, iron, golden, diamond, netherite |
+| `breaking.drops` | none | `[{ "item": "ns:id", "count": 1, "chance": 1.0 }]` |
+| `breaking.xp` | `0` | 0..100 |
+| `placement.support` | `any` | `any`, `ground`, `wall`, `ceiling` |
+| `placement.replaceable` | `air`, `water` | Blocks the footprint may replace |
+| `placement.spaceCheck` | `true` | Refuse placement instead of clipping |
+| `item.material` | `PAPER` | Any Bukkit material; unknown material is an error |
+| `item.model` | `visuals.model` | Pack item model for the drop/place item |
+| `events.onPlace` / `onBreak` / `onInteract` | none | Actions run on that event: `message:<text>`, `sound:<key>`, `command:<command>`; `%player%` and `%block%` are substituted, unknown actions warn and are dropped |
+| `properties.waterloggable` | `false` | Reserved for the placement phase |
+| `properties.flammable` | `false` | Reserved for the breaking phase |
+
+Rules the loader enforces: one bad file never stops the load; every problem is
+reported with its file; a duplicate id keeps the first definition and errors the
+second; a missing model is an error; unknown top-level keys warn; `geometry`,
+`fillBox` and clips stay in the `.bbmodel` / `.bbmodel.meta.json` pair, never
+duplicated here.
+
+Shipped examples: `examples/mineplus-machine/src/main/resources/defaults/blocks/mineplus/`
+(`water_wheel_weak.json`, `water_wheel_strong.json`, `shaft.json`). Copy
+`defaults/blocks` and `defaults/models` into `plugins/Mineplus/`, then run
+`/mineplus blocks validate`; `list` and `info <id>` inspect what loaded.
+

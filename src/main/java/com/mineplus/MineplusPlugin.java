@@ -32,6 +32,11 @@ public final class MineplusPlugin extends JavaPlugin {
     private com.mineplus.infrastructure.virtual.display.DisplayTransport displayTransport;
     private com.mineplus.infrastructure.minigame.MinigameBukkitWiring minigameWiring;
     private com.mineplus.infrastructure.mob.custom.MobYamlLoader yamlMobs;
+    private com.mineplus.infrastructure.core.block.BlockRegistry blockDefinitions;
+    private com.mineplus.infrastructure.core.block.BlockDefinitionLoader blockDefinitionLoader;
+    private com.mineplus.infrastructure.core.block.BlockStore placedBlocks;
+    private com.mineplus.infrastructure.core.block.BlockPlacementService blockPlacement;
+    private com.mineplus.infrastructure.core.block.BlockItemFactory blockItems;
 
     @Override
     public void onEnable() {
@@ -69,6 +74,7 @@ public final class MineplusPlugin extends JavaPlugin {
         com.mineplus.infrastructure.api.MineplusServices.registerAll(this, context);
 
         yamlMobs = loadYamlMobs();
+        loadBlockDefinitions();
 
         registerCommand();
         registerListeners();
@@ -103,6 +109,33 @@ public final class MineplusPlugin extends JavaPlugin {
         return loader;
     }
 
+    /**
+     * Loads {@code blocks/**&#47;*.json} definitions. Files are optional; a bad
+     * definition is reported and skipped, never a startup failure.
+     */
+    private void loadBlockDefinitions() {
+        blockDefinitions = new com.mineplus.infrastructure.core.block.BlockRegistry();
+        blockDefinitionLoader = new com.mineplus.infrastructure.core.block.BlockDefinitionLoader(
+                blockDefinitions, getLogger()::warning);
+        com.mineplus.infrastructure.core.block.BlockLoadReport report =
+                blockDefinitionLoader.reload(getDataFolder());
+        for (com.mineplus.infrastructure.core.block.BlockLoadReport.Problem problem : report.problems()) {
+            if (problem.severity() == com.mineplus.infrastructure.core.block.BlockLoadReport.Severity.WARN) {
+                getLogger().warning("blocks: " + problem.message() + " ["
+                        + problem.file().getName() + "]");
+            }
+        }
+        getLogger().info("Block definitions: " + report.summary());
+
+        blockItems = new com.mineplus.infrastructure.core.block.BlockItemFactory(this);
+        placedBlocks = new com.mineplus.infrastructure.core.block.BlockStore(
+                new java.io.File(getDataFolder(), "blocks_state.json"), getLogger()::warning);
+        placedBlocks.load();
+        blockPlacement = new com.mineplus.infrastructure.core.block.BlockPlacementService(
+                virtualBlockManager, blockDefinitions, placedBlocks, blockItems, getLogger()::warning,
+                this::animationApi);
+    }
+
     @Override
     public void onDisable() {
         if (context != null) {
@@ -121,6 +154,14 @@ public final class MineplusPlugin extends JavaPlugin {
 
         commandRouter = null;
         yamlMobs = null;
+        blockDefinitions = null;
+        blockDefinitionLoader = null;
+        if (placedBlocks != null) {
+            placedBlocks.save();
+        }
+        placedBlocks = null;
+        blockPlacement = null;
+        blockItems = null;
         context = null;
         instance = null;
         virtualBlockManager = null;
@@ -139,6 +180,8 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new StatusSubCommand(context));
         commandRouter.register(new ReloadSubCommand(context));
         commandRouter.register(new ModelSubCommand(context));
+        commandRouter.register(new com.mineplus.infrastructure.command.sub.BlockSubCommand(
+                this, blockDefinitions, blockDefinitionLoader, blockPlacement));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.PackSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.RenderSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.MobSubCommand(context, yamlMobs));
@@ -161,6 +204,21 @@ public final class MineplusPlugin extends JavaPlugin {
         minigameWiring = new com.mineplus.infrastructure.minigame.MinigameBukkitWiring(
                 this, new com.mineplus.infrastructure.core.minigame.InstanceManager());
         getServer().getPluginManager().registerEvents(virtualBlockManager, this);
+        if (blockPlacement != null) {
+            getServer().getPluginManager().registerEvents(
+                    new com.mineplus.infrastructure.listener.BlockPlacementListener(
+                            blockDefinitions, blockItems, blockPlacement, placedBlocks), this);
+            getServer().getPluginManager().registerEvents(
+                    new com.mineplus.infrastructure.listener.BlockBreakListener(
+                            virtualBlockManager, blockDefinitions, placedBlocks, blockPlacement), this);
+            getServer().getPluginManager().registerEvents(
+                    new com.mineplus.infrastructure.listener.BlockInteractionListener(
+                            virtualBlockManager, blockDefinitions, placedBlocks, blockItems), this);
+            int restored = blockPlacement.restoreAll();
+            if (restored > 0) {
+                getLogger().info("Restored " + restored + " placed block(s)");
+            }
+        }
         if (displayTransport != null) {
             getServer().getPluginManager().registerEvents(new DisplayTransportListener(displayTransport), this);
         }

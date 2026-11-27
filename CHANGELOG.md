@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: model/definition gate and block autoplay (phase 5)
+
+- `check-bbmodel.mjs --definition <blocks/…json>`: the pre-flight now proves the
+  model and its block JSON agree — `visuals.model` resolves to the file,
+  `occupancy` equals the measured footprint (sub-pixel overhang under 1 px is a
+  note, not a failure), every `visuals.animations.autoplay` clip exists,
+  `collision.mode` is one of `geometry|surface|single|box|none`, and
+  `breaking.hardness` is a finite 0..3600.
+- Footprint cell math in the checker now mirrors the Core exactly (same anchor
+  and epsilon), so its numbers and the barrier cells the server builds agree.
+- `BlockPlacementService` starts `visuals.animations.autoplay` clips after
+  `spawnModel` on placement and on chunk restore, through a lazily resolved
+  `AnimationApi` (definitions load before `PluginContext.bootstrap`). A clip
+  the model does not have warns instead of failing silently.
+
+### Added: live acceptance harness (custom blocks)
+
+- `devtools/live-test/run.sh` + `bot-e2e.mjs`: builds the plugin, starts Paper
+  headless, installs the example definitions, and drives a Mineflayer bot
+  through give → place → barrier cells → wrong-tool refusal → axe break → drop →
+  restart → restore. Paper is pinned by SHA-256, so the run is reproducible.
+- First recorded run, Paper 1.21.1 build 133: all assertions pass. The barrier
+  lattice is geometry-driven and capped by `fillBox` from
+  `.bbmodel.meta.json`, so a block definition's `occupancy` is a claim checked
+  at authoring time, not a runtime cap.
+
+### Added: block actions and interaction routing (phase 4)
+
+- `BlockAction` (pure parser) and `BlockActionRunner`: `message:`, `sound:`,
+  `command:` with `%player%`/`%block%`; unknown entries warn at load and are
+  dropped.
+- `BlockInteractionListener` cancels right-click on a placed block so the
+  note-block instrument never fires, then runs `events.onInteract`;
+  `events.onPlace`/`onBreak` run from the placement and break paths.
+- `BlockDefinitionTest` extended with action parsing, loader validation and the
+  event lists.
+
+### Added: custom block breaking (phase 3)
+
+- `BlockBreakTracker`: server-side progress per player and instance, capped per
+  damage event, reset after 400 ms without input, stages 0–9.
+- `BlockBreakingRules`: tool class and tier gating, tier speed table; wrong tool
+  refuses with a throttled message instead of silently stalling.
+- `BlockBreakListener`: drives `Player#sendBlockDamage` over every carrier cell,
+  drops on completion, removes the model and the record; creative keeps the
+  vanilla instant break path.
+- `BlockBreakingTest` covers progress, timeout reset, gating and the speed table.
+
+### Added: custom block placement and persistence (phase 2)
+
+- `BlockPlacementService` places a definition on the looked-at face through the
+  virtual engine (`prepareSpawnArea` refuses when the space is not clear), checks
+  `placement.support`, stores the instance with its quaternion, and restores it
+  on enable and on chunk load.
+- `BlockStore` keeps `plugins/Mineplus/blocks_state.json` (atomic write, corrupt
+  file moved to `.bak`), and `BlockItemFactory` makes the placeable item
+  (`mineplus:block_id` PDC key).
+- `BlockPlacementListener`: item right-click placement, drop + record removal on
+  barrier break, chunk restore.
+- `/mineplus blocks give|place|remove`; breaking is still instant, destroy
+  stages arrive with phase 3.
+- `BlockStoreTest` added (round-trip, write-through removal, corrupt file).
+
+### Added: custom block definitions, phase 1 (`blocks/*.json`)
+
+- `core/block`: `BlockDefinition`, `BlockDefinitionLoader`, `BlockRegistry`,
+  `BlockLoadReport` — recursive `blocks/<namespace>/<id>.json` loading, one bad
+  file isolated with a per-file report, duplicate ids rejected, model references
+  resolved against `models/`, `light` clamped with a warning, `auto` render mode
+  resolved from autoplay clips.
+- `/mineplus blocks validate|list|info` (+ `mineplus.admin.blocks`), reload on
+  `validate`; definitions also load at startup and log a summary.
+- `BlockDefinitionTest` (plain-Java runner): valid/invalid files, duplicates,
+  missing model, namespace defaulting, auto render mode, light clamp, and the
+  three shipped machine definitions.
+- Shipped example definitions: `examples/mineplus-machine/.../defaults/blocks/mineplus/`
+  for the weak/strong water wheel and the shaft.
+- Docs: `docs/config-reference.md` now documents the live format; design doc
+  status and phase table updated. Placement, collision wiring and breaking
+  remain phases 2–3 (design only).
+
+
 ### Added: toolkit subsystems (mega-plan Phases C/D)
 
 - **Research** (`core/research`): `ResearchTree` — prerequisite graph with

@@ -110,3 +110,38 @@ textures, animations or the display block.
 
 See also: `docs/display-slot-mapping.md`, `docs/pack-system.md`,
 `docs/custom-mobs.md`, `docs/developer-api.md`.
+
+## 9. Block models (the gate for a delivered block)
+
+A model is not a custom block on its own: `blocks/<namespace>/<id>.json` is the
+deliverable, and the model must pass this gate before the definition is
+written. The plan and schema live in
+[`design/2026-11-26-custom-block-system-design.md`](design/2026-11-26-custom-block-system-design.md).
+
+- [ ] Model space is `free`, anchored to the block grid: feet on y=0, no cube
+      below y=0, origin inside the anchor cell.
+- [ ] Footprint stated in whole cells and matching the visible extent
+      (a 2×2 wheel declares `width/height/depth`, not "about two blocks").
+- [ ] Cubes are the collision source. No decorative cube intrudes into a
+      walkway; every space that should be walkable is a real gap, not a dark
+      filler cube.
+- [ ] `fillBox` declared for every cell the block must leave open (water
+      through a wheel ring, a doorway in a wall piece) and checked against the
+      computed lattice.
+- [ ] Clips named `snake_case`; autoplay/loop clips listed in
+      `visuals.animations`.
+- [ ] Textures embedded (or a sibling PNG matching the model stem).
+- [ ] Element angles inside the 1.21.6 snap grid unless the target version
+      matrix excludes those releases.
+- [ ] Delivery report contains: pixel bounds, derived footprint, collision cell
+      count, expected bare-hand break time, and an in-game screenshot of the
+      debug lattice (`F3+G`).
+- [ ] `blocks/*.json` written and validated with `/mineplus blocks validate`
+      (phase 1 is live); a block shipped without a definition is rejected.
+- [ ] Model and definition checked together:
+      `node devtools/skills/mineplus-model-authoring/scripts/check-bbmodel.mjs <model>.bbmodel --target pack-block --definition <blocks/ns/id>.json`
+      exits 0, or 1 with warnings and no errors (the example wheels exit 1 on the
+      sunk-axle geometry warning). It proves `visuals.model`
+      resolves, `occupancy` equals the measured footprint, every autoplay clip
+      exists, `collision.mode` is known and `breaking.hardness` is sane.
+      Autoplay clips start on placement and on chunk restore as of this build.

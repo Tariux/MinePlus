@@ -32,3 +32,12 @@ Impact 1–5 (5 = product-defining). Effort S ≤ 3d, M ≤ 10d, L ≤ 30d, XL >
 | DX (add machine in <50 lines) | Examples exist but reach into internals (F9) | Annotation/DSL registration | Facade size; no templates/SDK | 5 | L | — | API v1, data-driven defs |
 | Tests / CI | 9 classes, no CI, empty repositories block (F10) | MockBukkit + run-paper smoke CI (03 §6) | Everything | 5 | M | — | Q5 decision |
 | Folia | Claimed, not real (F1) | Competitors list Folia support | 17 raw scheduler calls | 4 | L | Concurrency bugs | SchedulerCompat variants |
+
+### 2026-11-26: custom blocks, collision and breaking
+
+The gap is narrower than the original write-up assumed. Rendering (pack block
+carrier + display entities) and geometry-derived collision already exist, so
+the missing pieces are the definition layer (`blocks/*.json`), break progress,
+and a per-block event surface. Cell resolution (1/16 block) is the hard limit
+of a vanilla server; see `docs/design/2026-11-26-custom-block-system-design.md`
+for the decisions, rejected alternatives and the phased plan.

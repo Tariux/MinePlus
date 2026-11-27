@@ -83,13 +83,40 @@ vanilla aesthetic → virtual is usually enough.
 ## 4. Validate
 
 ```bash
-node scripts/check-bbmodel.mjs <model.bbmodel> --target virtual|pack-item|pack-block|mob
+node scripts/check-bbmodel.mjs <model.bbmodel> --target virtual|pack-item|pack-block|mob \
+  [--definition blocks/<namespace>/<id>.json]
 ```
 
 Exit 0 pass, 1 warnings, 2 errors. It mirrors the importer's texture-name priority, outliner
 pivots and bone mapping, anchor resolution, footprint cells, UV windows, pack serialization
 limits, mob part rules and animation channels. Treat every **error** as blocking; read
 **warnings** as things that render wrong or degrade silently.
+
+`--definition` gates the model against its block JSON: `visuals.model` must resolve to this
+model, `occupancy` must equal the measured footprint (cells the geometry meaningfully fills;
+a sub-pixel overhang under 1 px per side is reported as a note, not a mismatch), every
+`visuals.animations.autoplay` clip must exist, `collision.mode` must be one of the loader's
+modes, and `breaking.hardness` must be a finite 0..3600.
+
+## 4b. Block delivery gate
+
+A block model alone is not deliverable. Before handing it over, the model must
+pass `check-bbmodel.mjs --target pack-block --definition <blocks/…json>` with
+exit 0 and the box below, and the delivery must include the same
+`blocks/<namespace>/<id>.json` definition — the `--definition` gate proves the
+two agree. The contract and schema are in
+`docs/design/2026-11-26-custom-block-system-design.md`; the checklist is
+`docs/model-authoring-guide.md` §9.
+
+- Free space, feet on y=0, no cube below y=0, origin in the anchor cell.
+- Footprint in whole cells; cubes are the collision source (no filler cubes in
+  walkways, real gaps where the space must be open).
+- `fillBox` for every cell that must stay open (water through a wheel ring).
+- `snake_case` clips; autoplay clips listed in the definition.
+- Embedded texture or sibling PNG; angles inside the 1.21.6 snap grid unless
+  the version matrix excludes it.
+- Report pixel bounds, footprint, collision cell count, break time, and an
+  `F3+G` lattice screenshot.
 
 ## 5. Hard rules that fail silently
 
