@@ -1,0 +1,23 @@
+{
+  "originMode": "CENTER",
+  "autoplay": [
+    "idle",
+    "study"
+  ],
+  "texelMode": "AUTO",
+  "maxTexelPlatesPerFace": 128,
+  "maxTexelPlatesPerInstance": 900,
+  "triggers": {
+    "craft": "craft",
+    "shelve": "shelve",
+    "read": "study"
+  },
+  "fillBox": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ]
+}
