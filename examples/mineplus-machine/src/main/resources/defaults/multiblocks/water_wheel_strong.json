@@ -11,7 +11,8 @@
         "title": "Water Wheel (Strong)",
         "rotation.kind": "source",
         "rotation.su": "1024",
-        "rotation.speed": "10.0"
+        "rotation.speed": "10.0",
+        "rotation.water": "true"
       }
     }
   }

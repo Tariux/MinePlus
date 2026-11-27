@@ -21,6 +21,7 @@ public final class AssetPipelineTest {
         teaModelBakesInsideVanillaWindow();
         anchorModeParsing();
         texturePipelineDefaults();
+        packTexturePieces();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -212,6 +213,30 @@ public final class AssetPipelineTest {
      * custom name with pixels is plated (guns), and a meta override still wins.
      * Vanilla and legacy concatenated names must resolve so that skip works.
      */
+    /**
+     * Pack texture ids are model-scoped so two models may embed different art
+     * under the same name; memory-backed textures must export their bytes.
+     */
+    private static void packTexturePieces() {
+        check("pack id is <model>_<texture>",
+                "water_wheel_oak_planks".equals(
+                        com.mineplus.pack.PackSystem.packTextureName("water_wheel", "oak_planks")));
+        check("namespace prefix is dropped from the model id",
+                "water_wheel_oak_planks".equals(
+                        com.mineplus.pack.PackSystem.packTextureName("mineplus:water_wheel", "oak_planks")));
+        check("unsafe characters are sanitised",
+                "iron_gear_t e x t".equals(
+                        com.mineplus.pack.PackSystem.packTextureName("iron gear", "t e x t.png")));
+        try {
+            var asset = new com.mineplus.pack.asset.TextureAsset(
+                    "mineplus", "item/water_wheel_oak_planks", "test", new byte[]{1, 2, 3});
+            check("memory-backed texture exports its bytes",
+                    java.util.Arrays.equals(asset.serialize(), new byte[]{1, 2, 3}));
+        } catch (Exception e) {
+            check("memory-backed texture exports its bytes: " + e, false);
+        }
+    }
+
     private static void texturePipelineDefaults() {
         var settings = com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults();
         check("texel default mode is AUTO",

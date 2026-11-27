@@ -48,6 +48,7 @@ public final class MachineWiringTest {
         axleShaftTurnsWithWheel();        dryWheelStopsAxleShaft();
         offAxleShaftDoesNotJoin();
         restoredMachinesRejoinAfterRestart();
+        dryWaterWheelProducesNothing();
         preloadModelRegistersInstalledModel();
         everyMachineHasModelAndCollisionMeta();
 
@@ -129,16 +130,50 @@ public final class MachineWiringTest {
         rotation.setStateSink((instance, state) -> speeds.put(instance.id(), state.speed()));
         check("no profiles yet: nothing joins", rotation.rebuildFromRegistry() == 0);
         rotation.registerProfile("water_wheel",
-                new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false));
+                new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false, false));
         check("late type registration rejoins the wheel", rotation.rebuildFromRegistry("WATER_WHEEL") == 1);
         rotation.registerProfile("rotation_shaft",
-                new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false));
+                new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false, false));
         check("full rebuild restores both members", rotation.rebuildFromRegistry() == 2);
         check("rebuild is idempotent", rotation.rebuildFromRegistry() == 2);
 
         rotation.rotationTick();
         check("restored wheel spins", speeds.getOrDefault(wheel.id(), -1f) == 6f);
         check("restored axle shaft turns with the wheel", speeds.getOrDefault(shaft.id(), -1f) == 6f);
+    }
+
+    /**
+     * A water-driven source restored from disk is dry until the water scan
+     * reports flow: zero capacity must give the wheel and its axle 0 speed, and
+     * an explicit SU report must start them.
+     */
+    private static void dryWaterWheelProducesNothing() {
+        MultiBlockRegistry registry = new MultiBlockRegistry();
+        Fixture template = new Fixture();
+        MultiBlockInstance wheel = template.instance("water_wheel", 0, 64, 0);
+        MultiBlockInstance shaft = template.instance("rotation_shaft", 0, 64, 1);
+        registry.addInstance(wheel);
+        registry.addInstance(shaft);
+
+        RotationNetworkService rotation = new RotationNetworkService(registry);
+        Map<UUID, Float> speeds = new HashMap<>();
+        rotation.setStateSink((instance, state) -> speeds.put(instance.id(), state.speed()));
+        rotation.registerProfile("water_wheel",
+                new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false, true));
+        rotation.registerProfile("rotation_shaft",
+                new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false, false));
+        rotation.rebuildFromRegistry();
+        rotation.rotationTick();
+        check("dry wheel reports 0 SU", rotation.sourceSu(wheel) == 0);
+        check("dry wheel stands still", speeds.getOrDefault(wheel.id(), -1f) == 0f);
+        check("dry wheel leaves its axle still", speeds.getOrDefault(shaft.id(), -1f) == 0f);
+
+        rotation.setSourceSu(wheel, 512);
+        check("reported water flow gives the wheel capacity", rotation.sourceSu(wheel) == 512);
+        speeds.clear();
+        rotation.rotationTick();
+        check("water-driven wheel turns once wet", speeds.getOrDefault(wheel.id(), -1f) == 6f);
+        check("wet wheel turns its axle", speeds.getOrDefault(shaft.id(), -1f) == 6f);
     }
 
     /** Axle-only linking: a shaft off the axle does not join the wheel. */
@@ -253,9 +288,9 @@ public final class MachineWiringTest {
 
         Fixture() {
             rotation.registerProfile("water_wheel",
-                    new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false));
+                    new RotationProfile(KineticGrid.Kind.SOURCE, 512, 0, 6f, false, false));
             rotation.registerProfile("rotation_shaft",
-                    new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false));
+                    new RotationProfile(KineticGrid.Kind.SHAFT, 0, 0, 6f, false, false));
             rotation.setStateSink((instance, state) -> lastSpeeds.put(instance.id(), state.speed()));
         }
 

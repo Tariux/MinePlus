@@ -4,16 +4,44 @@
   "visuals": {
     "model": "water_wheel_strong",
     "renderMode": "virtual",
-    "animations": { "autoplay": ["spin"] },
-    "rotation": { "axis": "y", "snap": 90, "from": "player_facing" }
+    "rotation": {
+      "axis": "y",
+      "snap": 90,
+      "from": "player_facing"
+    }
   },
-  "collision": { "mode": "geometry", "material": "barrier" },
-  "occupancy": { "width": 3, "height": 3, "depth": 3 },
+  "collision": {
+    "mode": "geometry",
+    "material": "barrier"
+  },
+  "occupancy": {
+    "width": 3,
+    "height": 3,
+    "depth": 3
+  },
   "breaking": {
     "hardness": 2.0,
-    "tool": { "type": "axe", "tier": "stone" },
-    "drops": [{ "item": "mineplus:water_wheel_strong", "count": 1 }]
+    "tool": {
+      "type": "axe",
+      "tier": "stone"
+    },
+    "drops": [
+      {
+        "item": "mineplus:water_wheel_strong",
+        "count": 1
+      }
+    ]
   },
-  "placement": { "support": "any", "replaceable": ["air", "water"], "spaceCheck": true },
-  "item": { "material": "PAPER", "model": "water_wheel_strong" }
+  "placement": {
+    "support": "any",
+    "replaceable": [
+      "air",
+      "water"
+    ],
+    "spaceCheck": true
+  },
+  "item": {
+    "material": "PAPER",
+    "model": "water_wheel_strong"
+  }
 }

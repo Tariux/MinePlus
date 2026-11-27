@@ -11,7 +11,8 @@
         "title": "Water Wheel",
         "rotation.kind": "source",
         "rotation.su": "512",
-        "rotation.speed": "6.0"
+        "rotation.speed": "6.0",
+        "rotation.water": "true"
       }
     }
   }

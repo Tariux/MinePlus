@@ -11,7 +11,8 @@
         "title": "Water Wheel (Weak)",
         "rotation.kind": "source",
         "rotation.su": "256",
-        "rotation.speed": "3.0"
+        "rotation.speed": "3.0",
+        "rotation.water": "true"
       }
     }
   }

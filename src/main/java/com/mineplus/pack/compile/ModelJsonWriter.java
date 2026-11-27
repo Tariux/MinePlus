@@ -48,13 +48,48 @@ public final class ModelJsonWriter {
      * @param originMode  resolved anchor convention for {@code model}
      * @param outNamespace namespace the texture references point into
      */
+    /**
+     * One texture reference for the generated model: the id it points at and the
+     * pixel size its UVs were authored against. Vanilla references are 16x16, so
+     * a face authored on a 64px model canvas is re-scaled to the block atlas.
+     */
+    public record TextureRef(String id, int width, int height) {
+    }
+
+    /**
+     * Maps a face texture name to its pack reference. The default is the plain
+     * {@code item/<name>} / {@code block/<name>} path at the model resolution;
+     * PackSystem supplies the model-scoped {@code <model>_<texture>} name (and
+     * {@code minecraft:block/...} for vanilla-only faces) so two models can
+     * carry different art under the same texture name.
+     */
+    public interface TextureNaming {
+        TextureRef resolve(String textureName, VirtualModel model, boolean block);
+    }
+
+    private static final TextureNaming DEFAULT_NAMING = (textureName, model, block) ->
+            new TextureRef((block ? "block/" : "item/")
+                    + com.mineplus.pack.asset.TextureAsset.normalizePath(textureName),
+                    Math.max(1, model.resolution().width()),
+                    Math.max(1, model.resolution().height()));
+
     public static String write(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace) {
+        return write(model, originMode, outNamespace, DEFAULT_NAMING);
+    }
+
+    public static String write(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace,
+                               TextureNaming naming) {
         List<String> warnings = new ArrayList<>();
-        String json = write(model, originMode, outNamespace, warnings);
+        String json = write(model, originMode, outNamespace, naming, warnings);
         for (String warning : warnings) {
             com.mineplus.util.DebugLogger.warning("[PackCompiler] Model '" + model.name() + "': " + warning);
         }
         return json;
+    }
+
+    private static String write(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace,
+                                TextureNaming naming, List<String> warnings) {
+        return writeInternal(model, originMode, outNamespace, naming, warnings, false);
     }
 
     /** Same as {@link #write(VirtualModel, ModelMeta.OriginMode, String)} with a warning sink (for tests/tooling). */
@@ -64,7 +99,7 @@ public final class ModelJsonWriter {
             String outNamespace,
             List<String> warnings
     ) {
-        return writeInternal(model, originMode, outNamespace, warnings, false);
+        return writeInternal(model, originMode, outNamespace, DEFAULT_NAMING, warnings, false);
     }
 
     /**
@@ -76,12 +111,22 @@ public final class ModelJsonWriter {
      * transforms are emitted (block models carry their own vanilla defaults).
      */
     public static String writeBlock(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace) {
+        return writeBlock(model, originMode, outNamespace, DEFAULT_NAMING);
+    }
+
+    public static String writeBlock(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace,
+                                    TextureNaming naming) {
         List<String> warnings = new ArrayList<>();
-        String json = writeBlock(model, originMode, outNamespace, warnings);
+        String json = writeBlock(model, originMode, outNamespace, naming, warnings);
         for (String warning : warnings) {
             com.mineplus.util.DebugLogger.warning("[PackCompiler] Block model '" + model.name() + "': " + warning);
         }
         return json;
+    }
+
+    private static String writeBlock(VirtualModel model, ModelMeta.OriginMode originMode, String outNamespace,
+                                     TextureNaming naming, List<String> warnings) {
+        return writeInternal(model, originMode, outNamespace, naming, warnings, true);
     }
 
     /** Same as {@link #writeBlock(VirtualModel, ModelMeta.OriginMode, String)} with a warning sink. */
@@ -91,20 +136,21 @@ public final class ModelJsonWriter {
             String outNamespace,
             List<String> warnings
     ) {
-        return writeInternal(model, originMode, outNamespace, warnings, true);
+        return writeInternal(model, originMode, outNamespace, DEFAULT_NAMING, warnings, true);
     }
 
     private static String writeInternal(
             VirtualModel model,
             ModelMeta.OriginMode originMode,
             String outNamespace,
+            TextureNaming naming,
             List<String> warnings,
             boolean block
     ) {
         Map<String, String> textureIndex = new LinkedHashMap<>();
         JsonArray elements = new JsonArray();
         for (BakedCube cube : model.cubes()) {
-            JsonObject element = element(cube, model, originMode, textureIndex, warnings, block);
+            JsonObject element = element(cube, model, originMode, naming, textureIndex, warnings, block);
             if (element != null) {
                 elements.add(element);
             }
@@ -112,10 +158,12 @@ public final class ModelJsonWriter {
 
         JsonObject textures = new JsonObject();
         for (Map.Entry<String, String> entry : textureIndex.entrySet()) {
-            textures.addProperty(entry.getValue(), outNamespace + ":" + entry.getKey());
+            String id = entry.getKey().contains(":") ? entry.getKey() : outNamespace + ":" + entry.getKey();
+            textures.addProperty(entry.getValue(), id);
         }
         if (!textureIndex.isEmpty()) {
-            textures.addProperty("particle", outNamespace + ":" + textureIndex.keySet().iterator().next());
+            String first = textureIndex.keySet().iterator().next();
+            textures.addProperty("particle", first.contains(":") ? first : outNamespace + ":" + first);
         }
         JsonObject root = new JsonObject();
         root.addProperty("credit", "Generated by Mineplus");
@@ -152,6 +200,7 @@ public final class ModelJsonWriter {
             BakedCube cube,
             VirtualModel model,
             ModelMeta.OriginMode originMode,
+            TextureNaming naming,
             Map<String, String> textureIndex,
             List<String> warnings,
             boolean block
@@ -225,13 +274,12 @@ public final class ModelJsonWriter {
             if (face == null || face.textureName() == null || face.textureName().isBlank()) {
                 continue;
             }
-            String texturePath = (block ? "block/" : "item/")
-                    + com.mineplus.pack.asset.TextureAsset.normalizePath(face.textureName());
-            if (texturePath.endsWith("/")) {
+            TextureRef ref = naming.resolve(face.textureName(), model, block);
+            if (ref == null || ref.id() == null || ref.id().isBlank() || ref.id().endsWith("/")) {
                 continue;
             }
             faces.add(faceKey.name().toLowerCase(java.util.Locale.ROOT),
-                    face(face, texturePath, model, textureIndex, warnings));
+                    face(face, ref, textureIndex, warnings));
         }
         element.add("faces", faces);
         return element;
@@ -376,17 +424,16 @@ public final class ModelJsonWriter {
 
     private static JsonObject face(
             BakedFace face,
-            String texturePath,
-            VirtualModel model,
+            TextureRef ref,
             Map<String, String> textureIndex,
             List<String> warnings
     ) {
-        // Guard against broken imports: a zero resolution would divide by
-        // zero and write NaN/Infinity — invalid JSON the client rejects.
-        int resolutionWidth = Math.max(1, model.resolution().width());
-        int resolutionHeight = Math.max(1, model.resolution().height());
-        float uScale = 16.0f / resolutionWidth;
-        float vScale = 16.0f / resolutionHeight;
+        // UV scale uses the size of the texture actually referenced: our own PNG
+        // at its authored resolution, or vanilla's 16x16 atlas when the face
+        // points at a vanilla block. A 64px model canvas on a 16px texture must
+        // still cover the whole cube face exactly as authored.
+        float uScale = 16.0f / Math.max(1, ref.width());
+        float vScale = 16.0f / Math.max(1, ref.height());
 
         // Preserve authored UV orientation: vanilla mirrors when u2<u1 or v2<v1.
         // Do NOT swap; the original ordering encodes intentional mirrors.
@@ -395,10 +442,7 @@ public final class ModelJsonWriter {
         float u2 = clampUv(face.u2() * uScale, warnings, face);
         float v2 = clampUv(face.v2() * vScale, warnings, face);
 
-        // Standard vanilla texture-variable naming: the textures map declares
-        // "0", faces reference "#0". (Using the reference itself as the map key
-        // leaves the client unable to resolve the variable.)
-        String index = textureIndex.computeIfAbsent(texturePath,
+        String index = textureIndex.computeIfAbsent(ref.id(),
                 name -> String.valueOf(textureIndex.size()));
 
         JsonObject json = new JsonObject();

@@ -556,7 +556,8 @@ public final class PackSystem {
         String namespace = definition.namespace();
         try {
             assetRegistry.register(new ModelAsset(namespace, "item/" + definition.id(), namespace,
-                    definition.modelKey(), virtualBlockManager.getModelSourceFile(definition.modelKey()), model));
+                    definition.modelKey(), virtualBlockManager.getModelSourceFile(definition.modelKey()), model,
+                    textureNaming(definition.modelKey(), "item")));
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
             return;
@@ -629,7 +630,8 @@ public final class PackSystem {
         String namespace = definition.namespace();
         try {
             assetRegistry.register(new BlockModelAsset(namespace, definition.id(), namespace,
-                    geometryKey, virtualBlockManager.getModelSourceFile(geometryKey), model));
+                    geometryKey, virtualBlockManager.getModelSourceFile(geometryKey), model,
+                    textureNaming(geometryKey, "block")));
         } catch (IllegalArgumentException conflict) {
             plugin.getLogger().warning("[Pack] " + conflict.getMessage());
             return;
@@ -694,19 +696,15 @@ public final class PackSystem {
             if (normalized.isEmpty()) {
                 continue;
             }
-            String texturePath = folder + "/" + normalized;
+            String texturePath = folder + "/" + packTextureName(modelKey, textureName);
             try {
-                // The catalog already merged embedded bbmodel pixels and disk
-                // PNGs; use the bytes it resolved so the pack never re-reads a
-                // file the renderer could not find (or misses an embedded one).
+                // The catalog already merged the model's PNG file and the
+                // base64 embedded in it (file first, embedded second); use the
+                // bytes it resolved so the pack carries exactly what the model
+                // authored, even when the name matches a vanilla block.
                 byte[] png = virtualBlockManager.textureCatalog(modelKey).pngBytes(textureName);
                 if (png != null) {
                     assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, png));
-                    continue;
-                }
-                File textureFile = virtualBlockManager.resolveTextureFile(modelKey, textureName);
-                if (textureFile != null) {
-                    assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, textureFile));
                 }
             } catch (IllegalArgumentException conflict) {
                 // Same texture id registered with different bytes — a real
@@ -714,6 +712,63 @@ public final class PackSystem {
                 plugin.getLogger().warning("[Pack] " + conflict.getMessage());
             }
         }
+    }
+
+    /**
+     * Pack texture file stem for a model: {@code <model>_<texture>}. Two models
+     * may embed different art under the same texture name (`oak_planks`), and
+     * the pack must keep both.
+     */
+    public static String packTextureName(String modelKey, String textureName) {
+        String base = modelKey == null ? "" : modelKey.trim().toLowerCase(java.util.Locale.ROOT);
+        int colon = base.indexOf(':');
+        if (colon >= 0) {
+            base = base.substring(colon + 1);
+        }
+        base = base.replaceAll("[^a-z0-9_./-]", "_");
+        while (base.startsWith("/")) {
+            base = base.substring(1);
+        }
+        if (base.isEmpty()) {
+            base = "model";
+        }
+        return base + "_" + TextureAsset.normalizePath(textureName);
+    }
+
+    /** Texture reference policy for one model's generated item/block model JSON. */
+    private com.mineplus.pack.compile.ModelJsonWriter.TextureNaming textureNaming(String modelKey, String folder) {
+        return (textureName, model, block) -> {
+            var catalog = virtualBlockManager.textureCatalog(modelKey);
+            var resolution = catalog.resolution(textureName);
+            String local = folder + "/" + packTextureName(modelKey, textureName);
+            return switch (resolution.source()) {
+                case FILE, EMBEDDED -> new com.mineplus.pack.compile.ModelJsonWriter.TextureRef(
+                        local, Math.max(1, resolution.width()), Math.max(1, resolution.height()));
+                case VANILLA -> {
+                    org.bukkit.Material material = resolution.material();
+                    if (material == null || material == org.bukkit.Material.AIR) {
+                        yield new com.mineplus.pack.compile.ModelJsonWriter.TextureRef(local, 16, 16);
+                    }
+                    yield new com.mineplus.pack.compile.ModelJsonWriter.TextureRef(
+                            "minecraft:block/" + vanillaTextureName(material), 16, 16);
+                }
+                default -> new com.mineplus.pack.compile.ModelJsonWriter.TextureRef(local, 16, 16);
+            };
+        };
+    }
+
+    /** Vanilla blocks whose texture file is not simply their material name. */
+    private static String vanillaTextureName(org.bukkit.Material material) {
+        String name = material.name().toLowerCase(java.util.Locale.ROOT);
+        return switch (name) {
+            case "grass_block" -> "grass_block_top";
+            case "mycelium" -> "mycelium_top";
+            case "podzol" -> "podzol_top";
+            case "dirt_path" -> "dirt_path_top";
+            case "crimson_nylium" -> "crimson_nylium";
+            case "warped_nylium" -> "warped_nylium";
+            default -> name;
+        };
     }
 
     // ------------------------------------------------------------------

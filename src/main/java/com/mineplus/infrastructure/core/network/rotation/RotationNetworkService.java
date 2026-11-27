@@ -27,7 +27,14 @@ import java.util.function.BiConsumer;
 public final class RotationNetworkService {
 
     /** Per-level static profile of a rotating machine type. */
-    public record RotationProfile(KineticGrid.Kind kind, int su, int stress, float speed, boolean cogwheel) {
+    /**
+     * @param waterDriven true for sources whose capacity comes from the world
+     *                    (a water wheel's flowing water): they start at 0 SU and
+     *                    only produce what the owner reports via
+     *                    {@link #setSourceSu}, so a dry wheel never turns.
+     */
+    public record RotationProfile(KineticGrid.Kind kind, int su, int stress, float speed, boolean cogwheel,
+                                  boolean waterDriven) {
     }
 
     /** Solved per-instance state pushed to the sink each tick. */
@@ -82,7 +89,8 @@ public final class RotationNetworkService {
                     positiveInt(gui.get("rotation.su")),
                     positiveInt(gui.get("rotation.stress")),
                     positiveFloat(gui.get("rotation.speed")),
-                    Boolean.parseBoolean(gui.get("rotation.cogwheel"))));
+                    Boolean.parseBoolean(gui.get("rotation.cogwheel")),
+                    Boolean.parseBoolean(gui.get("rotation.water"))));
             return;
         }
     }
@@ -147,10 +155,11 @@ public final class RotationNetworkService {
     private void putNode(long key, RotationProfile profile) {
         boolean isBrakeEngaged = Boolean.TRUE.equals(braked.get(key));
         switch (profile.kind()) {
-            // A dynamic SU override (e.g. derived from adjacent flowing
-            // water) replaces the profile's static capacity when present.
+            // A dynamic SU override (e.g. derived from adjacent flowing water)
+            // replaces the profile's static capacity when present. A water-driven
+            // source without an override is dry: it contributes nothing.
             case SOURCE -> grid.put(key, KineticGrid.Kind.SOURCE, profile.speed(),
-                    suOverrides.getOrDefault(key, profile.su()), 0f);
+                    suOverrides.getOrDefault(key, profile.waterDriven() ? 0 : profile.su()), 0f);
             case CONSUMER -> grid.put(key, KineticGrid.Kind.CONSUMER, 0f, 0f,
                     isBrakeEngaged ? BRAKE_STRESS : profile.stress());
             default -> grid.put(key, KineticGrid.Kind.SHAFT, 0f, 0f, 0f);
@@ -167,7 +176,10 @@ public final class RotationNetworkService {
             return override;
         }
         RotationProfile profile = profiles.get(instance.typeId().toLowerCase());
-        return profile == null ? 0 : profile.su();
+        if (profile == null) {
+            return 0;
+        }
+        return profile.waterDriven() ? 0 : profile.su();
     }
 
     /**

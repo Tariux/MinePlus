@@ -77,7 +77,7 @@ BOM-free (the streaming reader does not strip a BOM).
 | `originMode` | `AUTO` / `CENTER` / `GRID` | `AUTO` | Anchor convention. `AUTO` reads the format (java_block/java_item → GRID) and falls back to CENTER when the xz bounds centre is within 2 px of the origin. `LEGACY` is a deprecated alias of `CENTER`. |
 | `collisionMode` | `GEOMETRY` / `SURFACE` / `AABB` | global (`GEOMETRY`) | Per-cube occupancy, or per-cube with interior hollowing. `AABB` resolves through the geometry path. |
 | `autoplay` | clip names | empty | Clips started when the model renders (level `animations` wins). |
-| `texelMode` | `AUTO` / `ON` / `OFF` | `AUTO` | Texel reconstruction from a sibling PNG. |
+| `texelMode` | `AUTO` / `ON` / `OFF` | `AUTO` | Texel reconstruction from the face's pixels (external file first, else base64). `AUTO` keeps faces named after vanilla blocks as that block; `ON` plates every pixel face. Only matters for `virtual` rendering. |
 | `texelDetail` | `FACE` / `SUPERSAMPLE_2X2` / `SUPERSAMPLE_4X4` | `FACE` | Sampling grid per face. |
 | `maxTexelPlatesPerFace` | positive int | 96 | Plate ceiling per face. |
 | `maxTexelPlatesPerInstance` | positive int | 150 | Plate ceiling per rendered instance. |

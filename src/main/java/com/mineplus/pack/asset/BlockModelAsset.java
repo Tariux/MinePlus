@@ -34,7 +34,19 @@ public final class BlockModelAsset extends ModelAsset {
             File sourceFile,
             VirtualModel capturedModel
     ) {
-        super(namespace, "block/" + id, owner, modelKey, sourceFile, capturedModel);
+        this(namespace, id, owner, modelKey, sourceFile, capturedModel, null);
+    }
+
+    public BlockModelAsset(
+            String namespace,
+            String id,
+            String owner,
+            String modelKey,
+            File sourceFile,
+            VirtualModel capturedModel,
+            ModelJsonWriter.TextureNaming textureNaming
+    ) {
+        super(namespace, "block/" + id, owner, modelKey, sourceFile, capturedModel, textureNaming);
     }
 
     @Override
@@ -42,6 +54,9 @@ public final class BlockModelAsset extends ModelAsset {
         if (model == null) {
             return new byte[0];
         }
-        return ModelJsonWriter.writeBlock(model, originMode, outNamespace).getBytes(StandardCharsets.UTF_8);
+        String json = textureNaming() == null
+                ? ModelJsonWriter.writeBlock(model, originMode, outNamespace)
+                : ModelJsonWriter.writeBlock(model, originMode, outNamespace, textureNaming());
+        return json.getBytes(StandardCharsets.UTF_8);
     }
 }

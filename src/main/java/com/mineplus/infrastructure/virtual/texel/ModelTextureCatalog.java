@@ -97,20 +97,20 @@ public final class ModelTextureCatalog extends TextureImageStore {
     // ---------------------------------------------------------------- pixels
 
     /**
-     * Embedded pixels first (the authored art), then the disk lookup. This is the
-     * method the texel baker calls for every face, so a model whose art lives
-     * only inside the bbmodel bakes exactly like one with a sidecar PNG.
+     * Pixels for a face with the same priority as {@link #resolution}: the
+     * model's own PNG file first, then the base64 embedded in the .bbmodel.
      */
     @Override
     public BufferedImage texture(String name, File modelFile) {
+        BufferedImage fromDisk = super.texture(name, modelFile);
+        if (fromDisk != null) {
+            return fromDisk;
+        }
         EmbeddedTexture embedded = embeddedFor(normalize(name));
         if (embedded != null && embedded.hasPixels()) {
-            BufferedImage decoded = decode(embedded.png());
-            if (decoded != null) {
-                return decoded;
-            }
+            return decode(embedded.png());
         }
-        return super.texture(name, modelFile);
+        return null;
     }
 
     @Override
@@ -158,24 +158,24 @@ public final class ModelTextureCatalog extends TextureImageStore {
     }
 
     /**
-     * Raw PNG bytes for the pack writer: embedded bytes straight from memory,
-     * else the resolved file read once. {@code null} for vanilla-only textures.
+     * Raw PNG bytes for the pack writer: the model's own PNG file first, else
+     * the base64 embedded in the .bbmodel. {@code null} for vanilla-only textures.
      */
     public byte[] pngBytes(String textureName) {
         String key = normalize(textureName);
+        Resolution resolution = resolution(textureName);
+        if (resolution.source() == Source.FILE && resolution.file() != null) {
+            try {
+                return Files.readAllBytes(resolution.file().toPath());
+            } catch (Exception ignored) {
+                // fall through to the embedded copy
+            }
+        }
         EmbeddedTexture embedded = embeddedFor(key);
         if (embedded != null && embedded.hasPixels()) {
             return embedded.png();
         }
-        Resolution resolution = resolution(textureName);
-        if (resolution.source() != Source.FILE || resolution.file() == null) {
-            return null;
-        }
-        try {
-            return Files.readAllBytes(resolution.file().toPath());
-        } catch (Exception ignored) {
-            return null;
-        }
+        return null;
     }
 
     /** Per-texture outcome for diagnostics ({@code /mineplus blocks diagnose}). */
@@ -205,16 +205,18 @@ public final class ModelTextureCatalog extends TextureImageStore {
     // --------------------------------------------------------------- private
 
     private Resolution compute(String key, String originalName) {
-        EmbeddedTexture embedded = embeddedFor(key);
-        int width = embedded != null ? embedded.width() : 0;
-        int height = embedded != null ? embedded.height() : 0;
-        if (embedded != null && embedded.hasPixels()) {
-            return new Resolution(originalName, Source.EMBEDDED, null, null, width, height, true);
-        }
-
+        // External file first, then the base64 inside the .bbmodel: an artist
+        // who ships a PNG next to the model overrides the copy embedded in it.
         File file = resolveTextureFile(key, modelFile);
         if (file != null) {
-            return new Resolution(originalName, Source.FILE, file, null, width, height, true);
+            int[] size = dimensions(file);
+            return new Resolution(originalName, Source.FILE, file, null, size[0], size[1], true);
+        }
+
+        EmbeddedTexture embedded = embeddedFor(key);
+        if (embedded != null && embedded.hasPixels()) {
+            return new Resolution(originalName, Source.EMBEDDED, null, null,
+                    embedded.width(), embedded.height(), true);
         }
 
         TextureMaterialResolver.Resolution material = TextureMaterialResolver.resolveDetailed(originalName);
@@ -222,6 +224,18 @@ public final class ModelTextureCatalog extends TextureImageStore {
             return new Resolution(originalName, Source.VANILLA, null, material.material(), 0, 0, false);
         }
         return new Resolution(originalName, Source.MISSING, null, TextureMaterialResolver.fallback(), 0, 0, false);
+    }
+
+    private static int[] dimensions(File file) {
+        try {
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(file);
+            if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
+                return new int[]{image.getWidth(), image.getHeight()};
+            }
+        } catch (Exception ignored) {
+            // Broken PNG: UV scaling falls back to the model resolution below.
+        }
+        return new int[]{16, 16};
     }
 
     private EmbeddedTexture embeddedFor(String key) {

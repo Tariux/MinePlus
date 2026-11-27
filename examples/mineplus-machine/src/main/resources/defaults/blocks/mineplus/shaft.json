@@ -3,17 +3,45 @@
   "displayName": "Drive Shaft",
   "visuals": {
     "model": "shaft",
-    "renderMode": "auto",
-    "animations": { "autoplay": ["spin"] },
-    "rotation": { "axis": "y", "snap": 90, "from": "player_facing" }
+    "renderMode": "virtual",
+    "rotation": {
+      "axis": "y",
+      "snap": 90,
+      "from": "player_facing"
+    }
   },
-  "collision": { "mode": "geometry", "material": "barrier" },
-  "occupancy": { "width": 1, "height": 1, "depth": 1 },
+  "collision": {
+    "mode": "geometry",
+    "material": "barrier"
+  },
+  "occupancy": {
+    "width": 1,
+    "height": 1,
+    "depth": 1
+  },
   "breaking": {
     "hardness": 1.0,
-    "tool": { "type": "axe", "tier": "wooden" },
-    "drops": [{ "item": "mineplus:shaft", "count": 1 }]
+    "tool": {
+      "type": "axe",
+      "tier": "wooden"
+    },
+    "drops": [
+      {
+        "item": "mineplus:shaft",
+        "count": 1
+      }
+    ]
   },
-  "placement": { "support": "any", "replaceable": ["air", "water"], "spaceCheck": true },
-  "item": { "material": "PAPER", "model": "shaft" }
+  "placement": {
+    "support": "any",
+    "replaceable": [
+      "air",
+      "water"
+    ],
+    "spaceCheck": true
+  },
+  "item": {
+    "material": "PAPER",
+    "model": "shaft"
+  }
 }

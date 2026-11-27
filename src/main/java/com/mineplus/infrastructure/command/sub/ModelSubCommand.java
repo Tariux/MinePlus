@@ -167,6 +167,34 @@ public final class ModelSubCommand implements SubCommand {
                     sender.sendMessage(ChatColor.RED + "Look at a nearby block face to place the debug model.");
                     return true;
                 }
+                // Default is resourcepack rendering: register a debug pack item
+                // for this model and attach the pack display next tick (the
+                // recompile is async). Only when the pack cannot take it does
+                // the debug command fall back to the texel/virtual path.
+                var packSystem = context.packSystem();
+                if (packSystem != null) {
+                    String itemId = "debug_" + modelKey.replace(':', '_').replace('/', '_');
+                    packSystem.registerModel("mineplus", "item/" + itemId, modelKey);
+                    packSystem.registerItem(new com.mineplus.pack.item.PackItemDefinition(
+                            "mineplus", itemId, org.bukkit.Material.PAPER, modelKey,
+                            "minecraft:item/paper", java.util.List.of(), "Debug " + modelKey,
+                            com.mineplus.infrastructure.definition.ItemCategory.MACHINE_COMPONENT,
+                            null, null, java.util.List.of()));
+                    UUID packInstanceId = UUID.randomUUID();
+                    org.bukkit.Bukkit.getScheduler().runTaskLater(
+                            org.bukkit.Bukkit.getPluginManager().getPlugin("Mineplus"),
+                            () -> {
+                                if (!packSystem.modelRenderer().attach(packInstanceId, model, placement)) {
+                                    UUID fallbackId = context.virtualBlockManager().spawnModel(model, placement);
+                                    player.sendMessage(ChatColor.YELLOW + "Pack display unavailable; spawned virtual model "
+                                            + fallbackId);
+                                }
+                            }, 40L);
+                    sender.sendMessage(ChatColor.GREEN + "Spawned debug model '" + modelKey
+                            + "' (resourcepack); attaching after the pack compiles");
+                    return true;
+                }
+
                 // Admin debug command: clear the target area so the model always places.
                 context.virtualBlockManager().prepareSpawnArea(model, placement, true);
                 UUID spawnedId = context.virtualBlockManager().spawnModel(model, placement);

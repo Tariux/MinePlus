@@ -30,6 +30,8 @@ public class ModelAsset extends PackAsset {
      * serialization deterministic.
      */
     private final VirtualModel capturedModel;
+    /** Texture reference policy (model-scoped ids); null = plain paths. */
+    private final com.mineplus.pack.compile.ModelJsonWriter.TextureNaming textureNaming;
 
     /**
      * @param namespace asset namespace (e.g. {@code fun})
@@ -56,10 +58,33 @@ public class ModelAsset extends PackAsset {
             File sourceFile,
             VirtualModel capturedModel
     ) {
+        this(namespace, path, owner, modelKey, sourceFile, capturedModel, null);
+    }
+
+    /**
+     * @param textureNaming model-scoped texture ids (PackSystem supplies
+     *                      {@code <model>_<texture>} plus vanilla references);
+     *                      null keeps the plain {@code item/<name>} paths
+     */
+    public ModelAsset(
+            String namespace,
+            String path,
+            String owner,
+            String modelKey,
+            File sourceFile,
+            VirtualModel capturedModel,
+            com.mineplus.pack.compile.ModelJsonWriter.TextureNaming textureNaming
+    ) {
         super(namespace, path, owner);
         this.modelKey = Objects.requireNonNull(modelKey, "modelKey").trim().toLowerCase(Locale.ROOT);
         this.sourceFile = sourceFile;
         this.capturedModel = capturedModel;
+        this.textureNaming = textureNaming;
+    }
+
+    /** Texture reference policy, or null for plain paths. */
+    public com.mineplus.pack.compile.ModelJsonWriter.TextureNaming textureNaming() {
+        return textureNaming;
     }
 
     public String modelKey() {
@@ -96,7 +121,9 @@ public class ModelAsset extends PackAsset {
         if (model == null) {
             return new byte[0];
         }
-        String json = com.mineplus.pack.compile.ModelJsonWriter.write(model, originMode, outNamespace);
+        String json = textureNaming() == null
+                ? com.mineplus.pack.compile.ModelJsonWriter.write(model, originMode, outNamespace)
+                : com.mineplus.pack.compile.ModelJsonWriter.write(model, originMode, outNamespace, textureNaming());
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
