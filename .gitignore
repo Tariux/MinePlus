@@ -33,7 +33,7 @@ docs/assets/
 /node_modules/
 package-lock.json
 
-**.png
+# **.png
 **.class
 
 # Module-shipped assets must build into every jar (R9: a fresh clone without
