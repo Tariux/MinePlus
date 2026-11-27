@@ -62,6 +62,16 @@ public final class MineplusMachinePlugin extends ModuleFeature {
                     "multiblocks/" + typeId + ".json", false);
         }
 
+        // The block layer (blocks/mineplus/*.json) is what /mineplus blocks
+        // list|give|place read. The Core loads it during its own enable, before
+        // this module runs, so install ours and re-run the load; the same
+        // registry backs the placement service, item factory and commands.
+        for (String id : new String[]{"shaft", "water_wheel_weak", "water_wheel_strong"}) {
+            support.installDefault(plugin, "defaults/blocks/mineplus/" + id + ".json",
+                    "blocks/mineplus/" + id + ".json", true);
+        }
+        support.reloadBlocks();
+
         context.rotationNetworks().setStateSink((instance, state) -> render(instance, state));
         Bukkit.getPluginManager().registerEvents(new BrakeListener(this), plugin);
         machineItems = new MachineItemListener(this);
@@ -132,6 +142,12 @@ public final class MineplusMachinePlugin extends ModuleFeature {
     private void preloadModels() {
         var virtual = context.virtualBlockManager();
         var support = context.moduleSupport();
+        // The block layer resolves its model by name (visuals.model), not by
+        // pack key, so those models have to be in the manager under their own
+        // names or placement refuses with "Model ... is not loaded".
+        for (String blockModel : new String[]{"shaft", "water_wheel_weak", "water_wheel_strong"}) {
+            virtual.preloadModel(blockModel, support.dataFile("models/" + blockModel + ".bbmodel"));
+        }
         for (String typeId : MACHINE_TYPE_IDS) {
             var type = typeById(typeId);
             if (type == null) {

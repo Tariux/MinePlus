@@ -21,9 +21,9 @@ import javax.imageio.ImageIO;
  * load. Decoding goes through {@code javax.imageio} (JDK, zero dependencies); images
  * beyond 4096x4096 are rejected as a sanity guard.</p>
  */
-public final class TextureImageStore {
+public class TextureImageStore {
 
-    private static final int MAX_DIMENSION = 4096;
+    public static final int MAX_DIMENSION = 4096;
 
     /** Cache identity: a texture name resolved against one model file's lookup order. */
     private record CacheKey(String name, String modelPath) {
@@ -46,6 +46,11 @@ public final class TextureImageStore {
 
     public TextureImageStore(File rootFolder) {
         this.rootFolder = rootFolder;
+    }
+
+    /** The models root folder this store falls back to, or {@code null}. */
+    public File rootFolder() {
+        return rootFolder;
     }
 
     /**
@@ -174,53 +179,84 @@ public final class TextureImageStore {
         }
     }
 
-    /** Adjacent-to-model first, then the models root folder; null when absent. */
+    /** Adjacent folder chain, then the models root; null when absent. */
     private File resolveFile(String name, File modelFile) {
         if (modelFile != null && modelFile.getParentFile() != null) {
-            File adjacent = new File(modelFile.getParentFile(), name + ".png");
-            if (adjacent.isFile()) {
-                return adjacent;
-            }
-            // Model folders are authored on case-sensitive filesystems with
-            // names that rarely match the bbmodel's own lowercase texture
-            // identifiers ("Alchemy_Texture.png" vs "alchemy_texture"); a
-            // case-insensitive index of the folder makes the pack and the
-            // texel baker agree with what the author meant.
-            File indexed = indexedLookup(modelFile.getParentFile(), name + ".png");
-            if (indexed != null) {
-                return indexed;
-            }
-            // Authors conventionally ship one texture PNG named after the
-            // model itself ("hawk_eye.png" beside "hawk_eye.bbmodel") even
-            // when the project's internal texture name drifted. When nothing
-            // matched the texture name, try the model's own stem.
             String stem = modelFile.getName();
             int dot = stem.lastIndexOf('.');
             if (dot > 0) {
                 stem = stem.substring(0, dot);
             }
-            if (!stem.isBlank()) {
-                File stemNamed = new File(modelFile.getParentFile(), stem + ".png");
-                if (stemNamed.isFile()) {
-                    return stemNamed;
+            // Asset folders are laid out by convention, and all of these shapes
+            // are in the wild: <model folder>/<name>.png, <asset>/<name>.png
+            // (guns: models/<gun>.bbmodel + <gun>.png one level up),
+            // <asset>/textures/<name>.png. Walk upward once, then stop at the
+            // models root so a stray PNG elsewhere cannot shadow the model.
+            File folder = modelFile.getParentFile();
+            for (int level = 0; level < 3 && folder != null; level++) {
+                if (rootFolder != null && folder.equals(rootFolder)) {
+                    break;
                 }
-                stemNamed = indexedLookup(modelFile.getParentFile(), stem + ".png");
-                if (stemNamed != null) {
-                    return stemNamed;
+                File hit = lookupIn(folder, name, stem);
+                if (hit != null) {
+                    return hit;
                 }
+                folder = folder.getParentFile();
             }
         }
         if (rootFolder != null) {
-            File rooted = new File(rootFolder, name + ".png");
-            if (rooted.isFile()) {
-                return rooted;
-            }
-            File indexed = indexedLookup(rootFolder, name + ".png");
-            if (indexed != null) {
-                return indexed;
+            File hit = lookupIn(rootFolder, name, stemOf(modelFile));
+            if (hit != null) {
+                return hit;
             }
         }
         return null;
+    }
+
+    /** One folder: exact name, case-insensitive name, textures/ subfolder, model stem. */
+    private File lookupIn(File folder, String name, String modelStem) {
+        if (folder == null || !folder.isDirectory()) {
+            return null;
+        }
+        File exact = new File(folder, name + ".png");
+        if (exact.isFile()) {
+            return exact;
+        }
+        File indexed = indexedLookup(folder, name + ".png");
+        if (indexed != null) {
+            return indexed;
+        }
+        File textures = new File(folder, "textures");
+        if (textures.isDirectory()) {
+            File nested = new File(textures, name + ".png");
+            if (nested.isFile()) {
+                return nested;
+            }
+            nested = indexedLookup(textures, name + ".png");
+            if (nested != null) {
+                return nested;
+            }
+        }
+        if (modelStem != null && !modelStem.isBlank() && !modelStem.equalsIgnoreCase(name)) {
+            File stemNamed = new File(folder, modelStem + ".png");
+            if (stemNamed.isFile()) {
+                return stemNamed;
+            }
+            stemNamed = indexedLookup(folder, modelStem + ".png");
+            if (stemNamed != null) {
+                return stemNamed;
+            }
+        }
+        return null;
+    }
+
+    private static String stemOf(File modelFile) {
+        if (modelFile == null) {
+            return null;
+        }
+        String stem = modelFile.getName();
+        int dot = stem.lastIndexOf('.');
+        return dot > 0 ? stem.substring(0, dot) : stem;
     }
 
     /** Lowercase filename -> actual filename per directory, built once and cached. */

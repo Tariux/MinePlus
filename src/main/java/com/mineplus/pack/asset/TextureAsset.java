@@ -11,6 +11,7 @@ import java.util.Objects;
 public final class TextureAsset extends PackAsset {
 
     private final File file;
+    private final byte[] bytes;
 
     /**
      * @param namespace asset namespace
@@ -21,11 +22,29 @@ public final class TextureAsset extends PackAsset {
     public TextureAsset(String namespace, String path, String owner, File file) {
         super(namespace, path, owner);
         this.file = Objects.requireNonNull(file, "file");
+        this.bytes = null;
         if (!file.isFile()) {
             throw new IllegalArgumentException("Texture file does not exist: " + file.getAbsolutePath());
         }
     }
 
+    /**
+     * Builds the asset from PNG bytes already in memory — embedded bbmodel
+     * textures have no file to point at. Keeping them on this path means the
+     * pack writer never re-reads (or misses) a texture the renderer resolved.
+     *
+     * @param bytes raw PNG bytes (not modified)
+     */
+    public TextureAsset(String namespace, String path, String owner, byte[] bytes) {
+        super(namespace, path, owner);
+        this.file = null;
+        this.bytes = Objects.requireNonNull(bytes, "bytes").clone();
+        if (this.bytes.length == 0) {
+            throw new IllegalArgumentException("Texture bytes are empty for " + path);
+        }
+    }
+
+    /** Source file, or {@code null} for a memory-backed (embedded) texture. */
     public File file() {
         return file;
     }
@@ -66,11 +85,11 @@ public final class TextureAsset extends PackAsset {
 
     @Override
     public byte[] serialize() throws IOException {
-        return fileBytes(file);
+        return bytes != null ? bytes.clone() : fileBytes(file);
     }
 
     @Override
     protected byte[] hashSource() throws IOException {
-        return fileBytes(file);
+        return bytes != null ? bytes.clone() : fileBytes(file);
     }
 }

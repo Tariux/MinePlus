@@ -20,6 +20,7 @@ public final class AssetPipelineTest {
         incrementalRebuilds();
         teaModelBakesInsideVanillaWindow();
         anchorModeParsing();
+        texturePipelineDefaults();
 
         if (failures.isEmpty()) {
             System.out.println("AssetPipelineTest: all checks passed");
@@ -202,6 +203,82 @@ public final class AssetPipelineTest {
         } catch (Exception e) {
             failures.add("anchor meta parse: " + e);
             return com.mineplus.infrastructure.virtual.AnchorMode.LATTICE;
+        }
+    }
+
+    /**
+     * Texel AUTO plates only art the client cannot otherwise see: a face whose
+     * texture name is a vanilla block keeps that block (water wheel = wood), a
+     * custom name with pixels is plated (guns), and a meta override still wins.
+     * Vanilla and legacy concatenated names must resolve so that skip works.
+     */
+    private static void texturePipelineDefaults() {
+        var settings = com.mineplus.infrastructure.virtual.texel.TexelBakingSettings.defaults();
+        check("texel default mode is AUTO",
+                settings.effectiveMode(com.mineplus.infrastructure.virtual.ModelMeta.empty())
+                        == com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.AUTO);
+        check("meta texelMode OFF disables plates for that model",
+                settings.effectiveMode(loadTexelMeta("{\"texelMode\": \"OFF\"}"))
+                        == com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.OFF);
+        check("global OFF disables plates everywhere",
+                new com.mineplus.infrastructure.virtual.texel.TexelBakingSettings(
+                        false,
+                        com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.AUTO,
+                        settings.detail(), settings.maxPlatesPerFace(), settings.maxPlatesPerInstance(),
+                        settings.maxGridEdge(), settings.uniformAreaDetection(), settings.uniformAreaMinSize(),
+                        settings.uniformAreaOklabThreshold(), settings.adaptiveBudgeting(),
+                        settings.budgetFallbackToSimpleColor(), settings.reuseSymmetricFaces())
+                        .effectiveMode(com.mineplus.infrastructure.virtual.ModelMeta.empty())
+                        == com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.OFF);
+
+        check("vanilla texture name resolves (oak_planks)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("oak_planks").material() == org.bukkit.Material.OAK_PLANKS);
+        check("legacy concatenated name resolves (blackwool)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("blackwool").material() == org.bukkit.Material.BLACK_WOOL);
+        check("legacy multi-word name resolves (orangeconcretepowder)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("orangeconcretepowder").material()
+                        == org.bukkit.Material.ORANGE_CONCRETE_POWDER);
+        check("reversed word order resolves (spruce_log -> log_spruce)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("spruce_log").material() == org.bukkit.Material.SPRUCE_LOG);
+        check("planned vanilla name resolves (oak_planks)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("oak_planks").material() == org.bukkit.Material.OAK_PLANKS);
+        check("short metal name resolves (iron)",
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("iron").material() == org.bukkit.Material.IRON_BLOCK);
+
+        var auto = com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.AUTO;
+        for (String wheelTexture : new String[]{"oak_planks", "spruce_log", "stone", "iron"}) {
+            check("AUTO keeps the block for wheel texture " + wheelTexture,
+                    com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker
+                            .keepsVanillaBlock(wheelTexture, auto));
+        }
+        check("AUTO plates custom art (gun_body)",
+                !com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker
+                        .keepsVanillaBlock("gun_body", auto));
+        check("ON plates even vanilla-named art (oak_planks)",
+                !com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker
+                        .keepsVanillaBlock("oak_planks",
+                                com.mineplus.infrastructure.virtual.ModelMeta.TexelMode.ON));
+        check("pixel-less legacy name is not marked fallback",
+                !com.mineplus.infrastructure.virtual.TextureMaterialResolver
+                        .resolveDetailed("blackwool").isFallback());
+    }
+
+    private static com.mineplus.infrastructure.virtual.ModelMeta loadTexelMeta(String json) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("texel-meta");
+            java.nio.file.Path model = dir.resolve("probe.bbmodel");
+            java.nio.file.Files.writeString(model, "{}");
+            java.nio.file.Files.writeString(dir.resolve("probe.meta.json"), json);
+            return com.mineplus.infrastructure.virtual.ModelMeta.load(model.toFile());
+        } catch (Exception e) {
+            failures.add("texel meta parse: " + e);
+            return com.mineplus.infrastructure.virtual.ModelMeta.empty();
         }
     }
 

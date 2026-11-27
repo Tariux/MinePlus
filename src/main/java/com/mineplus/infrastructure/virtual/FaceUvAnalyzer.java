@@ -114,7 +114,9 @@ public final class FaceUvAnalyzer {
      * <p>{@code OFF} (or an unresolvable texture image) keeps the legacy tiers.
      * {@code ON} forces TEXEL for every face with a resolvable image. {@code AUTO}
      * upgrades only {@link UvPlan.Strategy#FULL} faces — TILE and CROP_HALF are
-     * already exact vanilla renderings, so baking them would only add entities.</p>
+     * already exact vanilla renderings, so baking them would only add entities.
+     * The baker feeds {@code textureImageResolvable=false} under AUTO for a face
+     * whose texture name is itself a vanilla block, so that block stays.</p>
      *
      * @param face                   the face to analyze
      * @param texelMode              resolved texel mode (never {@code null})
@@ -133,11 +135,11 @@ public final class FaceUvAnalyzer {
         if (texelMode == null || texelMode == ModelMeta.TexelMode.OFF || !textureImageResolvable) {
             return existing;
         }
-        if (texelMode == ModelMeta.TexelMode.ON
-                || existing.strategy() == UvPlan.Strategy.FULL) {
-            return new UvPlan(UvPlan.Strategy.TEXEL, UvPlan.Half.NONE, existing.orientationDegrees());
-        }
-        return existing;
+        // Authored pixels are authoritative for *every* window shape: the baker
+        // wraps tiling windows (see TexelSampler) and crops partial ones, so a
+        // model never reverts to vanilla block materials just because its UVs
+        // tile or cover half a texture. The pixel-less faces keep their tiers.
+        return new UvPlan(UvPlan.Strategy.TEXEL, UvPlan.Half.NONE, existing.orientationDegrees());
     }
 
     /**

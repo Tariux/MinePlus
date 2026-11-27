@@ -27,6 +27,8 @@ public final class TextureMaterialResolver {
     private static final Material FALLBACK = Material.WHITE_CONCRETE;
 
     private static final Map<String, Material> TEXTURE_MAP;
+    /** TEXTURE_MAP indexed by token-sorted key, so {@code spruce_log} finds {@code log_spruce}. */
+    private static final Map<String, Material> ORDERED_TEXTURE_MAP;
     private static final Map<String, Material> ALIASES;
     private static final ConcurrentHashMap<String, Resolution> RESOLVE_CACHE = new ConcurrentHashMap<>();
 
@@ -35,6 +37,37 @@ public final class TextureMaterialResolver {
             "_top", "_side", "_bottom", "_front", "_back", "_left", "_right",
             "_inner", "_outer", "_base", "_0", "_1", "_2", "_3"
     };
+
+    /**
+     * Legacy Blockbench names concatenate words without underscores
+     * ({@code blackwool}, {@code oakplanks}, {@code orangeconcretepowder}).
+     * Flat colour tokens, longest first so {@code lightblue} wins over {@code blue}.
+     */
+    private static final String[] LEGACY_COLORS = {
+            "lightblue", "lightgray", "white", "orange", "magenta", "yellow", "lime",
+            "pink", "gray", "cyan", "purple", "blue", "brown", "green", "red", "black"
+    };
+
+    /**
+     * Multi-word suffixes a flat legacy name can end with, mapped to their
+     * material-name form. Single-word suffixes are covered by the split probe.
+     */
+    private static final Map<String, String> LEGACY_SUFFIXES = Map.ofEntries(
+            Map.entry("concretepowder", "CONCRETE_POWDER"),
+            Map.entry("stainedglasspane", "STAINED_GLASS_PANE"),
+            Map.entry("stainedglass", "STAINED_GLASS"),
+            Map.entry("glazedterracotta", "GLAZED_TERRACOTTA"),
+            Map.entry("hardenedclay", "TERRACOTTA"),
+            Map.entry("shulkerbox", "SHULKER_BOX"),
+            Map.entry("concrete", "CONCRETE"),
+            Map.entry("terracotta", "TERRACOTTA"),
+            Map.entry("banner", "BANNER"),
+            Map.entry("carpet", "CARPET"),
+            Map.entry("candle", "CANDLE"),
+            Map.entry("wool", "WOOL"),
+            Map.entry("glass", "GLASS"),
+            Map.entry("bed", "BED")
+    );
 
     static {
         Map<String, Material> m = new LinkedHashMap<>();
@@ -502,6 +535,10 @@ public final class TextureMaterialResolver {
         a.put("brick_block", Material.BRICKS);
         a.put("stonebrick", Material.STONE_BRICKS);
         a.put("stone_brick", Material.STONE_BRICKS);
+        // Short Blockbench metal names: the texture is the block's art.
+        a.put("iron", Material.IRON_BLOCK);
+        a.put("gold", Material.GOLD_BLOCK);
+        a.put("diamond", Material.DIAMOND_BLOCK);
         a.put("wood", Material.OAK_PLANKS);
         a.put("wooden", Material.OAK_PLANKS);
         a.put("double_plant", Material.SUNFLOWER);
@@ -558,6 +595,22 @@ public final class TextureMaterialResolver {
         MAP_KEYS = keys;
         MAP_FLAT_KEYS = flatKeys;
         MAP_MATERIALS = materials;
+
+        Map<String, Material> ordered = new LinkedHashMap<>();
+        for (Map.Entry<String, Material> entry : TEXTURE_MAP.entrySet()) {
+            ordered.putIfAbsent(tokenKey(entry.getKey()), entry.getValue());
+        }
+        for (Map.Entry<String, Material> entry : ALIASES.entrySet()) {
+            ordered.putIfAbsent(tokenKey(entry.getKey()), entry.getValue());
+        }
+        ORDERED_TEXTURE_MAP = Collections.unmodifiableMap(ordered);
+    }
+
+    /** Tokens sorted, so {@code spruce_log} and {@code log_spruce} share a key. */
+    private static String tokenKey(String name) {
+        String[] tokens = name.replace("_", " ").trim().split("\\s+");
+        java.util.Arrays.sort(tokens);
+        return String.join("_", tokens);
     }
 
     /** Resolution outcome for diagnostics. */
@@ -578,7 +631,9 @@ public final class TextureMaterialResolver {
                 case 2 -> "direct";
                 case 3 -> "suffix-strip";
                 case 4 -> "alias";
-                case 5 -> "fuzzy";
+                case 5 -> "legacy-concat";
+                case 6 -> "word-order";
+                case 7 -> "fuzzy";
                 default -> "fallback";
             };
         }
@@ -632,6 +687,18 @@ public final class TextureMaterialResolver {
             return new Resolution(textureName, aliased, 4);
         }
 
+        Resolution legacy = legacyResolve(textureName, key);
+        if (legacy != null) {
+            return legacy;
+        }
+
+        if (key.contains("_")) {
+            Material ordered = ORDERED_TEXTURE_MAP.get(tokenKey(key));
+            if (ordered != null) {
+                return new Resolution(textureName, ordered, 6);
+            }
+        }
+
         Resolution fuzzy = fuzzyResolve(textureName, key);
         if (fuzzy != null) {
             return fuzzy;
@@ -640,6 +707,40 @@ public final class TextureMaterialResolver {
         DebugLogger.warning("[TextureMaterialResolver] Could not resolve texture: '" + textureName
                 + "'. Falling back to " + FALLBACK.name());
         return new Resolution(textureName, FALLBACK, 0);
+    }
+
+    /**
+     * Tier 5: Blockbench's legacy concatenated names ({@code blackwool},
+     * {@code orangeconcretepowder}, {@code oakplanks}). Only runs when nothing
+     * else matched, so it can never override a real material or alias.
+     */
+    private static Resolution legacyResolve(String originalName, String key) {
+        String flatKey = key.replace("_", "");
+        if (flatKey.isEmpty()) {
+            return null;
+        }
+        if (!key.contains("_")) {
+            for (int i = 3; i <= flatKey.length() - 3; i++) {
+                Material split = matchBlock(flatKey.substring(0, i) + "_" + flatKey.substring(i));
+                if (split != null) {
+                    return new Resolution(originalName, split, 5);
+                }
+            }
+        }
+        for (String color : LEGACY_COLORS) {
+            if (!flatKey.startsWith(color) || flatKey.length() == color.length()) {
+                continue;
+            }
+            String suffix = LEGACY_SUFFIXES.get(flatKey.substring(color.length()));
+            if (suffix == null) {
+                continue;
+            }
+            Material matched = matchBlock(color + "_" + suffix);
+            if (matched != null) {
+                return new Resolution(originalName, matched, 5);
+            }
+        }
+        return null;
     }
 
     private static Resolution fuzzyResolve(String originalName, String key) {
@@ -666,13 +767,25 @@ public final class TextureMaterialResolver {
             return null;
         }
         DebugLogger.info("[TextureMaterialResolver] fuzzy-resolved '" + originalName + "' via '" + bestKeyName + "'.");
-        return new Resolution(originalName, best, 5);
+        return new Resolution(originalName, best, 7);
     }
 
     private static Material matchBlock(String key) {
         Material matched = Material.matchMaterial(key.toUpperCase(Locale.ROOT));
-        if (matched == null || !matched.isBlock() || matched.isAir()) {
+        if (matched == null) {
             return null;
+        }
+        // Material#isBlock/isAir go through the block-type registry, which needs
+        // a live Bukkit server; the plain-Java test runners have none and throw
+        // at class-init time. There, fall back to the name check.
+        try {
+            if (!matched.isBlock() || matched.isAir()) {
+                return null;
+            }
+        } catch (RuntimeException | LinkageError noRegistry) {
+            if (matched.name().equals("AIR")) {
+                return null;
+            }
         }
         return matched;
     }

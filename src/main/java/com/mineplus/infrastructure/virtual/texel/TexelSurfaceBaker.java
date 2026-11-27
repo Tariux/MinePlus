@@ -22,6 +22,23 @@ public final class TexelSurfaceBaker {
     private TexelSurfaceBaker() {
     }
 
+    /**
+     * Under {@code AUTO}, true when a face must keep its vanilla block instead of
+     * being plated: the texture name resolves to a real block (oak_planks,
+     * spruce_log, blackwool), so the block *is* the authored look. Custom art
+     * ({@code gun_body}) returns false and is plated. {@code ON} never keeps the
+     * block; {@code OFF}/{@code null} never plates, so the caller skips.
+     */
+    public static boolean keepsVanillaBlock(String textureName, ModelMeta.TexelMode mode) {
+        if (mode != ModelMeta.TexelMode.AUTO || textureName == null || textureName.isBlank()) {
+            return false;
+        }
+        com.mineplus.infrastructure.virtual.TextureMaterialResolver.Resolution resolution =
+                com.mineplus.infrastructure.virtual.TextureMaterialResolver.resolveDetailed(textureName);
+        return !resolution.isFallback() && resolution.material() != null
+                && resolution.material() != org.bukkit.Material.AIR;
+    }
+
     private static final float PLATE_SURFACE_OFFSET_BLOCKS = 1.0f / 256.0f;
     private static final float OCCLUSION_SHRINK_BLOCKS = 0.01f / 16.0f;
     private static final float CORNER_PROBE_INSET = 0.05f;
@@ -110,6 +127,14 @@ public final class TexelSurfaceBaker {
                 }
 
                 TextureImageStore.TextureRaster raster = imageStore.raster(face.textureName(), modelFile);
+                if (raster != null && keepsVanillaBlock(face.textureName(), mode)) {
+                    // AUTO means "show authored art the client cannot otherwise see".
+                    // A texture the author named after a vanilla block (oak_planks,
+                    // spruce_log, blackwool) keeps that block: it is the art, crisp
+                    // and cheap, and plating it would only add noise. Force texels
+                    // per model with "texelMode": "ON".
+                    raster = null;
+                }
                 FaceUvAnalyzer.UvPlan plan = FaceUvAnalyzer.analyze(
                         face, mode, raster != null, textureWidth, textureHeight);
                 if (plan.strategy() != FaceUvAnalyzer.UvPlan.Strategy.TEXEL) {

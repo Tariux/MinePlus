@@ -38,6 +38,13 @@ public final class VirtualModel {
      * not author. Null keeps the model parentless.
      */
     private final String itemParent;
+    /**
+     * Textures carried inside the bbmodel (base64 {@code source}), keyed by
+     * lowercased texture name. They are the authored pixels and outrank any PNG
+     * on disk, so a model keeps its exact art wherever it is installed and a
+     * same-named texture in another model can never shadow it.
+     */
+    private final Map<String, EmbeddedTexture> embeddedTextures;
     /** Lowercased bone name -> preorder index; the first occurrence wins (import order). */
     private final Map<String, Integer> boneIndexByName;
 
@@ -67,6 +74,23 @@ public final class VirtualModel {
             ModelDisplay display,
             String itemParent
     ) {
+        this(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations, display, itemParent,
+                null);
+    }
+
+    public VirtualModel(
+            String name,
+            List<BakedCube> cubes,
+            Map<String, String> textureMappings,
+            Resolution resolution,
+            String modelFormat,
+            List<VectorAnchor> anchors,
+            List<VirtualBone> bones,
+            List<AnimationClip> animations,
+            ModelDisplay display,
+            String itemParent,
+            Map<String, EmbeddedTexture> embeddedTextures
+    ) {
         this.name = name;
         this.cubes = List.copyOf(cubes);
         this.textureMappings = textureMappings == null ? Map.of() : Map.copyOf(textureMappings);
@@ -77,6 +101,8 @@ public final class VirtualModel {
         this.animations = animations == null ? List.of() : List.copyOf(animations);
         this.display = display == null ? ModelDisplay.EMPTY : display;
         this.itemParent = itemParent == null || itemParent.isBlank() ? null : itemParent.trim();
+        this.embeddedTextures = embeddedTextures == null || embeddedTextures.isEmpty()
+                ? Map.of() : Map.copyOf(embeddedTextures);
         Map<String, Integer> boneIndex = new HashMap<>();
         for (int i = 0; i < this.bones.size(); i++) {
             VirtualBone bone = this.bones.get(i);
@@ -119,7 +145,7 @@ public final class VirtualModel {
             return this;
         }
         return new VirtualModel(newName, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
-                display, itemParent);
+                display, itemParent, embeddedTextures);
     }
 
     /**
@@ -135,7 +161,7 @@ public final class VirtualModel {
             return this;
         }
         return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
-                resolved, itemParent);
+                resolved, itemParent, embeddedTextures);
     }
 
     /**
@@ -152,7 +178,7 @@ public final class VirtualModel {
             return this;
         }
         return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
-                display, resolved);
+                display, resolved, embeddedTextures);
     }
 
     /**
@@ -187,7 +213,7 @@ public final class VirtualModel {
             }
         }
         return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones,
-                new ArrayList<>(merged.values()), display, itemParent);
+                new ArrayList<>(merged.values()), display, itemParent, embeddedTextures);
     }
 
     public String name() {
@@ -200,6 +226,22 @@ public final class VirtualModel {
 
     public Map<String, String> textureMappings() {
         return textureMappings;
+    }
+
+    /** Textures carried inside the bbmodel file, keyed by lowercased name. */
+    public Map<String, EmbeddedTexture> embeddedTextures() {
+        return embeddedTextures;
+    }
+
+    /** The same model with embedded textures attached (importer-only seam). */
+    public VirtualModel withEmbeddedTextures(Map<String, EmbeddedTexture> textures) {
+        if (textures == null || textures.isEmpty()) {
+            return this;
+        }
+        Map<String, EmbeddedTexture> merged = new LinkedHashMap<>(embeddedTextures);
+        merged.putAll(textures);
+        return new VirtualModel(name, cubes, textureMappings, resolution, modelFormat, anchors, bones, animations,
+                display, itemParent, merged);
     }
 
     public Resolution resolution() {

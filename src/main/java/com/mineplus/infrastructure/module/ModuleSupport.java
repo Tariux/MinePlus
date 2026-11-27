@@ -110,6 +110,14 @@ public final class ModuleSupport {
         return installed;
     }
 
+    /**
+     * Reloads the Core's {@code blocks/**}{@code /*.json} after this module
+     * installed its own definitions, so they register in the live registry.
+     */
+    public com.mineplus.infrastructure.core.block.BlockLoadReport reloadBlocks() {
+        return core.reloadBlockDefinitions();
+    }
+
     /** The file the Core's data folder maps a relative install path to. */
     public File dataFile(String dataRelativePath) {
         return new File(core.getDataFolder(), dataRelativePath);

@@ -185,17 +185,24 @@ public class ConfigManager {
 
                     # Texel surface baking: reconstructs a face's texture pixel-by-pixel
                     # out of flat vanilla palette blocks (concretes, powders, terracottas).
-                    # Requires the texture PNG to sit next to the model file (or in the
-                    # models folder root) — placing a PNG next to an existing model is the
-                    # opt-in gesture. Per-model overrides live in models/<key>.meta.json
+                    # Texel art is one source among several, so baking is opt-in per model:
+                    # only models whose .meta.json sets "texelMode": AUTO or ON are baked.
+                    # Everything else renders its embedded/external PNG as a texture, and
+                    # faces whose texture is only a vanilla name (e.g. "stone", "blackwool")
+                    # use that vanilla block.
+                    # Per-model overrides live in models/<key>.meta.json
                     # ("texelMode": AUTO | ON | OFF, "texelDetail": FACE | SUPERSAMPLE_2X2
                     # | SUPERSAMPLE_4X4).
                     TEXEL_BAKING:
-                      # Global enable (false = rendering pipeline identical to before).
+                      # Global enable (false = flat vanilla materials everywhere).
                       ENABLED: true
-                      # AUTO: only faces that would otherwise use the FULL strategy and have
-                      # a resolvable PNG get baked (zero change for existing content).
-                      # ON: bake every face with a resolvable PNG. OFF: never bake.
+                      # Default for models without a meta override.
+                      # AUTO (recommended) plates only faces whose texture has pixels
+                      # and no vanilla block name: custom art (gun maps) shows exactly,
+                      # while oak_planks/spruce_log/blackwool faces keep that block —
+                      # so the water wheel renders as wood, not plates.
+                      # ON = plate every pixel face (even vanilla-named art).
+                      # OFF = never plate (flat vanilla materials only).
                       MODE: AUTO
                       # Sampling per texel: FACE = one center sample; SUPERSAMPLE_2X2/_4X4
                       # area-average the texel's texture footprint for close-up models.

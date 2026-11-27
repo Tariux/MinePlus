@@ -152,7 +152,11 @@ public final class ModelAssetValidator {
                 continue;
             }
             try {
-                if (virtualBlockManager.resolveTextureFile(asset.modelKey(), textureName) == null) {
+                // Embedded pixels count as resolved; only a name the catalog
+                // reports as MISSING is a real authoring error.
+                if (virtualBlockManager.textureCatalog(asset.modelKey())
+                        .resolution(textureName)
+                        .source() == com.mineplus.infrastructure.virtual.texel.ModelTextureCatalog.Source.MISSING) {
                     warn("Model '" + asset.id() + "' references unresolved texture '" + textureName + "'.");
                 }
             } catch (RuntimeException failure) {

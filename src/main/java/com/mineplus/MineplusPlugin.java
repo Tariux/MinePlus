@@ -136,6 +136,30 @@ public final class MineplusPlugin extends JavaPlugin {
                 this::animationApi);
     }
 
+    /** Reloads {@code blocks/**}{@code /*.json} into the live registry.
+     *
+     * <p>Modules install their embedded block definitions after the Core has
+     * enabled, so the startup load sees nothing yet; this repopulates the same
+     * registry the placement service, item factory and commands already hold.
+     */
+    public com.mineplus.infrastructure.core.block.BlockLoadReport reloadBlockDefinitions() {
+        if (blockDefinitionLoader == null) {
+            loadBlockDefinitions();
+            return new com.mineplus.infrastructure.core.block.BlockLoadReport(
+                    java.util.List.of(), blockDefinitions.size());
+        }
+        com.mineplus.infrastructure.core.block.BlockLoadReport report =
+                blockDefinitionLoader.reload(getDataFolder());
+        for (com.mineplus.infrastructure.core.block.BlockLoadReport.Problem problem : report.problems()) {
+            if (problem.severity() == com.mineplus.infrastructure.core.block.BlockLoadReport.Severity.WARN) {
+                getLogger().warning("blocks: " + problem.message() + " ["
+                        + problem.file().getName() + "]");
+            }
+        }
+        getLogger().info("Block definitions reloaded: " + report.summary());
+        return report;
+    }
+
     @Override
     public void onDisable() {
         if (context != null) {

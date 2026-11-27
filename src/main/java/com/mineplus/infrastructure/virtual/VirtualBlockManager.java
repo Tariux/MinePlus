@@ -7,6 +7,7 @@ import com.mineplus.infrastructure.virtual.animation.AnimationBinding;
 import com.mineplus.infrastructure.virtual.animation.AnimationClip;
 import com.mineplus.infrastructure.virtual.display.DisplayTransport;
 import com.mineplus.infrastructure.virtual.display.pool.PooledDisplay;
+import com.mineplus.infrastructure.virtual.texel.ModelTextureCatalog;
 import com.mineplus.infrastructure.virtual.texel.TexelBakeResult;
 import com.mineplus.infrastructure.virtual.texel.TexelBakingSettings;
 import com.mineplus.infrastructure.virtual.texel.TexelSurfaceBaker;
@@ -68,6 +69,8 @@ public class VirtualBlockManager implements Listener {
     private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
     private final Map<String, TexelBakeResult> texelBakes = new ConcurrentHashMap<>();
+    /** Per-model texture catalogs (embedded pixels + file lookup + material map). */
+    private final Map<String, ModelTextureCatalog> textureCatalogs = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<TexelBakeResult>> texelBakeFutures = new ConcurrentHashMap<>();
     private final Map<String, File> modelSourceFiles = new ConcurrentHashMap<>();
     /** Bumped whenever bake results are invalidated; async bakes only land if still current. */
@@ -149,6 +152,7 @@ public class VirtualBlockManager implements Listener {
     public void updateTexelSettings(TexelBakingSettings settings) {
         this.texelSettings = settings == null ? TexelBakingSettings.defaults() : settings;
         texelBakes.clear();
+        textureCatalogs.clear();
         texelBakeFutures.clear();
         texelBakeGeneration.incrementAndGet();
         for (Map.Entry<String, VirtualModel> entry : loadedModels.entrySet()) {
@@ -240,8 +244,52 @@ public class VirtualBlockManager implements Listener {
 
     public boolean hasTextureImage(String modelName, String textureName) {
         if (textureName == null || textureName.isBlank()) return false;
+        return textureCatalog(modelName).hasPixels(textureName);
+    }
+
+    /**
+     * The texture catalog of a registered model: embedded bbmodel pixels first,
+     * then PNGs on disk, then the vanilla material map. Cached for the model's
+     * lifetime and dropped on reload.
+     */
+    public ModelTextureCatalog textureCatalog(String modelName) {
         String key = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
-        return imageStore().isResolvable(textureName, modelSourceFiles.get(key));
+        ModelTextureCatalog cached = textureCatalogs.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        ModelTextureCatalog built = textureCatalog(key, loadedModels.get(key), modelSourceFiles.get(key));
+        ModelTextureCatalog existing = textureCatalogs.putIfAbsent(key, built);
+        return existing != null ? existing : built;
+    }
+
+    private ModelTextureCatalog textureCatalog(String key, VirtualModel model, File modelFile) {
+        ModelTextureCatalog catalog = ModelTextureCatalog.of(key, model, modelFile, imageStore());
+        if (texelSettings.effectiveMode(modelMeta.getOrDefault(key, ModelMeta.empty())) != ModelMeta.TexelMode.OFF) {
+            catalog.prime();
+        }
+        return catalog;
+    }
+
+    /** Raw PNG bytes for one model texture (embedded first), or null. */
+    public byte[] textureBytes(String modelName, String textureName) {
+        if (modelName == null || textureName == null || textureName.isBlank()) {
+            return null;
+        }
+        return textureCatalog(modelName).pngBytes(textureName);
+    }
+
+    /** Per-texture source report for diagnostics: name -> "embedded 16x16" etc. */
+    public Map<String, String> textureSourceReport(String modelName) {
+        if (modelName == null) {
+            return Map.of();
+        }
+        ModelTextureCatalog catalog = textureCatalog(modelName);
+        Map<String, String> report = new LinkedHashMap<>();
+        for (Map.Entry<String, ModelTextureCatalog.Resolution> entry : catalog.prime().report().entrySet()) {
+            report.put(entry.getKey(), entry.getValue().describe());
+        }
+        return report;
     }
 
     public void registerModel(String name, VirtualModel model) {
@@ -374,6 +422,7 @@ public class VirtualBlockManager implements Listener {
         modelMeta.clear();
         textureReports.clear();
         texelBakes.clear();
+        textureCatalogs.clear();
         texelBakeFutures.clear();
         texelBakeGeneration.incrementAndGet();
         modelSourceFiles.clear();
@@ -515,7 +564,7 @@ public class VirtualBlockManager implements Listener {
      */
     private void bakeTexelSurfacesAsync(String key, VirtualModel model, ModelMeta meta, File modelFile) {
         TexelBakingSettings settingsSnapshot = texelSettings;
-        TextureImageStore store = imageStore();
+        ModelTextureCatalog catalog = textureCatalog(key, model, modelFile);
         long generation = texelBakeGeneration.get();
         com.mineplus.infrastructure.perf.PerfRegistry registry = perf;
         if (registry != null) {
@@ -533,7 +582,7 @@ public class VirtualBlockManager implements Listener {
                         settingsSnapshot,
                         model == null ? 0 : model.cubes().size());
             }
-            return TexelSurfaceBaker.bakeModel(model, meta, modelFile, store, settingsSnapshot);
+            return TexelSurfaceBaker.bakeModel(model, meta, modelFile, catalog, settingsSnapshot);
         }, texelBakeExecutor);
         texelBakeFutures.put(key, future);
         future.whenComplete((result, error) -> {

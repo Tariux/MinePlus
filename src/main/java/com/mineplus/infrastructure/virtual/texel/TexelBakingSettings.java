@@ -8,9 +8,11 @@ import org.bukkit.configuration.file.FileConfiguration;
  * Global texel surface baking settings (the {@code TEXEL_BAKING} section of
  * {@code settings.mp.yml}); per-model {@code .meta.json} overrides take precedence.
  *
- * <p>Defaults are chosen so a server that never touches the config sees zero behavior
- * change: {@code AUTO} only activates for FULL-strategy faces with a resolvable PNG,
- * and shipped models have no adjacent PNGs.</p>
+ * <p>Texel plates are how custom pixel art reaches a block display, but vanilla
+ * block names are already exact art. So {@code AUTO} (the default) plates only
+ * faces whose texture has pixels and no vanilla block name; faces named
+ * {@code oak_planks}, {@code spruce_log} or {@code blackwool} keep their block.
+ * {@code ON} plates every pixel face, {@code OFF} never plates.</p>
  *
  * <p>Bake-time optimizations all default on and are strictly plate-count reducers:
  * {@code UNIFORM_AREA_DETECTION} coalesces large flat regions into one stretched
@@ -57,7 +59,7 @@ public record TexelBakingSettings(
 
     public static TexelBakingSettings defaults() {
         return new TexelBakingSettings(
-                false,
+                true,
                 ModelMeta.TexelMode.AUTO,
                 ModelMeta.TexelDetail.FACE,
                 96,
@@ -72,7 +74,13 @@ public record TexelBakingSettings(
         );
     }
 
-    /** Effective mode for a model: global enable gates everything, then meta overrides. */
+    /**
+     * Effective mode for a model: global enable gates everything, then the meta wins.
+     *
+     * <p>Under {@code AUTO} the baker plates only faces whose art has no vanilla
+     * block name, so `oak_planks`/`spruce_log`/`blackwool` faces (water wheel,
+     * cannon) render as those blocks while custom art (guns) still shows.</p>
+     */
     public ModelMeta.TexelMode effectiveMode(ModelMeta meta) {
         if (!enabled) {
             return ModelMeta.TexelMode.OFF;

@@ -137,18 +137,11 @@ public final class TexelSampler {
 
         u = clamp(u, uMin, uMax);
         v = clamp(v, vMin, vMax);
-        int px = (int) (u * pngScaleX);
-        int py = (int) (v * pngScaleY);
-        if (px < 0) {
-            px = 0;
-        } else if (px > width - 1) {
-            px = width - 1;
-        }
-        if (py < 0) {
-            py = 0;
-        } else if (py > height - 1) {
-            py = height - 1;
-        }
+        // Wrapping windows (UV span larger than the texture) repeat the texture
+        // natively, exactly like the vanilla client does; modulo equals the
+        // clamp for every window that lies inside the texture.
+        int px = Math.floorMod((int) (u * pngScaleX), width);
+        int py = Math.floorMod((int) (v * pngScaleY), height);
 
         int argb = pixels[py * width + px];
         return ((argb >>> 24) & 0xFF) >= 128 ? argb : 0;

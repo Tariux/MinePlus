@@ -31,8 +31,10 @@ import org.joml.Vector3f;
  * Streaming importer for Blockbench {@code .bbmodel} files.
  *
  * <p>Uses a single-pass {@link JsonReader} state machine instead of a Gson DOM so that
- * dead branches — most importantly every texture's Base64 {@code source} PNG (KB–MB each) —
- * are skipped with {@link JsonReader#skipValue()} and never materialized as strings.
+ * dead branches are skipped with {@link JsonReader#skipValue()} and never materialized.
+ * Texture {@code source} payloads are the one field read in full: decoded once and
+ * carried on the {@link VirtualModel} as {@link EmbeddedTexture}s (see
+ * {@code docs/design/2026-11-27-model-texture-pipeline.md}).
  *
  * <p>The outliner matrix accumulation (pivot conjugation {@code T(origin/16)·R·T(-origin/16)}
  * chained through parents, cycle-safe) is preserved verbatim from the DOM importer; only the
@@ -65,80 +67,29 @@ public class BbModelImporter {
             }
             return null;
         }
-        Map<String, byte[]> embedded = EMBEDDED_TEXTURES.get();
-        EMBEDDED_TEXTURES.remove();
-        if (model != null && embedded != null && !embedded.isEmpty()) {
-            materializeEmbeddedTextures(file, embedded, logger);
-        }
         return model;
     }
 
     /**
-     * Base64 sources captured by the streaming parse on this thread, texture
-     * name -> decoded PNG bytes. File-parse plumbing: materialized beside the
-     * model so every file-based consumer (texel baker, pack registration,
-     * reports) resolves them with no new seams.
+     * Base64 sources captured by the streaming parse, normalised texture name to
+     * decoded pixels. They are attached to the returned {@link VirtualModel} and
+     * never written to disk: the authored art must not depend on a writable
+     * install folder, and two models embedding a same-named texture (oak_planks
+     * on both wheels, with different art) must not overwrite each other.
      */
-    private static final ThreadLocal<Map<String, byte[]>> EMBEDDED_TEXTURES = new ThreadLocal<>();
     /** {@code mineplus} template metadata captured by the most recent streamed parse. */
     private static final ThreadLocal<MineplusTemplate> LAST_TEMPLATE = new ThreadLocal<>();
-
-    /**
-     * Decodes each embedded texture source and writes it as
-     * {@code <textureName>.png} beside the model — the authored pixels ARE the
-     * texture, and every free-format Blockbench project embeds them. An
-     * existing file is never overwritten (an author's hand-placed PNG wins).
-     */
-    private static void materializeEmbeddedTextures(File modelFile, Map<String, byte[]> embedded, Logger logger) {
-        File folder = modelFile.getParentFile();
-        if (folder == null || !folder.isDirectory() && !folder.mkdirs()) {
-            return;
-        }
-        for (Map.Entry<String, byte[]> entry : embedded.entrySet()) {
-            String name = entry.getKey();
-            if (name == null || name.isBlank()) {
-                continue;
-            }
-            int cut = name.lastIndexOf('/');
-            if (cut >= 0) {
-                name = name.substring(cut + 1);
-            }
-            name = name.toLowerCase(java.util.Locale.ROOT);
-            if (name.endsWith(".png")) {
-                name = name.substring(0, name.length() - 4);
-            }
-            if (name.isBlank()) {
-                continue;
-            }
-            File out = new File(folder, name + ".png");
-            if (out.isFile()) {
-                continue; // the author's own file is authoritative
-            }
-            try {
-                java.nio.file.Files.write(out.toPath(), entry.getValue());
-                if (logger != null) {
-                    logger.info("Materialized embedded texture '" + out.getName() + "' ("
-                            + entry.getValue().length + " bytes) beside '" + modelFile.getName() + "'.");
-                }
-            } catch (Exception exception) {
-                DebugLogger.warning("Failed to materialize embedded texture '" + name + "' beside '"
-                        + modelFile.getName() + "': " + exception.getMessage());
-            }
-        }
-    }
 
     public static VirtualModel parse(String name, Reader reader, Logger logger) {
         try {
             LAST_TEMPLATE.remove();
             VirtualModel model = parseStreamed(name, reader);
-            EMBEDDED_TEXTURES.remove(); // file-less parse: nothing to materialize
             MineplusTemplate template = LAST_TEMPLATE.get();
             if (template != null && logger != null) {
                 logger.info("Imported " + template.describe() + " — model '" + name + "'.");
             }
             return model;
         } catch (Exception exception) {
-            EMBEDDED_TEXTURES.remove();
             LAST_TEMPLATE.remove();
             if (logger != null) {
                 logger.warning("Failed to parse bbmodel '" + name + "': " + exception.getMessage());
@@ -163,7 +114,7 @@ public class BbModelImporter {
         List<RawGroup> groupDefinitions = new ArrayList<>();
         List<String> rootElementUuids = new ArrayList<>();
         List<RawAnimation> rawAnimations = new ArrayList<>();
-        Map<String, byte[]> embeddedTextures = new LinkedHashMap<>();
+        Map<String, EmbeddedTexture> embeddedTextures = new LinkedHashMap<>();
 
         JsonReader json = new JsonReader(reader);
         json.setLenient(false);
@@ -184,7 +135,6 @@ public class BbModelImporter {
             }
         }
         json.endObject();
-        EMBEDDED_TEXTURES.set(embeddedTextures);
 
         // 5.0 dialect: the root `groups` array carries the full group
         // definitions (name, origin, rotation) while the `outliner` holds
@@ -343,7 +293,7 @@ public class BbModelImporter {
             display = display.merge(specific);
         }
 
-        return new VirtualModel(
+        VirtualModel built = new VirtualModel(
                 name,
                 bakedCubes,
                 textureLookup.toIdMap(),
@@ -354,6 +304,7 @@ public class BbModelImporter {
                 animations,
                 display
         );
+        return built.withEmbeddedTextures(embeddedTextures);
     }
 
     /** Decoded-byte ceiling for one embedded texture (a 4096x4096 PNG fits comfortably). */
@@ -387,7 +338,8 @@ public class BbModelImporter {
         return template;
     }
 
-    private static void parseTextures(JsonReader json, TextureLookup lookup, Map<String, byte[]> embedded) throws Exception {
+    private static void parseTextures(JsonReader json, TextureLookup lookup, Map<String, EmbeddedTexture> embedded)
+            throws Exception {
         lookup.beginParse();
         json.beginArray();
         int arrayIndex = 0;
@@ -403,6 +355,8 @@ public class BbModelImporter {
             String relativePath = null;
             String name = null;
             String source = null;
+            int textureWidth = 0;
+            int textureHeight = 0;
             while (json.hasNext()) {
                 String fieldName = json.nextName();
                 switch (fieldName) {
@@ -411,6 +365,8 @@ public class BbModelImporter {
                     case "relative_path" -> relativePath = nextStringOrNull(json);
                     case "name" -> name = nextStringOrNull(json);
                     case "source" -> source = nextStringOrNull(json);
+                    case "width" -> textureWidth = nextIntOrZero(json);
+                    case "height" -> textureHeight = nextIntOrZero(json);
                     default -> json.skipValue(); // "uuid", "particle", "mode", ...
                 }
             }
@@ -428,18 +384,26 @@ public class BbModelImporter {
 
             // The embedded source is the texture the author painted — free-format
             // projects always embed it and often leave the internal name stale.
-            // Decode it (bounded) so the file-based parse can materialize it as
-            // <name>.png beside the model; every file-based consumer then
-            // resolves the real pixels with no new seams.
+            // Keep the decoded pixels on the model (keyed by the same normalised
+            // name the texel baker and pack writer ask with): the authored art
+            // then wins over any PNG on disk and never collides across models.
             if (source != null && source.startsWith("data:image/")) {
                 int comma = source.indexOf(',');
                 if (comma > 0 && source.length() - comma <= MAX_EMBEDDED_TEXTURE_BYTES) {
                     try {
                         byte[] decoded = java.util.Base64.getDecoder()
                                 .decode(source.substring(comma + 1).trim());
-                        String key = extracted != null && !extracted.isBlank() ? extracted
+                        String authored = extracted != null && !extracted.isBlank() ? extracted
                                 : (name != null ? name : "texture_" + arrayIndex);
-                        embedded.putIfAbsent(key.toLowerCase(java.util.Locale.ROOT), decoded);
+                        String key = normalizeTextureKey(authored);
+                        if (!key.isBlank()) {
+                            EmbeddedTexture texture = new EmbeddedTexture(
+                                    authored, extracted, decoded, textureWidth, textureHeight);
+                            embedded.putIfAbsent(key, texture);
+                            // Also file the raw lowercased name so a face that
+                            // references "Oak_Planks.png" still hits the pixels.
+                            embedded.putIfAbsent(EmbeddedTexture.key(authored), texture);
+                        }
                     } catch (IllegalArgumentException malformed) {
                         // A bad base64 payload is skipped; file-side PNGs still apply.
                     }
@@ -1002,6 +966,47 @@ public class BbModelImporter {
         return json.nextString();
     }
 
+    /**
+     * Canonical texture key shared by the importer, the texel baker's catalog and
+     * the pack writer: filename only, no extension, no namespace, lowercase.
+     * {@code "minecraft:block/Stone.png"} and {@code "stone"} both key to
+     * {@code "stone"}.
+     */
+    static String normalizeTextureKey(String name) {
+        if (name == null) {
+            return "";
+        }
+        String normalized = name.replace('\\', '/').trim();
+        int slash = normalized.lastIndexOf('/');
+        if (slash >= 0) {
+            normalized = normalized.substring(slash + 1);
+        }
+        int colon = normalized.lastIndexOf(':');
+        if (colon >= 0) {
+            normalized = normalized.substring(colon + 1);
+        }
+        if (normalized.endsWith(".png")) {
+            normalized = normalized.substring(0, normalized.length() - 4);
+        }
+        if (normalized.endsWith(".mcmeta")) {
+            normalized = normalized.substring(0, normalized.length() - 7);
+        }
+        return normalized.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static int nextIntOrZero(JsonReader json) throws Exception {
+        JsonToken peek = json.peek();
+        if (peek == JsonToken.NUMBER) {
+            return (int) Math.round(json.nextDouble());
+        }
+        if (peek == JsonToken.NULL) {
+            json.nextNull();
+            return 0;
+        }
+        json.skipValue();
+        return 0;
+    }
+
     private static boolean nextBoolean(JsonReader json, boolean fallback) throws Exception {
         JsonToken peek = json.peek();
         if (peek == JsonToken.BOOLEAN) {
@@ -1241,8 +1246,11 @@ public class BbModelImporter {
             String canonical = dedup.computeIfAbsent(extracted, key -> key.intern());
             byIndex.put(arrayIndex, canonical);
             if (id != null && !id.isBlank()) {
-                byId.put(id, canonical);
-                byId.put("#" + id, canonical);
+                // Blockbench reuses id "0" on cosmetically rebuilt texture lists
+                // (the water wheel embeds four textures all stamped id 0); the
+                // first entry owns the id so faces never silently repaint.
+                byId.putIfAbsent(id, canonical);
+                byId.putIfAbsent("#" + id, canonical);
             }
         }
 
@@ -1250,40 +1258,37 @@ public class BbModelImporter {
             if (reference == null || reference.isBlank()) {
                 return null;
             }
+            // Numeric references are indices into the textures array and take
+            // precedence over an id map that may have collided on "0".
+            String numeric = reference.startsWith("#") ? reference.substring(1) : reference;
+            if (isAllDigits(numeric)) {
+                try {
+                    String byIdx = byIndex.get(Integer.parseInt(numeric));
+                    if (byIdx != null) {
+                        return byIdx;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // out of range int — fall through to the id map
+                }
+            }
             String direct = byId.get(reference);
             if (direct != null) {
                 return direct;
             }
-            if (reference.startsWith("#")) {
-                String stripped = reference.substring(1);
-                direct = byId.get(stripped);
-                if (direct != null) {
-                    return direct;
-                }
-                reference = stripped;
+            return byId.get("#" + numeric);
+        }
+
+        private static boolean isAllDigits(String value) {
+            if (value.isEmpty()) {
+                return false;
             }
-            // Numeric references are indices into the textures array.
-            if (!reference.isEmpty()) {
-                boolean digits = true;
-                for (int i = 0; i < reference.length(); i++) {
-                    char c = reference.charAt(i);
-                    if (c < '0' || c > '9') {
-                        digits = false;
-                        break;
-                    }
-                }
-                if (digits) {
-                    try {
-                        String byIdx = byIndex.get(Integer.parseInt(reference));
-                        if (byIdx != null) {
-                            return byIdx;
-                        }
-                    } catch (NumberFormatException ignored) {
-                        // out of range int — fall through
-                    }
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (c < '0' || c > '9') {
+                    return false;
                 }
             }
-            return byId.get("#" + reference);
+            return true;
         }
 
         Map<String, String> toIdMap() {

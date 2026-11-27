@@ -696,6 +696,14 @@ public final class PackSystem {
             }
             String texturePath = folder + "/" + normalized;
             try {
+                // The catalog already merged embedded bbmodel pixels and disk
+                // PNGs; use the bytes it resolved so the pack never re-reads a
+                // file the renderer could not find (or misses an embedded one).
+                byte[] png = virtualBlockManager.textureCatalog(modelKey).pngBytes(textureName);
+                if (png != null) {
+                    assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, png));
+                    continue;
+                }
                 File textureFile = virtualBlockManager.resolveTextureFile(modelKey, textureName);
                 if (textureFile != null) {
                     assetRegistry.register(new TextureAsset(namespace, texturePath, namespace, textureFile));
