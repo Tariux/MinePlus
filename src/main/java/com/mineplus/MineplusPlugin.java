@@ -37,6 +37,7 @@ public final class MineplusPlugin extends JavaPlugin {
     private com.mineplus.infrastructure.core.block.BlockStore placedBlocks;
     private com.mineplus.infrastructure.core.block.BlockPlacementService blockPlacement;
     private com.mineplus.infrastructure.core.block.BlockItemFactory blockItems;
+    private com.mineplus.infrastructure.collision.CollisionService collisionService;
 
     @Override
     public void onEnable() {
@@ -69,6 +70,19 @@ public final class MineplusPlugin extends JavaPlugin {
         context.applyInputSettings(configManager.getConfig().getInput());
         context.applyVisualUnitSettings(configManager.getConfig().getVisualUnits());
         context.finalizeSetup();
+
+        // Shape Atlas + Hybrid Fitter: the live service replaces the disabled
+        // placeholder the context was bootstrapped with.
+        com.mineplus.infrastructure.collision.CollisionService collision =
+                com.mineplus.infrastructure.collision.CollisionService.start(this,
+                        configManager.getConfig().getCollision(), getDataFolder(),
+                        getLogger()::warning);
+        context.installCollisionService(collision);
+        collisionService = collision;
+        virtualBlockManager.setCollisionService(collision);
+        for (String warning : configManager.getConfig().getCollision().deprecationWarnings()) {
+            getLogger().warning(warning);
+        }
 
         // API v1 (P5): publish the stable facades in ServicesManager for addons.
         com.mineplus.infrastructure.api.MineplusServices.registerAll(this, context);
@@ -162,6 +176,10 @@ public final class MineplusPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (collisionService != null) {
+            collisionService.shutdown();
+            collisionService = null;
+        }
         if (context != null) {
             com.mineplus.infrastructure.api.MineplusServices.unregisterAll(this);
             context.shutdownServices();
@@ -210,6 +228,7 @@ public final class MineplusPlugin extends JavaPlugin {
         commandRouter.register(new com.mineplus.infrastructure.command.sub.RenderSubCommand(context));
         commandRouter.register(new com.mineplus.infrastructure.command.sub.MobSubCommand(context, yamlMobs));
         commandRouter.register(new PerfCommand(context));
+        commandRouter.register(new com.mineplus.infrastructure.command.sub.CollisionSubCommand(context));
 
         command.setExecutor(commandRouter);
         command.setTabCompleter(commandRouter);

@@ -115,4 +115,13 @@ public final class DeveloperApi2 {
                 context.infrastructureEngine().registry(),
                 context.infrastructureEngine().processManager());
     }
+
+    /**
+     * Collision facade: describe a fit ({@code CollisionSpec}), fit or bake it,
+     * read atlas counters and the cached plans. Never null; check
+     * {@code enabled()} before expecting world changes.
+     */
+    public com.mineplus.infrastructure.collision.CollisionService collision() {
+        return context.collisionService();
+    }
 }

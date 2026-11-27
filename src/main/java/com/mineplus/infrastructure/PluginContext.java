@@ -62,6 +62,8 @@ public final class PluginContext {
     private final com.mineplus.infrastructure.core.network.rotation.RotationNetworkService rotationNetworks;
     private final java.util.concurrent.ConcurrentHashMap<String, ItemMagazine> magazines =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile com.mineplus.infrastructure.collision.CollisionService collisionService =
+            com.mineplus.infrastructure.collision.CollisionService.disabled();
 
     private PluginContext(
             MineplusPlugin plugin,
@@ -399,6 +401,22 @@ public final class PluginContext {
      */
     public PackApi packApi() {
         return packApi;
+    }
+
+    /**
+     * Shape atlas + hybrid fitter. Never null: before enable it is a disabled
+     * service with an empty atlas, so addons can call it from any lifecycle hook.
+     */
+    public com.mineplus.infrastructure.collision.CollisionService collisionService() {
+        return collisionService;
+    }
+
+    /** Installs the live service (plugin enable/reload); a null value restores the disabled one. */
+    public void installCollisionService(
+            com.mineplus.infrastructure.collision.CollisionService service) {
+        this.collisionService = service == null
+                ? com.mineplus.infrastructure.collision.CollisionService.disabled()
+                : service;
     }
 
     /** The running pack subsystem, or null when disabled/unavailable. */

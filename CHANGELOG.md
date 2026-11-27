@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: Shape Atlas + Hybrid Fitter (collision)
+
+- Pure-Java collision core under `com.mineplus.infrastructure.collision`: a
+  shape atlas built from the server's own block collision shapes (Paper reader
+  with a scratch-location fallback for Spigot), a binary disk cache invalidated
+  by server version/provider/pool/resolution, and a candidate pool expanded to
+  block states.
+- Occupancy sources `AUTO`, `BLUEPRINT` (versioned JSON grid with `SOLID`,
+  `EMPTY`, `FORCE_BLOCK`, `PASSABLE_HITBOX`, `TOP_SURFACE`, `STEP`), `FILL` and
+  `HYBRID`, all producing the same sub-voxel mask; yaw is exact at 90°.
+- Hybrid fitter with weighted per-cell scoring, profile presets, a walkability
+  and ledge pass, deterministic plans, a serialisable fit result and a fit
+  cache; per-cell backends (real block, packet ghost, scaled shulker,
+  interaction, passable outline, plate) chosen by an explainable planner.
+- `CollisionManager` with a per-tick part budget, `collision_state.json`
+  persistence, chunk reconciliation, removal, protection listeners and the
+  built/removed events.
+- `CollisionSpec` builder, `CollisionService` in `PluginContext` and published
+  through Bukkit's `ServicesManager`, `COLLISION` config section (legacy
+  `VIRTUAL_RENDERING.COLLISION_*` keys are mapped and warned about once), the
+  `collision` block in a model's `.meta.json`, and `/mineplus collision atlas
+  stats|dump|rebuild` and `fit debug|report|bake` with tab completion.
+- `VirtualBoundingBox` is deprecated with `toCollisionSpec(String)` as its
+  adapter; the legacy barrier fill remains the fallback when collision is
+  disabled.
+- Docs under `docs/collision/` (schema, migration, testing checklist) and six
+  samples under `examples/collision/`.
+
+### Fixed
+
+- The service and the fitter now agree on a fit's atlas identity, so a cached
+  fit is found on the second call instead of being recomputed every time
+  (`HybridFitterTest`: "service fit knows its atlas", "fit cache returns the
+  same plan on the second call").
+- The `collision` profile key accepts the config spellings `DEFAULT`,
+  `FURNITURE`, `WALKABLE` and `THIN` as well as the preset names.
+
+### Added: placement and interaction wiring
+
+- A model whose `.meta.json` declares a `collision` block is fitted at spawn
+  (`CollisionSpec.fromModel`, shared with the `fit` commands) and placed through
+  `CollisionManager`; every other model keeps the legacy lattice, and
+  `COLLISION.ENABLED: false` puts all of them back on it.
+- `ModelCollisionInteractEvent`: right-clicking an interaction hitbox resolves to
+  its model instance and cancels the underlying vanilla entity interaction when
+  cancelled.
+
+- A fitted model still emits light: the lattice cells are reused as light
+  sources, so lamps keep working without the lattice's collision blocks.
+- `/mineplus collision fit debug` now draws the plan in the world as coloured
+  dust (one colour per backend) at the block you are looking at.
+
 ### Added: model/definition gate and block autoplay (phase 5)
 
 - `check-bbmodel.mjs --definition <blocks/…json>`: the pre-flight now proves the

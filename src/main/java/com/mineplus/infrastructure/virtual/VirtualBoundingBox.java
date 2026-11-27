@@ -10,10 +10,23 @@ import org.joml.Vector3f;
  *
  * @deprecated for collision use — {@link GeometryOccupancyCalculator} replaces it with
  *     per-cube geometry-aware cell rasterization. Retained as a diagnostic utility and as the
- *     AABB compat escape hatch ({@code collisionMode: AABB}).
+ *     AABB compat escape hatch ({@code collisionMode: AABB}). New code should build a
+ *     {@link com.mineplus.infrastructure.collision.CollisionSpec} and let
+ *     {@link com.mineplus.infrastructure.collision.CollisionService} fit it; see
+ *     {@code docs/collision/migration.md}. {@link #toCollisionSpec(String)} is the adapter.
  */
-@Deprecated
+@Deprecated(since = "5.0")
 public record VirtualBoundingBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+
+    /**
+     * Adapter for the legacy path: the AABB becomes a {@code FILL} spec, so
+     * callers can switch to the atlas fitter without changing their box math.
+     */
+    public com.mineplus.infrastructure.collision.CollisionSpec toCollisionSpec(String modelKey) {
+        return com.mineplus.infrastructure.collision.CollisionSpec.builder(modelKey)
+                .fill(maxX - minX, maxY - minY, maxZ - minZ)
+                .build();
+    }
 
     public static VirtualBoundingBox calculate(VirtualModel model) {
         if (model.cubes().isEmpty()) {

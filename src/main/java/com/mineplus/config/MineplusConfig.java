@@ -1,5 +1,7 @@
 package com.mineplus.config;
 
+import com.mineplus.infrastructure.collision.CollisionSettings;
+import com.mineplus.infrastructure.collision.mask.RasterMode;
 import com.mineplus.infrastructure.virtual.ModelMeta;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import com.mineplus.infrastructure.virtual.animation.AnimationSettings;
@@ -15,6 +17,8 @@ import com.mineplus.infrastructure.mob.custom.CustomMobSettings;
 import com.mineplus.infrastructure.perf.PerfSettings;
 import com.mineplus.infrastructure.render.RenderPolicy;
 import com.mineplus.pack.PackSettings;
+import java.util.ArrayList;
+import java.util.List;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public class MineplusConfig {
@@ -35,6 +39,7 @@ public class MineplusConfig {
     private final InputSettings input;
     private final VisualUnitSettings visualUnits;
     private final int updateCheckResourceId;
+    private CollisionSettings collision;
 
     public MineplusConfig() {
         this(false);
@@ -290,6 +295,25 @@ public class MineplusConfig {
         this.input = input == null ? InputSettings.defaults() : input;
         this.visualUnits = visualUnits == null ? VisualUnitSettings.defaults() : visualUnits;
         this.updateCheckResourceId = Math.max(0, updateCheckResourceId);
+        this.collision = CollisionSettings.defaults();
+    }
+
+    /**
+     * Returns a copy of this configuration with the collision system settings
+     * replaced. Config parsing fills this in after the other groups.
+     */
+    public MineplusConfig withCollision(CollisionSettings settings) {
+        MineplusConfig copy = new MineplusConfig(additionalDebugLogs, virtualRendering, animation,
+                texelBaking, displayTransport, pack, renderPolicy, mobBehavior, customMobs,
+                combat, performance, rigs, worldEdits, input, visualUnits,
+                updateCheckResourceId);
+        copy.collision = settings == null ? CollisionSettings.defaults() : settings;
+        return copy;
+    }
+
+    /** Shape-atlas / hybrid-fitter settings ({@code COLLISION}). */
+    public CollisionSettings getCollision() {
+        return collision;
     }
 
     public boolean isAdditionalDebugLogs() {
@@ -363,6 +387,94 @@ public class MineplusConfig {
 
     public int getUpdateCheckResourceId() {
         return updateCheckResourceId;
+    }
+
+    /**
+     * Parses the {@code COLLISION} section. Missing keys fall back to the
+     * documented defaults; old {@code VIRTUAL_RENDERING} collision keys are read
+     * as a last resort and reported so the operator can migrate.
+     */
+    public static CollisionSettings parseCollision(FileConfiguration yaml,
+            CollisionSettings fallback) {
+        CollisionSettings defaults = fallback == null ? CollisionSettings.defaults() : fallback;
+        var section = yaml.getConfigurationSection("COLLISION");
+        List<String> deprecated = new ArrayList<>();
+        boolean enabled = defaults.enabled();
+        if (section != null) {
+            enabled = section.getBoolean("ENABLED", enabled);
+        }
+
+        String profile = defaults.defaultProfile();
+        List<String> extras = new ArrayList<>(defaults.extraMaterials());
+        List<String> invisible = new ArrayList<>(defaults.invisibleStates());
+        java.util.Set<String> excluded = new java.util.LinkedHashSet<>(defaults.excludedMaterials());
+        int resolution = defaults.resolution();
+        RasterMode raster = defaults.rasterMode();
+        int maxBlocks = defaults.maxBlocks();
+        int maxEntities = defaults.maxEntities();
+        boolean ghosts = defaults.allowGhostBlocks();
+        boolean shulkers = defaults.allowShulkerEntities();
+        boolean visible = defaults.allowVisibleBlocks();
+        boolean interactions = defaults.allowInteraction();
+        boolean passable = defaults.allowPassableOutline();
+        boolean plates = defaults.allowPlates();
+        boolean minecarts = defaults.minecartPlates();
+        double shulkerScale = defaults.shulkerScale();
+        int partsPerTick = defaults.partsPerTick();
+        boolean cache = defaults.cacheFits();
+        boolean validate = defaults.validateAtStartup();
+
+        if (section != null) {
+            resolution = section.getInt("RESOLUTION", resolution);
+            raster = RasterMode.fromKey(section.getString("RASTER_MODE"), raster);
+            profile = section.getString("PROFILE", profile);
+            maxBlocks = section.getInt("MAX_BLOCKS", maxBlocks);
+            maxEntities = section.getInt("MAX_ENTITIES", maxEntities);
+            var backends = section.getConfigurationSection("BACKENDS");
+            if (backends != null) {
+                ghosts = backends.getBoolean("GHOST_BLOCK", ghosts);
+                shulkers = backends.getBoolean("SHULKER_BOX_ENTITY", shulkers);
+                interactions = backends.getBoolean("INTERACTION_ONLY", interactions);
+                passable = backends.getBoolean("PASSABLE_OUTLINE", passable);
+                plates = backends.getBoolean("PLATE", plates);
+                minecarts = backends.getBoolean("PLATE_USE_MINECART", minecarts);
+            }
+            visible = section.getBoolean("ALLOW_VISIBLE_STATES", visible);
+            shulkerScale = section.getDouble("SHULKER_SCALE", shulkerScale);
+            partsPerTick = section.getInt("PARTS_PER_TICK", partsPerTick);
+            var atlas = section.getConfigurationSection("ATLAS");
+            if (atlas != null) {
+                cache = atlas.getBoolean("CACHE", cache);
+                extras.addAll(atlas.getStringList("EXTRA_MATERIALS"));
+                invisible.addAll(atlas.getStringList("INVISIBLE_STATES"));
+                excluded.addAll(atlas.getStringList("EXCLUDED_MATERIALS"));
+            }
+            validate = section.getBoolean("VALIDATE_AT_STARTUP", validate);
+        } else {
+            var legacy = yaml.getConfigurationSection("VIRTUAL_RENDERING");
+            if (legacy != null) {
+                if (legacy.contains("COLLISION_MODE")) {
+                    deprecated.add("VIRTUAL_RENDERING.COLLISION_MODE");
+                    String mode = legacy.getString("COLLISION_MODE", "SURFACE");
+                    if ("NONE".equalsIgnoreCase(mode)) {
+                        enabled = false;
+                    }
+                }
+                if (legacy.contains("COLLISION_EPSILON")) {
+                    deprecated.add("VIRTUAL_RENDERING.COLLISION_EPSILON");
+                    double epsilon = legacy.getDouble("COLLISION_EPSILON", 0.0625);
+                    if (epsilon > 0) {
+                        resolution = Math.max(1, Math.min(32, (int) Math.round(1.0 / epsilon)));
+                    }
+                }
+                if (legacy.contains("COLLISION_NON_AIR_POLICY")) {
+                    deprecated.add("VIRTUAL_RENDERING.COLLISION_NON_AIR_POLICY");
+                }
+            }
+        }
+        return new CollisionSettings(enabled, resolution, raster, profile, maxBlocks, maxEntities,
+                ghosts, shulkers, visible, interactions, passable, plates, minecarts, shulkerScale,
+                partsPerTick, cache, validate, extras, invisible, excluded, deprecated);
     }
 
     public static VirtualRenderingSettings parseVirtualRendering(

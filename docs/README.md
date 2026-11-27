@@ -22,6 +22,7 @@ Welcome to the Mineplus documentation hub. Start here, then follow the path that
 | Make mobs **do things** | [Developer API → Mob Behavior API](developer-api.md#mob-behavior-api) |
 | Build **research trees, minigames, cross-server messaging or boss fights** | [Developer API → Toolkit Subsystems](developer-api.md#toolkit-subsystems-pure-java) |
 | Add a **fully custom mob** | [Custom Mobs](custom-mobs.md) |
+| Give custom models **real collision** | [Shape Atlas + Hybrid Fitter](collision/README.md) |
 | **Upgrade** from an older release | [Migration Guide](migration-guide.md) |
 | Just **administer a server** | [Command Reference](config-reference.md#admin-command-reference) |
 
@@ -46,6 +47,9 @@ The **primary rendering axis**: custom items, models, textures and baked item an
 
 ### [Custom block system](design/2026-11-26-custom-block-system-design.md)
 The `blocks/*.json` definition layer on today's pack/lattice/multiblock primitives — phases 1–5 are live (loader, registry, `/mineplus blocks`, item placement, JSON persistence, chunk restore, break progress with tool gating, `events` actions, autoplay on place/restore, and a `--definition` authoring gate); animation signals and carrier-pool fallback reuse the existing engine. `devtools/live-test/run.sh` replays the acceptance flow on a real Paper server (recorded: 1.21.1). Covers why exact mesh collision is impossible without a client mod, the 1/16-cell collision contract, the water-wheel + shaft acceptance test, and the phased delivery order.
+
+### [Shape Atlas + Hybrid Fitter](collision/README.md)
+Collision for custom models on a vanilla client: the shape atlas built from the server's own block collision shapes and cached on disk, the four occupancy sources (`AUTO`, `BLUEPRINT`, `FILL`, `HYBRID`), the hybrid fitter and its profiles, the backends that realise a plan (real blocks, packet ghosts, scaled shulkers, interaction entities, passable outlines, plates), the `collision` block in `.meta.json`, the `COLLISION` config section with its legacy-key mapping, the `/mineplus collision` tools, the migration path off the legacy barrier fill, and a testing checklist.
 
 ### [Migration Guide](migration-guide.md)
 Upgrading across a major release: renamed/added configuration keys, the unified `renderMode` vocabulary (and the legacy `renderBackend`/`renderKind` mapping), and how to update custom modules. The change list lives in the [changelog](../CHANGELOG.md).

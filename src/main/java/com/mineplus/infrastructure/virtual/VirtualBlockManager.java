@@ -1,5 +1,9 @@
 package com.mineplus.infrastructure.virtual;
 
+import com.mineplus.infrastructure.collision.CollisionService;
+import com.mineplus.infrastructure.collision.CollisionSpec;
+import com.mineplus.infrastructure.collision.fit.FitResult;
+import com.mineplus.infrastructure.collision.runtime.PlacedFurniture;
 import com.mineplus.infrastructure.core.multiblock.MultiBlockInstance;
 import com.mineplus.infrastructure.core.multiblock.lifecycle.MultiBlockLifecycleManager;
 import com.mineplus.infrastructure.model.BlockCoordinate;
@@ -15,6 +19,9 @@ import com.mineplus.infrastructure.virtual.texel.TexelSurfacePlan;
 import com.mineplus.infrastructure.virtual.texel.TextureImageStore;
 import com.mineplus.util.DebugLogger;
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -67,6 +74,9 @@ public class VirtualBlockManager implements Listener {
     private final Map<BlockCoordinate, UUID> anchorToInstance = new ConcurrentHashMap<>();
     private final Map<UUID, ActiveVirtualBlock> activeBlocks = new ConcurrentHashMap<>();
     private final GeometryOccupancyCalculator occupancyCalculator = new GeometryOccupancyCalculator();
+    /** Instance id -> fitted collision record id, for models placed through the fitter. */
+    private final Map<UUID, UUID> collisionByInstance = new ConcurrentHashMap<>();
+    private CollisionService collisionService;
     private final Map<String, Map<String, TextureMaterialResolver.Resolution>> textureReports = new ConcurrentHashMap<>();
     private final Map<String, TexelBakeResult> texelBakes = new ConcurrentHashMap<>();
     /** Per-model texture catalogs (embedded pixels + file lookup + material map). */
@@ -129,6 +139,11 @@ public class VirtualBlockManager implements Listener {
 
     public void setDisplayTransport(DisplayTransport transport) {
         this.displayTransport = transport;
+    }
+
+    /** Fitted collision for models that declare a {@code collision} block. */
+    public void setCollisionService(CollisionService service) {
+        this.collisionService = service;
     }
 
     public DisplayTransport displayTransport() {
@@ -824,9 +839,19 @@ public class VirtualBlockManager implements Listener {
         Location origin = context.origin();
         Quaternionf globalRotation = context.globalRotation();
         int[] cells = context.cells();
+        ModelMeta spawnMeta = getModelMeta(model.name());
+
+        // A model that declares a collision block is placed from a fitted plan
+        // instead of the legacy lattice; the fit is served from the fit cache
+        // after the first bake, so the common path is a file read.
+        UUID fittedCollision = null;
+        if (collisionService != null && collisionService.enabled() && spawnMeta != null
+                && !spawnMeta.collision().isEmpty() && !spawnMeta.collision().disabled()) {
+            fittedCollision = placeFittedCollision(model, origin);
+        }
+        boolean fitted = fittedCollision != null;
 
         Location displayOrigin = originMode == ModelMeta.OriginMode.GRID ? origin.clone() : origin.clone().add(0.5, 0.0, 0.5);
-        ModelMeta spawnMeta = getModelMeta(model.name());
         ModelMeta.CollisionMaterial latticeMaterial = spawnMeta != null && spawnMeta.collisionMaterial() != null
                 ? spawnMeta.collisionMaterial() : ModelMeta.CollisionMaterial.BARRIER;
 
@@ -836,7 +861,7 @@ public class VirtualBlockManager implements Listener {
                 : spawnMeta.light() == null ? LightTier.OFF : spawnMeta.light();
         int lightBudget = lightTier.maxCells();
 
-        for (int i = 0; i + 2 < cells.length; i += 3) {
+        for (int i = 0; i + 2 < cells.length && !fitted; i += 3) {
             Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
             Block block = location.getBlock();
             if (block.getType() == Material.WATER) {
@@ -858,7 +883,24 @@ public class VirtualBlockManager implements Listener {
         // Light engine: the same occupancy cells, re-read as emitters. Placing the
         // light blocks after the lattice means light cells also block movement —
         // a lit lamp is solid, which is what players expect from a machine.
-        if (lightTier != LightTier.OFF) {
+        if (lightTier != LightTier.OFF && fitted) {
+            // The fitted plan owns the collision blocks, so the lattice cells are
+            // free for lights: a fitted lamp still emits from its body.
+            for (int i = 0; i + 2 < cells.length; i += 3) {
+                if (lightBudget <= 0) {
+                    break;
+                }
+                Location location = origin.clone().add(cells[i], cells[i + 1], cells[i + 2]);
+                Block block = location.getBlock();
+                if (!block.getType().isAir()) {
+                    continue;
+                }
+                block.setType(lightTier.block());
+                barrierBlocks.add(location);
+                blockToModelMap.put(BlockCoordinate.from(location), instanceId);
+                lightBudget--;
+            }
+        } else if (lightTier != LightTier.OFF) {
             java.util.List<Block> lightCells = new java.util.ArrayList<>();
             for (Location placed : barrierBlocks) {
                 if (lightBudget <= 0) {
@@ -921,6 +963,9 @@ public class VirtualBlockManager implements Listener {
             }
         }
 
+        if (fittedCollision != null) {
+            collisionByInstance.put(instanceId, fittedCollision);
+        }
         activeBlocks.put(instanceId, new ActiveVirtualBlock(
                 model.name(),
                 origin,
@@ -1104,6 +1149,46 @@ public class VirtualBlockManager implements Listener {
         }
     }
 
+    /**
+     * Fits a model that declares a {@code collision} block and places the plan
+     * through the collision manager.
+     *
+     * @return the placed record's id, or {@code null} when the fit produced no
+     *         parts so the caller can fall back to the legacy lattice
+     */
+    private UUID placeFittedCollision(VirtualModel model, Location origin) {
+        File source = getModelSourceFile(model.name());
+        try {
+            String json = source == null ? null : Files.readString(source.toPath(), StandardCharsets.UTF_8);
+            CollisionSpec spec = CollisionService.fromModel(model.name(), getModelMeta(model.name()),
+                    json, null);
+            FitResult fit = collisionService.fit(spec, name -> {
+                File file = getModelSourceFile(name);
+                if (file == null) {
+                    return null;
+                }
+                try {
+                    return Files.readString(file.toPath(), StandardCharsets.UTF_8);
+                } catch (IOException broken) {
+                    return null;
+                }
+            });
+            UUID id = collisionService.manager()
+                    .map(manager -> manager.place(model.name(), fit, origin))
+                    .map(PlacedFurniture::id)
+                    .orElse(null);
+            if (id == null) {
+                DebugLogger.info("Collision fit for '" + model.name()
+                        + "' produced no parts; using the legacy lattice.");
+            }
+            return id;
+        } catch (IOException | RuntimeException failure) {
+            DebugLogger.warning("Fitted collision for '" + model.name()
+                    + "' failed, using the legacy lattice: " + failure.getMessage());
+            return null;
+        }
+    }
+
     private void removeModelInternal(UUID instanceId, VirtualBlockInstanceRemoveEvent.Reason reason) {
         ActiveVirtualBlock activeBlock = activeBlocks.remove(instanceId);
         if (activeBlock == null) return;
@@ -1111,6 +1196,11 @@ public class VirtualBlockManager implements Listener {
         // Conditional remove: the spawn origin is the anchor key, and a newer
         // render may already own the same anchor (remove + respawn swap).
         anchorToInstance.remove(BlockCoordinate.from(activeBlock.origin()), instanceId);
+
+        UUID fittedCollision = collisionByInstance.remove(instanceId);
+        if (fittedCollision != null && collisionService != null) {
+            collisionService.manager().ifPresent(manager -> manager.remove(fittedCollision));
+        }
 
         for (Location loc : activeBlock.barrierBlocks()) {
             if (isLatticeBlock(loc.getBlock().getType())) {

@@ -52,6 +52,8 @@ public final class MineplusServices {
         register(plugin, JsonInfrastructureApi.class, context.jsonInfrastructureApi());
         register(plugin, AnimationApi.class, context.animationApi());
         register(plugin, PackApi.class, context.packApi());
+        register(plugin, com.mineplus.infrastructure.collision.CollisionService.class,
+                context.collisionService());
     }
 
     /**
@@ -73,6 +75,7 @@ public final class MineplusServices {
         unregister(services, JsonInfrastructureApi.class);
         unregister(services, AnimationApi.class);
         unregister(services, PackApi.class);
+        unregister(services, com.mineplus.infrastructure.collision.CollisionService.class);
     }
 
     private static <T> void register(Plugin plugin, Class<T> clazz, T instance) {

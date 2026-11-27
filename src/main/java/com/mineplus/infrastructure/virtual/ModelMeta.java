@@ -55,7 +55,8 @@ public record ModelMeta(
         String animationFile,
         String displayFile,
         Map<String, String> triggers,
-        int[] fillBox
+        int[] fillBox,
+        ModelCollision collision
 ) {
 
     public ModelMeta {
@@ -72,6 +73,12 @@ public record ModelMeta(
         triggers = triggers == null || triggers.isEmpty() ? Map.of() : Map.copyOf(triggers);
         anchorMode = anchorMode == null ? null : anchorMode;
         fillBox = normalizeFillBox(fillBox);
+        collision = collision == null ? ModelCollision.EMPTY : collision;
+    }
+
+    /** Shape Atlas declaration, never null. */
+    public ModelCollision collision() {
+        return collision;
     }
 
     /**
@@ -363,12 +370,13 @@ public record ModelMeta(
     }
 
     public static ModelMeta empty() {
-        return new ModelMeta(null, null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ModelMeta(null, null, null, null, LightTier.OFF, null, null, null, null, null, null, null, null, null, null, null, null, ModelCollision.EMPTY);
     }
 
     public boolean isEmpty() {
         return originMode == null && collisionMode == null && collisionMaterial == null
                 && light == LightTier.OFF && autoplay.isEmpty()
+                && collision.isEmpty()
                 && texelMode == null && texelDetail == null
                 && maxTexelPlatesPerFace == null && maxTexelPlatesPerInstance == null
                 && texelBrightness == null && display.isEmpty() && itemParent == null
@@ -416,6 +424,7 @@ public record ModelMeta(
             String displayFile = null;
             Map<String, String> triggers = new LinkedHashMap<>();
             int[] fillBox = null;
+            ModelCollision collision = ModelCollision.EMPTY;
 
             json.beginObject();
             while (json.hasNext()) {
@@ -437,6 +446,8 @@ public record ModelMeta(
                     case "animationFile" -> animationFile = readString(json);
                     case "displayFile" -> displayFile = readString(json);
                     case "fillBox" -> fillBox = readFillBox(json);
+                    case "collision" -> collision = ModelCollision.fromJson(
+                            com.google.gson.JsonParser.parseReader(json));
                     case "triggers" -> readTriggerMap(json, triggers);
                     default -> json.skipValue();
                 }
@@ -445,7 +456,7 @@ public record ModelMeta(
 
             return new ModelMeta(originMode, anchorMode, collisionMode, collisionMaterial, light, autoplay, texelMode, texelDetail,
                     maxTexelPlatesPerFace, maxTexelPlatesPerInstance, texelBrightness, display, itemParent,
-                    animationFile, displayFile, triggers, fillBox);
+                    animationFile, displayFile, triggers, fillBox, collision);
         } catch (Exception exception) {
             DebugLogger.warning("Failed to read model meta file '" + metaFile.getAbsolutePath() + "': "
                     + exception.getMessage());

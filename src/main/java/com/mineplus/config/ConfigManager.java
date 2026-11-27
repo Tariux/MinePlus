@@ -1,5 +1,6 @@
 package com.mineplus.config;
 
+import com.mineplus.infrastructure.collision.CollisionSettings;
 import com.mineplus.infrastructure.virtual.VirtualRenderingSettings;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -52,6 +53,8 @@ public class ConfigManager {
                     MineplusConfig.parseVisualUnits(yamlConfig, com.mineplus.infrastructure.fx.unit.VisualUnitSettings.defaults()),
                     yamlConfig.getInt("UPDATE_CHECKER.RESOURCE_ID", 0)
             );
+            this.config = this.config.withCollision(
+                    MineplusConfig.parseCollision(yamlConfig, CollisionSettings.defaults()));
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Could not load configuration from settings.mp.yml, using defaults.", e);
             this.config = new MineplusConfig();
@@ -149,6 +152,47 @@ public class ConfigManager {
                       PER_FACE_RENDERING: true
                       # Anchor convention: AUTO (detect from model format and extent) | CENTER | GRID
                       ORIGIN_MODE: AUTO
+
+                    # Shape atlas + hybrid fitter (server-side collision for models).
+                    # Every placed model is matched to real block states whose vanilla
+                    # collision shapes approximate its voxelised geometry, so a plain
+                    # client sees solid furniture without client mods.
+                    COLLISION:
+                      # Master switch. false keeps the legacy barrier-fill path only.
+                      ENABLED: true
+                      # Sub-voxels per block axis: 8 (coarse) .. 32 (fine). 16 matches
+                      # the atlas cache and the default candidate pool.
+                      RESOLUTION: 16
+                      # CONSERVATIVE keeps a voxel when it overlaps any surface;
+                      # CENTER keeps it only when the sample point is inside.
+                      RASTER_MODE: CONSERVATIVE
+                      # Fit preset used when a model declares none:
+                      # DEFAULT | FURNITURE | WALKABLE | THIN.
+                      PROFILE: DEFAULT
+                      # Backend budget per model; the fitter prunes to these.
+                      MAX_BLOCKS: 64
+                      MAX_ENTITIES: 16
+                      # Allow states a plain client can see (real blocks), not just
+                      # invisible/ghost states. Needed for furniture made of real blocks.
+                      ALLOW_VISIBLE_STATES: true
+                      # Fit every model on enable and report failures (slower start).
+                      VALIDATE_AT_STARTUP: false
+                      # Blocks applied per tick when a model is placed (0 = no cap).
+                      PARTS_PER_TICK: 64
+                      BACKENDS:
+                        GHOST_BLOCK: true
+                        SHULKER_BOX_ENTITY: true
+                        INTERACTION_ONLY: true
+                        PASSABLE_OUTLINE: false
+                        PLATE: true
+                        PLATE_USE_MINECART: false
+                      SHULKER_SCALE: 0.5
+                      ATLAS:
+                        # Keep the built atlas on disk and reuse it across restarts.
+                        CACHE: true
+                        EXTRA_MATERIALS: []
+                        INVISIBLE_STATES: []
+                        EXCLUDED_MATERIALS: []
 
                     # Animation engine (bbmodel animations -> BlockDisplay transforms).
                     # The server pushes target transforms every TICK_INTERVAL_TICKS and the

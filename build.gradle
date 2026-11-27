@@ -74,6 +74,10 @@ def testRunnerMains = [
         'com.mineplus.test.BlockDefinitionTest',
         'com.mineplus.test.BlockStoreTest',
         'com.mineplus.test.BlockBreakingTest',
+        'com.mineplus.test.ShapeAtlasTest',
+        'com.mineplus.test.OccupancySourceTest',
+        'com.mineplus.test.HybridFitterTest',
+        'com.mineplus.test.CollisionStoreTest',
 ]
 
 tasks.register('testRunners') {
